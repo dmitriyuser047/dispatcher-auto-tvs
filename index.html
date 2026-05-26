@@ -914,14 +914,14 @@
           <input type="number" id="rec_fuel_issued" placeholder="0" min="0" step="0.1">
         </div>
         <div class="form-group">
+          <label>Расход по норме (л)</label>
+          <input type="number" id="rec_fuel_used" placeholder="Авто" min="0" step="0.1" readonly class="auto-filled">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
           <label>Фактический расход (л)</label>
-          <div style="display:flex;gap:6px;align-items:stretch">
-            <input type="number" id="rec_fuel_used" placeholder="0" min="0" step="0.1" style="flex:1">
-            <button type="button" id="fuelModeBtn" class="fuel-mode-btn" onclick="toggleFuelMode()" title="Переключить режим">
-              <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-              Вручную
-            </button>
-          </div>
+          <input type="number" id="rec_fuel_actual" placeholder="0" min="0" step="0.1">
         </div>
       </div>
       <div class="form-group">
@@ -1067,7 +1067,6 @@ let editingRecordId = null;
 let filterStatus = '';   // '' = все
 let filterFuel = '';     // '' = все
 let filterOrg = '';      // '' = все
-let fuelAutoMode = false; // авторасчёт расхода по норме
 
 // ─── FILTERS LOGIC ───────────────────────────────────────
 function populateOrgSelect() {
@@ -1315,6 +1314,7 @@ function renderDetail(v) {
         <td class="td-num">${r.odoStart ? r.odoStart.toLocaleString('ru') : '—'} → ${r.odoEnd ? r.odoEnd.toLocaleString('ru') : '—'}</td>
         <td class="td-num">${r.fuelIssued ? r.fuelIssued.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${r.fuelUsed ? r.fuelUsed.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
+        <td class="td-num">${r.fuelActual ? r.fuelActual.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${r.fuelIdle ? r.fuelIdle.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num" style="color:${balColor};font-weight:600">${balance != null ? balance.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${consumption}${devHtml ? ' ' + devHtml : ''}</td>
@@ -1450,7 +1450,8 @@ function renderDetail(v) {
               <th>Пробег, км</th>
               <th>Одометр</th>
               <th>Выдано, л</th>
-              <th>Расход, л</th>
+              <th>По норме, л</th>
+              <th>Факт. расход, л</th>
               <th>Расход ХХ, л</th>
               <th>Остаток, л</th>
               <th>л/100км</th>
@@ -1574,10 +1575,7 @@ function openAddRecord() {
   document.getElementById('recordModalTitle').textContent = 'Добавить запись';
   const now = new Date();
   document.getElementById('rec_date').value = fmtDate(now.toISOString().split('T')[0]);
-  ['rec_km','rec_odo_start','rec_odo_end','rec_fuel_issued','rec_fuel_used','rec_fuel_idle','rec_note'].forEach(id => document.getElementById(id).value = '');
-  // Авторежим по умолчанию
-  setFuelAutoUI(true);
-  document.getElementById('rec_fuel_used').value = '';
+  ['rec_km','rec_odo_start','rec_odo_end','rec_fuel_issued','rec_fuel_used','rec_fuel_actual','rec_fuel_idle','rec_note'].forEach(id => document.getElementById(id).value = '');
   routeSet([]);
   // Подставляем водителя и одометр начала из последней записи / данных ТС
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
@@ -1595,8 +1593,6 @@ function openEditRecord(id) {
   const r = data.records.find(x => x.id === id);
   if (!r) return;
   editingRecordId = id;
-  // Авторежим включён по умолчанию и при редактировании
-  setFuelAutoUI(true);
   document.getElementById('recordModalTitle').textContent = 'Редактировать запись';
   document.getElementById('rec_date').value = fmtDate(r.date);
   document.getElementById('rec_km').value = r.km || '';
@@ -1604,7 +1600,7 @@ function openEditRecord(id) {
   document.getElementById('rec_odo_end').value = r.odoEnd || '';
   document.getElementById('rec_driver').value = r.driver || '';
   document.getElementById('rec_fuel_issued').value = r.fuelIssued || '';
-  document.getElementById('rec_fuel_used').value = r.fuelUsed || '';
+  document.getElementById('rec_fuel_actual').value = r.fuelActual || '';
   document.getElementById('rec_fuel_idle').value = r.fuelIdle || '';
   routeSet(Array.isArray(r.route) ? r.route : (r.route ? [r.route] : []));
   document.getElementById('rec_note').value = r.note || '';
@@ -1652,8 +1648,9 @@ function saveRecord() {
     odoEnd: parseFloat(document.getElementById('rec_odo_end').value) || null,
     driver: document.getElementById('rec_driver').value.trim() || null,
     fuelIssued: parseFloat(document.getElementById('rec_fuel_issued').value) || null,
-    fuelUsed: parseFloat(document.getElementById('rec_fuel_used').value) || null,
-    fuelIdle: parseFloat(document.getElementById('rec_fuel_idle').value) || null,
+    fuelUsed:   parseFloat(document.getElementById('rec_fuel_used').value)   || null,
+    fuelActual: parseFloat(document.getElementById('rec_fuel_actual').value) || null,
+    fuelIdle:   parseFloat(document.getElementById('rec_fuel_idle').value)   || null,
     route: routeGet(),
     note: document.getElementById('rec_note').value.trim(),
   };
@@ -1866,7 +1863,7 @@ function exportToXlsx() {
   };
 
   // ── Style helpers ─────────────────────────────────────────
-  const NC = 13; // last column index (0-based), total 14 cols (A-N)
+  const NC = 14; // last column index (0-based), total 15 cols (A-O)
 
   function bd(style, rgb) { return { style, color: { rgb } }; }
   function bAll(style, rgb) {
@@ -2076,10 +2073,11 @@ function exportToXlsx() {
   put(row, 0, `  ЕЖЕДНЕВНЫЕ ЗАПИСИ — ${monthLabel}`, STYLES.secHeader);
   merge(row, 0, row, NC); fillEmpty(row, STYLES.secHeader); rowH(row, 22); row++;
 
-  const monthFuelIdle = monthRecs.reduce((s, rec) => s + (rec.fuelIdle || 0), 0);
+  const monthFuelIdle   = monthRecs.reduce((s, rec) => s + (rec.fuelIdle   || 0), 0);
+  const monthFuelActual = monthRecs.reduce((s, rec) => s + (rec.fuelActual || 0), 0);
 
   const TH = ['№','Дата','День','Пробег, км','Одометр нач.','Одометр кон.',
-               'Выдано, л','Расход, л','Расход ХХ, л','Остаток, л','л/100 км','Маршрут / Описание','Примечание','Водитель'];
+               'Выдано, л','Расход по норме, л','Факт. расход, л','Расход ХХ, л','Остаток, л','л/100 км','Маршрут / Описание','Примечание','Водитель'];
   TH.forEach((h, c) => put(row, c, h, STYLES.tableHead));
   rowH(row, 24); row++;
 
@@ -2097,14 +2095,15 @@ function exportToXlsx() {
     put(row, 3,  rec.km          || 0,                        STYLES.tdRight(bg));
     put(row, 4,  rec.odoStart    != null ? rec.odoStart : '', STYLES.tdRight(bg));
     put(row, 5,  rec.odoEnd      != null ? rec.odoEnd   : '', STYLES.tdRight(bg));
-    put(row, 6,  rec.fuelIssued  != null ? rec.fuelIssued:'', STYLES.tdRight(bg));
-    put(row, 7,  rec.fuelUsed    != null ? rec.fuelUsed  :'', STYLES.tdRight(bg));
-    put(row, 8,  rec.fuelIdle   != null ? rec.fuelIdle  :'', STYLES.tdRight(bg));
-    put(row, 9,  bal,                                         STYLES.tdRight(bg));
-    put(row, 10, cons,                                        STYLES.tdRight(bg));
-    put(row, 11, Array.isArray(rec.route) ? rec.route.join(' | ') : (rec.route || ''), STYLES.tdLeft(bg));
-    put(row, 12, rec.note   || '',                            STYLES.tdLeft(bg));
-    put(row, 13, rec.driver || '',                            STYLES.tdLeft(bg));
+    put(row, 6,  rec.fuelIssued  != null ? rec.fuelIssued  :'', STYLES.tdRight(bg));
+    put(row, 7,  rec.fuelUsed   != null ? rec.fuelUsed   :'', STYLES.tdRight(bg));
+    put(row, 8,  rec.fuelActual != null ? rec.fuelActual :'', STYLES.tdRight(bg));
+    put(row, 9,  rec.fuelIdle   != null ? rec.fuelIdle   :'', STYLES.tdRight(bg));
+    put(row, 10, bal,                                          STYLES.tdRight(bg));
+    put(row, 11, cons,                                         STYLES.tdRight(bg));
+    put(row, 12, Array.isArray(rec.route) ? rec.route.join(' | ') : (rec.route || ''), STYLES.tdLeft(bg));
+    put(row, 13, rec.note   || '',                             STYLES.tdLeft(bg));
+    put(row, 14, rec.driver || '',                             STYLES.tdLeft(bg));
     rowH(row, 19); row++;
   });
 
@@ -2119,20 +2118,21 @@ function exportToXlsx() {
   put(row, 3,  monthKm   || 0,                                STYLES.totals);
   put(row, 4,  '',                                            STYLES.totals);
   put(row, 5,  '',                                            STYLES.totals);
-  put(row, 6,  monthIss  || 0,                                STYLES.totals);
-  put(row, 7,  monthUsed     || 0,  STYLES.totals);
-  put(row, 8,  monthFuelIdle || '', STYLES.totals);
-  put(row, 9,  endBal,              STYLES.totals);
-  put(row, 10, avgMonth || '',      STYLES.totals);
-  put(row, 11, '',                  STYLES.totals);
-  put(row, 12, '',                  STYLES.totals);
-  put(row, 13, '',                  STYLES.totals);
+  put(row, 6,  monthIss        || 0,  STYLES.totals);
+  put(row, 7,  monthUsed       || 0,  STYLES.totals);
+  put(row, 8,  monthFuelActual || 0,  STYLES.totals);
+  put(row, 9,  monthFuelIdle   || '', STYLES.totals);
+  put(row, 10, endBal,               STYLES.totals);
+  put(row, 11, avgMonth        || '', STYLES.totals);
+  put(row, 12, '',                   STYLES.totals);
+  put(row, 13, '',                   STYLES.totals);
+  put(row, 14, '',                   STYLES.totals);
   rowH(row, 22);
 
   // ── Column widths ──────────────────────────────────────────
   ws['!cols'] = [
     {wch:4}, {wch:12}, {wch:6}, {wch:13}, {wch:15},
-    {wch:15}, {wch:14}, {wch:13}, {wch:13}, {wch:13}, {wch:11}, {wch:30}, {wch:30}, {wch:24},
+    {wch:15}, {wch:14}, {wch:15}, {wch:15}, {wch:13}, {wch:13}, {wch:11}, {wch:30}, {wch:30}, {wch:24},
   ];
 
   const wb = XLSX.utils.book_new();
@@ -2197,7 +2197,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
   const DAYS_RU_EXP = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
   const fuelLabels  = { diesel:'Дизельное', gasoline:'Бензин', gas:'Газ (ГБО)' };
   const fuelTypes   = ['diesel','gasoline','gas'];
-  const NC = 13;
+  const NC = 14;
 
   const P = {
     dark:'0F1117', navy:'1B3A6B', navyMid:'2D5A8E', navyLight:'D6E4F7',
@@ -2303,7 +2303,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
 
     hdr('  СВОДКА ПО ТРАНСПОРТНЫМ СРЕДСТВАМ', ST.secN);
     ['№','Госномер','Марка / Модель','Водитель','Организация','Объект','Вид топлива','Состояние',
-     'Пробег, км','Выдано, л','Расход, л','Остаток, л','Ср.расход л/100км','Маршруты']
+     'Пробег, км','Выдано, л','Расход по норме, л','Факт. расход, л','Остаток, л','Ср.расход л/100км','Маршруты']
       .forEach((h,c)=>put(R(),c,h,ST.tHead));
     rowH(R(),24);next();
 
@@ -2313,6 +2313,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
       const vKm=vRecs.reduce((s,r)=>s+(r.km||0),0);
       const vIss=vRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
       const vUsd=vRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
+      const vAct=vRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
       const bm=computeFuelBalances(v.id, dateFrom, dateTo);
       const sorted=vRecs.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
       const vBal=sorted.length?(bm[sorted[sorted.length-1].id]||0):0;
@@ -2344,8 +2345,9 @@ function exportAllToXlsx(dateFrom, dateTo) {
       put(R(),6,fuelLabels[v.fuel||'diesel'],ST.tdC(bg));
       put(R(),7,v.status||'—',sStatus);
       put(R(),8,+vKm.toFixed(1)||0,ST.tdR(bg));put(R(),9,+vIss.toFixed(2)||0,ST.tdR(bg));
-      put(R(),10,+vUsd.toFixed(2)||0,ST.tdR(bg));put(R(),11,bal,sB);put(R(),12,avg??'',ST.tdR(bg));
-      put(R(),13,vRoutes||'—',routeStyle);
+      put(R(),10,+vUsd.toFixed(2)||0,ST.tdR(bg));put(R(),11,+vAct.toFixed(2)||0,ST.tdR(bg));
+      put(R(),12,bal,sB);put(R(),13,avg??'',ST.tdR(bg));
+      put(R(),14,vRoutes||'—',routeStyle);
       rowH(R(),vRoutes ? Math.max(19, Math.min(vRoutes.split('\n').length * 16, 80)) : 19);next();
     });
 
@@ -2353,13 +2355,14 @@ function exportAllToXlsx(dateFrom, dateTo) {
     const aKm=filteredAll.reduce((s,r)=>s+(r.km||0),0);
     const aIss=filteredAll.reduce((s,r)=>s+(r.fuelIssued||0),0);
     const aUsd=filteredAll.reduce((s,r)=>s+(r.fuelUsed||0),0);
+    const aAct=filteredAll.reduce((s,r)=>s+(r.fuelActual||0),0);
     for(let c=0;c<=NC;c++) put(R(),c,'',ST.tot);
     put(R(),1,'ИТОГО',ST.totL);
     put(R(),8,+aKm.toFixed(1),ST.tot);put(R(),9,+aIss.toFixed(2),ST.tot);
-    put(R(),10,+aUsd.toFixed(2),ST.tot);rowH(R(),22);next();
+    put(R(),10,+aUsd.toFixed(2),ST.tot);put(R(),11,+aAct.toFixed(2),ST.tot);rowH(R(),22);next();
 
     ws['!cols']=[{wch:4},{wch:13},{wch:22},{wch:22},{wch:18},{wch:16},{wch:14},{wch:18},
-                 {wch:13},{wch:13},{wch:13},{wch:13},{wch:16},{wch:40}];
+                 {wch:13},{wch:13},{wch:16},{wch:15},{wch:13},{wch:16},{wch:40}];
     XLSX.utils.book_append_sheet(wb,ws,'Общая сводка');
   }
 
@@ -2620,51 +2623,12 @@ document.addEventListener('mousedown', function(e) {
 });
 
 function calcFuelAuto() {
-  if (!fuelAutoMode) return;
   const km  = parseFloat(document.getElementById('rec_km').value);
   const v   = data.vehicles.find(x => x.id === selectedVehicleId);
   const inp = document.getElementById('rec_fuel_used');
-  if (!v || !v.norm) {
-    if (inp) { inp.readOnly = false; inp.classList.remove('auto-filled'); }
-    return;
-  }
-  if (isNaN(km) || km <= 0) {
-    if (inp) { inp.value = ''; inp.readOnly = true; inp.classList.add('auto-filled'); }
-    return;
-  }
-  const calc = Math.round(v.norm * km / 100 * 10) / 10;
-  if (inp) { inp.value = calc; inp.readOnly = true; inp.classList.add('auto-filled'); }
-}
-
-function toggleFuelMode() {
-  fuelAutoMode = !fuelAutoMode;
-  const inp = document.getElementById('rec_fuel_used');
-  const btn = document.getElementById('fuelModeBtn');
-  if (fuelAutoMode) {
-    btn.innerHTML = `<svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Вручную`;
-    btn.classList.remove('manual');
-    calcFuelAuto();
-  } else {
-    btn.innerHTML = `<svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Авто`;
-    btn.classList.add('manual');
-    if (inp) { inp.readOnly = false; inp.classList.remove('auto-filled'); inp.focus(); }
-  }
-}
-
-function setFuelAutoUI(isAuto) {
-  fuelAutoMode = isAuto;
-  const btn = document.getElementById('fuelModeBtn');
-  const inp = document.getElementById('rec_fuel_used');
-  if (!btn || !inp) return;
-  if (isAuto) {
-    btn.innerHTML = `<svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Вручную`;
-    btn.classList.remove('manual');
-    inp.readOnly = true;
-  } else {
-    btn.innerHTML = `<svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Авто`;
-    btn.classList.add('manual');
-    inp.readOnly = false;
-  }
+  if (!inp) return;
+  if (!v || !v.norm || isNaN(km) || km <= 0) { inp.value = ''; return; }
+  inp.value = Math.round(v.norm * km / 100 * 10) / 10;
 }
 
 function calcOdoEnd() {
