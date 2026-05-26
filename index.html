@@ -897,11 +897,11 @@
       <div class="form-row">
         <div class="form-group">
           <label>Одометр (начало)</label>
-          <input type="number" id="rec_odo_start" placeholder="0" min="0" oninput="calcOdoEnd()">
+          <input type="number" id="rec_odo_start" placeholder="0" min="0" oninput="calcOdoEnd(); calcKmFromOdo()">
         </div>
         <div class="form-group">
           <label>Одометр (конец)</label>
-          <input type="number" id="rec_odo_end" placeholder="0" min="0">
+          <input type="number" id="rec_odo_end" placeholder="0" min="0" oninput="calcKmFromOdo()">
         </div>
       </div>
       <div class="form-group">
@@ -2633,9 +2633,20 @@ function calcFuelAuto() {
 
 function calcOdoEnd() {
   const start = parseFloat(document.getElementById('rec_odo_start').value);
-  const km = parseFloat(document.getElementById('rec_km').value);
+  const km    = parseFloat(document.getElementById('rec_km').value);
   if (!isNaN(start) && !isNaN(km)) {
     document.getElementById('rec_odo_end').value = Math.round((start + km) * 10) / 10;
+  }
+}
+
+function calcKmFromOdo() {
+  const kmInp = document.getElementById('rec_km');
+  if (kmInp.value !== '') return; // пробег введён вручную — не перезаписываем
+  const start = parseFloat(document.getElementById('rec_odo_start').value);
+  const end   = parseFloat(document.getElementById('rec_odo_end').value);
+  if (!isNaN(start) && !isNaN(end) && end > start) {
+    kmInp.value = Math.round((end - start) * 10) / 10;
+    calcFuelAuto();
   }
 }
 
