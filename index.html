@@ -1302,21 +1302,18 @@ function renderDetail(v) {
   // rows
   let tableRows = '';
   if (monthRecs.length === 0) {
-    tableRows = `<tr><td colspan="10" class="empty-table">Нет записей за этот месяц. Нажмите «+ Запись» чтобы добавить.</td></tr>`;
+    tableRows = `<tr><td colspan="12" class="empty-table">Нет записей за этот месяц. Нажмите «+ Запись» чтобы добавить.</td></tr>`;
   } else {
     monthRecs.forEach(r => {
       const d = new Date(r.date);
       const dayName = DAYS_RU[d.getDay()];
       const dayNum = d.getDate().toString().padStart(2, '0');
       const fullDate = fmtDate(r.date);
-      const consumption = r.km > 0 && r.fuelUsed > 0 ? (r.fuelUsed / r.km * 100).toFixed(1) : '—';
-      const deviation = v.norm && r.km > 0 && r.fuelUsed > 0
-        ? ((r.fuelUsed / r.km * 100) - v.norm).toFixed(1)
-        : null;
-      const devHtml = deviation !== null
-        ? `<span style="color:${parseFloat(deviation) > 0 ? 'var(--red)' : 'var(--green)'}">
-            ${parseFloat(deviation) > 0 ? '+' : ''}${deviation}
-          </span>`
+      const normL100   = v.norm ? v.norm : null;
+      const factL100   = r.fuelActual && r.km > 0 ? r.fuelActual / r.km * 100 : null;
+      const factDev    = factL100 !== null && normL100 !== null ? factL100 - normL100 : null;
+      const factDevHtml = factDev !== null
+        ? ` <span style="font-size:11px;color:${factDev > 0 ? 'var(--red)' : 'var(--green)'};font-weight:600">${factDev > 0 ? '+' : ''}${factDev.toFixed(1)}</span>`
         : '';
       const balance = balMap[r.id];
       const balColor = balance < 0 ? 'var(--red)' : balance === 0 ? 'var(--text3)' : 'var(--green)';
@@ -1329,7 +1326,8 @@ function renderDetail(v) {
         <td class="td-num">${r.fuelActual ? r.fuelActual.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${r.fuelIdle ? r.fuelIdle.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num" style="color:${balColor};font-weight:600">${balance != null ? balance.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
-        <td class="td-num">${consumption}${devHtml ? ' ' + devHtml : ''}</td>
+        <td class="td-num">${normL100 !== null ? normL100.toFixed(1) : '—'}</td>
+        <td class="td-num">${factL100 !== null ? factL100.toFixed(1) + factDevHtml : '—'}</td>
         <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${r.driver || '—'}</td>
         <td class="td-actions">
           <button class="icon-btn" title="Редактировать" onclick="openEditRecord('${r.id}')">
@@ -1473,7 +1471,8 @@ function renderDetail(v) {
               <th>Факт. расход, л</th>
               <th>Расход ХХ, л</th>
               <th>Остаток, л</th>
-              <th>л/100км</th>
+              <th>Норма л/100</th>
+              <th>Факт л/100</th>
               <th>Водитель</th>
               <th></th>
             </tr>
@@ -1882,7 +1881,7 @@ function exportToXlsx() {
   };
 
   // ── Style helpers ─────────────────────────────────────────
-  const NC = 14; // last column index (0-based), total 15 cols (A-O)
+  const NC = 15; // last column index (0-based), total 16 cols (A-P)
 
   function bd(style, rgb) { return { style, color: { rgb } }; }
   function bAll(style, rgb) {
@@ -2096,7 +2095,8 @@ function exportToXlsx() {
   const monthFuelActual = monthRecs.reduce((s, rec) => s + (rec.fuelActual || 0), 0);
 
   const TH = ['№','Дата','День','Пробег, км','Одометр нач.','Одометр кон.',
-               'Выдано, л','Расход по норме, л','Факт. расход, л','Расход ХХ, л','Остаток, л','л/100 км','Маршрут / Описание','Примечание','Водитель'];
+               'Выдано, л','Расход по норме, л','Факт. расход, л','Расход ХХ, л','Остаток, л',
+               'Норма л/100','Факт л/100','Маршрут / Описание','Примечание','Водитель'];
   TH.forEach((h, c) => put(row, c, h, STYLES.tableHead));
   rowH(row, 24); row++;
 
@@ -2105,8 +2105,9 @@ function exportToXlsx() {
   monthRecs.forEach((rec, i) => {
     const d    = new Date(rec.date);
     const bg   = i % 2 === 0 ? P.white : P.gray1;
-    const cons = rec.km > 0 && rec.fuelUsed > 0 ? +(rec.fuelUsed / rec.km * 100).toFixed(2) : '';
-    const bal  = xlsBalMap[rec.id] != null ? xlsBalMap[rec.id] : '';
+    const bal      = xlsBalMap[rec.id] != null ? xlsBalMap[rec.id] : '';
+    const normL100 = v.norm ? v.norm : '';
+    const factL100 = rec.fuelActual && rec.km > 0 ? +(rec.fuelActual / rec.km * 100).toFixed(2) : '';
 
     put(row, 0,  i + 1,                                       STYLES.tdCenter(bg));
     put(row, 1,  fmtDate(rec.date),                           STYLES.tdCenter(bg));
@@ -2115,14 +2116,15 @@ function exportToXlsx() {
     put(row, 4,  rec.odoStart    != null ? rec.odoStart : '', STYLES.tdRight(bg));
     put(row, 5,  rec.odoEnd      != null ? rec.odoEnd   : '', STYLES.tdRight(bg));
     put(row, 6,  rec.fuelIssued  != null ? rec.fuelIssued  :'', STYLES.tdRight(bg));
-    put(row, 7,  rec.fuelUsed   != null ? rec.fuelUsed   :'', STYLES.tdRight(bg));
-    put(row, 8,  rec.fuelActual != null ? rec.fuelActual :'', STYLES.tdRight(bg));
-    put(row, 9,  rec.fuelIdle   != null ? rec.fuelIdle   :'', STYLES.tdRight(bg));
+    put(row, 7,  rec.fuelUsed    != null ? rec.fuelUsed    :'', STYLES.tdRight(bg));
+    put(row, 8,  rec.fuelActual  != null ? rec.fuelActual  :'', STYLES.tdRight(bg));
+    put(row, 9,  rec.fuelIdle    != null ? rec.fuelIdle    :'', STYLES.tdRight(bg));
     put(row, 10, bal,                                          STYLES.tdRight(bg));
-    put(row, 11, cons,                                         STYLES.tdRight(bg));
-    put(row, 12, Array.isArray(rec.route) ? rec.route.join(' | ') : (rec.route || ''), STYLES.tdLeft(bg));
-    put(row, 13, rec.note   || '',                             STYLES.tdLeft(bg));
-    put(row, 14, rec.driver || '',                             STYLES.tdLeft(bg));
+    put(row, 11, normL100,                                     STYLES.tdRight(bg));
+    put(row, 12, factL100,                                     STYLES.tdRight(bg));
+    put(row, 13, Array.isArray(rec.route) ? rec.route.join(' | ') : (rec.route || ''), STYLES.tdLeft(bg));
+    put(row, 14, rec.note   || '',                             STYLES.tdLeft(bg));
+    put(row, 15, rec.driver || '',                             STYLES.tdLeft(bg));
     rowH(row, 19); row++;
   });
 
@@ -2141,17 +2143,19 @@ function exportToXlsx() {
   put(row, 7,  monthUsed       || 0,  STYLES.totals);
   put(row, 8,  monthFuelActual || 0,  STYLES.totals);
   put(row, 9,  monthFuelIdle   || '', STYLES.totals);
+  const avgFactL100 = monthKm > 0 && monthFuelActual > 0 ? +(monthFuelActual / monthKm * 100).toFixed(2) : '';
   put(row, 10, endBal,               STYLES.totals);
-  put(row, 11, avgMonth        || '', STYLES.totals);
-  put(row, 12, '',                   STYLES.totals);
+  put(row, 11, v.norm || '',         STYLES.totals);
+  put(row, 12, avgFactL100,          STYLES.totals);
   put(row, 13, '',                   STYLES.totals);
   put(row, 14, '',                   STYLES.totals);
+  put(row, 15, '',                   STYLES.totals);
   rowH(row, 22);
 
   // ── Column widths ──────────────────────────────────────────
   ws['!cols'] = [
     {wch:4}, {wch:12}, {wch:6}, {wch:13}, {wch:15},
-    {wch:15}, {wch:14}, {wch:15}, {wch:15}, {wch:13}, {wch:13}, {wch:11}, {wch:30}, {wch:30}, {wch:24},
+    {wch:15}, {wch:14}, {wch:15}, {wch:15}, {wch:13}, {wch:13}, {wch:12}, {wch:12}, {wch:30}, {wch:30}, {wch:24},
   ];
 
   const wb = XLSX.utils.book_new();
