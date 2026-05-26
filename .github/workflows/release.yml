@@ -67,6 +67,22 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git pull --rebase origin main
+          # перезаписываем version.json актуальными данными после rebase
+          $v    = "${{ steps.pkg.outputs.version }}"
+          $tag  = "${{ github.ref_name }}"
+          $repo = "${{ github.repository }}"
+          $url  = "https://github.com/$repo/releases/download/$tag/Dispatcher-Setup-$v.exe"
+          $date = Get-Date -Format "yyyy-MM-dd"
+          $json = [ordered]@{
+            version = $v
+            date    = $date
+            notes   = "Доступна версия $v. Нажмите «Скачать обновление»."
+            url     = $url
+          } | ConvertTo-Json
+          [System.IO.File]::WriteAllText("version.json", $json, [System.Text.UTF8Encoding]::new($false))
           git add version.json
           git commit -m "chore: release ${{ github.ref_name }}"
-          git push origin HEAD:main
+          git push origin main
