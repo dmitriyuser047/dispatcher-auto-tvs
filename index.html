@@ -1785,6 +1785,13 @@ function renderSidebarSummary() {
         </svg>
         <span style="font-size:10px;color:var(--text3);flex:1">Данные: Документы\\ДиспетчеризацияАвто_ТВС</span>
         <button class="btn btn-ghost btn-sm" onclick="window.electronAPI.openDataFolder()" style="font-size:10px;padding:2px 7px;white-space:nowrap" title="Открыть папку с данными и бэкапами">Открыть</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+        <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--text3);flex-shrink:0">
+          <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+        <span style="font-size:10px;color:var(--text3);flex:1" id="sidebarVersionLabel">Версия ...</span>
+        <button class="btn btn-ghost btn-sm" onclick="manualCheckUpdate()" style="font-size:10px;padding:2px 7px;white-space:nowrap" title="Проверить наличие обновлений">Обновить</button>
       </div>` : ''}
     </div>`;
 }
@@ -2478,18 +2485,20 @@ function importVehiclesFromXls(input) {
 // ─── AUTO UPDATER ─────────────────────────────────────────
 let _updateInfo = null;
 
+function showUpdateBanner(info) {
+  _updateInfo = info;
+  const banner = document.getElementById('updateBanner');
+  const title  = document.getElementById('updateTitle');
+  const notes  = document.getElementById('updateNotes');
+  if (!banner) return;
+  title.textContent = `Доступно обновление v${info.version}` +
+    (info.currentVersion ? ` (у вас v${info.currentVersion})` : '');
+  notes.textContent = info.notes || '';
+  banner.style.display = 'flex';
+}
+
 if (window.electronAPI && window.electronAPI.onUpdateAvailable) {
-  window.electronAPI.onUpdateAvailable(info => {
-    _updateInfo = info;
-    const banner = document.getElementById('updateBanner');
-    const title  = document.getElementById('updateTitle');
-    const notes  = document.getElementById('updateNotes');
-    if (!banner) return;
-    title.textContent = `Доступно обновление v${info.version}` +
-      (info.currentVersion ? ` (у вас v${info.currentVersion})` : '');
-    notes.textContent = info.notes || '';
-    banner.style.display = 'flex';
-  });
+  window.electronAPI.onUpdateAvailable(info => showUpdateBanner(info));
 
   window.electronAPI.onDownloadProgress(pct => {
     const bar = document.getElementById('updateProgressBar');
@@ -2497,11 +2506,45 @@ if (window.electronAPI && window.electronAPI.onUpdateAvailable) {
     if (bar) bar.style.width = pct + '%';
     if (txt) txt.textContent = pct + '%';
     if (pct >= 100) {
-      // Скачано — показать кнопку установки
       document.getElementById('updateProgress').style.display  = 'none';
       document.getElementById('updateInstallBtn').style.display = '';
     }
   });
+}
+
+// Показать версию в сайдбаре
+if (window.electronAPI && window.electronAPI.getAppVersion) {
+  window.electronAPI.getAppVersion().then(v => {
+    const el = document.getElementById('sidebarVersionLabel');
+    if (el) el.textContent = 'Версия ' + v;
+  });
+}
+
+// Ручная проверка обновлений
+async function manualCheckUpdate() {
+  if (!window.electronAPI || !window.electronAPI.checkUpdate) {
+    showToast('Автообновление доступно только в десктопной версии');
+    return;
+  }
+  const el = document.getElementById('sidebarVersionLabel');
+  if (el) el.textContent = 'Проверка...';
+  try {
+    const info = await window.electronAPI.checkUpdate();
+    if (info) {
+      showUpdateBanner(info);
+      showToast('Найдено обновление v' + info.version + '!');
+    } else {
+      showToast('У вас актуальная версия');
+    }
+  } catch(e) {
+    showToast('Ошибка проверки обновлений');
+  } finally {
+    if (window.electronAPI && window.electronAPI.getAppVersion) {
+      window.electronAPI.getAppVersion().then(v => {
+        if (el) el.textContent = 'Версия ' + v;
+      });
+    }
+  }
 }
 
 async function startUpdateDownload() {
