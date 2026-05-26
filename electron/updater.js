@@ -14,7 +14,7 @@
  */
 
 // ─── НАСТРОЙКА ───────────────────────────────────────────────────────────────
-const UPDATE_CHECK_URL = '';
+const UPDATE_CHECK_URL = 'https://raw.githubusercontent.com/dmitriyuser047/dispatcher-auto-tvs/main/version.json';
 // Примеры:
 //   'https://raw.githubusercontent.com/ВАШ_ORG/ВАШ_REPO/main/version.json'
 //   'https://ваш-сервер.ru/updates/version.json'
