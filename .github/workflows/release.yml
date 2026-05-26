@@ -26,7 +26,7 @@ jobs:
         run: npm ci
 
       - name: Build Electron app
-        run: npm run build
+        run: npx electron-builder --win --x64 --publish never
 
       - name: Get version
         id: pkg
@@ -44,6 +44,7 @@ jobs:
 
             Скачайте и запустите установщик ниже.
           files: dist/Dispatcher-Setup-${{ steps.pkg.outputs.version }}.exe
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update version.json
         shell: pwsh
