@@ -2640,12 +2640,10 @@ function calcOdoEnd() {
 }
 
 function calcKmFromOdo() {
-  const kmInp = document.getElementById('rec_km');
-  if (kmInp.value !== '') return; // пробег введён вручную — не перезаписываем
   const start = parseFloat(document.getElementById('rec_odo_start').value);
   const end   = parseFloat(document.getElementById('rec_odo_end').value);
   if (!isNaN(start) && !isNaN(end) && end > start) {
-    kmInp.value = Math.round((end - start) * 10) / 10;
+    document.getElementById('rec_km').value = Math.round((end - start) * 10) / 10;
     calcFuelAuto();
   }
 }
