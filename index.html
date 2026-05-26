@@ -315,6 +315,17 @@
     display: flex;
     flex-direction: column;
   }
+  .table-wrap.fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 400;
+    border-radius: 0;
+    border: none;
+  }
+  .table-wrap.fullscreen .table-scroll {
+    flex: 1;
+    max-height: none;
+  }
   .table-toolbar {
     padding: 12px 16px;
     border-bottom: 1px solid var(--border);
@@ -1067,6 +1078,7 @@ let editingRecordId = null;
 let filterStatus = '';   // '' = все
 let filterFuel = '';     // '' = все
 let filterOrg = '';      // '' = все
+let historyFullscreen = false;
 
 // ─── FILTERS LOGIC ───────────────────────────────────────
 function populateOrgSelect() {
@@ -1431,16 +1443,23 @@ function renderDetail(v) {
     </div>
 
     <!-- Days table -->
-    <div class="table-wrap">
+    <div class="table-wrap${historyFullscreen ? ' fullscreen' : ''}" id="historyTableWrap">
       <div class="table-toolbar">
         <div class="table-toolbar-left">
           ${MONTHS_RU[selectedMonth-1]} ${selectedYear}
           <span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:10px">${monthRecs.length} записей · ${Math.round(monthKm).toLocaleString('ru')} км · ${monthFuel.toLocaleString('ru',{maximumFractionDigits:1})} л</span>
         </div>
-        <button class="btn btn-primary btn-sm" onclick="openAddRecord()">
-          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          + Запись
-        </button>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="btn btn-ghost btn-sm" onclick="toggleHistoryFullscreen()" id="historyFsBtn" title="${historyFullscreen ? 'Свернуть' : 'Развернуть на весь экран'}">
+            ${historyFullscreen
+              ? `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg> Свернуть`
+              : `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg> На весь экран`}
+          </button>
+          <button class="btn btn-primary btn-sm" onclick="openAddRecord()">
+            <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            + Запись
+          </button>
+        </div>
       </div>
       <div class="table-scroll">
         <table>
@@ -2630,6 +2649,21 @@ function calcFuelAuto() {
   if (!v || !v.norm || isNaN(km) || km <= 0) { inp.value = ''; return; }
   inp.value = Math.round(v.norm * km / 100 * 10) / 10;
 }
+
+function toggleHistoryFullscreen() {
+  historyFullscreen = !historyFullscreen;
+  const v = data.vehicles.find(x => x.id === selectedVehicleId);
+  if (v) renderDetail(v);
+}
+
+// Закрыть полноэкранный режим по Escape
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && historyFullscreen) {
+    historyFullscreen = false;
+    const v = data.vehicles.find(x => x.id === selectedVehicleId);
+    if (v) renderDetail(v);
+  }
+});
 
 function calcOdoEnd() {
   const start = parseFloat(document.getElementById('rec_odo_start').value);
