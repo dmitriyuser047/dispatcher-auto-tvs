@@ -1,0 +1,71 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Electron app
+        run: npm run build
+
+      - name: Get version
+        id: pkg
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release & upload installer
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.pkg.outputs.version }}"
+          body: |
+            ## Версия ${{ steps.pkg.outputs.version }}
+
+            Скачайте и запустите установщик ниже.
+          files: dist/Dispatcher-Setup-${{ steps.pkg.outputs.version }}.exe
+
+      - name: Update version.json
+        shell: pwsh
+        run: |
+          $v    = "${{ steps.pkg.outputs.version }}"
+          $tag  = "${{ github.ref_name }}"
+          $repo = "${{ github.repository }}"
+          $url  = "https://github.com/$repo/releases/download/$tag/Dispatcher-Setup-$v.exe"
+          $date = Get-Date -Format "yyyy-MM-dd"
+          $json = [ordered]@{
+            version = $v
+            date    = $date
+            notes   = "Доступна версия $v. Нажмите «Скачать обновление»."
+            url     = $url
+          } | ConvertTo-Json
+          [System.IO.File]::WriteAllText("version.json", $json, [System.Text.UTF8Encoding]::new($false))
+
+      - name: Commit & push version.json
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.json
+          git commit -m "chore: release ${{ github.ref_name }}"
+          git push origin HEAD:main

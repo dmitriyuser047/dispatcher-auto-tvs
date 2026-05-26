@@ -14,13 +14,13 @@
   "build": {
     "appId": "com.tvs.dispetcherizaciya-avto",
     "productName": "Диспетчеризация авто ООО Технрайз Велл Сервис",
+    "artifactName": "Dispatcher-Setup-${version}.${ext}",
     "directories": {
       "output": "dist"
     },
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        { "target": "nsis", "arch": ["x64"] }
       ],
       "icon": "build/icon.ico",
       "signingHashAlgorithms": null,
