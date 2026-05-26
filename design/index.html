@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BookApp — Прототип</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #F5F0E8;
+    --surface: #EDE8DE;
+    --text: #1C1916;
+    --text-muted: #7A7168;
+    --accent: #6B5CE7;
+    --accent-soft: #EDE9FF;
+    --border: rgba(0,0,0,0.08);
+    --shadow: rgba(0,0,0,0.08);
+    --bar-bg: rgba(245,240,232,0.95);
+  }
+
+  .theme-night {
+    --bg: #161618;
+    --surface: #1F1F22;
+    --text: #E8E2D4;
+    --text-muted: #6B6760;
+    --accent: #8B7CF8;
+    --accent-soft: #2A2640;
+    --border: rgba(255,255,255,0.07);
+    --shadow: rgba(0,0,0,0.4);
+    --bar-bg: rgba(22,22,24,0.97);
+  }
+
+  .theme-dopamine {
+    --bg: #FFF0FB;
+    --surface: #FFE4F7;
+    --text: #1A0A2E;
+    --text-muted: #8A6A9A;
+    --accent: #FF3CAC;
+    --accent-soft: #FFE0F5;
+    --border: rgba(255,60,172,0.15);
+    --shadow: rgba(255,60,172,0.1);
+    --bar-bg: rgba(255,240,251,0.97);
+  }
+
+  body {
+    font-family: -apple-system, 'Segoe UI', sans-serif;
+    background: #2A2A2E;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    padding: 24px 16px;
+    gap: 32px;
+    flex-wrap: wrap;
+  }
+
+  /* ─── PHONE FRAME ─── */
+  .phone-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .phone-label {
+    color: #888;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+
+  .phone {
+    width: 375px;
+    height: 812px;
+    background: var(--bg);
+    border-radius: 44px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 32px 64px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+    display: flex;
+    flex-direction: column;
+    transition: background 0.3s;
+  }
+
+  /* ─── TOP BAR ─── */
+  .top-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 60px;
+    background: var(--bar-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    padding-top: 8px;
+    border-bottom: 1px solid var(--border);
+    z-index: 10;
+    transition: background 0.3s, border-color 0.3s;
+  }
+
+  .top-btn {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: none;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted);
+    font-size: 16px;
+    transition: background 0.2s, color 0.2s;
+  }
+  .top-btn:hover { background: var(--accent-soft); color: var(--accent); }
+
+  .chapter-title {
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    transition: color 0.3s;
+  }
+
+  /* ─── READING CONTENT ─── */
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 80px 28px 100px;
+    scrollbar-width: none;
+  }
+  .content::-webkit-scrollbar { display: none; }
+
+  .book-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    transition: color 0.3s;
+  }
+
+  .chapter-heading {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.3;
+    margin-bottom: 20px;
+    transition: color 0.3s;
+  }
+
+  .book-text {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 17px;
+    line-height: 1.8;
+    color: var(--text);
+    transition: color 0.3s;
+  }
+
+  .book-text p {
+    margin-bottom: 18px;
+    text-indent: 1.5em;
+  }
+
+  .book-text p:first-child { text-indent: 0; }
+
+  /* ─── BOTTOM BAR ─── */
+  .bottom-bar {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 80px;
+    background: var(--bar-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 20px 12px;
+    gap: 8px;
+    transition: background 0.3s, border-color 0.3s;
+  }
+
+  .progress-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .progress-text {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+    transition: color 0.3s;
+  }
+
+  .progress-track {
+    height: 3px;
+    background: var(--border);
+    border-radius: 99px;
+    overflow: hidden;
+    transition: background 0.3s;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 99px;
+    width: 34%;
+    transition: background 0.3s;
+  }
+
+  /* ─── SETTINGS PANEL ─── */
+  .settings-panel {
+    position: absolute;
+    bottom: 80px;
+    left: 16px; right: 16px;
+    background: var(--surface);
+    border-radius: 20px;
+    padding: 20px;
+    border: 1px solid var(--border);
+    box-shadow: 0 -8px 32px var(--shadow);
+    z-index: 20;
+    display: none;
+    transition: background 0.3s, border-color 0.3s;
+  }
+
+  .settings-panel.visible { display: block; }
+
+  .settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .settings-row:last-child { margin-bottom: 0; }
+
+  .settings-label {
+    font-size: 14px;
+    color: var(--text-muted);
+    font-weight: 500;
+    transition: color 0.3s;
+  }
+
+  .font-size-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .font-btn {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text);
+    font-weight: 700;
+    font-size: 16px;
+    transition: all 0.2s;
+  }
+  .font-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
+
+  .font-size-display {
+    font-size: 14px;
+    color: var(--text);
+    font-weight: 600;
+    min-width: 28px;
+    text-align: center;
+    transition: color 0.3s;
+  }
+
+  /* ─── THEME SELECTOR ─── */
+  .theme-selector {
+    display: flex;
+    gap: 8px;
+  }
+
+  .theme-dot {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: transform 0.2s, border-color 0.2s;
+    position: relative;
+  }
+
+  .theme-dot:hover { transform: scale(1.15); }
+  .theme-dot.active { border-color: var(--accent); }
+
+  .theme-dot.day { background: #F5F0E8; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15); }
+  .theme-dot.night { background: #161618; }
+  .theme-dot.dopamine {
+    background: linear-gradient(135deg, #FF3CAC, #784BA0, #2B86C5);
+  }
+
+  /* ─── LIBRARY SCREEN (tablet view) ─── */
+  .tablet {
+    width: 768px;
+    height: 600px;
+    background: var(--bg);
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 32px 64px rgba(0,0,0,0.5);
+    display: flex;
+    transition: background 0.3s;
+  }
+
+  /* ─── SIDEBAR ─── */
+  .sidebar {
+    width: 220px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 24px 16px;
+    gap: 4px;
+    flex-shrink: 0;
+    transition: background 0.3s, border-color 0.3s;
+  }
+
+  .sidebar-title {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text);
+    padding: 0 8px;
+    margin-bottom: 16px;
+    letter-spacing: -0.03em;
+    transition: color 0.3s;
+  }
+
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-muted);
+    transition: all 0.2s;
+  }
+
+  .sidebar-item:hover { background: var(--accent-soft); color: var(--accent); }
+  .sidebar-item.active { background: var(--accent-soft); color: var(--accent); }
+  .sidebar-icon { font-size: 16px; }
+
+  /* ─── LIBRARY CONTENT ─── */
+  .library-main {
+    flex: 1;
+    padding: 24px;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .library-main::-webkit-scrollbar { display: none; }
+
+  .lib-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+
+  .lib-heading {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+    transition: color 0.3s;
+  }
+
+  .add-btn {
+    padding: 8px 16px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: opacity 0.2s;
+  }
+  .add-btn:hover { opacity: 0.85; }
+
+  .books-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+
+  .book-card {
+    cursor: pointer;
+    transition: transform 0.2s;
+  }
+  .book-card:hover { transform: translateY(-3px); }
+
+  .book-cover {
+    width: 100%;
+    aspect-ratio: 2/3;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 4px 12px var(--shadow);
+  }
+
+  .cover-1 { background: linear-gradient(135deg, #667eea, #764ba2); }
+  .cover-2 { background: linear-gradient(135deg, #f093fb, #f5576c); }
+  .cover-3 { background: linear-gradient(135deg, #4facfe, #00f2fe); }
+  .cover-4 { background: linear-gradient(135deg, #43e97b, #38f9d7); }
+  .cover-5 { background: linear-gradient(135deg, #fa709a, #fee140); }
+  .cover-6 { background: linear-gradient(135deg, #a18cd1, #fbc2eb); }
+  .cover-7 { background: linear-gradient(135deg, #ffecd2, #fcb69f); }
+  .cover-8 { background: linear-gradient(135deg, #a1c4fd, #c2e9fb); }
+
+  .cover-title {
+    position: absolute;
+    bottom: 8px; left: 8px; right: 8px;
+    font-family: Georgia, serif;
+    font-size: 11px;
+    font-weight: 700;
+    color: white;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    line-height: 1.3;
+  }
+
+  .reading-progress-bar {
+    height: 3px;
+    background: var(--border);
+    border-radius: 99px;
+    margin-bottom: 6px;
+    overflow: hidden;
+  }
+
+  .reading-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 99px;
+    transition: background 0.3s;
+  }
+
+  .book-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.3;
+    transition: color 0.3s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .book-author {
+    font-size: 11px;
+    color: var(--text-muted);
+    transition: color 0.3s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ─── GLOBAL THEME SWITCHER ─── */
+  .global-switcher {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(30,30,34,0.9);
+    backdrop-filter: blur(12px);
+    border-radius: 50px;
+    padding: 8px 12px;
+    display: flex;
+    gap: 8px;
+    z-index: 999;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .g-theme-btn {
+    padding: 6px 16px;
+    border-radius: 50px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+    color: rgba(255,255,255,0.5);
+    background: transparent;
+  }
+
+  .g-theme-btn:hover { color: white; }
+  .g-theme-btn.active { background: rgba(255,255,255,0.15); color: white; }
+  .g-theme-btn.day.active   { background: #F5F0E8; color: #1C1916; }
+  .g-theme-btn.night.active { background: #1F1F22; color: #E8E2D4; }
+  .g-theme-btn.dopa.active  { background: linear-gradient(90deg,#FF3CAC,#784BA0,#2B86C5); color: white; }
+
+  .screens-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 32px;
+    margin-top: 60px;
+  }
+
+  .screen-label {
+    color: #666;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    margin-bottom: -24px;
+    align-self: flex-start;
+  }
+
+</style>
+</head>
+<body>
+
+<!-- Global Theme Switcher -->
+<div class="global-switcher">
+  <button class="g-theme-btn day active" onclick="setTheme('day', this)">☀️ День</button>
+  <button class="g-theme-btn night" onclick="setTheme('night', this)">🌙 Ночь</button>
+  <button class="g-theme-btn dopa" onclick="setTheme('dopa', this)">🌈 Дофамин</button>
+</div>
+
+<div class="screens-container">
+
+  <!-- PHONE: Reading Screen -->
+  <div>
+    <div class="screen-label" style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:8px;">📱 Экран чтения</div>
+    <div class="phone" id="phone">
+
+      <!-- Top Bar -->
+      <div class="top-bar">
+        <button class="top-btn">←</button>
+        <span class="chapter-title">Глава III · Мастер и Маргарита</span>
+        <button class="top-btn" onclick="toggleSettings()">⋯</button>
+      </div>
+
+      <!-- Book Content -->
+      <div class="content" id="bookContent">
+        <div class="book-title">Михаил Булгаков</div>
+        <div class="chapter-heading">Глава третья.<br>Седьмое доказательство</div>
+        <div class="book-text">
+          <p>Да, следует отметить первую странность этого страшного майского вечера. Не только у будочки, но и во всей аллее, параллельной Малой Бронной улице, не оказалось ни одного человека.</p>
+          <p>В тот час, когда уж, кажется, и сил не было дышать, когда солнце, раскалив Москву, в сухом тумане валилось куда-то за Садовое кольцо, — никто не пришёл под липы, никто не сел на скамейку, пуста была аллея.</p>
+          <p>— Дайте нарзану, — попросил Берлиоз.</p>
+          <p>— Нарзану нету, — ответила женщина в будочке и почему-то обиделась.</p>
+          <p>— Пиво есть? — сиплым голосом осведомился Бездомный.</p>
+          <p>— Пиво привезут к вечеру, — ответила женщина.</p>
+          <p>— А что есть? — спросил Берлиоз.</p>
+          <p>— Абрикосовая, только тёплая, — сказала женщина.</p>
+          <p>— Ну, давайте, давайте, давайте!..</p>
+          <p>Абрикосовая дала обильную жёлтую пену, и в воздухе запахло парикмахерской. Напившись, литераторы немедленно начали икать, расплатились и уселись на скамейке лицом к пруду, спиной к Бронной.</p>
+        </div>
+      </div>
+
+      <!-- Settings Panel -->
+      <div class="settings-panel" id="settingsPanel">
+        <div class="settings-row">
+          <span class="settings-label">Размер шрифта</span>
+          <div class="font-size-controls">
+            <button class="font-btn" onclick="changeFontSize(-1)">−</button>
+            <span class="font-size-display" id="fontSizeDisplay">17</span>
+            <button class="font-btn" onclick="changeFontSize(1)">+</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Тема</span>
+          <div class="theme-selector">
+            <div class="theme-dot day active" id="dot-day" onclick="setThemeFromDot('day')"></div>
+            <div class="theme-dot night" id="dot-night" onclick="setThemeFromDot('night')"></div>
+            <div class="theme-dot dopamine" id="dot-dopa" onclick="setThemeFromDot('dopa')"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Bar -->
+      <div class="bottom-bar">
+        <div class="progress-info">
+          <span class="progress-text">Глава 3 из 32</span>
+          <span class="progress-text">34%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- TABLET: Library Screen -->
+  <div>
+    <div class="screen-label" style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:8px;">💻 Библиотека (десктоп)</div>
+    <div class="tablet" id="tablet">
+      <div class="sidebar">
+        <div class="sidebar-title">📚 Bookly</div>
+        <div class="sidebar-item active"><span class="sidebar-icon">🏠</span> Библиотека</div>
+        <div class="sidebar-item"><span class="sidebar-icon">📖</span> Читаю сейчас</div>
+        <div class="sidebar-item"><span class="sidebar-icon">✅</span> Прочитано</div>
+        <div class="sidebar-item"><span class="sidebar-icon">🔖</span> Закладки</div>
+        <div class="sidebar-item"><span class="sidebar-icon">⚙️</span> Настройки</div>
+      </div>
+      <div class="library-main">
+        <div class="lib-header">
+          <span class="lib-heading">Моя библиотека</span>
+          <button class="add-btn">＋ Добавить книгу</button>
+        </div>
+        <div class="books-grid">
+          <div class="book-card">
+            <div class="book-cover cover-1"><div class="cover-title">Мастер и Маргарита</div></div>
+            <div class="reading-progress-bar"><div class="reading-progress-fill" style="width:34%"></div></div>
+            <div class="book-name">Мастер и Маргарита</div>
+            <div class="book-author">Булгаков М.</div>
+          </div>
+          <div class="book-card">
+            <div class="book-cover cover-2"><div class="cover-title">Преступление и наказание</div></div>
+            <div class="reading-progress-bar"><div class="reading-progress-fill" style="width:78%"></div></div>
+            <div class="book-name">Преступление и наказание</div>
+            <div class="book-author">Достоевский Ф.</div>
+          </div>
+          <div class="book-card">
+            <div class="book-cover cover-3"><div class="cover-title">Дюна</div></div>
+            <div class="reading-progress-bar"><div class="reading-progress-fill" style="width:12%"></div></div>
+            <div class="book-name">Дюна</div>
+            <div class="book-author">Герберт Ф.</div>
+          </div>
+          <div class="book-card">
+            <div class="book-cover cover-4"><div class="cover-title">1984</div></div>
+            <div class="reading-progress-bar"><div class="reading-progress-fill" style="width:100%"></div></div>
+            <div class="book-name">1984</div>
+            <div class="book-author">Оруэлл Д.</div>
+          </div>
+          <div class="book-card">
+            <div class="book-cover cover-5"><div class="cover-title">Война и мир</div></div>
+            <div class="reading-progress-bar"><div class="reading-progress-fill" style="width:5%"></div></div>
+            <div class="book-name">Война и мир</div>
+            <div class="book-author">Толстой Л.</div>
+          </div>
+          <div class="book-card">
+            <div class="book-cover cover-6"><div class="cover-title">Гарри Поттер</div></div>
+            <div class="reading-progress-bar"><div class="reading-progress-fill" style="width:60%"></div></div>
+            <div class="book-name">Гарри Поттер и Тайная комната</div>
+            <div class="book-author">Роулинг Дж.</div>
+          </div>
+          <div class="book-card">
+            <div class="book-cover cover-7"><div class="cover-title">Три товарища</div></div>
+            <div class="reading-progress-bar"><div class="reading-progress-fill" style="width:90%"></div></div>
+            <div class="book-name">Три товарища</div>
+            <div class="book-author">Ремарк Э.М.</div>
+          </div>
+          <div class="book-card">
+            <div class="book-cover cover-8"><div class="cover-title">Идиот</div></div>
+            <div class="reading-progress-bar"><div class="reading-progress-fill" style="width:0%"></div></div>
+            <div class="book-name">Идиот</div>
+            <div class="book-author">Достоевский Ф.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  let currentTheme = 'day';
+  let fontSize = 17;
+
+  function setTheme(theme, btn) {
+    const phone = document.getElementById('phone');
+    const tablet = document.getElementById('tablet');
+
+    phone.className = 'phone';
+    tablet.className = 'tablet';
+
+    if (theme === 'night') {
+      phone.classList.add('theme-night');
+      tablet.classList.add('theme-night');
+    } else if (theme === 'dopa') {
+      phone.classList.add('theme-dopamine');
+      tablet.classList.add('theme-dopamine');
+    }
+
+    currentTheme = theme;
+
+    document.querySelectorAll('.g-theme-btn').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+
+    updateDots();
+  }
+
+  function setThemeFromDot(theme) {
+    const btnMap = { day: 0, night: 1, dopa: 2 };
+    const btns = document.querySelectorAll('.g-theme-btn');
+    setTheme(theme, btns[btnMap[theme]]);
+  }
+
+  function updateDots() {
+    document.querySelectorAll('.theme-dot').forEach(d => d.classList.remove('active'));
+    const dotMap = { day: 'dot-day', night: 'dot-night', dopa: 'dot-dopa' };
+    const el = document.getElementById(dotMap[currentTheme]);
+    if (el) el.classList.add('active');
+  }
+
+  function toggleSettings() {
+    const panel = document.getElementById('settingsPanel');
+    panel.classList.toggle('visible');
+  }
+
+  function changeFontSize(delta) {
+    fontSize = Math.min(24, Math.max(13, fontSize + delta));
+    document.getElementById('fontSizeDisplay').textContent = fontSize;
+    document.querySelectorAll('.book-text').forEach(el => {
+      el.style.fontSize = fontSize + 'px';
+    });
+  }
+
+  document.getElementById('bookContent').addEventListener('click', function(e) {
+    if (!e.target.closest('.top-btn') && !e.target.closest('.settings-panel')) {
+      const panel = document.getElementById('settingsPanel');
+      if (panel.classList.contains('visible')) panel.classList.remove('visible');
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BookApp — Библиотека</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+
+:root {
+  --bg:       #F8F7F4;
+  --surface:  #EFEDE8;
+  --surface2: #E7E4DD;
+  --text:     #18171A;
+  --text-2:   #6B6760;
+  --text-3:   #A8A49E;
+  --accent:   #2F2C6B;
+  --accent-2: #4B47A3;
+  --accent-bg:#ECEAFB;
+  --line:     rgba(0,0,0,0.07);
+  --shadow-s: 0 1px 4px rgba(0,0,0,0.06);
+  --shadow-m: 0 4px 14px rgba(0,0,0,0.09);
+  --bar:      rgba(248,247,244,0.96);
+}
+
+.night {
+  --bg:       #111113;
+  --surface:  #1A1A1E;
+  --surface2: #222228;
+  --text:     #F0EDE6;
+  --text-2:   #6B6760;
+  --text-3:   #3D3C40;
+  --accent:   #9490F0;
+  --accent-2: #7B77E8;
+  --accent-bg:#1E1C36;
+  --line:     rgba(255,255,255,0.06);
+  --shadow-s: 0 1px 4px rgba(0,0,0,0.3);
+  --shadow-m: 0 4px 14px rgba(0,0,0,0.4);
+  --bar:      rgba(17,17,19,0.97);
+}
+
+.dopa {
+  --bg:       #FCF5FF;
+  --surface:  #F5E9FF;
+  --surface2: #EDD6FF;
+  --text:     #180A2A;
+  --text-2:   #8C6AAA;
+  --text-3:   #C4AADC;
+  --accent:   #7B22E0;
+  --accent-2: #9940F5;
+  --accent-bg:#F0DEFF;
+  --line:     rgba(123,34,224,0.10);
+  --shadow-s: 0 1px 4px rgba(123,34,224,0.08);
+  --shadow-m: 0 4px 14px rgba(123,34,224,0.13);
+  --bar:      rgba(252,245,255,0.97);
+}
+
+body {
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  background: #1C1C1E;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  padding: 24px 16px 48px;
+}
+
+/* ── Theme switcher ── */
+.switcher {
+  display: flex;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 4px;
+  gap: 2px;
+  margin-bottom: 24px;
+}
+
+.sw-btn {
+  padding: 6px 20px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,0.4);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.18s;
+  letter-spacing: 0.01em;
+}
+.sw-btn:hover { color: rgba(255,255,255,0.75); }
+.sw-btn.on { background: rgba(255,255,255,0.10); color: rgba(255,255,255,0.95); }
+
+/* ── Phone ── */
+.phone {
+  width: 393px;
+  height: 852px;
+  background: var(--bg);
+  border-radius: 48px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 48px 96px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.06);
+  display: flex;
+  flex-direction: column;
+  transition: background 0.25s;
+}
+
+/* ── Scrollable body ── */
+.body {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  padding-bottom: 80px;
+}
+.body::-webkit-scrollbar { display: none; }
+
+/* ── Header ── */
+.header {
+  padding: 56px 24px 20px;
+}
+
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 20px;
+}
+
+.title-block {}
+.title-sup {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 3px;
+}
+.title-main {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.header-btns {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 2px;
+}
+
+.hbtn {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  color: var(--text-2);
+  transition: background 0.15s, color 0.15s;
+}
+.hbtn:hover { background: var(--accent-bg); color: var(--accent); }
+.hbtn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ── Search ── */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 14px;
+}
+.search svg { width: 15px; height: 15px; stroke: var(--text-3); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.search-text { font-size: 14px; color: var(--text-3); }
+
+/* ── Stats row ── */
+.stats {
+  display: flex;
+  gap: 10px;
+  padding: 16px 24px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.stats::-webkit-scrollbar { display: none; }
+
+.stat {
+  flex-shrink: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 16px;
+  min-width: 90px;
+}
+.stat-val {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.03em;
+  line-height: 1;
+  margin-bottom: 3px;
+}
+.stat-key {
+  font-size: 11px;
+  color: var(--text-3);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* ── Section label ── */
+.sec-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24px 24px 14px;
+}
+.sec-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.sec-link {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 500;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+}
+
+/* ── Hero card (continue reading) ── */
+.hero {
+  margin: 0 24px;
+  background: var(--accent);
+  border-radius: 18px;
+  padding: 20px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  box-shadow: 0 6px 24px rgba(47,44,107,0.28);
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.night .hero  { box-shadow: 0 6px 24px rgba(0,0,0,0.45); }
+.dopa  .hero  { box-shadow: 0 6px 24px rgba(123,34,224,0.30); }
+
+.hero:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(47,44,107,0.32); }
+
+.hero-cover {
+  width: 72px; height: 108px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+  background: rgba(255,255,255,0.15);
+}
+.hero-cover img { width: 100%; height: 100%; object-fit: cover; }
+.hero-cover-fill {
+  width: 100%; height: 100%;
+  background: linear-gradient(160deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.04) 100%);
+  display: flex; align-items: flex-end; padding: 8px;
+}
+.hero-cover-text {
+  font-family: Georgia, serif;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.85);
+  line-height: 1.35;
+}
+
+.hero-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 108px;
+}
+
+.hero-tag {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.hero-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.hero-author {
+  font-size: 12px;
+  color: rgba(255,255,255,0.6);
+  margin-top: 2px;
+}
+
+.hero-footer {}
+.hero-progress-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.hero-prog-text {
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  font-weight: 500;
+}
+.hero-prog-pct {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.9);
+}
+.hero-bar {
+  height: 3px;
+  background: rgba(255,255,255,0.2);
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.hero-bar-fill {
+  height: 100%;
+  background: rgba(255,255,255,0.85);
+  border-radius: 99px;
+  width: 34%;
+}
+.hero-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  padding: 8px;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  letter-spacing: 0.01em;
+  transition: background 0.15s;
+}
+.hero-btn:hover { background: rgba(255,255,255,0.22); }
+.hero-btn svg { width: 13px; height: 13px; stroke: white; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ── Reading cards (horizontal) ── */
+.h-list {
+  display: flex;
+  gap: 12px;
+  padding: 0 24px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.h-list::-webkit-scrollbar { display: none; }
+
+.r-card {
+  flex-shrink: 0;
+  width: 108px;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.r-card:hover { transform: translateY(-2px); }
+
+.r-cover {
+  width: 108px; height: 156px;
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: var(--shadow-m);
+  margin-bottom: 10px;
+}
+
+.r-cover-bg {
+  width: 100%; height: 100%;
+  display: flex; align-items: flex-end;
+  padding: 10px;
+}
+.r-cover-title {
+  font-family: Georgia, serif;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.88);
+  text-shadow: 0 1px 6px rgba(0,0,0,0.5);
+  line-height: 1.35;
+}
+
+.r-prog-track {
+  height: 2.5px;
+  background: var(--line);
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.r-prog-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 99px;
+}
+
+.r-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.r-author {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+.r-pct {
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+/* ── Divider ── */
+.divider {
+  height: 1px;
+  background: var(--line);
+  margin: 20px 24px 0;
+}
+
+/* ── Finished grid ── */
+.f-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px 12px;
+  padding: 0 24px;
+}
+
+.f-card {
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.f-card:hover { transform: translateY(-2px); }
+
+.f-cover {
+  width: 100%;
+  aspect-ratio: 2/3;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: var(--shadow-m);
+  margin-bottom: 8px;
+}
+.f-cover-bg {
+  width: 100%; height: 100%;
+  display: flex; align-items: flex-end;
+  padding: 8px;
+}
+.f-cover-title {
+  font-family: Georgia, serif;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.88);
+  text-shadow: 0 1px 4px rgba(0,0,0,0.55);
+  line-height: 1.35;
+}
+
+.f-done {
+  position: absolute;
+  top: 7px; right: 7px;
+  width: 20px; height: 20px;
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(4px);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+.f-done svg { width: 10px; height: 10px; stroke: white; fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+
+.f-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.f-author {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+.f-stars {
+  margin-top: 3px;
+  display: flex;
+  gap: 1px;
+}
+.star { width: 9px; height: 9px; }
+.star.on  { fill: var(--accent); }
+.star.off { fill: var(--line); }
+
+/* ── Bottom nav ── */
+.nav {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 78px;
+  background: var(--bar);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding-bottom: 14px;
+  z-index: 20;
+  transition: background 0.25s, border-color 0.25s;
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 4px 12px;
+  border-radius: 10px;
+  transition: all 0.15s;
+}
+
+.nav-item svg {
+  width: 22px; height: 22px;
+  stroke: var(--text-3); fill: none;
+  stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+  transition: stroke 0.15s;
+}
+.nav-item.on svg { stroke: var(--accent); }
+
+.nav-item span {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-3);
+  letter-spacing: 0.01em;
+  transition: color 0.15s;
+}
+.nav-item.on span { color: var(--accent); font-weight: 600; }
+
+/* ── Cover palettes ── */
+.g1  { background: linear-gradient(150deg,#5E5CE6,#3A37B0); }
+.g2  { background: linear-gradient(150deg,#E84393,#B0145E); }
+.g3  { background: linear-gradient(150deg,#0A84FF,#0052CC); }
+.g4  { background: linear-gradient(150deg,#30D158,#1A8A36); }
+.g5  { background: linear-gradient(150deg,#FF9F0A,#CC6B00); }
+.g6  { background: linear-gradient(150deg,#BF5AF2,#8944C0); }
+.g7  { background: linear-gradient(150deg,#FF6B6B,#CC2020); }
+.g8  { background: linear-gradient(150deg,#64D2FF,#0084B4); }
+.g9  { background: linear-gradient(150deg,#5AC8FA,#2E6DA4); }
+.g10 { background: linear-gradient(150deg,#FF453A,#99180F); }
+</style>
+</head>
+<body>
+
+<!-- Switcher -->
+<div class="switcher">
+  <button class="sw-btn on" onclick="setT('',this)">День</button>
+  <button class="sw-btn"    onclick="setT('night',this)">Ночь</button>
+  <button class="sw-btn"    onclick="setT('dopa',this)">Дофамин</button>
+</div>
+
+<div class="phone" id="ph">
+<div class="body">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-top">
+      <div class="title-block">
+        <div class="title-sup">Bookly</div>
+        <div class="title-main">Моя библиотека</div>
+      </div>
+      <div class="header-btns">
+        <button class="hbtn">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
+        </button>
+        <button class="hbtn">
+          <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="search">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
+      <span class="search-text">Поиск по библиотеке...</span>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-val">15</div>
+      <div class="stat-key">Книг всего</div>
+    </div>
+    <div class="stat">
+      <div class="stat-val">8</div>
+      <div class="stat-key">Прочитано</div>
+    </div>
+    <div class="stat">
+      <div class="stat-val">5</div>
+      <div class="stat-key">Дней подряд</div>
+    </div>
+    <div class="stat">
+      <div class="stat-val">3.2</div>
+      <div class="stat-key">Ч. за месяц</div>
+    </div>
+  </div>
+
+  <!-- Continue reading -->
+  <div class="sec-label">
+    <span class="sec-title">Продолжить чтение</span>
+  </div>
+  <div class="hero">
+    <div class="hero-cover">
+      <div class="hero-cover-fill g1">
+        <div class="hero-cover-text">Мастер и Маргарита</div>
+      </div>
+    </div>
+    <div class="hero-body">
+      <div>
+        <div class="hero-tag">Читаю сейчас</div>
+        <div class="hero-title">Мастер и Маргарита</div>
+        <div class="hero-author">Михаил Булгаков</div>
+      </div>
+      <div class="hero-footer">
+        <div class="hero-progress-row">
+          <span class="hero-prog-text">Глава 3 из 32</span>
+          <span class="hero-prog-pct">34%</span>
+        </div>
+        <div class="hero-bar"><div class="hero-bar-fill"></div></div>
+        <button class="hero-btn">
+          Читать
+          <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Currently reading -->
+  <div class="sec-label">
+    <span class="sec-title">Читаемые</span>
+    <span class="sec-link">Все 4</span>
+  </div>
+  <div class="h-list">
+    <div class="r-card">
+      <div class="r-cover">
+        <div class="r-cover-bg g2">
+          <div class="r-cover-title">Преступление и наказание</div>
+        </div>
+      </div>
+      <div class="r-prog-track"><div class="r-prog-fill" style="width:78%"></div></div>
+      <div class="r-title">Преступление и наказание</div>
+      <div class="r-author">Достоевский</div>
+      <div class="r-pct">78%</div>
+    </div>
+    <div class="r-card">
+      <div class="r-cover">
+        <div class="r-cover-bg g3">
+          <div class="r-cover-title">Дюна</div>
+        </div>
+      </div>
+      <div class="r-prog-track"><div class="r-prog-fill" style="width:12%"></div></div>
+      <div class="r-title">Дюна</div>
+      <div class="r-author">Фрэнк Герберт</div>
+      <div class="r-pct">12%</div>
+    </div>
+    <div class="r-card">
+      <div class="r-cover">
+        <div class="r-cover-bg g5">
+          <div class="r-cover-title">Война и мир</div>
+        </div>
+      </div>
+      <div class="r-prog-track"><div class="r-prog-fill" style="width:5%"></div></div>
+      <div class="r-title">Война и мир</div>
+      <div class="r-author">Толстой</div>
+      <div class="r-pct">5%</div>
+    </div>
+    <div class="r-card">
+      <div class="r-cover">
+        <div class="r-cover-bg g6">
+          <div class="r-cover-title">Гарри Поттер и Тайная Комната</div>
+        </div>
+      </div>
+      <div class="r-prog-track"><div class="r-prog-fill" style="width:60%"></div></div>
+      <div class="r-title">Гарри Поттер</div>
+      <div class="r-author">Роулинг</div>
+      <div class="r-pct">60%</div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Finished -->
+  <div class="sec-label">
+    <span class="sec-title">Прочитанные</span>
+    <span class="sec-link">Все 8</span>
+  </div>
+  <div class="f-grid">
+
+    <div class="f-card">
+      <div class="f-cover">
+        <div class="f-cover-bg g4"><div class="f-cover-title">1984</div></div>
+        <div class="f-done"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+      </div>
+      <div class="f-title">1984</div>
+      <div class="f-author">Оруэлл</div>
+      <div class="f-stars">
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </div>
+    </div>
+
+    <div class="f-card">
+      <div class="f-cover">
+        <div class="f-cover-bg g7"><div class="f-cover-title">Три товарища</div></div>
+        <div class="f-done"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+      </div>
+      <div class="f-title">Три товарища</div>
+      <div class="f-author">Ремарк</div>
+      <div class="f-stars">
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </div>
+    </div>
+
+    <div class="f-card">
+      <div class="f-cover">
+        <div class="f-cover-bg g10"><div class="f-cover-title">Идиот</div></div>
+        <div class="f-done"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+      </div>
+      <div class="f-title">Идиот</div>
+      <div class="f-author">Достоевский</div>
+      <div class="f-stars">
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star off" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </div>
+    </div>
+
+    <div class="f-card">
+      <div class="f-cover">
+        <div class="f-cover-bg g8"><div class="f-cover-title">Маленький принц</div></div>
+        <div class="f-done"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+      </div>
+      <div class="f-title">Маленький принц</div>
+      <div class="f-author">Сент-Экзюпери</div>
+      <div class="f-stars">
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </div>
+    </div>
+
+    <div class="f-card">
+      <div class="f-cover">
+        <div class="f-cover-bg g5"><div class="f-cover-title">Алхимик</div></div>
+        <div class="f-done"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+      </div>
+      <div class="f-title">Алхимик</div>
+      <div class="f-author">Коэльо</div>
+      <div class="f-stars">
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star off" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star off" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </div>
+    </div>
+
+    <div class="f-card">
+      <div class="f-cover">
+        <div class="f-cover-bg g9"><div class="f-cover-title">Гордость и предубеждение</div></div>
+        <div class="f-done"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+      </div>
+      <div class="f-title">Гордость и предуб.</div>
+      <div class="f-author">Остин</div>
+      <div class="f-stars">
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star on" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <svg class="star off" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="height:16px"></div>
+
+</div><!-- /body -->
+
+<!-- Bottom nav -->
+<div class="nav">
+  <div class="nav-item on">
+    <svg viewBox="0 0 24 24"><path d="M4 19V6a2 2 0 0 1 2-2h13v13"/><path d="M4 19a2 2 0 0 0 2 2h13"/><line x1="16" y1="4" x2="16" y2="17"/></svg>
+    <span>Библиотека</span>
+  </div>
+  <div class="nav-item">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
+    <span>Поиск</span>
+  </div>
+  <div class="nav-item">
+    <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+    <span>Статистика</span>
+  </div>
+  <div class="nav-item">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    <span>Настройки</span>
+  </div>
+</div>
+
+</div><!-- /phone -->
+
+<script>
+function setT(cls, btn) {
+  document.getElementById('ph').className = 'phone' + (cls ? ' ' + cls : '');
+  document.querySelectorAll('.sw-btn').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+}
+</script>
+</body>
+</html>
