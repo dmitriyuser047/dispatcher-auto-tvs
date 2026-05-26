@@ -60,7 +60,9 @@ function fetchText(url, redirects = 5) {
 async function checkForUpdate() {
   if (!UPDATE_CHECK_URL) return null;
   try {
-    const text = await fetchText(UPDATE_CHECK_URL);
+    // Добавляем timestamp чтобы обойти CDN-кэш GitHub
+    const url  = UPDATE_CHECK_URL + '?t=' + Date.now();
+    const text = await fetchText(url);
     const info = JSON.parse(text);
     const current = app.getVersion();
     if (compareVersions(info.version, current) > 0) {

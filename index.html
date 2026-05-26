@@ -2509,6 +2509,13 @@ if (window.electronAPI && window.electronAPI.onUpdateAvailable) {
       document.getElementById('updateInstallBtn').style.display = '';
     }
   });
+
+  // Проверка при возврате в приложение (фокус окна)
+  window.addEventListener('focus', async () => {
+    if (_updateInfo) return; // баннер уже показан
+    const info = await window.electronAPI.checkUpdate();
+    if (info) showUpdateBanner(info);
+  });
 }
 
 // Показать версию в сайдбаре

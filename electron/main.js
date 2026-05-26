@@ -56,11 +56,11 @@ function createWindow() {
     }, 4000);
   });
 
-  // Периодическая проверка каждые 30 минут
+  // Периодическая проверка каждые 5 минут
   setInterval(async () => {
     const info = await updater.checkForUpdate();
     if (info) win.webContents.send('update-available', info);
-  }, 30 * 60 * 1000);
+  }, 5 * 60 * 1000);
 
   return win;
 }
