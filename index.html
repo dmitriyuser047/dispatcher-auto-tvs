@@ -1323,9 +1323,9 @@ function renderDetail(v) {
         <td class="td-num">${r.odoStart ? r.odoStart.toLocaleString('ru') : '—'} → ${r.odoEnd ? r.odoEnd.toLocaleString('ru') : '—'}</td>
         <td class="td-num">${r.fuelIssued ? r.fuelIssued.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${r.fuelUsed ? r.fuelUsed.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
-        <td class="td-num">${r.fuelActual ? r.fuelActual.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
-        <td class="td-num">${r.fuelIdle ? r.fuelIdle.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
-        <td class="td-num" style="color:${balColor};font-weight:600">${balance != null ? balance.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
+        <td class="td-num">${r.fuelActual != null ? r.fuelActual.toLocaleString('ru', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</td>
+        <td class="td-num">${r.fuelIdle != null ? r.fuelIdle.toLocaleString('ru', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</td>
+        <td class="td-num" style="color:${balColor};font-weight:600">${balance != null ? balance.toLocaleString('ru', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</td>
         <td class="td-num">${normL100 !== null ? normL100.toFixed(1) : '—'}</td>
         <td class="td-num">${factL100 !== null ? factL100.toFixed(1) + factDevHtml : '—'}</td>
         <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${r.driver || '—'}</td>
