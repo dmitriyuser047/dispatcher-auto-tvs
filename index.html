@@ -1603,6 +1603,9 @@ function openAddRecord() {
   if (vRecs.length) {
     const last = vRecs[vRecs.length - 1];
     if (last.odoEnd) document.getElementById('rec_odo_start').value = last.odoEnd;
+  } else if (v && v.odometer) {
+    // Первая запись — берём начальный одометр из данных ТС
+    document.getElementById('rec_odo_start').value = v.odometer;
   }
   openModal('recordModal');
 }
