@@ -1244,9 +1244,9 @@ const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 function renderDetail(v) {
   const recs = recsFor(v.id);
   const totalKm = recs.reduce((s, r) => s + (r.km || 0), 0);
-  const totalFuel = recs.reduce((s, r) => s + (r.fuelUsed || 0), 0);
+  const totalFuel = recs.reduce((s, r) => s + (r.fuelActual || 0), 0);
   const totalFuelIssued = recs.reduce((s, r) => s + (r.fuelIssued || 0), 0);
-  const avgConsumption = totalKm > 0 ? (totalFuel / totalKm * 100) : 0;
+  const avgConsumption = totalKm > 0 && totalFuel > 0 ? (totalFuel / totalKm * 100) : 0;
 
   const fuelLabels = { diesel: 'Дизельное', gasoline: 'Бензин', gas: 'Газ (ГБО)' };
   const fuelClasses = { diesel: 'diesel', gasoline: 'gasoline', gas: 'gas' };
@@ -1262,7 +1262,7 @@ function renderDetail(v) {
   }).sort((a, b) => new Date(a.date) - new Date(b.date));
 
   const monthKm = monthRecs.reduce((s, r) => s + (r.km || 0), 0);
-  const monthFuel = monthRecs.reduce((s, r) => s + (r.fuelUsed || 0), 0);
+  const monthFuel = monthRecs.reduce((s, r) => s + (r.fuelActual || 0), 0);
 
   // build month tabs grouped by year
   let monthTabsHtml = '';
@@ -1823,7 +1823,9 @@ function computeFuelBalances(vehicleId, dateFrom, dateTo) {
   let balance = (vehicle && !dateFrom) ? (vehicle.fuelBalance || 0) : 0;
   const balMap = {};
   recs.forEach(r => {
-    balance += (r.fuelIssued || 0) - (r.fuelUsed || 0) - (r.fuelIdle || 0);
+    // Остаток считается по фактическому расходу; если не введён — по норме
+    const spent = r.fuelActual != null ? r.fuelActual : (r.fuelUsed || 0);
+    balance += (r.fuelIssued || 0) - spent - (r.fuelIdle || 0);
     balMap[r.id] = +balance.toFixed(2);
   });
   return balMap;
@@ -1851,9 +1853,9 @@ function exportToXlsx() {
   const allRecs  = recsFor(v.id);
   const totalKm  = allRecs.reduce((s, rec) => s + (rec.km || 0), 0);
   const monthKm  = monthRecs.reduce((s, rec) => s + (rec.km || 0), 0);
-  const totalFuel= allRecs.reduce((s, rec) => s + (rec.fuelUsed || 0), 0);
+  const totalFuel= allRecs.reduce((s, rec) => s + (rec.fuelActual || 0), 0);
   const monthIss = monthRecs.reduce((s, rec) => s + (rec.fuelIssued || 0), 0);
-  const monthUsed= monthRecs.reduce((s, rec) => s + (rec.fuelUsed || 0), 0);
+  const monthUsed= monthRecs.reduce((s, rec) => s + (rec.fuelActual || 0), 0);
   const avgAll   = totalKm > 0 && totalFuel > 0 ? +(totalFuel / totalKm * 100).toFixed(1) : null;
   const avgMonth = monthKm > 0 && monthUsed > 0 ? +(monthUsed / monthKm * 100).toFixed(2) : null;
 
@@ -2340,7 +2342,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
       const bm=computeFuelBalances(v.id, dateFrom, dateTo);
       const sorted=vRecs.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
       const vBal=sorted.length?(bm[sorted[sorted.length-1].id]||0):0;
-      const avg=vKm>0&&vUsd>0?+(vUsd/vKm*100).toFixed(2):null;
+      const avg=vKm>0&&vAct>0?+(vAct/vKm*100).toFixed(2):null;
       const bal=+vBal.toFixed(2);
       const balBg=bal<0?P.redPale:bal===0?P.gray2:P.greenPale;
       const sB=cs({bold:true,sz:10,color:{rgb:bal<0?P.red:bal===0?P.gray4:P.green}},balBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
