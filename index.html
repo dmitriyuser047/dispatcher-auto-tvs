@@ -402,7 +402,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 100;
+    z-index: 500;
     backdrop-filter: blur(2px);
     opacity: 0;
     pointer-events: none;
@@ -416,6 +416,8 @@
     padding: 24px;
     width: 480px;
     max-width: calc(100vw - 40px);
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
     box-shadow: var(--shadow);
     transform: translateY(12px);
     transition: transform .2s;
@@ -2225,7 +2227,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
   const DAYS_RU_EXP = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
   const fuelLabels  = { diesel:'Дизельное', gasoline:'Бензин', gas:'Газ (ГБО)' };
   const fuelTypes   = ['diesel','gasoline','gas'];
-  const NC = 14;
+  const NC = 15;
 
   const P = {
     dark:'0F1117', navy:'1B3A6B', navyMid:'2D5A8E', navyLight:'D6E4F7',
@@ -2331,7 +2333,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
 
     hdr('  СВОДКА ПО ТРАНСПОРТНЫМ СРЕДСТВАМ', ST.secN);
     ['№','Госномер','Марка / Модель','Водитель','Организация','Объект','Вид топлива','Состояние',
-     'Пробег, км','Выдано, л','Расход по норме, л','Факт. расход, л','Остаток, л','Ср.расход л/100км','Маршруты']
+     'Пробег, км','Выдано, л','Расход по норме, л','Факт. расход, л','Остаток, л','Ср.расход л/100км','Маршруты','Примечание']
       .forEach((h,c)=>put(R(),c,h,ST.tHead));
     rowH(R(),24);next();
 
@@ -2368,6 +2370,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
         return fmtDate(r.date) + ': ' + rts.join('; ');
       }).filter(Boolean).join('\n');
       const routeStyle = cs({sz:9,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',wrapText:true,indent:1},bAll('thin',P.gray3));
+      const noteStyle = cs({sz:9,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',wrapText:true,indent:1},bAll('thin',P.gray3));
       put(R(),0,i+1,ST.tdC(bg));put(R(),1,v.plate,ST.tdC(bg));put(R(),2,v.make,ST.tdL(bg));
       put(R(),3,v.driver,ST.tdL(bg));put(R(),4,v.org||'—',ST.tdL(bg));put(R(),5,v.object||'—',ST.tdL(bg));
       put(R(),6,fuelLabels[v.fuel||'diesel'],ST.tdC(bg));
@@ -2376,7 +2379,10 @@ function exportAllToXlsx(dateFrom, dateTo) {
       put(R(),10,+vUsd.toFixed(2)||0,ST.tdR(bg));put(R(),11,+vAct.toFixed(2)||0,ST.tdR(bg));
       put(R(),12,bal,sB);put(R(),13,avg??'',ST.tdR(bg));
       put(R(),14,vRoutes||'—',routeStyle);
-      rowH(R(),vRoutes ? Math.max(19, Math.min(vRoutes.split('\n').length * 16, 80)) : 19);next();
+      put(R(),15,v.note||'—',noteStyle);
+      const noteLines = v.note ? Math.ceil(v.note.length / 30) : 1;
+      const routeLines = vRoutes ? vRoutes.split('\n').length : 1;
+      rowH(R(),Math.max(19, Math.min(Math.max(routeLines, noteLines) * 16, 80)));next();
     });
 
     const filteredAll=filterRecs(data.records);
@@ -2390,7 +2396,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
     put(R(),10,+aUsd.toFixed(2),ST.tot);put(R(),11,+aAct.toFixed(2),ST.tot);rowH(R(),22);next();
 
     ws['!cols']=[{wch:4},{wch:13},{wch:22},{wch:22},{wch:18},{wch:16},{wch:14},{wch:18},
-                 {wch:13},{wch:13},{wch:16},{wch:15},{wch:13},{wch:16},{wch:40}];
+                 {wch:13},{wch:13},{wch:16},{wch:15},{wch:13},{wch:16},{wch:40},{wch:30}];
     XLSX.utils.book_append_sheet(wb,ws,'Общая сводка');
   }
 
