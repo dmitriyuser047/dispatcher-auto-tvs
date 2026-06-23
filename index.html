@@ -4168,9 +4168,13 @@ function calcGenHoursFromMeter() {
 
 // ─── GENERATOR SIDEBAR SUMMARY ───────────────────────────
 function renderGenSidebarSummary() {
-  const el   = document.getElementById('sidebarSummary');
+  document.getElementById('sidebarSummary').innerHTML = '';
+  const list = document.getElementById('generatorList');
   const gens = data.generators || [];
-  if (!gens.length) { el.innerHTML = ''; return; }
+
+  const existing = list?.querySelector('.gen-sidebar-summary');
+  if (existing) existing.remove();
+  if (!gens.length) return;
 
   let rows = '';
   gens.forEach(g => {
@@ -4192,7 +4196,9 @@ function renderGenSidebarSummary() {
     </div>`;
   });
 
-  el.innerHTML = `<div class="sidebar-summary">
+  const div = document.createElement('div');
+  div.className = 'gen-sidebar-summary';
+  div.innerHTML = `<div class="sidebar-summary" style="margin-top:8px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
       <div class="ss-title" style="margin-bottom:0">ДЕЗ — сводка</div>
       <button class="btn btn-ghost btn-sm" onclick="openGenExportAllModal()" style="font-size:11px;padding:4px 10px">
@@ -4211,6 +4217,7 @@ function renderGenSidebarSummary() {
     </div>
     ${rows}
   </div>`;
+  list?.appendChild(div);
 }
 </script>
 </body>
