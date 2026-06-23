@@ -3553,8 +3553,6 @@ function renderGeneratorList() {
       .some(f => (f || '').toLowerCase().includes(q));
   });
 
-  renderGenSidebarSummary();
-
   if (!filtered.length) {
     list.innerHTML = `<div class="empty-list">
       <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" style="display:block;margin:0 auto 8px">
@@ -3562,6 +3560,7 @@ function renderGeneratorList() {
       </svg>
       ${gens.length ? 'Ничего не найдено' : 'Нет дизельных генераторов.<br>Нажмите «Добавить ДЕЗ»'}
     </div>`;
+    renderGenSidebarSummary();
     return;
   }
 
@@ -3595,6 +3594,7 @@ function renderGeneratorList() {
       </div>
     </div>`;
   }).join('');
+  renderGenSidebarSummary();
 }
 
 // ─── SELECT GENERATOR ────────────────────────────────────
