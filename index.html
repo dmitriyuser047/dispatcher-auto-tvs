@@ -3285,7 +3285,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     put(R(),5,g.power!=null?g.power:'—',ST.tdC(bg));put(R(),6,fuelLabels[g.fuel||'diesel'],ST.tdC(bg));
     put(R(),7,g.status||'—',sStatus);put(R(),8,+hours.toFixed(1),ST.tdR(bg));
     put(R(),9,+issued.toFixed(2),ST.tdR(bg));put(R(),10,+actual.toFixed(2),ST.tdR(bg));put(R(),11,fBal,sB);
-    put(R(),12,g.cost!=null?g.cost:'—',ST.tdR(bg));
+    put(R(),12,g.cost!=null?g.cost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tdR(bg));
     put(R(),13,g.note||'—',ST.tdL(bg));
     rowH(R(),20);next();
   });
@@ -3293,7 +3293,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
   put(R(),8,+totH.toFixed(1),ST.tot);put(R(),9,+totIss.toFixed(2),ST.tot);put(R(),10,+totAct.toFixed(2),ST.tot);
   const tBal=+totBal.toFixed(2);
   put(R(),11,tBal,cs({bold:true,sz:10,color:{rgb:tBal<0?P.red:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
-  put(R(),12,totCost>0?+totCost.toFixed(2):'—',ST.tot);
+  put(R(),12,totCost>0?totCost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tot);
   put(R(),13,'',ST.tot);
   rowH(R(),22);next();
   spacer();
@@ -3320,13 +3320,13 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
       put(R(),3,r.hours!=null?+r.hours:'—',ST.tdR(bg));
       put(R(),4,r.nextHoursAbs!=null?+r.nextHoursAbs:(r.nextHours?'+'+r.nextHours:'—'),ST.tdR(bg));
       put(R(),5,r.nextDate?fmtDate(r.nextDate):'—',ST.tdC(bg));
-      put(R(),6,r.cost!=null?+r.cost:'—',ST.tdR(bg));
+      put(R(),6,r.cost!=null?r.cost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tdR(bg));
       put(R(),7,r.performer||'—',ST.tdL(bg));
       put(R(),8,r.note||'—',ST.tdL(bg));merge(R(),8,R(),NC);
       rowH(R(),18);next();
     });
     put(R(),0,'ИТОГО ТО',ST.totL);merge(R(),0,R(),5);fill(R(),ST.totL);
-    put(R(),6,totToC>0?+totToC.toFixed(2):'—',ST.tot);
+    put(R(),6,totToC>0?totToC.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tot);
     merge(R(),7,R(),NC);put(R(),7,'',ST.tot);
     rowH(R(),22);next();
   }
@@ -3497,13 +3497,13 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
       put(R(),2,r.hours!=null?+r.hours:'—',ST.tdR(bg));
       put(R(),3,r.nextHoursAbs!=null?+r.nextHoursAbs:(r.nextHours?'+'+r.nextHours:'—'),ST.tdR(bg));
       put(R(),4,r.nextDate?fmtDate(r.nextDate):'—',ST.tdC(bg));
-      put(R(),5,r.cost!=null?+r.cost:'—',ST.tdR(bg));
+      put(R(),5,r.cost!=null?r.cost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tdR(bg));
       put(R(),6,r.performer||'—',ST.tdL(bg));
       put(R(),7,r.note||'—',ST.tdL(bg));merge(R(),7,R(),NC);
       rowH(R(),18);next();
     });
     put(R(),0,'ИТОГО ТО',ST.totL);merge(R(),0,R(),4);fill(R(),ST.totL);
-    put(R(),5,totToC>0?+totToC.toFixed(2):'—',ST.tot);
+    put(R(),5,totToC>0?totToC.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tot);
     merge(R(),6,R(),NC);put(R(),6,'',ST.tot);
     rowH(R(),22);next();
   }
