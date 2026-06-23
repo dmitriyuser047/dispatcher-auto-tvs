@@ -3174,7 +3174,7 @@ function doGenExport() {
 function exportAllGensToXlsx(dateFrom, dateTo) {
   const gens = data.generators || [];
   if (!gens.length) return;
-  const NC = 11;
+  const NC = 12;
   function filterGenRecs(gid) {
     const recs = genRecsFor(gid);
     if (!dateFrom && !dateTo) return recs;
@@ -3258,10 +3258,10 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
   spacer();
 
   hdr('  ПЕРЕЧЕНЬ ДИЗЕЛЬНЫХ ГЕНЕРАТОРОВ', ST.secN);
-  ['№','Наименование','Серийный номер','Ответственное лицо','Местонахождение','Мощность, кВт','Вид топлива','Состояние','Наработка, мтч','Выдано, л','Факт. расход, л','Остаток в баке, л']
+  ['№','Наименование','Серийный номер','Ответственное лицо','Местонахождение','Мощность, кВт','Вид топлива','Состояние','Наработка, мтч','Выдано, л','Факт. расход, л','Остаток в баке, л','Стоимость ДЕЗ, руб.']
     .forEach((h,c)=>put(R(),c,h,ST.tHead));
   rowH(R(),28);next();
-  let totH=0,totIss=0,totAct=0,totBal=0;
+  let totH=0,totIss=0,totAct=0,totBal=0,totCost=0;
   gens.forEach((g,i)=>{
     const bg=i%2===0?P.white:P.gray1;
     const recs=filterGenRecs(g.id);
@@ -3272,6 +3272,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     const sorted=genRecsFor(g.id).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
     const bal=sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
     totH+=hours;totIss+=issued;totAct+=actual;totBal+=bal;
+    if(g.cost!=null) totCost+=g.cost;
     const fBal=+bal.toFixed(2);
     const bBg=fBal<0?P.redPale:fBal===0?P.gray2:P.greenPale;
     const sB=cs({bold:true,sz:10,color:{rgb:fBal<0?P.red:fBal===0?P.gray4:P.green}},bBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
@@ -3284,14 +3285,50 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     put(R(),5,g.power!=null?g.power:'—',ST.tdC(bg));put(R(),6,fuelLabels[g.fuel||'diesel'],ST.tdC(bg));
     put(R(),7,g.status||'—',sStatus);put(R(),8,+hours.toFixed(1),ST.tdR(bg));
     put(R(),9,+issued.toFixed(2),ST.tdR(bg));put(R(),10,+actual.toFixed(2),ST.tdR(bg));put(R(),11,fBal,sB);
+    put(R(),12,g.cost!=null?g.cost:'—',ST.tdR(bg));
     rowH(R(),20);next();
   });
   put(R(),0,'ИТОГО',ST.totL);merge(R(),0,R(),7);fill(R(),ST.totL);
   put(R(),8,+totH.toFixed(1),ST.tot);put(R(),9,+totIss.toFixed(2),ST.tot);put(R(),10,+totAct.toFixed(2),ST.tot);
   const tBal=+totBal.toFixed(2);
   put(R(),11,tBal,cs({bold:true,sz:10,color:{rgb:tBal<0?P.red:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
+  put(R(),12,totCost>0?+totCost.toFixed(2):'—',ST.tot);
   rowH(R(),22);next();
-  ws['!cols']=[{wch:4},{wch:22},{wch:16},{wch:20},{wch:20},{wch:10},{wch:12},{wch:12},{wch:12},{wch:10},{wch:12},{wch:14}];
+  spacer();
+
+  // ─── ИСТОРИЯ ТО ───────────────────────────────────────────
+  hdr('  ИСТОРИЯ ТЕХНИЧЕСКОГО ОБСЛУЖИВАНИЯ', ST.secT);
+  const toHdrs=['Генератор','Дата','Вид ТО','Счётчик, мтч','След. ТО, мтч','Дата след. ТО','Стоимость ТО, руб.','Исполнитель','Примечание'];
+  toHdrs.forEach((h,c)=>put(R(),c,h,ST.tHead));
+  merge(R(),8,R(),NC);fill(R(),ST.tHead);rowH(R(),28);next();
+  const allToRecs=(data.toRecords||[]).filter(r=>(data.generators||[]).some(g=>g.id===r.generatorId))
+    .sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if(!allToRecs.length){
+    const sE=cs({sz:10,italic:true,color:{rgb:P.gray4}},P.white,{horizontal:'center',vertical:'center'},bAll('thin',P.gray3));
+    put(R(),0,'Нет записей ТО',sE);merge(R(),0,R(),NC);rowH(R(),20);next();
+  } else {
+    let totToC=0;
+    allToRecs.forEach((r,i)=>{
+      const bg=i%2===0?P.white:P.gray1;
+      const gen=(data.generators||[]).find(g=>g.id===r.generatorId);
+      if(r.cost!=null) totToC+=r.cost;
+      put(R(),0,gen?gen.name:'—',ST.tdL(bg));
+      put(R(),1,fmtDate(r.date),ST.tdC(bg));
+      put(R(),2,r.type||'—',ST.tdC(bg));
+      put(R(),3,r.hours!=null?+r.hours:'—',ST.tdR(bg));
+      put(R(),4,r.nextHoursAbs!=null?+r.nextHoursAbs:(r.nextHours?'+'+r.nextHours:'—'),ST.tdR(bg));
+      put(R(),5,r.nextDate?fmtDate(r.nextDate):'—',ST.tdC(bg));
+      put(R(),6,r.cost!=null?+r.cost:'—',ST.tdR(bg));
+      put(R(),7,r.performer||'—',ST.tdL(bg));
+      put(R(),8,r.note||'—',ST.tdL(bg));merge(R(),8,R(),NC);
+      rowH(R(),18);next();
+    });
+    put(R(),0,'ИТОГО ТО',ST.totL);merge(R(),0,R(),5);fill(R(),ST.totL);
+    put(R(),6,totToC>0?+totToC.toFixed(2):'—',ST.tot);
+    merge(R(),7,R(),NC);put(R(),7,'',ST.tot);
+    rowH(R(),22);next();
+  }
+  ws['!cols']=[{wch:4},{wch:22},{wch:16},{wch:20},{wch:20},{wch:10},{wch:12},{wch:12},{wch:12},{wch:10},{wch:12},{wch:14},{wch:16}];
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Все ДЕЗ');
   const fname=`ДЕЗ_Сводка_${dateFrom?fmtDate(dateFrom).replace(/\./g,'-')+'_'+fmtDate(dateTo).replace(/\./g,'-'):'ВсёВремя'}.xlsx`;
@@ -3358,6 +3395,7 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
     ['Мощность', g.power!=null?g.power+' кВт':'—'],
     ['Вид топлива', fuelLabels[g.fuel||'diesel']],
     ['Норма расхода', g.norm?g.norm+' л/мтч':'—'],
+    ['Стоимость ДЕЗ', g.cost!=null?g.cost+' руб.':'—'],
     ['Состояние', g.status||'—'],
   ].forEach(([label,val],i)=>{
     const bg=i%2===0?P.gray2:P.white;
@@ -3434,6 +3472,39 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
     [8,9,10].forEach(c=>put(R(),c,'',ST.tot));
     rowH(R(),22);next();
   }
+  spacer();
+
+  // ─── ИСТОРИЯ ТО ───────────────────────────────────────────
+  hdr('  ИСТОРИЯ ТЕХНИЧЕСКОГО ОБСЛУЖИВАНИЯ', ST.secT);
+  const toRecs=(data.toRecords||[]).filter(r=>r.generatorId===gid)
+    .sort((a,b)=>new Date(a.date)-new Date(b.date));
+  ['Дата','Вид ТО','Счётчик, мтч','След. ТО, мтч','Дата след. ТО','Стоимость ТО, руб.','Исполнитель','Примечание','','','']
+    .forEach((h,c)=>put(R(),c,h,ST.tHead));
+  merge(R(),7,R(),NC);fill(R(),ST.tHead);rowH(R(),28);next();
+  if(!toRecs.length){
+    const sE=cs({sz:10,italic:true,color:{rgb:P.gray4}},P.white,{horizontal:'center',vertical:'center'},bAll('thin',P.gray3));
+    put(R(),0,'Нет записей ТО',sE);merge(R(),0,R(),NC);rowH(R(),20);next();
+  } else {
+    let totToC=0;
+    toRecs.forEach((r,i)=>{
+      const bg=i%2===0?P.white:P.gray1;
+      if(r.cost!=null) totToC+=r.cost;
+      put(R(),0,fmtDate(r.date),ST.tdC(bg));
+      put(R(),1,r.type||'—',ST.tdC(bg));
+      put(R(),2,r.hours!=null?+r.hours:'—',ST.tdR(bg));
+      put(R(),3,r.nextHoursAbs!=null?+r.nextHoursAbs:(r.nextHours?'+'+r.nextHours:'—'),ST.tdR(bg));
+      put(R(),4,r.nextDate?fmtDate(r.nextDate):'—',ST.tdC(bg));
+      put(R(),5,r.cost!=null?+r.cost:'—',ST.tdR(bg));
+      put(R(),6,r.performer||'—',ST.tdL(bg));
+      put(R(),7,r.note||'—',ST.tdL(bg));merge(R(),7,R(),NC);
+      rowH(R(),18);next();
+    });
+    put(R(),0,'ИТОГО ТО',ST.totL);merge(R(),0,R(),4);fill(R(),ST.totL);
+    put(R(),5,totToC>0?+totToC.toFixed(2):'—',ST.tot);
+    merge(R(),6,R(),NC);put(R(),6,'',ST.tot);
+    rowH(R(),22);next();
+  }
+
   ws['!cols']=[{wch:14},{wch:12},{wch:12},{wch:12},{wch:10},{wch:10},{wch:12},{wch:12},{wch:10},{wch:10},{wch:24}];
   const wb=XLSX.utils.book_new();
   const sheetName=g.name.replace(/[\[\]\\\/\?\*\:]/g,'').slice(0,31);
