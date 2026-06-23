@@ -46,22 +46,6 @@ jobs:
           files: dist/Dispatcher-Setup-${{ steps.pkg.outputs.version }}.exe
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update version.json
-        shell: pwsh
-        run: |
-          $v    = "${{ steps.pkg.outputs.version }}"
-          $tag  = "${{ github.ref_name }}"
-          $repo = "${{ github.repository }}"
-          $url  = "https://github.com/$repo/releases/download/$tag/Dispatcher-Setup-$v.exe"
-          $date = Get-Date -Format "yyyy-MM-dd"
-          $json = [ordered]@{
-            version = $v
-            date    = $date
-            notes   = "Доступна версия $v. Нажмите «Скачать обновление»."
-            url     = $url
-          } | ConvertTo-Json
-          [System.IO.File]::WriteAllText("version.json", $json, [System.Text.UTF8Encoding]::new($false))
-
       - name: Commit & push version.json
         shell: pwsh
         run: |
@@ -70,7 +54,6 @@ jobs:
           git fetch origin main
           git checkout main
           git pull --rebase origin main
-          # перезаписываем version.json актуальными данными после rebase
           $v    = "${{ steps.pkg.outputs.version }}"
           $tag  = "${{ github.ref_name }}"
           $repo = "${{ github.repository }}"
