@@ -1112,6 +1112,10 @@
         </div>
       </div>
       <div class="form-group">
+        <label>Стоимость ДЕЗ (руб.)</label>
+        <input type="number" id="gm_cost" placeholder="0" min="0" step="0.01">
+      </div>
+      <div class="form-group">
         <label>Состояние</label>
         <input type="text" id="gm_status" list="gm_status_list" placeholder="Выберите или введите...">
         <datalist id="gm_status_list">
@@ -3576,6 +3580,7 @@ function renderGenDetail(g) {
           ${g.power!=null?`<div class="vdh-meta-item" style="color:var(--text3);font-size:12px"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>${g.power} кВт</div>`:''}
           ${g.fuel?`<div class="vdh-meta-item"><span class="fuel-tag ${fuelClasses[g.fuel]}">${fuelLabels[g.fuel]}</span></div>`:''}
           ${g.norm?`<div class="vdh-meta-item" style="color:var(--text3);font-size:12px">Норма: ${g.norm} л/мтч</div>`:''}
+          ${g.cost!=null?`<div class="vdh-meta-item" style="color:var(--text3);font-size:12px">Стоимость: ${g.cost.toLocaleString('ru-RU')} руб.</div>`:''}
           ${stColor?`<div class="vdh-meta-item"><span style="color:${stColor};font-weight:600">${g.status}</span></div>`:''}
         </div>
         ${g.note?`<div style="margin-top:8px;font-size:12px;color:var(--text2);background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;max-width:600px">${g.note}</div>`:''}
@@ -3674,7 +3679,7 @@ function openAddGenerator() {
   document.getElementById('generatorModalTitle').textContent = 'Добавить дизельный генератор';
   ['gm_name','gm_serial','gm_location','gm_responsible','gm_status','gm_note'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('gm_fuel').value = 'diesel';
-  ['gm_norm','gm_power','gm_hours_init','gm_fuel_balance'].forEach(id => document.getElementById(id).value = '');
+  ['gm_norm','gm_power','gm_hours_init','gm_fuel_balance','gm_cost'].forEach(id => document.getElementById(id).value = '');
   openModal('generatorModal');
 }
 
@@ -3692,6 +3697,7 @@ function openEditGenerator(id) {
   document.getElementById('gm_norm').value         = g.norm        ?? '';
   document.getElementById('gm_hours_init').value   = g.hoursInit   ?? '';
   document.getElementById('gm_fuel_balance').value = g.fuelBalance ?? '';
+  document.getElementById('gm_cost').value         = g.cost        ?? '';
   document.getElementById('gm_status').value       = g.status      || '';
   document.getElementById('gm_note').value         = g.note        || '';
   openModal('generatorModal');
@@ -3712,6 +3718,7 @@ function saveGenerator() {
     norm:        parseFloat(document.getElementById('gm_norm').value)         || null,
     hoursInit:   parseFloat(document.getElementById('gm_hours_init').value)   || 0,
     fuelBalance: parseFloat(document.getElementById('gm_fuel_balance').value) || 0,
+    cost:        parseFloat(document.getElementById('gm_cost').value)         || null,
     status:      document.getElementById('gm_status').value.trim(),
     note:        document.getElementById('gm_note').value.trim(),
   };
