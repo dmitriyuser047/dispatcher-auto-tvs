@@ -735,7 +735,7 @@
     <div id="hdrGenerators" style="display:none;gap:10px;align-items:center">
       <button class="btn btn-primary" onclick="openAddGenerator()">
         <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Добавить ДЕЗ
+        Добавить ДЕС
       </button>
     </div>
   </div>
@@ -790,7 +790,7 @@
       </button>
       <button class="sec-tab" id="tabGenerators" onclick="switchSection('generators')">
         <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2"/><path d="M12 12v4m-2-2h4"/></svg>
-        ДЕЗ
+        ДЕС
       </button>
     </div>
 
@@ -856,7 +856,7 @@
         <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" style="display:block;margin:0 auto 8px">
           <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2"/><path d="M12 12v4m-2-2h4"/>
         </svg>
-        Нет дизельных генераторов.<br>Нажмите «Добавить ДЕЗ»
+        Нет дизельных генераторов.<br>Нажмите «Добавить ДЕС»
       </div>
     </div>
 
@@ -1077,7 +1077,7 @@
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>Мощность ДЕЗ (кВт)</label>
+          <label>Мощность ДЕС (кВт)</label>
           <input type="number" id="gm_power" placeholder="100" min="0" step="0.1">
         </div>
         <div class="form-group">
@@ -1114,7 +1114,7 @@
         </div>
       </div>
       <div class="form-group">
-        <label>Стоимость ДЕЗ (руб.)</label>
+        <label>Стоимость ДЕС (руб.)</label>
         <input type="number" id="gm_cost" placeholder="0" min="0" step="0.01">
       </div>
       <div class="form-group">
@@ -1322,7 +1322,7 @@
 <div class="modal-overlay" id="genExportPeriodModal">
   <div class="modal">
     <div class="modal-header">
-      <div class="modal-title" id="genExportPeriodTitle">Выгрузка сводки ДЕЗ</div>
+      <div class="modal-title" id="genExportPeriodTitle">Выгрузка сводки ДЕС</div>
       <button class="icon-btn" onclick="closeModal('genExportPeriodModal')">
         <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -3173,7 +3173,7 @@ function routeGet() {
 }
 
 // ═══════════════════════════════════════════════════════
-// ДЕЗ — ДИЗЕЛЬНЫЕ ГЕНЕРАТОРЫ
+// ДЕС — ДИЗЕЛЬНЫЕ ГЕНЕРАТОРЫ
 // ═══════════════════════════════════════════════════════
 
 // ─── GEN EXPORT ──────────────────────────────────────────
@@ -3184,7 +3184,7 @@ function openGenExportAllModal() {
   if (!(data.generators||[]).length) { showToast('Нет дизельных генераторов для выгрузки'); return; }
   genExportMode = 'all';
   exportingGenId = null;
-  document.getElementById('genExportPeriodTitle').textContent = 'Выгрузка сводки — все ДЕЗ';
+  document.getElementById('genExportPeriodTitle').textContent = 'Выгрузка сводки — все ДЕС';
   document.getElementById('gep_all').checked = true;
   document.getElementById('gep_range_inputs').style.display = 'none';
   const now = new Date();
@@ -3273,9 +3273,9 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
   function spacer(){put(R(),0,'',ST.sp);merge(R(),0,R(),NC);fill(R(),ST.sp);rowH(R(),6);next();}
   function hdr(text,style){put(R(),0,text,style);merge(R(),0,R(),NC);fill(R(),style);rowH(R(),22);next();}
 
-  put(R(),0,'СВОДКА — ДИЗЕЛЬНЫЕ ГЕНЕРАТОРЫ (ДЕЗ)',ST.title);
+  put(R(),0,'СВОДКА — ДИЗЕЛЬНЫЕ ГЕНЕРАТОРЫ (ДЕС)',ST.title);
   merge(R(),0,R(),NC);fill(R(),ST.title);rowH(R(),34);next();
-  put(R(),0,`Дата выгрузки: ${today}   ·   Период: ${periodLabel}   ·   Всего ДЕЗ: ${gens.length}`,ST.sub);
+  put(R(),0,`Дата выгрузки: ${today}   ·   Период: ${periodLabel}   ·   Всего ДЕС: ${gens.length}`,ST.sub);
   merge(R(),0,R(),NC);fill(R(),ST.sub);rowH(R(),18);next();
   spacer();
 
@@ -3310,7 +3310,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
   spacer();
 
   hdr('  ПЕРЕЧЕНЬ ДИЗЕЛЬНЫХ ГЕНЕРАТОРОВ', ST.secN);
-  ['№','Наименование','Серийный номер','Ответственное лицо','Местонахождение','Мощность, кВт','Вид топлива','Состояние','Наработка, мтч','Выдано, л','Факт. расход, л','Остаток в баке, л','Стоимость ДЕЗ, руб.','Примечание']
+  ['№','Наименование','Серийный номер','Ответственное лицо','Местонахождение','Мощность, кВт','Вид топлива','Состояние','Наработка, мтч','Выдано, л','Факт. расход, л','Остаток в баке, л','Стоимость ДЕС, руб.','Примечание']
     .forEach((h,c)=>put(R(),c,h,ST.tHead));
   rowH(R(),28);next();
   let totH=0,totIss=0,totAct=0,totBal=0,totCost=0;
@@ -3384,8 +3384,8 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
   }
   ws['!cols']=[{wch:4},{wch:22},{wch:16},{wch:20},{wch:20},{wch:10},{wch:12},{wch:12},{wch:12},{wch:10},{wch:12},{wch:14},{wch:16},{wch:28}];
   const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'Все ДЕЗ');
-  const fname=`ДЕЗ_Сводка_${dateFrom?fmtDate(dateFrom).replace(/\./g,'-')+'_'+fmtDate(dateTo).replace(/\./g,'-'):'ВсёВремя'}.xlsx`;
+  XLSX.utils.book_append_sheet(wb,ws,'Все ДЕС');
+  const fname=`ДЕС_Сводка_${dateFrom?fmtDate(dateFrom).replace(/\./g,'-')+'_'+fmtDate(dateTo).replace(/\./g,'-'):'ВсёВремя'}.xlsx`;
   XLSX.writeFile(wb,fname);
 }
 
@@ -3449,7 +3449,7 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
     ['Мощность', g.power!=null?g.power+' кВт':'—'],
     ['Вид топлива', fuelLabels[g.fuel||'diesel']],
     ['Норма расхода', g.norm?g.norm+' л/мтч':'—'],
-    ['Стоимость ДЕЗ', g.cost!=null?g.cost+' руб.':'—'],
+    ['Стоимость ДЕС', g.cost!=null?g.cost+' руб.':'—'],
     ['Состояние', g.status||'—'],
     ['Примечание', g.note||'—'],
   ].forEach(([label,val],i)=>{
@@ -3564,7 +3564,7 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
   const wb=XLSX.utils.book_new();
   const sheetName=g.name.replace(/[\[\]\\\/\?\*\:]/g,'').slice(0,31);
   XLSX.utils.book_append_sheet(wb,ws,sheetName);
-  const fname=`ДЕЗ_${g.name}_${dateFrom?fmtDate(dateFrom).replace(/\./g,'-')+'_'+fmtDate(dateTo).replace(/\./g,'-'):'ВсёВремя'}.xlsx`;
+  const fname=`ДЕС_${g.name}_${dateFrom?fmtDate(dateFrom).replace(/\./g,'-')+'_'+fmtDate(dateTo).replace(/\./g,'-'):'ВсёВремя'}.xlsx`;
   XLSX.writeFile(wb,fname);
 }
 
@@ -3588,7 +3588,7 @@ function switchSection(section) {
         <h2>Выберите транспортное средство</h2><p>Выберите ТС из списка слева или добавьте новое</p></div>`
     : `<div class="welcome">
         <svg width="72" height="72" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2"/><path d="M12 12v4m-2-2h4"/></svg>
-        <h2>Выберите дизельный генератор</h2><p>Выберите ДЕЗ из списка слева или добавьте новый</p></div>`;
+        <h2>Выберите дизельный генератор</h2><p>Выберите ДЕС из списка слева или добавьте новый</p></div>`;
   if (section === 'vehicles') renderVehicleList();
   else renderGeneratorList();
 }
@@ -3610,7 +3610,7 @@ function renderGeneratorList() {
       <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" style="display:block;margin:0 auto 8px">
         <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2"/><path d="M12 12v4m-2-2h4"/>
       </svg>
-      ${gens.length ? 'Ничего не найдено' : 'Нет дизельных генераторов.<br>Нажмите «Добавить ДЕЗ»'}
+      ${gens.length ? 'Ничего не найдено' : 'Нет дизельных генераторов.<br>Нажмите «Добавить ДЕС»'}
     </div>`;
     renderGenSidebarSummary();
     return;
@@ -4080,7 +4080,7 @@ function openEditGenerator(id) {
   const g = (data.generators || []).find(x => x.id === id);
   if (!g) return;
   editingGeneratorId = id;
-  document.getElementById('generatorModalTitle').textContent = 'Редактировать ДЕЗ';
+  document.getElementById('generatorModalTitle').textContent = 'Редактировать ДЕС';
   document.getElementById('gm_name').value         = g.name        || '';
   document.getElementById('gm_serial').value       = g.serial      || '';
   document.getElementById('gm_power').value        = g.power       ?? '';
@@ -4099,7 +4099,7 @@ function openEditGenerator(id) {
 function saveGenerator() {
   const name     = document.getElementById('gm_name').value.trim();
   const location = document.getElementById('gm_location').value.trim();
-  if (!name)     { showFieldError('Укажите наименование ДЕЗ', 'gm_name'); return; }
+  if (!name)     { showFieldError('Укажите наименование ДЕС', 'gm_name'); return; }
   if (!location) { showFieldError('Укажите местонахождение', 'gm_location'); return; }
   if (!data.generators) data.generators = [];
   const obj = {
@@ -4130,7 +4130,7 @@ function saveGenerator() {
 }
 
 function deleteGenerator(id) {
-  if (!confirm('Удалить этот ДЕЗ и все его записи?')) return;
+  if (!confirm('Удалить этот ДЕС и все его записи?')) return;
   data.generators = (data.generators || []).filter(g => g.id !== id);
   data.genRecords  = (data.genRecords  || []).filter(r => r.generatorId !== id);
   data.toRecords   = (data.toRecords   || []).filter(r => r.generatorId !== id);
@@ -4139,7 +4139,7 @@ function deleteGenerator(id) {
   renderGeneratorList();
   document.getElementById('mainContent').innerHTML = `<div class="welcome">
     <svg width="72" height="72" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2"/><path d="M12 12v4m-2-2h4"/></svg>
-    <h2>Выберите дизельный генератор</h2><p>Выберите ДЕЗ из списка слева или добавьте новый</p></div>`;
+    <h2>Выберите дизельный генератор</h2><p>Выберите ДЕС из списка слева или добавьте новый</p></div>`;
 }
 
 // ─── GENERATOR RECORDS CRUD ──────────────────────────────
@@ -4275,7 +4275,7 @@ function renderGenSidebarSummary() {
   div.className = 'gen-sidebar-summary';
   div.innerHTML = `<div class="sidebar-summary" style="margin-top:8px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-      <div class="ss-title" style="margin-bottom:0">ДЕЗ — сводка</div>
+      <div class="ss-title" style="margin-bottom:0">ДЕС — сводка</div>
       <button class="btn btn-ghost btn-sm" onclick="openGenExportAllModal()" style="font-size:11px;padding:4px 10px">
         <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
