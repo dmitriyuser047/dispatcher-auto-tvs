@@ -3619,7 +3619,27 @@ function renderGeneratorList() {
   const fuelLabels  = { diesel: 'Дизель', gasoline: 'Бензин', gas: 'Газ' };
   const fuelClasses = { diesel: 'diesel', gasoline: 'gasoline', gas: 'gas' };
 
-  list.innerHTML = filtered.map(g => {
+  // Сортируем по местонахождению (без местонахождения — в конец)
+  const sortedFiltered = filtered.slice().sort((a, b) => {
+    const la = (a.location || '').toLowerCase();
+    const lb = (b.location || '').toLowerCase();
+    if (!la && lb) return 1;
+    if (la && !lb) return -1;
+    return la < lb ? -1 : la > lb ? 1 : 0;
+  });
+
+  let html = '';
+  let curLoc = null;
+
+  sortedFiltered.forEach(g => {
+    const locGroup = g.location || '— Без местонахождения —';
+    if (locGroup !== curLoc) {
+      curLoc = locGroup;
+      html += `<div style="padding:6px 12px 4px;font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;border-top:1px solid var(--border);margin-top:4px;display:flex;align-items:center;gap:5px">
+        <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        ${locGroup}
+      </div>`;
+    }
     const gRecs      = genRecsFor(g.id);
     const totalHours = gRecs.reduce((s, r) => s + (r.hours || 0), 0);
     const balMap     = computeGenFuelBalances(g.id);
@@ -3629,13 +3649,11 @@ function renderGeneratorList() {
     const balColor   = fuelBal < 0 ? 'var(--red)' : fuelBal < 50 ? 'var(--yellow)' : 'var(--green)';
     const stColor    = g.status === 'В работе' ? 'var(--green)' : g.status === 'Резерв' ? 'var(--accent)' : g.status ? 'var(--red)' : null;
     const fb         = g.fuel ? { label: fuelLabels[g.fuel], cls: fuelClasses[g.fuel] } : null;
-    return `<div class="vehicle-card ${selectedGeneratorId === g.id ? 'active' : ''}" onclick="selectGenerator('${g.id}')" style="display:flex;flex-direction:column">
+    html += `<div class="vehicle-card ${selectedGeneratorId === g.id ? 'active' : ''}" onclick="selectGenerator('${g.id}')" style="display:flex;flex-direction:column">
       <div style="flex:1;min-width:0;overflow:hidden">
         <div class="vc-make" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${g.name}</div>
         ${g.serial ? `<div class="vc-driver" style="font-family:'Courier New',monospace;letter-spacing:0.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">С/н: ${g.serial}</div>` : ''}
         ${g.responsible ? `<div class="vc-driver" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Отв.: ${g.responsible}</div>` : ''}
-        ${g.location ? `<div class="vc-org" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-          <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="display:inline;margin-right:3px;vertical-align:middle"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>${g.location}</div>` : ''}
         ${g.power != null ? `<div class="vc-org">${g.power} кВт</div>` : ''}
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;align-items:center">
@@ -3645,7 +3663,9 @@ function renderGeneratorList() {
         ${fb ? `<span class="fuel-tag ${fb.cls}" style="font-size:11px;padding:3px 9px">${fb.label}</span>` : ''}
       </div>
     </div>`;
-  }).join('');
+  });
+
+  list.innerHTML = html;
   renderGenSidebarSummary();
 }
 
