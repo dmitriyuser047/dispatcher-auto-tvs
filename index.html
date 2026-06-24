@@ -811,6 +811,7 @@
           <option value="в ремонте">● В ремонте</option>
           <option value="после дтп">● После ДТП</option>
           <option value="требуется">● Треб. ремонт</option>
+          <option value="в резерве">● В резерве</option>
         </select>
         <select id="filterFuelSel" class="fsel" onchange="setFuelFilter(this.value)" title="Фильтр по типу топлива">
           <option value="">Все топливо</option>
@@ -959,6 +960,7 @@
           <option value="На ходу / требуется ремонт">
           <option value="В ремонте">
           <option value="После ДТП">
+          <option value="В резерве">
         </datalist>
       </div>
       <div class="form-group">
@@ -1554,6 +1556,7 @@ function renderVehicleList() {
     const totalKm = vRecs.reduce((s, r) => s + (r.km || 0), 0);
     const statusColor = !v.status ? null
       : v.status === 'На ходу' ? 'var(--green)'
+      : v.status === 'В резерве' ? 'var(--accent)'
       : v.status === 'В ремонте' || v.status === 'После ДТП' ? 'var(--red)'
       : 'var(--yellow)';
     const fuelBadge = { diesel: { label: 'Дизель', cls: 'diesel' }, gasoline: { label: 'Бензин', cls: 'gasoline' }, gas: { label: 'Газ (ГБО)', cls: 'gas' } };
@@ -2715,14 +2718,62 @@ function exportAllToXlsx(dateFrom, dateTo) {
     });
     spacer();
 
-    hdr('  СВОДКА ПО ТРАНСПОРТНЫМ СРЕДСТВАМ', ST.secN);
+    // ── СВОДКА ПО СОСТОЯНИЮ ДЭЗ ──────────────────────────
+    {
+      const sc = { work:0, reserve:0, repair:0, other:0 };
+      data.vehicles.forEach(v=>{
+        const st=(v.status||'').toLowerCase();
+        if(st.includes('резерв')) sc.reserve++;
+        else if(st.includes('ходу')) sc.work++;
+        else if(st.includes('ремонт')||st.includes('дтп')) sc.repair++;
+        else sc.other++;
+      });
+      const secDEZ=cs({bold:true,sz:11,color:{rgb:P.white}},'1D4ED8',{horizontal:'left',vertical:'center',indent:1},bAll('medium','1D4ED8'));
+      hdr('  СВОДКА ПО СОСТОЯНИЮ ДЭЗ', secDEZ);
+
+      const dezRows=[
+        {label:'В работе',    count:sc.work,    bg:P.greenPale, color:P.green},
+        {label:'В резерве',   count:sc.reserve, bg:P.bluePale,  color:P.blue},
+        {label:'В ремонте',   count:sc.repair,  bg:P.redPale,   color:P.red},
+      ];
+      if(sc.other>0) dezRows.push({label:'Без статуса / иное', count:sc.other, bg:P.gray2, color:P.gray4});
+      dezRows.forEach(row=>{
+        const sL=cs({bold:true,sz:11,color:{rgb:row.color}},row.bg,{horizontal:'left',vertical:'center',indent:2},bAll('thin',P.gray3));
+        const sN=cs({bold:true,sz:13,color:{rgb:row.color}},row.bg,{horizontal:'center',vertical:'center'},bAll('thin',P.gray3));
+        put(R(),0,row.label,sL);merge(R(),0,R(),NC-2);fill(R(),sL);
+        put(R(),NC-1,row.count,sN);merge(R(),NC-1,R(),NC);
+        rowH(R(),24);next();
+      });
+      const sTotL=cs({bold:true,sz:11,color:{rgb:P.text}},P.navyLight,{horizontal:'left',vertical:'center',indent:2},bAll('medium',P.navy));
+      const sTotN=cs({bold:true,sz:13,color:{rgb:P.text}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy));
+      put(R(),0,'Итого ТС',sTotL);merge(R(),0,R(),NC-2);fill(R(),sTotL);
+      put(R(),NC-1,data.vehicles.length,sTotN);merge(R(),NC-1,R(),NC);
+      rowH(R(),24);next();
+    }
+    spacer();
+
+    hdr('  СВОДКА ПО ТРАНСПОРТНЫМ СРЕДСТВАМ (по объектам)', ST.secN);
     ['№','Госномер','Марка / Модель','Водитель','Организация','Объект','Вид топлива','Состояние',
      'Пробег, км','Выдано, л','Расход по норме, л','Факт. расход, л','Остаток, л','Ср.расход л/100км','Маршруты','Примечание']
       .forEach((h,c)=>put(R(),c,h,ST.tHead));
     rowH(R(),24);next();
 
-    data.vehicles.forEach((v,i)=>{
-      const bg=i%2===0?P.white:P.gray1;
+    const sortedVehicles = data.vehicles.slice().sort((a,b)=>{
+      const oa=(a.object||'￿').toLowerCase();
+      const ob=(b.object||'￿').toLowerCase();
+      return oa<ob?-1:oa>ob?1:0;
+    });
+    let curObj=null, grpRowNum=0, globalNum=0;
+    sortedVehicles.forEach(v=>{
+      const objGroup=v.object||'— Без объекта —';
+      if(objGroup!==curObj){
+        curObj=objGroup;
+        grpRowNum=0;
+        const sGrp=cs({bold:true,sz:11,color:{rgb:P.navy}},P.navyLight,{horizontal:'left',vertical:'center',indent:1},bAll('medium',P.navy));
+        put(R(),0,'  Объект: '+objGroup,sGrp);merge(R(),0,R(),NC);fill(R(),sGrp);rowH(R(),22);next();
+      }
+      const bg=grpRowNum%2===0?P.white:P.gray1;
+      grpRowNum++;globalNum++;
       const vRecs=filterRecs(recsFor(v.id));
       const vKm=vRecs.reduce((s,r)=>s+(r.km||0),0);
       const vIss=vRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
@@ -2736,26 +2787,27 @@ function exportAllToXlsx(dateFrom, dateTo) {
       const balBg=bal<0?P.redPale:bal===0?P.gray2:P.greenPale;
       const sB=cs({bold:true,sz:10,color:{rgb:bal<0?P.red:bal===0?P.gray4:P.green}},balBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
 
-      // Стиль состояния — цветом по смыслу
-      const st = (v.status||'').toLowerCase();
+      const st=(v.status||'').toLowerCase();
       const statusBg    = !v.status ? P.gray2
+        : st.includes('резерв') ? P.bluePale
         : (st.includes('ходу') && !st.includes('треб')) ? P.greenPale
         : (st.includes('ремонт') || st.includes('дтп')) ? P.redPale
         : P.yellowPale;
       const statusColor = !v.status ? P.gray4
+        : st.includes('резерв') ? P.blue
         : (st.includes('ходу') && !st.includes('треб')) ? P.green
         : (st.includes('ремонт') || st.includes('дтп')) ? P.red
         : P.yellow;
-      const sStatus = cs({bold:true,sz:10,color:{rgb:statusColor}},statusBg,{horizontal:'center',vertical:'center'},bAll('thin',P.gray3));
+      const sStatus=cs({bold:true,sz:10,color:{rgb:statusColor}},statusBg,{horizontal:'center',vertical:'center'},bAll('thin',P.gray3));
 
-      const vRoutes = vRecs.map(r => {
-        const rts = Array.isArray(r.route) ? r.route : (r.route ? [r.route] : []);
-        if (!rts.length) return null;
-        return fmtDate(r.date) + ': ' + rts.join('; ');
+      const vRoutes=vRecs.map(r=>{
+        const rts=Array.isArray(r.route)?r.route:(r.route?[r.route]:[]);
+        if(!rts.length) return null;
+        return fmtDate(r.date)+': '+rts.join('; ');
       }).filter(Boolean).join('\n');
-      const routeStyle = cs({sz:9,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',wrapText:true,indent:1},bAll('thin',P.gray3));
-      const noteStyle = cs({sz:9,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',wrapText:true,indent:1},bAll('thin',P.gray3));
-      put(R(),0,i+1,ST.tdC(bg));put(R(),1,v.plate,ST.tdC(bg));put(R(),2,v.make,ST.tdL(bg));
+      const routeStyle=cs({sz:9,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',wrapText:true,indent:1},bAll('thin',P.gray3));
+      const noteStyle=cs({sz:9,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',wrapText:true,indent:1},bAll('thin',P.gray3));
+      put(R(),0,globalNum,ST.tdC(bg));put(R(),1,v.plate,ST.tdC(bg));put(R(),2,v.make,ST.tdL(bg));
       put(R(),3,v.driver,ST.tdL(bg));put(R(),4,v.org||'—',ST.tdL(bg));put(R(),5,v.object||'—',ST.tdL(bg));
       put(R(),6,fuelLabels[v.fuel||'diesel'],ST.tdC(bg));
       put(R(),7,v.status||'—',sStatus);
@@ -2764,9 +2816,9 @@ function exportAllToXlsx(dateFrom, dateTo) {
       put(R(),12,bal,sB);put(R(),13,avg??'',ST.tdR(bg));
       put(R(),14,vRoutes||'—',routeStyle);
       put(R(),15,v.note||'—',noteStyle);
-      const noteLines = v.note ? Math.ceil(v.note.length / 30) : 1;
-      const routeLines = vRoutes ? vRoutes.split('\n').length : 1;
-      rowH(R(),Math.max(19, Math.min(Math.max(routeLines, noteLines) * 16, 80)));next();
+      const noteLines=v.note?Math.ceil(v.note.length/30):1;
+      const routeLines=vRoutes?vRoutes.split('\n').length:1;
+      rowH(R(),Math.max(19,Math.min(Math.max(routeLines,noteLines)*16,80)));next();
     });
 
     const filteredAll=filterRecs(data.records);
