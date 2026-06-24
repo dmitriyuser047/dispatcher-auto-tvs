@@ -2718,7 +2718,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
     });
     spacer();
 
-    // ── СВОДКА ПО СОСТОЯНИЮ ДЭЗ ──────────────────────────
+    // ── СВОДКА ПО СОСТОЯНИЮ ДЕС ──────────────────────────
     {
       const sc = { work:0, reserve:0, repair:0, other:0 };
       data.vehicles.forEach(v=>{
@@ -2729,7 +2729,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
         else sc.other++;
       });
       const secDEZ=cs({bold:true,sz:11,color:{rgb:P.white}},'1D4ED8',{horizontal:'left',vertical:'center',indent:1},bAll('medium','1D4ED8'));
-      hdr('  СВОДКА ПО СОСТОЯНИЮ ДЭЗ', secDEZ);
+      hdr('  СВОДКА ПО СОСТОЯНИЮ ДЕС', secDEZ);
 
       const dezRows=[
         {label:'В работе',    count:sc.work,    bg:P.greenPale, color:P.green},
