@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path    = require('path');
 const fs      = require('fs');
 const os      = require('os');
 const updater = require('./updater');
+const { createExtractorFromData } = require('node-unrar-js');
 
 const DATA_DIR   = path.join(os.homedir(), 'Documents', 'ДиспетчеризацияАвто_ТВС');
 const DATA_FILE  = path.join(DATA_DIR, 'data.json');
@@ -84,9 +85,114 @@ app.whenReady().then(() => {
 
   ipcMain.handle('get-data-path', () => DATA_DIR);
 
+  // Импорт данных из RAR-архива (data.json + backups) для пополнения базы
+  ipcMain.handle('import-rar', async (event) => {
+    const senderWin = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
+      title: 'Выберите RAR-архив с данными',
+      filters: [{ name: 'RAR архив', extensions: ['rar'] }],
+      properties: ['openFile'],
+    });
+    if (canceled || !filePaths || !filePaths[0]) return { ok: false, canceled: true };
+
+    const KEYS = ['vehicles', 'records', 'generators', 'genRecords', 'toRecords'];
+    const pick = (obj) => {
+      const o = {};
+      KEYS.forEach(k => { o[k] = Array.isArray(obj[k]) ? obj[k] : []; });
+      return o;
+    };
+
+    try {
+      const buf = fs.readFileSync(filePaths[0]);
+      const ab  = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+      const extractor = await createExtractorFromData({ data: ab });
+      const headers = [...extractor.getFileList().fileHeaders];
+      const jsonNames = headers
+        .filter(h => !h.flags.directory && h.name.toLowerCase().endsWith('.json'))
+        .map(h => h.name);
+      if (!jsonNames.length) return { ok: false, error: 'В архиве не найдено JSON-файлов с данными.' };
+
+      const extracted = extractor.extract({ files: jsonNames });
+      const dec = new TextDecoder('utf-8');
+      let main = null;
+      const backupObjs = [];
+      for (const f of extracted.files) {
+        const name = f.fileHeader.name.split('\\').join('/');
+        let obj;
+        try { obj = JSON.parse(dec.decode(f.extraction)); } catch { continue; }
+        if (!obj || typeof obj !== 'object') continue;
+        const isBackup = /backups\//i.test(name);
+        const isMain   = /(^|\/)data\.json$/i.test(name) && !isBackup;
+        if (isMain) main = pick(obj);
+        else if (isBackup) backupObjs.push(pick(obj));
+        else if (!main) main = pick(obj); // запасной вариант: любой не-backup json
+      }
+      if (!main) main = pick({});
+
+      // Данные, которые есть в бэкапах, но отсутствуют в основном data.json (по id)
+      const backupExtra = {};
+      KEYS.forEach(k => {
+        const seen = new Set(main[k].map(x => x && x.id).filter(Boolean));
+        const extra = [];
+        backupObjs.forEach(bo => {
+          bo[k].forEach(item => {
+            const id = item && item.id;
+            if (!id || seen.has(id)) return;
+            seen.add(id);
+            extra.push(item);
+          });
+        });
+        backupExtra[k] = extra;
+      });
+
+      return { ok: true, fileName: path.basename(filePaths[0]), backupCount: backupObjs.length, main, backupExtra };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
   ipcMain.handle('open-data-folder', () => shell.openPath(DATA_DIR));
 
   ipcMain.handle('get-app-version', () => app.getVersion());
+
+  // Экспорт HTML-сводки в PDF (рендер через printToPDF — корректная кириллица)
+  ipcMain.handle('export-pdf', async (event, payload) => {
+    const html = payload && payload.html;
+    const defaultFileName = (payload && payload.defaultFileName) || 'Сводка.pdf';
+    if (!html) return { ok: false, error: 'Пустой документ' };
+
+    const senderWin = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePath } = await dialog.showSaveDialog(senderWin, {
+      title: 'Сохранить сводку в PDF',
+      defaultPath: path.join(app.getPath('documents'), defaultFileName),
+      filters: [{ name: 'PDF документ', extensions: ['pdf'] }],
+    });
+    if (canceled || !filePath) return { ok: false, canceled: true };
+
+    const tmpFile = path.join(os.tmpdir(), `svodka_${Date.now()}.html`);
+    const pdfWin = new BrowserWindow({
+      show: false,
+      webPreferences: { contextIsolation: true, nodeIntegration: false },
+    });
+    try {
+      fs.writeFileSync(tmpFile, html, 'utf8');
+      await pdfWin.loadFile(tmpFile);
+      const pdfData = await pdfWin.webContents.printToPDF({
+        printBackground: true,
+        landscape: true,
+        pageSize: 'A4',
+        margins: { top: 0.4, bottom: 0.4, left: 0.3, right: 0.3 },
+      });
+      fs.writeFileSync(filePath, pdfData);
+      shell.openPath(filePath);
+      return { ok: true, path: filePath };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    } finally {
+      pdfWin.destroy();
+      try { fs.unlinkSync(tmpFile); } catch (_) { /* ignore */ }
+    }
+  });
 
   ipcMain.handle('check-update', async () => {
     return await updater.checkForUpdate();

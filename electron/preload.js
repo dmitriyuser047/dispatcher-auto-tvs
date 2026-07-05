@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeData:      (json)    => ipcRenderer.invoke('write-data', json),
   getDataPath:    ()        => ipcRenderer.invoke('get-data-path'),
   openDataFolder: ()        => ipcRenderer.invoke('open-data-folder'),
+  exportPdf:      (html, defaultFileName) => ipcRenderer.invoke('export-pdf', { html, defaultFileName }),
+  importRar:      ()        => ipcRenderer.invoke('import-rar'),
 
   // Обновления
   getAppVersion:  ()        => ipcRenderer.invoke('get-app-version'),

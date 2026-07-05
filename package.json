@@ -18,6 +18,9 @@
     "directories": {
       "output": "dist"
     },
+    "asarUnpack": [
+      "node_modules/node-unrar-js/**"
+    ],
     "win": {
       "target": [
         {
@@ -35,5 +38,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
+  },
+  "allowScripts": {},
+  "dependencies": {
+    "node-unrar-js": "^2.0.2"
   }
 }
