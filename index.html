@@ -3326,7 +3326,7 @@ function doExportActGsm() {
 function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
   opts = opts || {};
   const fuelMark = { diesel:'ДТ', gasoline:'Бензин', gas:'Газ' };
-  const MONTHS_RU = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+  const MONTHS_RU = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
 
   function inPeriod(r){ return (!dateFrom || r.date >= dateFrom) && (!dateTo || r.date <= dateTo); }
   let periodLabel;
@@ -3425,7 +3425,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       const idle=per.reduce((s,r)=>s+(r.fuelIdle||0),0);
       const iss=per.reduce((s,r)=>s+(r.fuelIssued||0),0);
       const normL=per.reduce((s,r)=>s+(r.fuelUsed||0),0);
-      const actL=per.reduce((s,r)=>s+(r.fuelActual||0),0);
+      const actL=per.reduce((s,r)=>s+(r.fuelActual!=null?r.fuelActual:(r.fuelUsed||0)),0);
       const sBal=startBalance(v, allRecs);
       const eBal=sBal + per.reduce((s,r)=>s+((r.fuelIssued||0)-(r.fuelActual!=null?r.fuelActual:(r.fuelUsed||0))-(r.fuelIdle||0)),0);
       const eco=normL-actL;
