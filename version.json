@@ -1,6 +1,6 @@
 {
-  "version": "2.0.3",
-  "date": "2026-07-05",
-  "notes": "Доступна версия 2.0.3. Нажмите «Скачать обновление».",
-  "url": "https://github.com/dmitriyuser047/dispatcher-auto-tvs/releases/download/v2.0.4/Dispatcher-Setup-2.0.3.exe"
+  "version": "2.0.5",
+  "date": "2026-07-06",
+  "notes": "Экспорт сводок (Транспорт и ДЭС) в PDF; сводки по объектам/местонахождениям; импорт данных из RAR; новые поля ТС (марка топлива, поставщик, норма город/трасса); пробег по Глонассу в записях; акт списания ГСМ по организациям по образцу.",
+  "url": "https://github.com/dmitriyuser047/dispatcher-auto-tvs/releases/download/v2.0.5/Dispatcher-Setup-2.0.5.exe"
 }
