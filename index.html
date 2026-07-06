@@ -932,6 +932,36 @@
       </div>
       <div class="form-row">
         <div class="form-group">
+          <label>Марка топлива (грейд)</label>
+          <input type="text" id="vm_fuel_grade" list="vm_grade_list" placeholder="ДТ, АИ-92, АИ-95...">
+          <datalist id="vm_grade_list">
+            <option value="ДТ"><option value="АИ-92"><option value="АИ-95"><option value="АИ-98"><option value="АИ-100"><option value="Газ">
+          </datalist>
+        </div>
+        <div class="form-group">
+          <label>Поставщик топлива</label>
+          <select id="vm_supplier">
+            <option value="">— не указан —</option>
+            <option value="Газпром">Газпром</option>
+            <option value="Волга-Интер">Волга-Интер</option>
+            <option value="СПС">СПС</option>
+            <option value="Наличка">Наличка</option>
+            <option value="Другой">Другой</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Норма город (л/100 км)</label>
+          <input type="number" id="vm_norm_city" placeholder="напр. 14" min="0" step="0.01">
+        </div>
+        <div class="form-group">
+          <label>Норма трасса (л/100 км)</label>
+          <input type="number" id="vm_norm_highway" placeholder="напр. 12" min="0" step="0.01">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
           <label>Начальный пробег (км)</label>
           <input type="number" id="vm_odometer" placeholder="0" min="0" step="1">
         </div>
@@ -1011,6 +1041,12 @@
         <div class="form-group">
           <label>Одометр (конец)</label>
           <input type="number" id="rec_odo_end" placeholder="0" min="0" oninput="calcKmFromOdo()">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Пробег по Глонассу (км)</label>
+          <input type="number" id="rec_km_glonass" placeholder="0" min="0" step="0.1">
         </div>
       </div>
       <div class="form-group">
@@ -1974,9 +2010,12 @@ function selectMonth(year, month) {
 function openAddVehicle() {
   editingVehicleId = null;
   document.getElementById('vehicleModalTitle').textContent = 'Добавить транспортное средство';
-  ['vm_make','vm_plate','vm_driver','vm_org','vm_object','vm_responsible','vm_fuelcard','vm_status','vm_justification','vm_note'].forEach(id => document.getElementById(id).value = '');
+  ['vm_make','vm_plate','vm_driver','vm_org','vm_object','vm_responsible','vm_fuelcard','vm_status','vm_justification','vm_note','vm_fuel_grade'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('vm_fuel').value = 'diesel';
+  document.getElementById('vm_supplier').value = '';
   document.getElementById('vm_norm').value = '';
+  document.getElementById('vm_norm_city').value = '';
+  document.getElementById('vm_norm_highway').value = '';
   document.getElementById('vm_norm_idle').value = '';
   document.getElementById('vm_odometer').value = '';
   document.getElementById('vm_fuel_balance').value = '';
@@ -1994,7 +2033,11 @@ function openEditVehicle(id) {
   document.getElementById('vm_org').value = v.org || '';
   document.getElementById('vm_object').value = v.object || '';
   document.getElementById('vm_fuel').value = v.fuel || 'diesel';
+  document.getElementById('vm_fuel_grade').value = v.fuelGrade || '';
+  document.getElementById('vm_supplier').value = v.supplier || '';
   document.getElementById('vm_norm').value = v.norm || '';
+  document.getElementById('vm_norm_city').value = v.normCity ?? '';
+  document.getElementById('vm_norm_highway').value = v.normHighway ?? '';
   document.getElementById('vm_norm_idle').value = v.normIdle || '';
   document.getElementById('vm_odometer').value = v.odometer || '';
   document.getElementById('vm_fuel_balance').value = v.fuelBalance ?? '';
@@ -2020,7 +2063,11 @@ function saveVehicle() {
     org: document.getElementById('vm_org').value.trim(),
     object: document.getElementById('vm_object').value.trim(),
     fuel: document.getElementById('vm_fuel').value,
+    fuelGrade: document.getElementById('vm_fuel_grade').value.trim(),
+    supplier: document.getElementById('vm_supplier').value,
     norm: parseFloat(document.getElementById('vm_norm').value) || null,
+    normCity: parseFloat(document.getElementById('vm_norm_city').value) || null,
+    normHighway: parseFloat(document.getElementById('vm_norm_highway').value) || null,
     normIdle: parseFloat(document.getElementById('vm_norm_idle').value) || null,
     odometer: parseFloat(document.getElementById('vm_odometer').value) || null,
     fuelBalance: parseFloat(document.getElementById('vm_fuel_balance').value) || 0,
@@ -2072,7 +2119,7 @@ function openAddRecord() {
   document.getElementById('recordModalTitle').textContent = 'Добавить запись';
   const now = new Date();
   document.getElementById('rec_date').value = fmtDate(now.toISOString().split('T')[0]);
-  ['rec_km','rec_odo_start','rec_odo_end','rec_fuel_issued','rec_fuel_used','rec_fuel_actual','rec_fuel_idle','rec_note'].forEach(id => document.getElementById(id).value = '');
+  ['rec_km','rec_km_glonass','rec_odo_start','rec_odo_end','rec_fuel_issued','rec_fuel_used','rec_fuel_actual','rec_fuel_idle','rec_note'].forEach(id => document.getElementById(id).value = '');
   routeSet([]);
   // Подставляем водителя и одометр начала из последней записи / данных ТС
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
@@ -2096,6 +2143,7 @@ function openEditRecord(id) {
   document.getElementById('recordModalTitle').textContent = 'Редактировать запись';
   document.getElementById('rec_date').value = fmtDate(r.date);
   document.getElementById('rec_km').value = r.km || '';
+  document.getElementById('rec_km_glonass').value = r.kmGlonass ?? '';
   document.getElementById('rec_odo_start').value = r.odoStart || '';
   document.getElementById('rec_odo_end').value = r.odoEnd || '';
   document.getElementById('rec_driver').value = r.driver || '';
@@ -2144,6 +2192,7 @@ function saveRecord() {
     vehicleId: selectedVehicleId,
     date,
     km,
+    kmGlonass: parseFloat(document.getElementById('rec_km_glonass').value) || null,
     odoStart: parseFloat(document.getElementById('rec_odo_start').value) || null,
     odoEnd: parseFloat(document.getElementById('rec_odo_end').value) || null,
     driver: document.getElementById('rec_driver').value.trim() || null,
@@ -3347,7 +3396,9 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     green:'16A34A', red:'DC2626', greenPale:'DCFCE7', redPale:'FEE2E2' };
   function bAll(st,rgb){const b={style:st,color:{rgb}};return{top:b,bottom:b,left:b,right:b};}
   function cs(font,fill,align,border){return{font:font||{},fill:fill?{patternType:'solid',fgColor:{rgb:fill}}:{patternType:'none'},alignment:align||{vertical:'center'},border:border||{}};}
-  const NC = 16; // колонки 0..16
+  const NC = 24; // колонки 0..24
+  const SUPPLIERS = ['Газпром','Волга-Интер','СПС','Наличка','Другой']; // колонки 15..19
+  const supplierCol = s => { const idx = SUPPLIERS.indexOf(s); return 15 + (idx >= 0 ? idx : 4); }; // не указан/иной → «Другой»
   const ST = {
     appr:  cs({sz:10,color:{rgb:P.text}},null,{horizontal:'left',vertical:'center',wrapText:true},{}),
     title: cs({bold:true,sz:13,color:{rgb:P.text}},null,{horizontal:'center',vertical:'center',wrapText:true},{}),
@@ -3396,9 +3447,9 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     if (oi>0) { put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,10); n++; }
 
     // Утверждаю (справа)
-    put(n,11,'Утверждаю:',ST.appr); merge(n,11,n,NC); rowH(n,14); n++;
-    put(n,11,'Руководитель '+orgLabel,ST.appr); merge(n,11,n,NC); rowH(n,14); n++;
-    put(n,11,'_______________ / ______________ /',ST.appr); merge(n,11,n,NC); rowH(n,14); n++;
+    put(n,18,'Утверждаю:',ST.appr); merge(n,18,n,NC); rowH(n,14); n++;
+    put(n,18,'Руководитель '+orgLabel,ST.appr); merge(n,18,n,NC); rowH(n,14); n++;
+    put(n,18,'_______________ / ______________ /',ST.appr); merge(n,18,n,NC); rowH(n,14); n++;
 
     // Заголовок акта
     put(n,0,`Акт списания ГСМ по ${orgLabel} за ${periodLabel}`,ST.title); merge(n,0,n,NC); fillRow(n,ST.title); rowH(n,22); n++;
@@ -3408,20 +3459,25 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     // Шапка таблицы (2 строки)
     const h1 = n, h2 = n+1;
     const vh = (c,label)=>{ put(h1,c,label,ST.head); merge(h1,c,h2,c); };
+    const gh = (c1,c2,label,subs)=>{ put(h1,c1,label,ST.head); merge(h1,c1,h1,c2); subs.forEach((s,k)=>put(h2,c1+k,s,ST.head)); };
     vh(0,'№ п/п'); vh(1,'Марка а/м'); vh(2,'№ а/м'); vh(3,'Объект'); vh(4,'Марка топлива'); vh(5,'ФИО водителя');
-    put(h1,6,'Спидометр',ST.head); merge(h1,6,h1,7); put(h2,6,'на нач',ST.head); put(h2,7,'на кон',ST.head);
-    vh(8,'Норма, л/100км'); vh(9,'Пробег, км'); vh(10,'Прогрев/х.х., л'); vh(11,'Остаток на нач., л'); vh(12,'Получено, л');
-    put(h1,13,'Списано, л',ST.head); merge(h1,13,h1,14); put(h2,13,'по норме',ST.head); put(h2,14,'по факту',ST.head);
-    vh(15,'Остаток на кон., л'); vh(16,'Экономия(+)/ Перерасход(-), л');
-    rowH(h1,16); rowH(h2,26); n+=2;
+    gh(6,7,'Спидометр',['на нач','на кон']);
+    gh(8,10,'Норма, л/100км',['город','трасса','х/х']);
+    vh(11,'Пробег, км'); vh(12,'Пробег Глонасс, км'); vh(13,'Прогрев/х.х., л'); vh(14,'Остаток на нач., л');
+    gh(15,20,'Получено, л',['Газпром','Волга-Интер','СПС','Наличка','Другой','Всего']);
+    gh(21,22,'Списано, л',['по норме','по факту']);
+    vh(23,'Остаток на кон., л'); vh(24,'Экономия(+)/ Перерасход(-), л');
+    rowH(h1,16); rowH(h2,30); n+=2;
 
     // Строки
-    let i=0, tKm=0,tIdle=0,tStart=0,tIss=0,tNorm=0,tAct=0,tEnd=0,tEco=0;
+    let i=0, tKm=0,tGl=0,tIdle=0,tStart=0,tIss=0,tNorm=0,tAct=0,tEnd=0,tEco=0;
+    const tSup=[0,0,0,0,0];
     orgVehicles.forEach(v=>{
       const ft=v.fuel||'diesel';
       const allRecs = recsFor(v.id).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
       const per = allRecs.filter(inPeriod);
       const km=per.reduce((s,r)=>s+(r.km||0),0);
+      const glon=per.reduce((s,r)=>s+(r.kmGlonass||0),0);
       const idle=per.reduce((s,r)=>s+(r.fuelIdle||0),0);
       const iss=per.reduce((s,r)=>s+(r.fuelIssued||0),0);
       const normL=per.reduce((s,r)=>s+(r.fuelUsed||0),0);
@@ -3431,35 +3487,43 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       const eco=normL-actL;
       const odoNach = per.length? (per[0].odoStart!=null?per[0].odoStart:'') : (v.odometer!=null?v.odometer:'');
       const odoKon  = per.length? (per[per.length-1].odoEnd!=null?per[per.length-1].odoEnd:'') : (v.odometer!=null?v.odometer:'');
+      const grade = (v.fuelGrade||'').trim() || fuelMark[ft] || '—';
+      const nCity = v.normCity!=null ? v.normCity : (v.norm!=null ? v.norm : null);
+      const supIdx = supplierCol(v.supplier) - 15;
       const bg=i%2===0?P.white:P.gray1;
       i++;
-      tKm+=km; tIdle+=idle; tStart+=sBal; tIss+=iss; tNorm+=normL; tAct+=actL; tEnd+=eBal; tEco+=eco;
+      tKm+=km; tGl+=glon; tIdle+=idle; tStart+=sBal; tIss+=iss; tNorm+=normL; tAct+=actL; tEnd+=eBal; tEco+=eco; tSup[supIdx]+=iss;
       const ecoBg=eco<0?P.redPale:eco>0?P.greenPale:bg;
       const ecoStyle=cs({bold:true,sz:9,color:{rgb:eco<0?P.red:eco>0?P.green:P.text}},ecoBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
       put(n,0,i,ST.tdC(bg));
       put(n,1,v.make||'—',ST.tdL(bg));
       put(n,2,v.plate||'—',ST.tdC(bg));
       put(n,3,v.object||'—',ST.tdL(bg));
-      put(n,4,fuelMark[ft]||'—',ST.tdC(bg));
+      put(n,4,grade,ST.tdC(bg));
       put(n,5,(v.driver||'—').replace(/\r?\n/g,', '),ST.tdL(bg));
       put(n,6,odoNach===''?'—':+odoNach,ST.tdR(bg));
       put(n,7,odoKon===''?'—':+odoKon,ST.tdR(bg));
-      put(n,8,v.norm!=null?+v.norm:'—',ST.tdR(bg));
-      put(n,9,num(km,1),ST.tdR(bg));
-      put(n,10,num(idle),ST.tdR(bg));
-      put(n,11,num(sBal),ST.tdR(bg));
-      put(n,12,num(iss),ST.tdR(bg));
-      put(n,13,num(normL),ST.tdR(bg));
-      put(n,14,num(actL),ST.tdR(bg));
-      put(n,15,num(eBal),ST.tdR(bg));
-      put(n,16,num(eco),ecoStyle);
+      put(n,8,nCity!=null?+nCity:'—',ST.tdR(bg));
+      put(n,9,v.normHighway!=null?+v.normHighway:'—',ST.tdR(bg));
+      put(n,10,v.normIdle!=null?+v.normIdle:'—',ST.tdR(bg));
+      put(n,11,num(km,1),ST.tdR(bg));
+      put(n,12,glon>0?num(glon,1):'—',ST.tdR(bg));
+      put(n,13,num(idle),ST.tdR(bg));
+      put(n,14,num(sBal),ST.tdR(bg));
+      for(let c=0;c<5;c++) put(n,15+c, c===supIdx?num(iss):'', ST.tdR(bg));
+      put(n,20,num(iss),ST.tdR(bg));
+      put(n,21,num(normL),ST.tdR(bg));
+      put(n,22,num(actL),ST.tdR(bg));
+      put(n,23,num(eBal),ST.tdR(bg));
+      put(n,24,num(eco),ecoStyle);
       rowH(n,16); n++;
     });
 
     // ИТОГО
-    put(n,0,'ИТОГО:',ST.totL); merge(n,0,n,8); fillRow(n,ST.totL);
-    put(n,9,num(tKm,1),ST.tot); put(n,10,num(tIdle),ST.tot); put(n,11,num(tStart),ST.tot); put(n,12,num(tIss),ST.tot);
-    put(n,13,num(tNorm),ST.tot); put(n,14,num(tAct),ST.tot); put(n,15,num(tEnd),ST.tot); put(n,16,num(tEco),ST.tot);
+    put(n,0,'ИТОГО:',ST.totL); merge(n,0,n,10); fillRow(n,ST.totL);
+    put(n,11,num(tKm,1),ST.tot); put(n,12,tGl>0?num(tGl,1):'—',ST.tot); put(n,13,num(tIdle),ST.tot); put(n,14,num(tStart),ST.tot);
+    for(let c=0;c<5;c++) put(n,15+c,num(tSup[c]),ST.tot);
+    put(n,20,num(tIss),ST.tot); put(n,21,num(tNorm),ST.tot); put(n,22,num(tAct),ST.tot); put(n,23,num(tEnd),ST.tot); put(n,24,num(tEco),ST.tot);
     rowH(n,18); n++;
 
     // Подписи
@@ -3470,7 +3534,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
 
   if (!renderedAny) { alert('Нет ТС на дизеле/бензине для выбранной организации.'); return; }
 
-  ws['!cols']=[{wch:4},{wch:20},{wch:13},{wch:16},{wch:11},{wch:20},{wch:10},{wch:10},{wch:9},{wch:9},{wch:9},{wch:11},{wch:11},{wch:10},{wch:10},{wch:11},{wch:12}];
+  ws['!cols']=[{wch:4},{wch:18},{wch:12},{wch:14},{wch:8},{wch:18},{wch:9},{wch:9},{wch:7},{wch:7},{wch:6},{wch:9},{wch:10},{wch:8},{wch:9},{wch:9},{wch:10},{wch:8},{wch:8},{wch:8},{wch:9},{wch:9},{wch:9},{wch:9},{wch:11}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Акт списания ГСМ');
   const d=new Date();
