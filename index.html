@@ -3963,8 +3963,8 @@ function importVehiclesFromXls(input) {
 }
 
 // ─── ИМПОРТ ИЗ RAR (пополнение данных) ───────────────────
-const RAR_KEYS = ['vehicles', 'records', 'generators', 'genRecords', 'toRecords'];
-const RAR_LABELS = { vehicles:'ТС', records:'записей о поездках', generators:'ДЭС', genRecords:'записей ДЭС', toRecords:'записей ТО' };
+const RAR_KEYS = ['vehicles', 'records', 'generators', 'genRecords', 'toRecords', 'tanks', 'tankIncomes'];
+const RAR_LABELS = { vehicles:'ТС', records:'записей о поездках', generators:'ДЭС', genRecords:'записей ДЭС', toRecords:'записей ТО', tanks:'ёмкостей', tankIncomes:'записей прихода' };
 let _rarImport = null;
 
 async function importFromRar() {
@@ -4017,7 +4017,8 @@ function doRarMerge() {
   RAR_KEYS.forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
   const curIds = {};
   RAR_KEYS.forEach(k => curIds[k] = new Set((data[k] || []).map(x => x && x.id).filter(Boolean)));
-  const added = { vehicles:0, records:0, generators:0, genRecords:0, toRecords:0 };
+  const added = {};
+  RAR_KEYS.forEach(k => added[k] = 0);
   const mergeSrc = (src) => {
     RAR_KEYS.forEach(k => {
       (src[k] || []).forEach(item => {
@@ -4037,6 +4038,7 @@ function doRarMerge() {
   updateFilterUI();
   renderVehicleList();
   if (typeof renderGeneratorList === 'function') renderGeneratorList();
+  if (typeof renderTankList === 'function') renderTankList();
   closeModal('rarImportModal');
 
   let any = false, msg = 'Импорт завершён. Добавлено:\n';

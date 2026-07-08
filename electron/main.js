@@ -95,7 +95,7 @@ app.whenReady().then(() => {
     });
     if (canceled || !filePaths || !filePaths[0]) return { ok: false, canceled: true };
 
-    const KEYS = ['vehicles', 'records', 'generators', 'genRecords', 'toRecords'];
+    const KEYS = ['vehicles', 'records', 'generators', 'genRecords', 'toRecords', 'tanks', 'tankIncomes'];
     const pick = (obj) => {
       const o = {};
       KEYS.forEach(k => { o[k] = Array.isArray(obj[k]) ? obj[k] : []; });
