@@ -1161,6 +1161,73 @@
   </div>
 </div>
 
+<!-- MODAL: Акт на списание ГСМ (ДЭС) -->
+<div class="modal-overlay" id="genActModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Акт на списание ГСМ (ДЭС)</div>
+      <button class="icon-btn" onclick="closeModal('genActModal')">
+        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Номер акта</label>
+          <input type="text" id="ga2_no" placeholder="напр. 14">
+        </div>
+        <div class="form-group">
+          <label>Дата акта</label>
+          <input type="text" id="ga2_date" placeholder="ДД.ММ.ГГГГ" maxlength="10" oninput="autoDateSep(this)">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Местонахождение</label>
+        <select id="ga2_loc" style="width:100%;accent-color:var(--accent)"></select>
+      </div>
+      <div class="form-group">
+        <label>Период списания</label>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:2px">
+          <label style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text);font-weight:400;cursor:pointer">
+            <input type="radio" name="ga2_period" id="ga2_all" value="all" checked style="width:auto;accent-color:var(--accent)">
+            За всё время
+          </label>
+          <label style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text);font-weight:400;cursor:pointer">
+            <input type="radio" name="ga2_period" id="ga2_range" value="range" style="width:auto;accent-color:var(--accent)">
+            Указать период
+          </label>
+        </div>
+      </div>
+      <div id="ga2_range_inputs" style="display:none">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Дата с</label>
+            <input type="text" id="ga2_date_from" placeholder="ДД.ММ.ГГГГ" maxlength="10" oninput="autoDateSep(this)">
+          </div>
+          <div class="form-group">
+            <label>Дата по</label>
+            <input type="text" id="ga2_date_to" placeholder="ДД.ММ.ГГГГ" maxlength="10" oninput="autoDateSep(this)">
+          </div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Компания-собственник (в шапке)</label>
+        <input type="text" id="ga2_owner" placeholder="ООО «...» (если пусто — из ёмкости)">
+      </div>
+      <div style="font-size:12px;color:var(--text3);margin-top:2px">
+        Акт формируется по образцу: мото-часы, нагрузка, нормы 100/50%, расход по норме/факт, остаток, приход из привязанной ёмкости. Группировка — по местонахождению ДЭС.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('genActModal')">Отмена</button>
+      <button class="btn btn-primary" onclick="doExportGenAct()">
+        <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Сформировать акт
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: Add/Edit Tank (ёмкость) -->
 <div class="modal-overlay" id="tankModal">
   <div class="modal">
@@ -5165,6 +5232,215 @@ function computeGenFuelBalances(gid) {
 }
 
 // ═══════════════════════════════════════════════════════
+// АКТ НА СПИСАНИЕ ГСМ (ДЭС) — по образцу
+// ═══════════════════════════════════════════════════════
+function genActLocations() {
+  const set = new Set();
+  (data.generators || []).forEach(g => set.add((g.location || '').trim() || '— Без местонахождения —'));
+  return Array.from(set).sort((a, b) => a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0);
+}
+
+function openGenActModal() {
+  if (!(data.generators || []).length) { showToast('Нет ДЭС для формирования акта'); return; }
+  document.getElementById('ga2_all').checked = true;
+  document.getElementById('ga2_range_inputs').style.display = 'none';
+  const now = new Date();
+  const y = now.getFullYear(), m = (now.getMonth() + 1).toString().padStart(2, '0');
+  document.getElementById('ga2_date').value = fmtDate(now.toISOString().split('T')[0]);
+  document.getElementById('ga2_date_from').value = `01.${m}.${y}`;
+  document.getElementById('ga2_date_to').value = fmtDate(now.toISOString().split('T')[0]);
+  document.getElementById('ga2_no').value = '';
+  document.getElementById('ga2_owner').value = '';
+  const sel = document.getElementById('ga2_loc');
+  sel.innerHTML = '<option value="__ALL__">Все местонахождения (по отдельности)</option>' +
+    genActLocations().map(l => `<option value="${l.replace(/"/g, '&quot;')}">${l}</option>`).join('');
+  document.querySelectorAll('input[name="ga2_period"]').forEach(r => r.onchange = () => {
+    document.getElementById('ga2_range_inputs').style.display = document.getElementById('ga2_range').checked ? 'block' : 'none';
+  });
+  openModal('genActModal');
+}
+
+function doExportGenAct() {
+  const isRange = document.getElementById('ga2_range').checked;
+  let dateFrom = null, dateTo = null;
+  if (isRange) {
+    dateFrom = parseDate(document.getElementById('ga2_date_from').value.trim());
+    dateTo   = parseDate(document.getElementById('ga2_date_to').value.trim());
+    if (!dateFrom || !dateTo) { alert('Укажите обе даты периода в формате ДД.ММ.ГГГГ'); return; }
+    if (dateFrom > dateTo) { alert('Дата «с» не может быть позже даты «по»'); return; }
+  }
+  const opts = {
+    actNo:  document.getElementById('ga2_no').value.trim(),
+    actDate: parseDate(document.getElementById('ga2_date').value.trim()) || new Date().toISOString().split('T')[0],
+    loc:    document.getElementById('ga2_loc').value,
+    owner:  document.getElementById('ga2_owner').value.trim(),
+  };
+  closeModal('genActModal');
+  exportGenWriteOffAct(dateFrom, dateTo, opts);
+}
+
+// Баланс ёмкости на дату: до (inclusive=false) или включительно (inclusive=true)
+function computeTankBalanceAt(tankId, boundary, inclusive) {
+  const t = tanksAll().find(x => x.id === tankId);
+  if (!t) return 0;
+  const okDate = d => !boundary || (inclusive ? d <= boundary : d < boundary);
+  const income = (data.tankIncomes || []).filter(r => r.tankId === tankId && okDate(r.date)).reduce((s, r) => s + (r.amount || 0), 0);
+  const boundGenIds = new Set((data.generators || []).filter(g => g.tankId === tankId).map(g => g.id));
+  const issued = (data.genRecords || []).filter(r => boundGenIds.has(r.generatorId) && okDate(r.date)).reduce((s, r) => s + (r.fuelIssued || 0), 0);
+  return +((t.balanceInit || 0) + income - issued).toFixed(2);
+}
+
+function exportGenWriteOffAct(dateFrom, dateTo, opts) {
+  opts = opts || {};
+  const MONTHS_RU = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+  const fuelLabels = { diesel:'Дизельное топливо', gasoline:'Бензин', gas:'Газ' };
+  const inPeriod = r => (!dateFrom || r.date >= dateFrom) && (!dateTo || r.date <= dateTo);
+  let periodLabel;
+  if (dateFrom && dateTo) {
+    const df = new Date(dateFrom), dt = new Date(dateTo);
+    periodLabel = (df.getFullYear() === dt.getFullYear() && df.getMonth() === dt.getMonth())
+      ? `${MONTHS_RU[df.getMonth()]} ${df.getFullYear()}г.` : `${fmtDate(dateFrom)} — ${fmtDate(dateTo)}`;
+  } else periodLabel = 'всё время';
+
+  const allLocs = genActLocations();
+  const locsToRender = (opts.loc && opts.loc !== '__ALL__') ? [opts.loc] : allLocs;
+  if (!locsToRender.length) { alert('Нет ДЭС для акта.'); return; }
+
+  const P = { navy:'1B3A6B', navyMid:'2D5A8E', navyLight:'D6E4F7', white:'FFFFFF',
+    gray1:'F8FAFC', gray2:'F1F5F9', gray3:'E2E8F0', gray4:'94A3B8', text:'1E293B', green:'16A34A', red:'DC2626' };
+  const bAll = (st, rgb) => { const b = { style:st, color:{rgb} }; return { top:b, bottom:b, left:b, right:b }; };
+  const cs = (font, fill, align, border) => ({ font:font||{}, fill:fill?{patternType:'solid',fgColor:{rgb:fill}}:{patternType:'none'}, alignment:align||{vertical:'center'}, border:border||{} });
+  const NC = 11;
+  const ST = {
+    appr:  cs({sz:10,color:{rgb:P.text}}, null, {horizontal:'left',vertical:'center',wrapText:true}, {}),
+    org:   cs({bold:true,sz:11,color:{rgb:P.text}}, null, {horizontal:'left',vertical:'center'}, {}),
+    title: cs({bold:true,sz:13,color:{rgb:P.text}}, null, {horizontal:'center',vertical:'center'}, {}),
+    plain: cs({sz:10,color:{rgb:P.text}}, null, {horizontal:'left',vertical:'center',wrapText:true}, {}),
+    head:  cs({bold:true,sz:9,color:{rgb:P.white}}, P.navyMid, {horizontal:'center',vertical:'center',wrapText:true}, bAll('medium',P.navy)),
+    tot:   cs({bold:true,sz:10,color:{rgb:P.text}}, P.navyLight, {horizontal:'center',vertical:'center'}, bAll('medium',P.navy)),
+    totL:  cs({bold:true,sz:10,color:{rgb:P.text}}, P.navyLight, {horizontal:'left',vertical:'center',indent:1}, bAll('medium',P.navy)),
+    tdC: bg => cs({sz:9,color:{rgb:P.text}}, bg, {horizontal:'center',vertical:'center',wrapText:true}, bAll('thin',P.gray3)),
+    tdL: bg => cs({sz:9,color:{rgb:P.text}}, bg, {horizontal:'left',vertical:'center',wrapText:true,indent:1}, bAll('thin',P.gray3)),
+    tdR: bg => cs({sz:9,color:{rgb:P.text}}, bg, {horizontal:'right',vertical:'center',indent:1}, bAll('thin',P.gray3)),
+    sp:    cs(null, null, null, {}),
+  };
+  const ws = { '!merges':[], '!rows':[], '!cols':[] };
+  let n = 0;
+  const put = (r, c, val, style) => { ws[XLSX.utils.encode_cell({r,c})] = { v: val==null?'':val, t: typeof val==='number'?'n':'s', s: style }; ws['!ref'] = XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:Math.max(r,0),c:NC} }); };
+  const merge = (r1,c1,r2,c2) => ws['!merges'].push({ s:{r:r1,c:c1}, e:{r:r2,c:c2} });
+  const fillRow = (r, style) => { for (let c=0;c<=NC;c++) if (!ws[XLSX.utils.encode_cell({r,c})]) put(r,c,'',style); };
+  const rowH = (r, h) => ws['!rows'][r] = { hpt:h };
+  const num = (x, d) => +(Number(x)||0).toFixed(d==null?2:d);
+
+  let rendered = false;
+
+  locsToRender.forEach((loc, li) => {
+    const gens = (data.generators || []).filter(g => (((g.location||'').trim()) || '— Без местонахождения —') === loc)
+      .sort((a,b) => (a.name||'').toLowerCase() < (b.name||'').toLowerCase() ? -1 : 1);
+    if (!gens.length) return;
+    rendered = true;
+    const linkedTanks = [...new Set(gens.map(g => g.tankId).filter(Boolean))];
+    const ownerFromTank = (linkedTanks.map(id => (tanksAll().find(t=>t.id===id)||{}).owner).find(Boolean)) || '';
+    const owner = opts.owner || ownerFromTank || '';
+
+    if (li > 0) { put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,12); n++; }
+
+    // Утверждаю
+    put(n,8,'УТВЕРЖДАЮ:',ST.appr); merge(n,8,n,NC); rowH(n,14); n++;
+    put(n,8,'_______________ /______________/',ST.appr); merge(n,8,n,NC); rowH(n,14); n++;
+    put(n,8,'«___» ____________ 20__ г.',ST.appr); merge(n,8,n,NC); rowH(n,14); n++;
+    // Шапка организации
+    if (owner) { put(n,0,owner,ST.org); merge(n,0,n,6); rowH(n,15); n++; }
+    put(n,0,loc,ST.org); merge(n,0,n,6); rowH(n,15); n++;
+    put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,4); n++;
+    // Заголовок
+    put(n,0,`Акт на списание материалов № ${opts.actNo||'____'} от ${fmtDate(opts.actDate)} г.`,ST.title); merge(n,0,n,NC); fillRow(n,ST.title); rowH(n,20); n++;
+    put(n,0,'Настоящий акт составлен о том, что нижеперечисленные материалы израсходованы в полном объеме.',ST.plain); merge(n,0,n,NC); rowH(n,14); n++;
+    put(n,0,`Цель расхода: Производственно-хозяйственные нужды ${loc}   ·   Период: ${periodLabel}`,ST.plain); merge(n,0,n,NC); rowH(n,14); n++;
+    put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,4); n++;
+
+    // Шапка таблицы (2 строки)
+    const h1 = n, h2 = n+1;
+    const vh = (c, label) => { put(h1,c,label,ST.head); merge(h1,c,h2,c); };
+    vh(0,'Наименование оборудования'); vh(1,'Наименование ГСМ'); vh(2,'Ед. изм.'); vh(3,'Кол-во мото-часов');
+    vh(4,'Показания мтч на начало'); vh(5,'Показания мтч на конец'); vh(6,'Факт. нагрузка, кВт');
+    put(h1,7,'Норма л/час',ST.head); merge(h1,7,h1,8); put(h2,7,'при 100%',ST.head); put(h2,8,'при 50%',ST.head);
+    put(h1,9,'Расход ГСМ, л',ST.head); merge(h1,9,h1,10); put(h2,9,'по норме',ST.head); put(h2,10,'факт',ST.head);
+    vh(11,'Остаток на конец мес., л');
+    rowH(h1,16); rowH(h2,26); n += 2;
+
+    let tHours=0, tNorm=0, tAct=0, i=0;
+    gens.forEach(g => {
+      const recs = genRecsFor(g.id).filter(inPeriod).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+      const hours = recs.reduce((s,r)=>s+(r.hours||0),0);
+      const meterStart = recs.length ? (recs[0].meterStart!=null?recs[0].meterStart:(g.hoursInit!=null?g.hoursInit:'')) : (g.hoursInit!=null?g.hoursInit:'');
+      const meterEnd = recs.length ? (recs[recs.length-1].meterEnd!=null?recs[recs.length-1].meterEnd:'') : '';
+      const loadHours = recs.reduce((s,r)=>s+((r.load!=null?r.load:0)*(r.hours||0)),0);
+      const loadAvg = hours>0 && loadHours>0 ? loadHours/hours : null;
+      const normSpent = recs.reduce((s,r)=>s+((g.norm100 && g.power && r.load!=null) ? g.norm100*(r.load/g.power)*(r.hours||0) : (r.fuelUsed||0)),0);
+      const actSpent = recs.reduce((s,r)=>s+(r.fuelActual!=null?r.fuelActual:(r.fuelUsed||0)),0);
+      const ostKon = g.tankId ? computeTankBalanceAt(g.tankId, dateTo, true) : (() => { const bm=computeGenFuelBalances(g.id); const sorted=genRecsFor(g.id).slice().sort((a,b)=>new Date(a.date)-new Date(b.date)); const last=sorted.filter(inPeriod).pop(); return last?(bm[last.id]||0):(g.fuelBalance||0); })();
+      const bg = i%2===0?P.white:P.gray1; i++;
+      tHours+=hours; tNorm+=normSpent; tAct+=actSpent;
+      const nameCell = g.name + (g.serial ? ', ' + g.serial : '');
+      put(n,0,nameCell,ST.tdL(bg));
+      put(n,1,fuelLabels[g.fuel||'diesel'],ST.tdC(bg));
+      put(n,2,'л',ST.tdC(bg));
+      put(n,3,num(hours,1),ST.tdC(bg));
+      put(n,4,meterStart===''?'—':+meterStart,ST.tdR(bg));
+      put(n,5,meterEnd===''?'—':+meterEnd,ST.tdR(bg));
+      put(n,6,loadAvg!=null?num(loadAvg,1):'—',ST.tdC(bg));
+      put(n,7,g.norm100!=null?+g.norm100:'—',ST.tdC(bg));
+      put(n,8,g.norm50!=null?+g.norm50:'—',ST.tdC(bg));
+      put(n,9,num(normSpent),ST.tdR(bg));
+      put(n,10,num(actSpent),ST.tdR(bg));
+      put(n,11,num(ostKon),ST.tdR(bg));
+      rowH(n,18); n++;
+    });
+    // ИТОГО
+    put(n,0,'ИТОГО',ST.totL); merge(n,0,n,2); fillRow(n,ST.totL);
+    put(n,3,num(tHours,1),ST.tot); put(n,4,'',ST.tot); put(n,5,'',ST.tot); put(n,6,'',ST.tot); put(n,7,'',ST.tot); put(n,8,'',ST.tot);
+    put(n,9,num(tNorm),ST.tot); put(n,10,num(tAct),ST.tot);
+    put(n,11, linkedTanks.length ? num(linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id,dateTo,true),0)) : '', ST.tot);
+    rowH(n,20); n++;
+    put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,6); n++;
+
+    // Приход топлива за период (из привязанных ёмкостей)
+    const incomes = (data.tankIncomes || []).filter(r => linkedTanks.includes(r.tankId) && inPeriod(r)).sort((a,b)=>new Date(a.date)-new Date(b.date));
+    put(n,0,'Приход топлива за отчётный период',ST.totL); merge(n,0,n,3); fillRow(n,ST.totL); rowH(n,18); n++;
+    put(n,0,'Дата привоза',ST.head); merge(n,0,n,1); put(n,2,'Объём, л',ST.head); merge(n,2,n,3); rowH(n,16); n++;
+    if (incomes.length) {
+      incomes.forEach((r,k)=>{ const bg=k%2===0?P.white:P.gray1; put(n,0,fmtDate(r.date),ST.tdC(bg)); merge(n,0,n,1); put(n,2,num(r.amount),ST.tdR(bg)); merge(n,2,n,3); rowH(n,16); n++; });
+    } else { put(n,0,'Нет прихода за период',ST.tdC(P.white)); merge(n,0,n,3); rowH(n,16); n++; }
+    // Остаток ДТ
+    const ostNach = linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id, dateFrom, false), 0);
+    const ostKonAll = linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id, dateTo, true), 0);
+    put(n,0,'Остаток ДТ, л:',ST.totL); merge(n,0,n,1); put(n,2,'на начало',ST.head); put(n,3,'на конец',ST.head); rowH(n,16); n++;
+    put(n,0,'',ST.tdC(P.white)); merge(n,0,n,1); put(n,2,num(ostNach),ST.tdR(P.white)); put(n,3,num(ostKonAll),ST.tdR(P.white)); rowH(n,16); n++;
+    put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,8); n++;
+
+    // Подписи
+    put(n,0,'Председатель комиссии:',ST.plain); merge(n,0,n,NC); rowH(n,14); n++;
+    put(n,0,'Управляющий директор _______________ /______________________/',ST.plain); merge(n,0,n,NC); rowH(n,16); n++;
+    put(n,0,'Директор по ПНГ      _______________ /______________________/',ST.plain); merge(n,0,n,NC); rowH(n,16); n++;
+    put(n,0,'Члены комиссии:',ST.plain); merge(n,0,n,NC); rowH(n,14); n++;
+    put(n,0,'Главный механик      _______________ /______________________/',ST.plain); merge(n,0,n,NC); rowH(n,16); n++;
+    put(n,0,'Руководитель проекта _______________ /______________________/',ST.plain); merge(n,0,n,NC); rowH(n,16); n++;
+    put(n,0,'Инженер-энергетик    _______________ /______________________/',ST.plain); merge(n,0,n,NC); rowH(n,16); n++;
+  });
+
+  if (!rendered) { alert('Нет ДЭС для выбранного местонахождения.'); return; }
+
+  ws['!cols'] = [{wch:30},{wch:16},{wch:7},{wch:11},{wch:12},{wch:12},{wch:11},{wch:9},{wch:9},{wch:11},{wch:11},{wch:14}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Акт списания ГСМ ДЭС');
+  const d = new Date();
+  const ds = `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}.${d.getFullYear()}`;
+  const suffix = (opts.loc && opts.loc!=='__ALL__') ? '_'+opts.loc.replace(/[^\wА-Яа-яЁё]+/g,'').slice(0,20) : '_все';
+  XLSX.writeFile(wb, `Акт_ГСМ_ДЭС${suffix}_${ds}.xlsx`);
+}
+
+// ═══════════════════════════════════════════════════════
 // ЁМКОСТИ (топливные) — привязаны к ДЭС
 // ═══════════════════════════════════════════════════════
 let genSubView = 'generators';
@@ -5707,6 +5983,14 @@ function renderGenSidebarSummary() {
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <div class="ss-title" style="margin-bottom:0">Общая сводка</div>
       <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="openGenActModal()" style="font-size:11px;padding:4px 10px" title="Акт на списание ГСМ (ДЭС)">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/>
+          </svg>
+          Акт ГСМ
+        </button>
         <button class="btn btn-ghost btn-sm" onclick="openGenExportAllModal('xls')" style="font-size:11px;padding:4px 10px">
           <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
