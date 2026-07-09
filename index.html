@@ -1644,8 +1644,12 @@
         <input type="checkbox" id="rarIncludeBackups" style="width:auto;accent-color:var(--accent)">
         <span id="rarBackupLabel">Также добавить записи из бэкапов</span>
       </label>
-      <div style="margin-top:12px;padding:10px 12px;background:var(--bg2,#f1f5f9);border-radius:8px;font-size:12px;color:var(--text3)">
-        Данные <b>добавляются</b> к текущим по уникальному ID. Существующие записи не изменяются и не удаляются.
+      <label id="rarUpdateWrap" style="display:none;align-items:center;gap:10px;margin-top:10px;font-size:13px;color:var(--text);font-weight:400;cursor:pointer">
+        <input type="checkbox" id="rarUpdateExisting" style="width:auto;accent-color:var(--accent)">
+        <span id="rarUpdateLabel">Также обновить уже существующие карточки данными из файла</span>
+      </label>
+      <div id="rarModeNote" style="margin-top:12px;padding:10px 12px;background:var(--bg2,#f1f5f9);border-radius:8px;font-size:12px;color:var(--text3)">
+        Новые данные <b>добавляются</b> к текущим по уникальному ID. Существующие карточки не изменяются, если не включена опция обновления выше.
       </div>
     </div>
     <div class="modal-footer">
@@ -4101,16 +4105,22 @@ async function importFromRar() {
   if (!res.ok) { alert('Не удалось прочитать архив: ' + (res.error || 'неизвестная ошибка')); return; }
   _rarImport = res;
 
-  // Сколько новых элементов относительно текущей базы
+  // Сколько новых / уже существующих элементов относительно текущей базы
   const curIds = {};
   RAR_KEYS.forEach(k => curIds[k] = new Set((data[k] || []).map(x => x && x.id).filter(Boolean)));
-  const countNew = (src) => {
-    const c = {};
-    RAR_KEYS.forEach(k => { c[k] = (src[k] || []).filter(it => it && it.id && !curIds[k].has(it.id)).length; });
-    return c;
+  const countSplit = (src) => {
+    const n = {}, e = {};
+    RAR_KEYS.forEach(k => {
+      const items = (src[k] || []).filter(it => it && it.id);
+      n[k] = items.filter(it => !curIds[k].has(it.id)).length;
+      e[k] = items.filter(it => curIds[k].has(it.id)).length;
+    });
+    return { n, e };
   };
-  const mainNew = countNew(res.main);
-  const backNew = countNew(res.backupExtra);
+  const mainSplit = countSplit(res.main);
+  const backSplit = countSplit(res.backupExtra);
+  const mainNew = mainSplit.n, backNew = backSplit.n;
+  const totalMainExisting = RAR_KEYS.reduce((s, k) => s + mainSplit.e[k], 0);
 
   let html = '<div style="margin-bottom:8px"><b>Файл:</b> ' + _pdfEsc(res.fileName) + '</div>';
   html += '<div style="margin-bottom:6px">Новых данных для добавления (из data.json):</div><ul style="margin:0 0 0 18px;padding:0">';
@@ -4118,6 +4128,9 @@ async function importFromRar() {
   RAR_KEYS.forEach(k => { if (mainNew[k] > 0) { html += '<li>' + RAR_LABELS[k] + ': <b>' + mainNew[k] + '</b></li>'; anyMain = true; } });
   if (!anyMain) html += '<li style="color:var(--text3)">нет новых записей — всё уже есть в базе</li>';
   html += '</ul>';
+  if (totalMainExisting > 0) {
+    html += '<div style="margin-top:6px;color:var(--text3)">Уже есть в базе (по ID): <b>' + totalMainExisting + '</b> — не изменятся, если не включить обновление ниже.</div>';
+  }
   document.getElementById('rarImportInfo').innerHTML = html;
 
   const totalBackNew = RAR_KEYS.reduce((s, k) => s + backNew[k], 0);
@@ -4130,24 +4143,40 @@ async function importFromRar() {
   } else {
     wrap.style.display = 'none';
   }
+
+  const updWrap = document.getElementById('rarUpdateWrap');
+  document.getElementById('rarUpdateExisting').checked = false;
+  if (totalMainExisting > 0) {
+    updWrap.style.display = 'flex';
+    document.getElementById('rarUpdateLabel').textContent =
+      'Также обновить уже существующие карточки данными из файла (' + totalMainExisting + ')';
+  } else {
+    updWrap.style.display = 'none';
+  }
   openModal('rarImportModal');
 }
 
 function doRarMerge() {
   if (!_rarImport) return;
   const includeBackups = document.getElementById('rarIncludeBackups').checked;
+  const updateExisting = document.getElementById('rarUpdateExisting').checked;
   RAR_KEYS.forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
-  const curIds = {};
-  RAR_KEYS.forEach(k => curIds[k] = new Set((data[k] || []).map(x => x && x.id).filter(Boolean)));
-  const added = {};
-  RAR_KEYS.forEach(k => added[k] = 0);
+  const byId = {};
+  RAR_KEYS.forEach(k => { byId[k] = {}; data[k].forEach(x => { if (x && x.id) byId[k][x.id] = x; }); });
+  const added = {}, updated = {};
+  RAR_KEYS.forEach(k => { added[k] = 0; updated[k] = 0; });
   const mergeSrc = (src) => {
     RAR_KEYS.forEach(k => {
       (src[k] || []).forEach(item => {
         const id = item && item.id;
-        if (!id || curIds[k].has(id)) return;
-        curIds[k].add(id);
+        if (!id) return;
+        const existing = byId[k][id];
+        if (existing) {
+          if (updateExisting) { Object.assign(existing, item); updated[k]++; }
+          return;
+        }
         data[k].push(item);
+        byId[k][id] = item;
         added[k]++;
       });
     });
@@ -4163,11 +4192,20 @@ function doRarMerge() {
   if (typeof renderTankList === 'function') renderTankList();
   closeModal('rarImportModal');
 
-  let any = false, msg = 'Импорт завершён. Добавлено:\n';
-  RAR_KEYS.forEach(k => { if (added[k] > 0) { msg += '• ' + RAR_LABELS[k] + ': ' + added[k] + '\n'; any = true; } });
-  if (!any) msg = 'Новых данных не найдено — всё уже есть в базе.';
+  const totalAdded = RAR_KEYS.reduce((s, k) => s + added[k], 0);
+  const totalUpdated = RAR_KEYS.reduce((s, k) => s + updated[k], 0);
+  let msg = '';
+  if (totalAdded > 0) {
+    msg += 'Добавлено:\n';
+    RAR_KEYS.forEach(k => { if (added[k] > 0) msg += '• ' + RAR_LABELS[k] + ': ' + added[k] + '\n'; });
+  }
+  if (totalUpdated > 0) {
+    msg += (msg ? '\n' : '') + 'Обновлено:\n';
+    RAR_KEYS.forEach(k => { if (updated[k] > 0) msg += '• ' + RAR_LABELS[k] + ': ' + updated[k] + '\n'; });
+  }
+  if (!msg) msg = 'Новых данных не найдено — всё уже есть в базе.';
   _rarImport = null;
-  alert(msg);
+  alert(msg.trim());
 }
 
 // ─── INIT ────────────────────────────────────────────────
