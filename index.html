@@ -3265,6 +3265,8 @@ function exportAllToXlsx(dateFrom, dateTo) {
     function next(){rows.n++;}
     function spacer(){put(R(),0,'',ST.sp);merge(R(),0,R(),NC);fill(R(),ST.sp);rowH(R(),6);next();}
     function hdr(text,style){put(R(),0,text,style);merge(R(),0,R(),NC);fill(R(),style);rowH(R(),22);next();}
+    // Заливка только части строки (колонки cFrom..cTo) — для мини-таблиц уже сверстанных вручную
+    function fillRange(r,style,cFrom,cTo){for(let c=cFrom;c<=cTo;c++)if(!ws[XLSX.utils.encode_cell({r,c})])put(r,c,'',style);}
 
     put(R(),0,'ОБЩАЯ СВОДКА — ДИСПЕТЧЕРИЗАЦИЯ АВТО ООО «ТЕХНРАЙЗ ВЕЛЛ СЕРВИС»',ST.title);
     merge(R(),0,R(),NC);fill(R(),ST.title);rowH(R(),34);next();
@@ -3316,34 +3318,41 @@ function exportAllToXlsx(dateFrom, dateTo) {
       hdr('  СВОДКА ПО ОБЪЕКТАМ (СОСТОЯНИЕ ТС)', secObj);
 
       const objBreak=computeObjectStatusBreakdown();
-      const hSpec=[[0,8,'Объект'],[8,2,'На ходу'],[10,2,'В ремонте'],[12,2,'Требуется ремонт'],[14,2,'Всего машин']];
+      // Компактная раскладка: узкие метрики (числа) не растягиваются на широкие
+      // "чужие" колонки (Маршруты/Примечание) — иначе «Всего машин» выглядит
+      // непропорционально широким рядом с «На ходу»/«В ремонте».
+      const hSpec=[[0,7,'Объект'],[7,1,'На ходу'],[8,1,'В ремонте'],[9,2,'Требуется\nремонт'],[11,1,'Всего\nмашин']];
+      const OBJ_END=11; // последняя колонка мини-таблицы (не доходит до NC=15)
       const hL=cs({bold:true,sz:10,color:{rgb:P.white}},P.navyMid,{horizontal:'left',vertical:'center',indent:1,wrapText:true},bAll('medium',P.navy));
       hSpec.forEach(([c,span,t])=>{ put(R(),c,t,c===0?hL:ST.tHead); merge(R(),c,R(),c+span-1); });
-      rowH(R(),24); next();
+      fillRange(R(),ST.sp,OBJ_END+1,NC); // серая заливка справа, чтобы строка доходила до края листа
+      rowH(R(),26); next();
 
       let tRun=0,tRep=0,tNeed=0,tTot=0;
       objBreak.forEach(([name,r],i)=>{
         const bg=i%2===0?P.white:P.gray1;
         tRun+=r.run; tRep+=r.repair; tNeed+=r.need; tTot+=r.total;
-        const sName=cs({sz:10,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',indent:1},bAll('thin',P.gray3));
+        const sName=cs({sz:10,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',indent:1,wrapText:true},bAll('thin',P.gray3));
         const sRun=cs({bold:true,sz:11,color:{rgb:P.green}},bg,{horizontal:'center',vertical:'center'},bAll('thin',P.gray3));
         const sRep=cs({bold:true,sz:11,color:{rgb:P.red}},bg,{horizontal:'center',vertical:'center'},bAll('thin',P.gray3));
         const sNeed=cs({bold:true,sz:11,color:{rgb:P.yellow}},bg,{horizontal:'center',vertical:'center'},bAll('thin',P.gray3));
         const sTot=cs({bold:true,sz:11,color:{rgb:P.text}},bg,{horizontal:'center',vertical:'center'},bAll('thin',P.gray3));
-        put(R(),0,name,sName);merge(R(),0,R(),7);fill(R(),sName);
-        put(R(),8,r.run,sRun);merge(R(),8,R(),9);
-        put(R(),10,r.repair,sRep);merge(R(),10,R(),11);
-        put(R(),12,r.need,sNeed);merge(R(),12,R(),13);
-        put(R(),14,r.total,sTot);merge(R(),14,R(),15);
-        rowH(R(),20);next();
+        put(R(),0,name,sName);merge(R(),0,R(),6);
+        put(R(),7,r.run,sRun);
+        put(R(),8,r.repair,sRep);
+        put(R(),9,r.need,sNeed);merge(R(),9,R(),10);
+        put(R(),11,r.total,sTot);
+        fillRange(R(),cs(null,bg,null,{}),OBJ_END+1,NC);
+        rowH(R(),18);next();
       });
       const tL=cs({bold:true,sz:11,color:{rgb:P.text}},P.navyLight,{horizontal:'left',vertical:'center',indent:1},bAll('medium',P.navy));
       const tN=cs({bold:true,sz:11,color:{rgb:P.text}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy));
-      put(R(),0,'ИТОГО',tL);merge(R(),0,R(),7);fill(R(),tL);
-      put(R(),8,tRun,tN);merge(R(),8,R(),9);
-      put(R(),10,tRep,tN);merge(R(),10,R(),11);
-      put(R(),12,tNeed,tN);merge(R(),12,R(),13);
-      put(R(),14,tTot,tN);merge(R(),14,R(),15);
+      put(R(),0,'ИТОГО',tL);merge(R(),0,R(),6);
+      put(R(),7,tRun,tN);
+      put(R(),8,tRep,tN);
+      put(R(),9,tNeed,tN);merge(R(),9,R(),10);
+      put(R(),11,tTot,tN);
+      fillRange(R(),tL,OBJ_END+1,NC);
       rowH(R(),22);next();
     }
     spacer();
