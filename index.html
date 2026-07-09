@@ -2582,6 +2582,9 @@ function renderSidebarSummary() {
     if (sorted.length) {
       const last = sorted[sorted.length - 1];
       balance[ft] += bMap[last.id] || 0;
+    } else {
+      // Нет записей — остаток равен начальному значению из карточки ТС
+      balance[ft] += v.fuelBalance || 0;
     }
   });
 
@@ -3192,6 +3195,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
       const bm=computeFuelBalances(v.id, dateFrom, dateTo);
       const sorted=vRecs.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
       if(sorted.length) gBal[ft]+=bm[sorted[sorted.length-1].id]||0;
+      else if(!dateFrom) gBal[ft]+=v.fuelBalance||0;
     });
     const vFuelSet=new Set(data.vehicles.map(v=>v.fuel||'diesel'));
     fuelTypes.filter(ft=>vFuelSet.has(ft)).forEach((ft,i)=>{
@@ -3444,6 +3448,7 @@ function exportAllToPdf(dateFrom, dateTo){
     const bm=computeFuelBalances(v.id, dateFrom, dateTo);
     const sorted=vRecs.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
     if(sorted.length) gBal[ft]+=bm[sorted[sorted.length-1].id]||0;
+    else if(!dateFrom) gBal[ft]+=v.fuelBalance||0;
   });
   const vFuelSet=new Set(data.vehicles.map(v=>v.fuel||'diesel'));
   let fuelRows='';
