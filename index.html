@@ -3840,7 +3840,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     green:'16A34A', red:'DC2626', greenPale:'DCFCE7', redPale:'FEE2E2' };
   function bAll(st,rgb){const b={style:st,color:{rgb}};return{top:b,bottom:b,left:b,right:b};}
   function cs(font,fill,align,border){return{font:font||{},fill:fill?{patternType:'solid',fgColor:{rgb:fill}}:{patternType:'none'},alignment:align||{vertical:'center'},border:border||{}};}
-  const NC = 24; // колонки 0..24
+  const NC = 25; // колонки 0..25
   const SUPPLIERS = ['Газпром','Волга-Интер','СПС','Наличка','Другой']; // колонки 15..19
   const supplierCol = s => { const idx = SUPPLIERS.indexOf(s); return 15 + (idx >= 0 ? idx : 4); }; // не указан/иной → «Другой»
   const ST = {
@@ -3910,7 +3910,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     vh(11,'Пробег, км'); vh(12,'Пробег Глонасс, км'); vh(13,'Прогрев/х.х., л'); vh(14,'Остаток на нач., л');
     gh(15,20,'Получено, л',['Газпром','Волга-Интер','СПС','Наличка','Другой','Всего']);
     gh(21,22,'Списано, л',['по норме','по факту']);
-    vh(23,'Остаток на кон., л'); vh(24,'Экономия(+)/ Перерасход(-), л');
+    vh(23,'Остаток на кон., л'); vh(24,'Экономия(+)/ Перерасход(-), л'); vh(25,'Поставщик');
     rowH(h1,16); rowH(h2,30); n+=2;
 
     // Строки
@@ -3960,6 +3960,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       put(n,22,num(actL),ST.tdR(bg));
       put(n,23,num(eBal),ST.tdR(bg));
       put(n,24,num(eco),ecoStyle);
+      put(n,25,v.supplier||'—',ST.tdC(bg));
       rowH(n,16); n++;
     });
 
@@ -3968,6 +3969,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     put(n,11,num(tKm,1),ST.tot); put(n,12,tGl>0?num(tGl,1):'—',ST.tot); put(n,13,num(tIdle),ST.tot); put(n,14,num(tStart),ST.tot);
     for(let c=0;c<5;c++) put(n,15+c,num(tSup[c]),ST.tot);
     put(n,20,num(tIss),ST.tot); put(n,21,num(tNorm),ST.tot); put(n,22,num(tAct),ST.tot); put(n,23,num(tEnd),ST.tot); put(n,24,num(tEco),ST.tot);
+    put(n,25,'',ST.tot);
     rowH(n,18); n++;
 
     // Подписи
@@ -3978,7 +3980,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
 
   if (!renderedAny) { alert('Нет ТС на дизеле/бензине для выбранной организации.'); return; }
 
-  ws['!cols']=[{wch:4},{wch:18},{wch:12},{wch:14},{wch:8},{wch:18},{wch:9},{wch:9},{wch:7},{wch:7},{wch:6},{wch:9},{wch:10},{wch:8},{wch:9},{wch:9},{wch:10},{wch:8},{wch:8},{wch:8},{wch:9},{wch:9},{wch:9},{wch:9},{wch:11}];
+  ws['!cols']=[{wch:4},{wch:18},{wch:12},{wch:14},{wch:8},{wch:18},{wch:9},{wch:9},{wch:7},{wch:7},{wch:6},{wch:9},{wch:10},{wch:8},{wch:9},{wch:9},{wch:10},{wch:8},{wch:8},{wch:8},{wch:9},{wch:9},{wch:9},{wch:9},{wch:11},{wch:13}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Акт списания ГСМ');
   const d=new Date();
