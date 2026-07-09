@@ -3307,7 +3307,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
       put(R(),0,fuelLabels[ft],sL);merge(R(),0,R(),3);fill(R(),sL);
       put(R(),4,+gIss[ft].toFixed(2),sN);merge(R(),4,R(),6);
       put(R(),7,+gUsd[ft].toFixed(2),sN);merge(R(),7,R(),8);
-      put(R(),9,bal,sB);merge(R(),9,R(),NC);
+      put(R(),9,bal,sB);merge(R(),9,R(),13);fillRange(R(),cs(null,bg,null,{}),14,NC);
       rowH(R(),20);next();
     });
     spacer();
@@ -4489,6 +4489,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
   function put(r,c,val,style){const addr=XLSX.utils.encode_cell({r,c});ws[addr]={v:val??'',t:typeof val==='number'?'n':'s',s:style};ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r,c:NC}});}
   function merge(r1,c1,r2,c2){ws['!merges'].push({s:{r:r1,c:c1},e:{r:r2,c:c2}});}
   function fill(r,style){for(let c=0;c<=NC;c++)if(!ws[XLSX.utils.encode_cell({r,c})])put(r,c,'',style);}
+  function fillRange(r,style,cFrom,cTo){for(let c=cFrom;c<=cTo;c++)if(!ws[XLSX.utils.encode_cell({r,c})])put(r,c,'',style);}
   function rowH(r,h){ws['!rows'][r]={hpt:h};}
   function R(){return rows.n;}
   function next(){rows.n++;}
@@ -4526,7 +4527,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     put(R(),0,fuelLabels[ft],sL);merge(R(),0,R(),2);fill(R(),sL);
     put(R(),3,+gIss[ft].toFixed(2),sN);merge(R(),3,R(),5);
     put(R(),6,+gAct[ft].toFixed(2),sN);merge(R(),6,R(),8);
-    put(R(),9,bal,sB);merge(R(),9,R(),NC);
+    put(R(),9,bal,sB);merge(R(),9,R(),11);fillRange(R(),cs(null,bg,null,{}),12,NC);
     rowH(R(),20);next();
   });
   spacer();
