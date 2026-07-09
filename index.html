@@ -158,11 +158,23 @@
   }
   .vehicle-list {
     flex: 1;
+    min-height: 110px;
     overflow-y: auto;
     padding: 8px;
   }
   .vehicle-list::-webkit-scrollbar { width: 4px; }
   .vehicle-list::-webkit-scrollbar-thumb { background: #b0bec5; border-radius: 4px; }
+
+  /* Сводка внизу сайдбара не должна вытеснять список ТС/ДЭС —
+     ограничиваем высоту и скроллим её саму при необходимости. */
+  #sidebarSummary {
+    max-height: 34vh;
+    overflow-y: auto;
+    flex-shrink: 0;
+    border-top: 1px solid var(--border);
+  }
+  #sidebarSummary::-webkit-scrollbar { width: 4px; }
+  #sidebarSummary::-webkit-scrollbar-thumb { background: #b0bec5; border-radius: 4px; }
 
   .vehicle-card {
     padding: 12px 14px;
@@ -519,8 +531,7 @@
 
   /* ─── SIDEBAR SUMMARY ─── */
   .sidebar-summary {
-    border-top: 1px solid var(--border);
-    padding: 12px 14px;
+    padding: 10px 14px;
     flex-shrink: 0;
     background: var(--bg2);
   }
@@ -530,19 +541,19 @@
     text-transform: uppercase;
     letter-spacing: 1px;
     color: var(--text3);
-    margin-bottom: 10px;
+    margin-bottom: 6px;
   }
   .ss-row {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    padding: 3px 0;
+    padding: 2px 0;
     font-size: 12px;
   }
   .ss-label { color: var(--text2); }
   .ss-value { font-weight: 600; font-variant-numeric: tabular-nums; }
-  .ss-divider { height: 1px; background: var(--border); margin: 8px 0; }
-  .ss-fuel-block { margin-bottom: 6px; }
+  .ss-divider { height: 1px; background: var(--border); margin: 6px 0; }
+  .ss-fuel-block { margin-bottom: 4px; }
   .ss-fuel-title {
     font-size: 10px;
     font-weight: 600;
@@ -555,7 +566,7 @@
   }
 
   /* ─── Состояние ТС по объектам (компактный блок сводки) ─── */
-  .objst-list { max-height: 220px; overflow-y: auto; margin-bottom: 2px; }
+  .objst-list { max-height: 130px; overflow-y: auto; margin-bottom: 2px; }
   .objst-list::-webkit-scrollbar { width: 4px; }
   .objst-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
   .objst-row {
