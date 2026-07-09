@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, session } = require('electron');
 const path    = require('path');
 const fs      = require('fs');
 const os      = require('os');
@@ -68,6 +68,14 @@ function createWindow() {
 
 app.whenReady().then(() => {
   ensureDirs();
+
+  // Экспорт сводок/актов (XLSX) идёт через обычную загрузку браузера —
+  // открываем файл сразу после сохранения, чтобы не искать его в "Загрузках".
+  session.defaultSession.on('will-download', (_event, item) => {
+    item.once('done', (_e, state) => {
+      if (state === 'completed') shell.openPath(item.getSavePath());
+    });
+  });
 
   ipcMain.handle('read-data', () => {
     if (fs.existsSync(DATA_FILE)) {
