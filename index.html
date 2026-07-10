@@ -4167,14 +4167,14 @@ function doRarMerge() {
   RAR_KEYS.forEach(k => { byId[k] = {}; data[k].forEach(x => { if (x && x.id) byId[k][x.id] = x; }); });
   const added = {}, updated = {};
   RAR_KEYS.forEach(k => { added[k] = 0; updated[k] = 0; });
-  const mergeSrc = (src) => {
+  const mergeSrc = (src, allowUpdate) => {
     RAR_KEYS.forEach(k => {
       (src[k] || []).forEach(item => {
         const id = item && item.id;
         if (!id) return;
         const existing = byId[k][id];
         if (existing) {
-          if (updateExisting) { Object.assign(existing, item); updated[k]++; }
+          if (allowUpdate && updateExisting) { Object.assign(existing, item); updated[k]++; }
           return;
         }
         data[k].push(item);
@@ -4183,8 +4183,11 @@ function doRarMerge() {
       });
     });
   };
-  mergeSrc(_rarImport.main);
-  if (includeBackups) mergeSrc(_rarImport.backupExtra);
+  // Бэкапы внутри архива — это более старые снимки данных. Они могут только
+  // дополнять отсутствующие записи, но никогда не должны перезаписывать уже
+  // существующие (иначе более свежие правки молча затираются старыми значениями).
+  mergeSrc(_rarImport.main, true);
+  if (includeBackups) mergeSrc(_rarImport.backupExtra, false);
 
   saveData(data);
   populateOrgSelect();
