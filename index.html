@@ -1644,12 +1644,8 @@
         <input type="checkbox" id="rarIncludeBackups" style="width:auto;accent-color:var(--accent)">
         <span id="rarBackupLabel">Также добавить записи из бэкапов</span>
       </label>
-      <label id="rarUpdateWrap" style="display:none;align-items:center;gap:10px;margin-top:10px;font-size:13px;color:var(--text);font-weight:400;cursor:pointer">
-        <input type="checkbox" id="rarUpdateExisting" style="width:auto;accent-color:var(--accent)">
-        <span id="rarUpdateLabel">Также обновить уже существующие карточки данными из файла</span>
-      </label>
       <div id="rarModeNote" style="margin-top:12px;padding:10px 12px;background:var(--bg2,#f1f5f9);border-radius:8px;font-size:12px;color:var(--text3)">
-        Новые данные <b>добавляются</b> к текущим по уникальному ID. Существующие карточки не изменяются, если не включена опция обновления выше.
+        Новые данные <b>добавляются</b> к текущим по уникальному ID. Существующие карточки и записи никогда не перезаписываются.
       </div>
     </div>
     <div class="modal-footer">
@@ -4131,7 +4127,7 @@ async function importFromRar() {
   if (!anyMain) html += '<li style="color:var(--text3)">нет новых записей — всё уже есть в базе</li>';
   html += '</ul>';
   if (totalMainExisting > 0) {
-    html += '<div style="margin-top:6px;color:var(--text3)">Уже есть в базе (по ID): <b>' + totalMainExisting + '</b> — не изменятся, если не включить обновление ниже.</div>';
+    html += '<div style="margin-top:6px;color:var(--text3)">Уже есть в базе (по ID): <b>' + totalMainExisting + '</b> — не изменятся.</div>';
   }
   document.getElementById('rarImportInfo').innerHTML = html;
 
@@ -4146,37 +4142,24 @@ async function importFromRar() {
     wrap.style.display = 'none';
   }
 
-  const updWrap = document.getElementById('rarUpdateWrap');
-  document.getElementById('rarUpdateExisting').checked = false;
-  if (totalMainExisting > 0) {
-    updWrap.style.display = 'flex';
-    document.getElementById('rarUpdateLabel').textContent =
-      'Также обновить уже существующие карточки данными из файла (' + totalMainExisting + ')';
-  } else {
-    updWrap.style.display = 'none';
-  }
   openModal('rarImportModal');
 }
 
 function doRarMerge() {
   if (!_rarImport) return;
   const includeBackups = document.getElementById('rarIncludeBackups').checked;
-  const updateExisting = document.getElementById('rarUpdateExisting').checked;
   RAR_KEYS.forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
   const byId = {};
   RAR_KEYS.forEach(k => { byId[k] = {}; data[k].forEach(x => { if (x && x.id) byId[k][x.id] = x; }); });
   const added = {}, updated = {};
   RAR_KEYS.forEach(k => { added[k] = 0; updated[k] = 0; });
-  const mergeSrc = (src, allowUpdate) => {
+  const mergeSrc = (src) => {
     RAR_KEYS.forEach(k => {
       (src[k] || []).forEach(item => {
         const id = item && item.id;
         if (!id) return;
         const existing = byId[k][id];
-        if (existing) {
-          if (allowUpdate && updateExisting) { Object.assign(existing, item); updated[k]++; }
-          return;
-        }
+        if (existing) return;
         data[k].push(item);
         byId[k][id] = item;
         added[k]++;
@@ -4186,8 +4169,8 @@ function doRarMerge() {
   // Бэкапы внутри архива — это более старые снимки данных. Они могут только
   // дополнять отсутствующие записи, но никогда не должны перезаписывать уже
   // существующие (иначе более свежие правки молча затираются старыми значениями).
-  mergeSrc(_rarImport.main, true);
-  if (includeBackups) mergeSrc(_rarImport.backupExtra, false);
+  mergeSrc(_rarImport.main);
+  if (includeBackups) mergeSrc(_rarImport.backupExtra);
 
   saveData(data);
   populateOrgSelect();
