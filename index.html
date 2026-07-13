@@ -3932,7 +3932,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       const supIdx = supplierCol(v.supplier) - 15;
       const bg=i%2===0?P.white:P.gray1;
       i++;
-      tKm+=km; tGl+=glon; tIdle+=idle; tStart+=sBal; tIss+=iss; tNorm+=normL; tAct+=actL; tEnd+=eBal; tEco+=eco; tSup[supIdx]+=iss;
+      tKm+=km; tGl+=glon; tIdle+=idle; tStart+=sBal; tIss+=iss; tNorm+=normL; tAct+=actL+idle; tEnd+=eBal; tEco+=eco; tSup[supIdx]+=iss;
       const ecoBg=eco<0?P.redPale:eco>0?P.greenPale:bg;
       const ecoStyle=cs({bold:true,sz:9,color:{rgb:eco<0?P.red:eco>0?P.green:P.text}},ecoBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
       put(n,0,i,ST.tdC(bg));
@@ -3953,7 +3953,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       for(let c=0;c<5;c++) put(n,15+c, c===supIdx?num(iss):'', ST.tdR(bg));
       put(n,20,num(iss),ST.tdR(bg));
       put(n,21,num(normL),ST.tdR(bg));
-      put(n,22,num(actL),ST.tdR(bg));
+      put(n,22,num(actL+idle),ST.tdR(bg));
       put(n,23,num(eBal),ST.tdR(bg));
       put(n,24,num(eco),ecoStyle);
       put(n,25,v.supplier||'—',ST.tdC(bg));
