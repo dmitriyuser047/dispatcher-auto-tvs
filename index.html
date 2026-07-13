@@ -3903,9 +3903,9 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     vh(0,'№ п/п'); vh(1,'Марка а/м'); vh(2,'№ а/м'); vh(3,'Объект'); vh(4,'Марка топлива'); vh(5,'ФИО водителя');
     gh(6,7,'Спидометр',['на нач','на кон']);
     gh(8,10,'Норма, л/100км',['город','трасса','х/х']);
-    vh(11,'Пробег, км'); vh(12,'Пробег Глонасс, км'); vh(13,'Прогрев/х.х., л'); vh(14,'Остаток на нач., л');
-    gh(15,20,'Получено, л',['Газпром','Волга-Интер','СПС','Наличка','Другой','Всего']);
-    gh(21,22,'Списано, л',['по норме','по факту']);
+    vh(11,'Пробег, км'); vh(12,'Пробег Глонасс, км'); vh(13,'Остаток на нач., л');
+    gh(14,19,'Получено, л',['Газпром','Волга-Интер','СПС','Наличка','Другой','Всего']);
+    gh(20,22,'Списано, л',['по норме','по факту','х/х']);
     vh(23,'Остаток на кон., л'); vh(24,'Экономия(+)/ Перерасход(-), л'); vh(25,'Поставщик');
     rowH(h1,16); rowH(h2,30); n+=2;
 
@@ -3948,12 +3948,12 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       put(n,10,v.normIdle!=null?+v.normIdle:'—',ST.tdR(bg));
       put(n,11,num(km,1),ST.tdR(bg));
       put(n,12,glon>0?num(glon,1):'—',ST.tdR(bg));
-      put(n,13,num(idle),ST.tdR(bg));
-      put(n,14,num(sBal),ST.tdR(bg));
-      for(let c=0;c<5;c++) put(n,15+c, c===supIdx?num(iss):'', ST.tdR(bg));
-      put(n,20,num(iss),ST.tdR(bg));
-      put(n,21,num(normL),ST.tdR(bg));
-      put(n,22,num(actL+idle),ST.tdR(bg));
+      put(n,13,num(sBal),ST.tdR(bg));
+      for(let c=0;c<5;c++) put(n,14+c, c===supIdx?num(iss):'', ST.tdR(bg));
+      put(n,19,num(iss),ST.tdR(bg));
+      put(n,20,num(normL),ST.tdR(bg));
+      put(n,21,num(actL+idle),ST.tdR(bg));
+      put(n,22,num(idle),ST.tdR(bg));
       put(n,23,num(eBal),ST.tdR(bg));
       put(n,24,num(eco),ecoStyle);
       put(n,25,v.supplier||'—',ST.tdC(bg));
@@ -3962,9 +3962,9 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
 
     // ИТОГО
     put(n,0,'ИТОГО:',ST.totL); merge(n,0,n,10); fillRow(n,ST.totL);
-    put(n,11,num(tKm,1),ST.tot); put(n,12,tGl>0?num(tGl,1):'—',ST.tot); put(n,13,num(tIdle),ST.tot); put(n,14,num(tStart),ST.tot);
-    for(let c=0;c<5;c++) put(n,15+c,num(tSup[c]),ST.tot);
-    put(n,20,num(tIss),ST.tot); put(n,21,num(tNorm),ST.tot); put(n,22,num(tAct),ST.tot); put(n,23,num(tEnd),ST.tot); put(n,24,num(tEco),ST.tot);
+    put(n,11,num(tKm,1),ST.tot); put(n,12,tGl>0?num(tGl,1):'—',ST.tot); put(n,13,num(tStart),ST.tot);
+    for(let c=0;c<5;c++) put(n,14+c,num(tSup[c]),ST.tot);
+    put(n,19,num(tIss),ST.tot); put(n,20,num(tNorm),ST.tot); put(n,21,num(tAct),ST.tot); put(n,22,num(tIdle),ST.tot); put(n,23,num(tEnd),ST.tot); put(n,24,num(tEco),ST.tot);
     put(n,25,'',ST.tot);
     rowH(n,18); n++;
 
@@ -3976,7 +3976,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
 
   if (!renderedAny) { alert('Нет ТС на дизеле/бензине для выбранной организации.'); return; }
 
-  ws['!cols']=[{wch:4},{wch:18},{wch:12},{wch:14},{wch:8},{wch:18},{wch:9},{wch:9},{wch:7},{wch:7},{wch:6},{wch:9},{wch:10},{wch:8},{wch:9},{wch:9},{wch:10},{wch:8},{wch:8},{wch:8},{wch:9},{wch:9},{wch:9},{wch:9},{wch:11},{wch:13}];
+  ws['!cols']=[{wch:4},{wch:18},{wch:12},{wch:14},{wch:8},{wch:18},{wch:9},{wch:9},{wch:7},{wch:7},{wch:6},{wch:9},{wch:10},{wch:9},{wch:9},{wch:10},{wch:8},{wch:8},{wch:8},{wch:9},{wch:9},{wch:9},{wch:8},{wch:9},{wch:11},{wch:13}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Акт списания ГСМ');
   const d=new Date();
