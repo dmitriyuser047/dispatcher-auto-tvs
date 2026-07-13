@@ -3,9 +3,8 @@ const path    = require('path');
 const fs      = require('fs');
 const os      = require('os');
 const updater = require('./updater');
-const { createExtractorFromData } = require('node-unrar-js');
 
-const DATA_DIR   = path.join(os.homedir(), 'Documents', 'ДиспетчеризацияАвто_ТВС');
+const DATA_DIR   = path.join(os.homedir(), 'Documents', 'ДЭС_ТВС');
 const DATA_FILE  = path.join(DATA_DIR, 'data.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 
@@ -38,7 +37,7 @@ function createWindow() {
     height: 800,
     minWidth: 960,
     minHeight: 620,
-    title: 'Диспетчеризация авто группы компаний ООО "Технрайз Велл Сервис"',
+    title: 'ДЭС — ООО "Технрайз Велл Сервис"',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -93,73 +92,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('get-data-path', () => DATA_DIR);
 
-  // Импорт данных из RAR-архива (data.json + backups) для пополнения базы
-  ipcMain.handle('import-rar', async (event) => {
-    const senderWin = BrowserWindow.fromWebContents(event.sender);
-    const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
-      title: 'Выберите RAR-архив с данными',
-      filters: [{ name: 'RAR архив', extensions: ['rar'] }],
-      properties: ['openFile'],
-    });
-    if (canceled || !filePaths || !filePaths[0]) return { ok: false, canceled: true };
-
-    const KEYS = ['vehicles', 'records', 'generators', 'genRecords', 'toRecords', 'tanks', 'tankIncomes'];
-    const pick = (obj) => {
-      const o = {};
-      KEYS.forEach(k => { o[k] = Array.isArray(obj[k]) ? obj[k] : []; });
-      return o;
-    };
-
-    try {
-      const buf = fs.readFileSync(filePaths[0]);
-      const ab  = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-      const extractor = await createExtractorFromData({ data: ab });
-      const headers = [...extractor.getFileList().fileHeaders];
-      const jsonNames = headers
-        .filter(h => !h.flags.directory && h.name.toLowerCase().endsWith('.json'))
-        .map(h => h.name);
-      if (!jsonNames.length) return { ok: false, error: 'В архиве не найдено JSON-файлов с данными.' };
-
-      const extracted = extractor.extract({ files: jsonNames });
-      const dec = new TextDecoder('utf-8');
-      let main = null;
-      const backupObjs = [];
-      for (const f of extracted.files) {
-        const name = f.fileHeader.name.split('\\').join('/');
-        let obj;
-        try { obj = JSON.parse(dec.decode(f.extraction)); } catch { continue; }
-        if (!obj || typeof obj !== 'object') continue;
-        const isBackup = /backups\//i.test(name);
-        const isMain   = /(^|\/)data\.json$/i.test(name) && !isBackup;
-        if (isMain) main = pick(obj);
-        else if (isBackup) backupObjs.push(pick(obj));
-        else if (!main) main = pick(obj); // запасной вариант: любой не-backup json
-      }
-      if (!main) main = pick({});
-
-      // Данные, которые есть в бэкапах, но отсутствуют в основном data.json (по id)
-      const backupExtra = {};
-      KEYS.forEach(k => {
-        const seen = new Set(main[k].map(x => x && x.id).filter(Boolean));
-        const extra = [];
-        backupObjs.forEach(bo => {
-          bo[k].forEach(item => {
-            const id = item && item.id;
-            if (!id || seen.has(id)) return;
-            seen.add(id);
-            extra.push(item);
-          });
-        });
-        backupExtra[k] = extra;
-      });
-
-      return { ok: true, fileName: path.basename(filePaths[0]), backupCount: backupObjs.length, main, backupExtra };
-    } catch (e) {
-      return { ok: false, error: e.message };
-    }
-  });
-
-  // Экспорт произвольного JSON-подмножества данных в файл (для передачи между приложениями)
+  // Экспорт произвольного JSON-подмножества данных в файл (для передачи в основную программу)
   ipcMain.handle('export-json', async (event, jsonStr, defaultFileName) => {
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePath } = await dialog.showSaveDialog(senderWin, {
@@ -173,7 +106,7 @@ app.whenReady().then(() => {
     return { ok: true, filePath };
   });
 
-  // Импорт JSON-файла (сырые данные, без RAR) — выбор файла и чтение содержимого
+  // Импорт JSON-файла — выбор файла и чтение содержимого
   ipcMain.handle('import-json-file', async (event) => {
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {

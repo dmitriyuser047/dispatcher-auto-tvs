@@ -1,0 +1,74 @@
+name: Build & Release (ДЭС)
+
+on:
+  push:
+    tags:
+      - 'des-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: des-app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: des-app
+        run: npm ci
+
+      - name: Build Electron app
+        working-directory: des-app
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Get version
+        id: pkg
+        shell: pwsh
+        run: |
+          $v = (Get-Content des-app/package.json -Raw | ConvertFrom-Json).version
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release & upload installer
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "ДЭС v${{ steps.pkg.outputs.version }}"
+          body: |
+            ## ДЭС — версия ${{ steps.pkg.outputs.version }}
+
+            Скачайте и запустите установщик ниже.
+          files: des-app/dist/Dispatcher-DES-Setup-${{ steps.pkg.outputs.version }}.exe
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit & push des-app/version.json
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git pull --rebase origin main
+          $v    = "${{ steps.pkg.outputs.version }}"
+          $tag  = "${{ github.ref_name }}"
+          $repo = "${{ github.repository }}"
+          $url  = "https://github.com/$repo/releases/download/$tag/Dispatcher-DES-Setup-$v.exe"
+          $date = Get-Date -Format "yyyy-MM-dd"
+          $json = [ordered]@{
+            version = $v
+            date    = $date
+            notes   = "Доступна версия $v. Нажмите «Скачать обновление»."
+            url     = $url
+          } | ConvertTo-Json
+          [System.IO.File]::WriteAllText("des-app/version.json", $json, [System.Text.UTF8Encoding]::new($false))
+          git add des-app/version.json
+          git commit -m "chore: release ${{ github.ref_name }}"
+          git push origin main

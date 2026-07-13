@@ -1,0 +1,40 @@
+{
+  "name": "dispetcherizaciya-des",
+  "version": "0.1.0",
+  "description": "ДЭС — дизельные генераторы, ООО Технрайз Велл Сервис",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.tvs.dispetcherizaciya-des",
+    "productName": "ДЭС Технрайз Велл Сервис",
+    "artifactName": "Dispatcher-DES-Setup-${version}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signingHashAlgorithms": null,
+      "sign": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "allowScripts": {}
+}
