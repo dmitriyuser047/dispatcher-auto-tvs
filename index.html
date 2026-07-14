@@ -3309,14 +3309,14 @@ function exportAllToXlsx(dateFrom, dateTo) {
     });
     fill(R(),fHS);rowH(R(),22);next();
 
-    let grandKm=0;
+    let grandKm=0, grandKmGlonass=0;
     const gIss={diesel:0,gasoline:0,gas:0};
     const gUsd={diesel:0,gasoline:0,gas:0};
     const gBal={diesel:0,gasoline:0,gas:0};
     data.vehicles.forEach(v=>{
       const ft=v.fuel||'diesel';
       const vRecs=filterRecs(recsFor(v.id));
-      vRecs.forEach(r=>{grandKm+=r.km||0;gIss[ft]+=r.fuelIssued||0;gUsd[ft]+=r.fuelUsed||0;});
+      vRecs.forEach(r=>{grandKm+=r.km||0;grandKmGlonass+=r.kmGlonass||0;gIss[ft]+=r.fuelIssued||0;gUsd[ft]+=r.fuelUsed||0;});
       const bm=computeFuelBalances(v.id, dateFrom, dateTo);
       const sorted=vRecs.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
       if(sorted.length) gBal[ft]+=bm[sorted[sorted.length-1].id]||0;
@@ -3336,6 +3336,24 @@ function exportAllToXlsx(dateFrom, dateTo) {
       put(R(),9,bal,sB);merge(R(),9,R(),13);fillRange(R(),cs(null,bg,null,{}),14,NC);
       rowH(R(),20);next();
     });
+    spacer();
+
+    // ── Общий пробег (+ по Глонасс, если есть) ───────────
+    {
+      const bg=P.gray1;
+      const sL=cs({bold:true,sz:10,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',indent:1},bAll('thin',P.gray3));
+      const sN=cs({bold:true,sz:10,color:{rgb:P.text}},bg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
+      put(R(),0,'Общий пробег, км',sL);merge(R(),0,R(),3);fill(R(),sL);
+      put(R(),4,+grandKm.toFixed(1),sN);merge(R(),4,R(),6);
+      fillRange(R(),cs(null,bg,null,{}),7,NC);
+      rowH(R(),20);next();
+      if (grandKmGlonass > 0) {
+        put(R(),0,'Пробег по Глонасс, км',sL);merge(R(),0,R(),3);fill(R(),sL);
+        put(R(),4,+grandKmGlonass.toFixed(1),sN);merge(R(),4,R(),6);
+        fillRange(R(),cs(null,bg,null,{}),7,NC);
+        rowH(R(),20);next();
+      }
+    }
     spacer();
 
     // ── СВОДКА ПО ОБЪЕКТАМ (СОСТОЯНИЕ ТС) ────────────────
