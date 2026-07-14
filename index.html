@@ -2650,6 +2650,7 @@ function renderSidebarSummary() {
   const fuelColors = { diesel: 'var(--yellow)', gasoline: 'var(--accent-light)', gas: 'var(--green)' };
 
   let totalKm = 0;
+  let totalKmGlonass = 0;
   const issued  = { diesel: 0, gasoline: 0, gas: 0 };
   const used    = { diesel: 0, gasoline: 0, gas: 0 };
   const balance = { diesel: 0, gasoline: 0, gas: 0 };
@@ -2659,6 +2660,7 @@ function renderSidebarSummary() {
     const vRecs = recsFor(v.id);
     vRecs.forEach(r => {
       totalKm        += r.km         || 0;
+      totalKmGlonass += r.kmGlonass  || 0;
       issued[ft]     += r.fuelIssued || 0;
       used[ft]       += r.fuelUsed   || 0;
     });
@@ -2741,6 +2743,11 @@ function renderSidebarSummary() {
         <span class="ss-label">Общий пробег</span>
         <span class="ss-value">${Math.round(totalKm).toLocaleString('ru')} км</span>
       </div>
+      ${totalKmGlonass > 0 ? `
+      <div class="ss-row">
+        <span class="ss-label">Пробег по Глонасс</span>
+        <span class="ss-value">${Math.round(totalKmGlonass).toLocaleString('ru')} км</span>
+      </div>` : ''}
       <div class="ss-divider"></div>
       ${fuelHtml}
       <div class="ss-divider"></div>
