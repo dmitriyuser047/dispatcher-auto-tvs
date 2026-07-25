@@ -5029,10 +5029,15 @@ function renderGeneratorList() {
     }
     const gRecs      = genRecsFor(g.id);
     const totalHours = gRecs.reduce((s, r) => s + (r.hours || 0), 0);
-    const balMap     = computeGenFuelBalances(g.id);
-    const sorted     = gRecs.slice().sort((a,b) => new Date(a.date) - new Date(b.date));
-    const lastRec    = sorted[sorted.length - 1];
-    const fuelBal    = lastRec ? (balMap[lastRec.id] ?? (g.fuelBalance || 0)) : (g.fuelBalance || 0);
+    let fuelBal;
+    if (g.tankId) {
+      fuelBal = computeTankBalance(g.tankId).balance;
+    } else {
+      const balMap  = computeGenFuelBalances(g.id);
+      const sorted  = gRecs.slice().sort((a,b) => new Date(a.date) - new Date(b.date));
+      const lastRec = sorted[sorted.length - 1];
+      fuelBal = lastRec ? (balMap[lastRec.id] ?? (g.fuelBalance || 0)) : (g.fuelBalance || 0);
+    }
     const balColor   = fuelBal < 0 ? 'var(--red)' : fuelBal < 50 ? 'var(--yellow)' : 'var(--green)';
     const stColor    = g.status === 'В работе' ? 'var(--green)' : g.status === 'Резерв' ? 'var(--accent)' : g.status ? 'var(--red)' : null;
     const fb         = g.fuel ? { label: fuelLabels[g.fuel], cls: fuelClasses[g.fuel] } : null;
@@ -6204,6 +6209,7 @@ function renderGenSidebarSummary() {
   // ─── Агрегированная сводка (по подобию транспорта) ───
   let totalHours = 0;
   let issued = 0, used = 0, balance = 0;
+  const countedTanks = new Set();
   gens.forEach(g => {
     const gRecs = genRecsFor(g.id).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
     gRecs.forEach(r => {
@@ -6211,9 +6217,13 @@ function renderGenSidebarSummary() {
       issued     += r.fuelIssued || 0;
       used       += r.fuelActual != null ? r.fuelActual : (r.fuelUsed || 0);
     });
-    const balMap  = computeGenFuelBalances(g.id);
-    const lastRec = gRecs[gRecs.length - 1];
-    balance += lastRec ? (balMap[lastRec.id] ?? (g.fuelBalance || 0)) : (g.fuelBalance || 0);
+    if (g.tankId) {
+      if (!countedTanks.has(g.tankId)) { countedTanks.add(g.tankId); balance += computeTankBalance(g.tankId).balance; }
+    } else {
+      const balMap  = computeGenFuelBalances(g.id);
+      const lastRec = gRecs[gRecs.length - 1];
+      balance += lastRec ? (balMap[lastRec.id] ?? (g.fuelBalance || 0)) : (g.fuelBalance || 0);
+    }
   });
   const balColor = balance < 0 ? 'var(--red)' : balance === 0 ? 'var(--text3)' : 'var(--green)';
 
