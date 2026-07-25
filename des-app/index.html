@@ -2893,6 +2893,18 @@ function computeTankBalanceAt(tankId, boundary, inclusive) {
   return +((t.balanceInit || 0) + income - issued).toFixed(2);
 }
 
+// Баланс генератора без привязанной ёмкости на дату (аналог computeTankBalanceAt)
+function computeGenBalanceAt(gid, boundary, inclusive) {
+  const g = (data.generators || []).find(x => x.id === gid);
+  if (!g) return 0;
+  const okDate = d => !boundary || (inclusive ? d <= boundary : d < boundary);
+  const recs = (data.genRecords || []).filter(r => r.generatorId === gid && okDate(r.date))
+    .slice().sort((a,b) => new Date(a.date) - new Date(b.date));
+  let bal = g.fuelBalance || 0;
+  recs.forEach(r => { const spent = r.fuelActual != null ? r.fuelActual : (r.fuelUsed || 0); bal += (r.fuelIssued || 0) - spent; });
+  return +bal.toFixed(2);
+}
+
 function exportGenWriteOffAct(dateFrom, dateTo, opts) {
   opts = opts || {};
   const MONTHS_RU = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
@@ -2972,7 +2984,7 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
     vh(11,'Остаток на конец мес., л');
     rowH(h1,16); rowH(h2,26); n += 2;
 
-    let tHours=0, tNorm=0, tAct=0, i=0;
+    let tHours=0, tNorm=0, tAct=0, tOstNoTank=0, i=0;
     gens.forEach(g => {
       const recs = genRecsFor(g.id).filter(inPeriod).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
       const hours = recs.reduce((s,r)=>s+(r.hours||0),0);
@@ -2982,7 +2994,8 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
       const loadAvg = hours>0 && loadHours>0 ? loadHours/hours : null;
       const normSpent = recs.reduce((s,r)=>s+((g.norm100 && g.power && r.load!=null) ? g.norm100*(r.load/g.power)*(r.hours||0) : (r.fuelUsed||0)),0);
       const actSpent = recs.reduce((s,r)=>s+(r.fuelActual!=null?r.fuelActual:(r.fuelUsed||0)),0);
-      const ostKon = g.tankId ? computeTankBalanceAt(g.tankId, dateTo, true) : (() => { const bm=computeGenFuelBalances(g.id); const sorted=genRecsFor(g.id).slice().sort((a,b)=>new Date(a.date)-new Date(b.date)); const last=sorted.filter(inPeriod).pop(); return last?(bm[last.id]||0):(g.fuelBalance||0); })();
+      const ostKon = g.tankId ? computeTankBalanceAt(g.tankId, dateTo, true) : computeGenBalanceAt(g.id, dateTo, true);
+      if (!g.tankId) tOstNoTank += ostKon; // ёмкости считаются один раз ниже (linkedTanks), без ёмкости — суммируем по генератору
       const bg = i%2===0?P.white:P.gray1; i++;
       tHours+=hours; tNorm+=normSpent; tAct+=actSpent;
       const nameCell = g.name + (g.serial ? ', ' + g.serial : '');
@@ -3004,7 +3017,7 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
     put(n,0,'ИТОГО',ST.totL); merge(n,0,n,2); fillRow(n,ST.totL);
     put(n,3,num(tHours,1),ST.tot); put(n,4,'',ST.tot); put(n,5,'',ST.tot); put(n,6,'',ST.tot); put(n,7,'',ST.tot); put(n,8,'',ST.tot);
     put(n,9,num(tNorm),ST.tot); put(n,10,num(tAct),ST.tot);
-    put(n,11, linkedTanks.length ? num(linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id,dateTo,true),0)) : '', ST.tot);
+    put(n,11, num(tOstNoTank + linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id,dateTo,true),0)), ST.tot);
     rowH(n,20); n++;
     put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,6); n++;
 
@@ -3015,9 +3028,12 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
     if (incomes.length) {
       incomes.forEach((r,k)=>{ const bg=k%2===0?P.white:P.gray1; put(n,0,fmtDate(r.date),ST.tdC(bg)); merge(n,0,n,1); put(n,2,num(r.amount),ST.tdR(bg)); merge(n,2,n,3); rowH(n,16); n++; });
     } else { put(n,0,'Нет прихода за период',ST.tdC(P.white)); merge(n,0,n,3); rowH(n,16); n++; }
-    // Остаток ДТ
-    const ostNach = linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id, dateFrom, false), 0);
-    const ostKonAll = linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id, dateTo, true), 0);
+    // Остаток ДТ (ёмкости + генераторы без привязанной ёмкости, каждый учитывается один раз)
+    const noTankGenIds = gens.filter(g => !g.tankId).map(g => g.id);
+    const ostNach = linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id, dateFrom, false), 0)
+      + noTankGenIds.reduce((s,id)=>s+computeGenBalanceAt(id, dateFrom, false), 0);
+    const ostKonAll = linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id, dateTo, true), 0)
+      + noTankGenIds.reduce((s,id)=>s+computeGenBalanceAt(id, dateTo, true), 0);
     put(n,0,'Остаток ДТ, л:',ST.totL); merge(n,0,n,1); put(n,2,'на начало',ST.head); put(n,3,'на конец',ST.head); rowH(n,16); n++;
     put(n,0,'',ST.tdC(P.white)); merge(n,0,n,1); put(n,2,num(ostNach),ST.tdR(P.white)); put(n,3,num(ostKonAll),ST.tdR(P.white)); rowH(n,16); n++;
     put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,8); n++;

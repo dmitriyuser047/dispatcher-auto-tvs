@@ -1,6 +1,6 @@
 {
   "name": "dispetcherizaciya-des",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ДЭС — дизельные генераторы, ООО Технрайз Велл Сервис",
   "main": "electron/main.js",
   "scripts": {
