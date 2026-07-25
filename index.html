@@ -5143,7 +5143,7 @@ function renderGenDetail(g) {
   // Table rows
   let tableRows = '';
   if (!monthRecs.length) {
-    tableRows = `<tr><td colspan="11" class="empty-table">Нет записей за этот месяц. Нажмите «+ Запись» чтобы добавить.</td></tr>`;
+    tableRows = `<tr><td colspan="12" class="empty-table">Нет записей за этот месяц. Нажмите «+ Запись» чтобы добавить.</td></tr>`;
   } else {
     monthRecs.forEach(r => {
       const dayName = DAYS_RU[new Date(r.date).getDay()];
@@ -5159,6 +5159,7 @@ function renderGenDetail(g) {
         <td class="td-day">${fmtDate(r.date)} <span style="color:var(--text3)">${dayName}</span></td>
         <td class="td-num">${r.hours!=null ? r.hours.toLocaleString('ru',{maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${r.meterStart!=null?r.meterStart.toLocaleString('ru',{maximumFractionDigits:1}):'—'} → ${r.meterEnd!=null?r.meterEnd.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
+        <td class="td-num" style="cursor:pointer" title="Изменить нагрузку" onclick="event.stopPropagation();openEditGenRecord('${r.id}')">${r.load!=null?r.load.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
         <td class="td-num">${r.fuelIssued!=null?r.fuelIssued.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
         <td class="td-num">${r.fuelUsed!=null?r.fuelUsed.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
         <td class="td-num">${r.fuelActual!=null?r.fuelActual.toLocaleString('ru',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
@@ -5260,6 +5261,7 @@ function renderGenDetail(g) {
         <table>
           <thead><tr>
             <th>Дата</th><th>Наработка, мтч</th><th>Счётчик</th>
+            <th>Нагрузка, кВт</th>
             <th>Выдано, л</th><th>По норме, л</th><th>Факт. расход, л</th>
             <th>Остаток, л</th><th>Норма л/мтч</th><th>Факт л/мтч</th>
             <th>Примечание</th><th></th>
@@ -5520,6 +5522,18 @@ function computeTankBalanceAt(tankId, boundary, inclusive) {
 }
 
 // Баланс генератора без привязанной ёмкости на дату (аналог computeTankBalanceAt)
+// Расход топлива (л/час) при заданной нагрузке — линейная интерполяция между
+// нормой при 50% и нормой при 100% (кривая расхода дизель-генератора не
+// пропорциональна напрямую нагрузке от нуля, поэтому одной нормы100 мало).
+function genFuelRate(g, load) {
+  if (!g.norm100 || !g.power) return null;
+  const loadPct = (load / g.power) * 100;
+  if (g.norm50 != null) {
+    return g.norm50 + (g.norm100 - g.norm50) * (loadPct - 50) / 50;
+  }
+  return g.norm100 * (loadPct / 100);
+}
+
 function computeGenBalanceAt(gid, boundary, inclusive) {
   const g = (data.generators || []).find(x => x.id === gid);
   if (!g) return 0;
@@ -5618,7 +5632,7 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
       const meterEnd = recs.length ? (recs[recs.length-1].meterEnd!=null?recs[recs.length-1].meterEnd:'') : '';
       const loadHours = recs.reduce((s,r)=>s+((r.load!=null?r.load:0)*(r.hours||0)),0);
       const loadAvg = hours>0 && loadHours>0 ? loadHours/hours : null;
-      const normSpent = recs.reduce((s,r)=>s+((g.norm100 && g.power && r.load!=null) ? g.norm100*(r.load/g.power)*(r.hours||0) : (r.fuelUsed||0)),0);
+      const normSpent = recs.reduce((s,r)=>{ if (g.norm100 && g.power && r.load!=null) { const rate=genFuelRate(g,r.load); return s+Math.max(0,rate||0)*(r.hours||0); } return s+(r.fuelUsed||0); },0);
       const actSpent = recs.reduce((s,r)=>s+(r.fuelActual!=null?r.fuelActual:(r.fuelUsed||0)),0);
       const ostKon = g.tankId ? computeTankBalanceAt(g.tankId, dateTo, true) : computeGenBalanceAt(g.id, dateTo, true);
       if (!g.tankId) tOstNoTank += ostKon; // ёмкости считаются один раз ниже (linkedTanks), без ёмкости — суммируем по генератору
@@ -6176,7 +6190,9 @@ function calcGenActualAuto() {
   const inp   = document.getElementById('gen_rec_fuel_actual');
   if (!inp || !g) return;
   if (!g.norm100 || !g.power || isNaN(hours) || isNaN(load) || hours < 0 || load < 0) return;
-  inp.value = Math.round(g.norm100 * (load / g.power) * hours * 10) / 10;
+  const rate = genFuelRate(g, load);
+  if (rate == null) return;
+  inp.value = Math.round(Math.max(0, rate) * hours * 10) / 10;
   inp.classList.add('auto-filled');
 }
 
