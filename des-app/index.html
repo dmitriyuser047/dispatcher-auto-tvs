@@ -1170,6 +1170,12 @@
       </div>
       <div class="form-row">
         <div class="form-group">
+          <label>Норма л/час на холостом ходу (0%)</label>
+          <input type="number" id="gm_norm_idle" placeholder="напр. 12 (необязательно)" min="0" step="0.1">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
           <label>Счётчик моточасов (текущий)</label>
           <input type="number" id="gm_hours_init" placeholder="0" min="0" step="0.1">
         </div>
@@ -2915,7 +2921,12 @@ function genFuelRate(g, load) {
   if (!g.norm100 || !g.power) return null;
   const loadPct = (load / g.power) * 100;
   if (g.norm50 != null) {
-    // прямая через две точки (50%, norm50) и (100%, norm100)
+    if (loadPct <= 50 && g.normIdle != null) {
+      // кусочно-линейно: (0%, normIdle) → (50%, norm50) — реальная кривая
+      // на малых нагрузках не идёт к нулю, а стремится к расходу х/х
+      return g.normIdle + (g.norm50 - g.normIdle) * loadPct / 50;
+    }
+    // прямая через (50%, norm50) и (100%, norm100); выше 100% — та же прямая
     return g.norm50 + (g.norm100 - g.norm50) * (loadPct - 50) / 50;
   }
   return g.norm100 * (loadPct / 100); // нет нормы50 — старое линейное поведение от нуля
@@ -3408,7 +3419,7 @@ function openAddGenerator() {
   document.getElementById('generatorModalTitle').textContent = 'Добавить дизельный генератор';
   ['gm_name','gm_serial','gm_location','gm_responsible','gm_status','gm_note'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('gm_fuel').value = 'diesel';
-  ['gm_norm','gm_norm100','gm_norm50','gm_power','gm_hours_init','gm_fuel_balance','gm_cost'].forEach(id => document.getElementById(id).value = '');
+  ['gm_norm','gm_norm100','gm_norm50','gm_norm_idle','gm_power','gm_hours_init','gm_fuel_balance','gm_cost'].forEach(id => document.getElementById(id).value = '');
   populateGenTankSelect('');
   openModal('generatorModal');
 }
@@ -3427,6 +3438,7 @@ function openEditGenerator(id) {
   document.getElementById('gm_norm').value         = g.norm        ?? '';
   document.getElementById('gm_norm100').value      = g.norm100     ?? '';
   document.getElementById('gm_norm50').value       = g.norm50      ?? '';
+  document.getElementById('gm_norm_idle').value    = g.normIdle    ?? '';
   document.getElementById('gm_hours_init').value   = g.hoursInit   ?? '';
   document.getElementById('gm_fuel_balance').value = g.fuelBalance ?? '';
   document.getElementById('gm_cost').value         = g.cost        ?? '';
@@ -3451,6 +3463,7 @@ function saveGenerator() {
     norm:        parseFloat(document.getElementById('gm_norm').value)         || null,
     norm100:     parseFloat(document.getElementById('gm_norm100').value)      || null,
     norm50:      parseFloat(document.getElementById('gm_norm50').value)       || null,
+    normIdle:    parseFloat(document.getElementById('gm_norm_idle').value)    || null,
     hoursInit:   parseFloat(document.getElementById('gm_hours_init').value)   || 0,
     fuelBalance: parseFloat(document.getElementById('gm_fuel_balance').value) || 0,
     cost:        parseFloat(document.getElementById('gm_cost').value)         || null,
