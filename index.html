@@ -475,6 +475,7 @@
   }
   .modal-overlay.open .modal { transform: translateY(0); }
   .modal-lg { width: 560px; }
+  .modal-xl { width: 1180px; }
   .modal-header {
     display: flex;
     align-items: center;
@@ -824,6 +825,10 @@
       <button class="btn btn-ghost" onclick="importFromJsonFile()" title="Пополнить базу данными из JSON-файла (например, экспорт из приложения ДЭС на другом компьютере)">
         <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
         Импорт из файла
+      </button>
+      <button class="btn btn-ghost" onclick="openRepairsJournal()" title="Общий журнал ремонта по всем ТС">
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+        Журнал ремонта
       </button>
       <button class="btn btn-primary" onclick="openAddVehicle()">
         <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1213,6 +1218,173 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('recordModal')">Отмена</button>
       <button class="btn btn-primary" onclick="saveRecord()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: ТО (Техническое обслуживание) — Транспорт -->
+<div class="modal-overlay" id="vehicleToModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="vehicleToModalTitle">Добавить запись ТО</div>
+      <button class="icon-btn" onclick="closeModal('vehicleToModal')">
+        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Дата проведения *</label>
+          <div style="display:flex;gap:6px">
+            <input type="text" id="vto_date" placeholder="ДД.ММ.ГГГГ" maxlength="10" oninput="autoDateSep(this)" style="flex:1">
+            <button type="button" class="cal-btn" onclick="calOpenFor('vto_date')" title="Выбрать дату">
+              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Вид ТО *</label>
+          <input type="text" id="vto_type" list="vto_type_list" placeholder="ТО-1, Замена масла...">
+          <datalist id="vto_type_list">
+            <option value="ТО-1"><option value="ТО-2"><option value="ТО-3">
+            <option value="Замена масла"><option value="Замена фильтров">
+            <option value="Плановое ТО"><option value="Внеплановое ТО">
+            <option value="Шиномонтаж"><option value="Развал-схождение">
+            <option value="Капитальный ремонт">
+          </datalist>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Пробег на момент ТО (км)</label>
+          <input type="number" id="vto_odometer" placeholder="0" min="0" step="1">
+        </div>
+        <div class="form-group">
+          <label>Следующее ТО через (км)</label>
+          <input type="number" id="vto_next_km" placeholder="10000" min="0" step="1">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Следующая дата ТО</label>
+          <div style="display:flex;gap:6px">
+            <input type="text" id="vto_next_date" placeholder="ДД.ММ.ГГГГ" maxlength="10" oninput="autoDateSep(this)" style="flex:1">
+            <button type="button" class="cal-btn" onclick="calOpenFor('vto_next_date')" title="Выбрать дату">
+              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Стоимость ТО (руб.)</label>
+          <input type="number" id="vto_cost" placeholder="0" min="0" step="0.01">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Исполнитель</label>
+        <input type="text" id="vto_performer" placeholder="Иванов И.И., сервисный центр...">
+      </div>
+      <div class="form-group">
+        <label>Примечание / Выполненные работы</label>
+        <textarea id="vto_note" rows="3" placeholder="Перечень выполненных работ..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="vehicleToDeleteBtn" onclick="deleteVehicleTo(editingVehicleToId)" style="margin-right:auto;color:var(--red);display:none">Удалить</button>
+      <button class="btn btn-ghost" onclick="closeModal('vehicleToModal')">Отмена</button>
+      <button class="btn btn-primary" onclick="saveVehicleTo()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Add/Edit Repair (Ремонт) -->
+<div class="modal-overlay" id="repairModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="repairModalTitle">Добавить ремонт</div>
+      <button class="icon-btn" onclick="closeModal('repairModal')">
+        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group" id="rp_vehicle_wrap">
+        <label>Транспортное средство *</label>
+        <select id="rp_vehicle"></select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>№ счёта на оплату</label>
+          <input type="text" id="rp_invoice_no" placeholder="№ 12345">
+        </div>
+        <div class="form-group">
+          <label>Дата счёта *</label>
+          <div style="display:flex;gap:6px">
+            <input type="text" id="rp_invoice_date" placeholder="ДД.ММ.ГГГГ" maxlength="10" oninput="autoDateSep(this)" style="flex:1">
+            <button type="button" class="cal-btn" onclick="calOpenFor('rp_invoice_date')" title="Выбрать дату">
+              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Сумма ремонта (руб.) *</label>
+          <input type="number" id="rp_cost" placeholder="0" min="0" step="0.01">
+        </div>
+        <div class="form-group">
+          <label>Пробег на момент ремонта (км)</label>
+          <input type="number" id="rp_mileage" placeholder="0" min="0" step="1">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Описание ремонта *</label>
+        <textarea id="rp_description" rows="3" placeholder="Перечень выполненных работ, замена деталей..."></textarea>
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:10px;font-weight:400;cursor:pointer;margin:0">
+          <input type="checkbox" id="rp_paid" style="width:auto;accent-color:var(--accent)">
+          Оплачено
+        </label>
+      </div>
+      <div class="form-group">
+        <label>Примечание</label>
+        <textarea id="rp_note" rows="2" placeholder="Дополнительно..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="repairDeleteBtn" onclick="deleteRepair(editingRepairId)" style="margin-right:auto;color:var(--red);display:none">Удалить</button>
+      <button class="btn btn-ghost" onclick="closeModal('repairModal')">Отмена</button>
+      <button class="btn btn-primary" onclick="saveRepair()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Журнал ремонта (все ТС) -->
+<div class="modal-overlay" id="repairsJournalModal">
+  <div class="modal modal-xl">
+    <div class="modal-header">
+      <div class="modal-title">Журнал ремонта автотранспорта</div>
+      <button class="icon-btn" onclick="closeModal('repairsJournalModal')">
+        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <select id="rj_vehicle_filter" class="fsel" style="max-width:260px" onchange="renderRepairsJournal()"></select>
+        <select id="rj_status_filter" class="fsel" style="max-width:200px" onchange="renderRepairsJournal()">
+          <option value="">Все статусы оплаты</option>
+          <option value="paid">Оплачено</option>
+          <option value="unpaid">Не оплачено</option>
+        </select>
+        <div style="flex:1"></div>
+        <button class="btn btn-primary btn-sm" onclick="openAddRepair(null)">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          + Ремонт
+        </button>
+      </div>
+      <div id="repairsJournalBody"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('repairsJournalModal')">Закрыть</button>
     </div>
   </div>
 </div>
@@ -1939,6 +2111,8 @@ async function loadData() {
   if (!d.toRecords)   d.toRecords    = [];
   if (!d.tanks)       d.tanks        = [];
   if (!d.tankIncomes) d.tankIncomes  = [];
+  if (!d.vehicleTo)   d.vehicleTo    = [];
+  if (!d.repairs)     d.repairs      = [];
   return d;
 }
 function saveData(d) {
@@ -1955,6 +2129,8 @@ function saveData(d) {
 let data = { vehicles: [], records: [], generators: [], genRecords: [] };
 let recsByVid = {};
 let genRecsByGid = {};
+let vehicleToByVid = {};
+let repairsByVid = {};
 // Кэши балансов (сбрасываются при любом изменении данных через rebuildIndex)
 let _fuelBalCache = {};
 let _genBalCache = {};
@@ -1969,11 +2145,23 @@ function rebuildIndex() {
     if (!genRecsByGid[r.generatorId]) genRecsByGid[r.generatorId] = [];
     genRecsByGid[r.generatorId].push(r);
   });
+  vehicleToByVid = {};
+  (data.vehicleTo || []).forEach(r => {
+    if (!vehicleToByVid[r.vehicleId]) vehicleToByVid[r.vehicleId] = [];
+    vehicleToByVid[r.vehicleId].push(r);
+  });
+  repairsByVid = {};
+  (data.repairs || []).forEach(r => {
+    if (!repairsByVid[r.vehicleId]) repairsByVid[r.vehicleId] = [];
+    repairsByVid[r.vehicleId].push(r);
+  });
   _fuelBalCache = {};
   _genBalCache = {};
 }
 function recsFor(vid) { return recsByVid[vid] || []; }
 function genRecsFor(gid) { return genRecsByGid[gid] || []; }
+function vehicleToFor(vid) { return vehicleToByVid[vid] || []; }
+function repairsFor(vid) { return repairsByVid[vid] || []; }
 
 // Debounce для поиска — не перерисовываем список на каждый символ
 function debounce(fn, ms) {
@@ -1993,6 +2181,8 @@ let selectedGenYear = null;
 let selectedGenMonth = null;
 let editingGeneratorId = null;
 let editingGenRecordId = null;
+let editingVehicleToId = null;
+let editingRepairId = null;
 
 // ─── FILTERS ─────────────────────────────────────────────
 let filterStatus = '';   // '' = все
@@ -2402,6 +2592,9 @@ function renderDetail(v) {
         </table>
       </div>
     </div>
+
+    ${renderVehicleToSection(v.id, (v.odometer || 0) + totalKm)}
+    ${renderRepairSection(v.id)}
   `;
 }
 
@@ -2410,6 +2603,410 @@ function selectMonth(year, month) {
   selectedMonth = month;
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   if (v) renderDetail(v);
+}
+
+// ═══════════════════════════════════════════════════════
+// ГРАФИК ТО (ТРАНСПОРТ)
+// ═══════════════════════════════════════════════════════
+function renderVehicleToSection(vid, currentOdometer) {
+  const recs = vehicleToFor(vid).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+  const last = recs[recs.length - 1];
+
+  let statusHtml = '';
+  if (last) {
+    const parts = [];
+    if (last.nextOdometerAbs != null) {
+      const diff = last.nextOdometerAbs - currentOdometer;
+      if (diff <= 0) {
+        parts.push(`<span style="color:var(--red);font-weight:600">⚠ ТО просрочено на ${Math.abs(diff).toLocaleString('ru',{maximumFractionDigits:0})} км!</span>`);
+      } else if (diff <= 1000) {
+        parts.push(`<span style="color:var(--yellow);font-weight:600">⚡ До ТО: ${diff.toLocaleString('ru',{maximumFractionDigits:0})} км</span>`);
+      } else {
+        parts.push(`<span style="color:var(--green);font-weight:600">До ТО: ${diff.toLocaleString('ru',{maximumFractionDigits:0})} км</span>`);
+      }
+    }
+    if (last.nextDate) {
+      const nd = new Date(last.nextDate);
+      const today = new Date(); today.setHours(0,0,0,0);
+      const daysLeft = Math.ceil((nd - today) / 86400000);
+      if (daysLeft <= 0) {
+        parts.push(`<span style="color:var(--red);font-weight:600">⚠ Дата ТО просрочена (${fmtDate(last.nextDate)})</span>`);
+      } else if (daysLeft <= 14) {
+        parts.push(`<span style="color:var(--yellow);font-weight:600">⚡ Дата ТО: ${fmtDate(last.nextDate)} (через ${daysLeft} дн.)</span>`);
+      } else {
+        parts.push(`<span style="color:var(--green);font-weight:600">Дата ТО: ${fmtDate(last.nextDate)}</span>`);
+      }
+    }
+    if (parts.length) statusHtml = `<div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:8px">${parts.join('')}</div>`;
+  }
+
+  let rows = '';
+  if (!recs.length) {
+    rows = `<tr><td colspan="8" class="empty-table">Нет записей ТО. Нажмите «+ ТО» чтобы добавить.</td></tr>`;
+  } else {
+    [...recs].reverse().forEach(r => {
+      rows += `<tr>
+        <td class="td-day">${fmtDate(r.date)}</td>
+        <td style="padding:10px 14px;font-size:13px;font-weight:600">${r.type || '—'}</td>
+        <td class="td-num">${r.odometer != null ? r.odometer.toLocaleString('ru', {maximumFractionDigits:0}) : '—'}</td>
+        <td class="td-num">${r.nextOdometerAbs != null ? r.nextOdometerAbs.toLocaleString('ru', {maximumFractionDigits:0}) : (r.nextKm ? '+'+r.nextKm.toLocaleString('ru')+' км' : '—')}</td>
+        <td class="td-day">${r.nextDate ? fmtDate(r.nextDate) : '—'}</td>
+        <td class="td-num">${r.cost != null ? r.cost.toLocaleString('ru-RU') + ' ₽' : '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${r.performer || '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${r.note || '—'}</td>
+        <td class="td-actions">
+          <button class="icon-btn" onclick="openEditVehicleTo('${r.id}')">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="icon-btn del" onclick="deleteVehicleTo('${r.id}')">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+          </button>
+        </td>
+      </tr>`;
+    });
+  }
+
+  return `<div class="table-wrap" style="margin-top:24px">
+    <div class="table-toolbar">
+      <div class="table-toolbar-left">
+        <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--accent)"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+        График ТО
+        <span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:10px">${recs.length} записей · Текущий пробег: ${currentOdometer.toLocaleString('ru',{maximumFractionDigits:0})} км</span>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openAddVehicleTo('${vid}')">
+        <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        + ТО
+      </button>
+    </div>
+    ${statusHtml}
+    <div class="table-scroll">
+      <table>
+        <thead><tr>
+          <th>Дата</th><th>Вид ТО</th><th>Пробег, км</th><th>След. ТО (км)</th>
+          <th>Дата след. ТО</th><th>Стоимость</th><th>Исполнитель</th><th>Примечание</th><th></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function openAddVehicleTo(vid) {
+  editingVehicleToId = null;
+  document.getElementById('vehicleToModalTitle').textContent = 'Добавить запись ТО';
+  document.getElementById('vehicleToDeleteBtn').style.display = 'none';
+  const now = new Date();
+  document.getElementById('vto_date').value = fmtDate(now.toISOString().split('T')[0]);
+  ['vto_type','vto_next_date','vto_performer','vto_note'].forEach(id => document.getElementById(id).value = '');
+  ['vto_odometer','vto_next_km','vto_cost'].forEach(id => document.getElementById(id).value = '');
+  const v = data.vehicles.find(x => x.id === vid);
+  if (v) {
+    const totalKm = recsFor(vid).reduce((s, r) => s + (r.km || 0), 0);
+    const curOdo = (v.odometer || 0) + totalKm;
+    if (curOdo > 0) document.getElementById('vto_odometer').value = Math.round(curOdo);
+    const last = vehicleToFor(vid).slice().sort((a,b) => new Date(a.date)-new Date(b.date)).pop();
+    if (last && last.nextKm) document.getElementById('vto_next_km').value = last.nextKm;
+  }
+  document.getElementById('vehicleToModal').dataset.vid = vid;
+  openModal('vehicleToModal');
+}
+
+function openEditVehicleTo(id) {
+  const r = (data.vehicleTo || []).find(x => x.id === id);
+  if (!r) return;
+  editingVehicleToId = id;
+  document.getElementById('vehicleToModalTitle').textContent = 'Редактировать запись ТО';
+  document.getElementById('vehicleToDeleteBtn').style.display = '';
+  document.getElementById('vto_date').value       = fmtDate(r.date);
+  document.getElementById('vto_type').value       = r.type        || '';
+  document.getElementById('vto_odometer').value   = r.odometer    ?? '';
+  document.getElementById('vto_next_km').value    = r.nextKm      ?? '';
+  document.getElementById('vto_next_date').value  = r.nextDate    ? fmtDate(r.nextDate) : '';
+  document.getElementById('vto_cost').value       = r.cost        ?? '';
+  document.getElementById('vto_performer').value  = r.performer   || '';
+  document.getElementById('vto_note').value       = r.note        || '';
+  document.getElementById('vehicleToModal').dataset.vid = r.vehicleId;
+  openModal('vehicleToModal');
+}
+
+function saveVehicleTo() {
+  const dateIso = parseDate(document.getElementById('vto_date').value.trim());
+  const type    = document.getElementById('vto_type').value.trim();
+  if (!dateIso) { showFieldError('Укажите дату проведения ТО', 'vto_date'); return; }
+  if (!type)    { showFieldError('Укажите вид ТО', 'vto_type'); return; }
+  const nextKm      = parseFloat(document.getElementById('vto_next_km').value);
+  const odometer    = parseFloat(document.getElementById('vto_odometer').value);
+  const nextDate    = parseDate(document.getElementById('vto_next_date').value.trim()) || null;
+  const hasNextKm   = !isNaN(nextKm);
+  const hasOdometer = !isNaN(odometer);
+  const nextOdometerAbs = hasOdometer && hasNextKm ? Math.round(odometer + nextKm) : null;
+  const obj = {
+    vehicleId:  document.getElementById('vehicleToModal').dataset.vid,
+    date:       dateIso,
+    type,
+    odometer:   hasOdometer ? odometer : null,
+    nextKm:     hasNextKm ? nextKm : null,
+    nextOdometerAbs,
+    nextDate,
+    cost:       parseFloat(document.getElementById('vto_cost').value) || null,
+    performer:  document.getElementById('vto_performer').value.trim(),
+    note:       document.getElementById('vto_note').value.trim(),
+  };
+  if (!data.vehicleTo) data.vehicleTo = [];
+  if (editingVehicleToId) {
+    Object.assign(data.vehicleTo.find(x => x.id === editingVehicleToId), obj);
+  } else {
+    obj.id = 'vto_' + Date.now();
+    data.vehicleTo.push(obj);
+  }
+  saveData(data);
+  closeModal('vehicleToModal');
+  const v = data.vehicles.find(x => x.id === obj.vehicleId);
+  if (v) renderDetail(v);
+}
+
+function deleteVehicleTo(id) {
+  if (!confirm('Удалить эту запись ТО?')) return;
+  data.vehicleTo = (data.vehicleTo || []).filter(r => r.id !== id);
+  saveData(data);
+  closeModal('vehicleToModal');
+  const v = data.vehicles.find(x => x.id === selectedVehicleId);
+  if (v) renderDetail(v);
+}
+
+// ═══════════════════════════════════════════════════════
+// ЖУРНАЛ РЕМОНТА (ТРАНСПОРТ)
+// ═══════════════════════════════════════════════════════
+function renderRepairSection(vid) {
+  const recs = repairsFor(vid).slice().sort((a, b) => new Date(b.invoiceDate) - new Date(a.invoiceDate));
+  const totalCost   = recs.reduce((s, r) => s + (r.cost || 0), 0);
+  const unpaidCost  = recs.filter(r => !r.paid).reduce((s, r) => s + (r.cost || 0), 0);
+
+  let rows = '';
+  if (!recs.length) {
+    rows = `<tr><td colspan="7" class="empty-table">Нет записей о ремонте. Нажмите «+ Ремонт» чтобы добавить.</td></tr>`;
+  } else {
+    recs.forEach(r => {
+      rows += `<tr>
+        <td class="td-day">${fmtDate(r.invoiceDate)}</td>
+        <td style="padding:10px 14px;font-size:13px;font-weight:600">${r.invoiceNo || '—'}</td>
+        <td class="td-num">${r.mileage != null ? r.mileage.toLocaleString('ru') + ' км' : '—'}</td>
+        <td class="td-num" style="font-weight:600">${r.cost != null ? r.cost.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ₽' : '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${r.description || '—'}</td>
+        <td class="td-num">
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:700;color:${r.paid ? 'var(--green)' : 'var(--red)'}">
+            <input type="checkbox" ${r.paid ? 'checked' : ''} onchange="toggleRepairPaid('${r.id}')" style="width:auto;accent-color:var(--accent)">
+            ${r.paid ? 'Оплачено' : 'Не оплачено'}
+          </label>
+        </td>
+        <td class="td-actions">
+          <button class="icon-btn" onclick="openEditRepair('${r.id}')">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="icon-btn del" onclick="deleteRepair('${r.id}')">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+          </button>
+        </td>
+      </tr>`;
+    });
+  }
+
+  return `<div class="table-wrap" style="margin-top:24px">
+    <div class="table-toolbar">
+      <div class="table-toolbar-left">
+        <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--accent)"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+        Журнал ремонта
+        <span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:10px">${recs.length} записей · ${totalCost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})} ₽ всего${unpaidCost > 0 ? ` · <span style="color:var(--red);font-weight:600">${unpaidCost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})} ₽ не оплачено</span>` : ''}</span>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openAddRepair('${vid}')">
+        <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        + Ремонт
+      </button>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr>
+          <th>Дата счёта</th><th>№ счёта</th><th>Пробег</th><th>Сумма</th>
+          <th>Описание</th><th>Статус оплаты</th><th></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function populateRepairVehicleSelect(selEl, presetVid) {
+  selEl.innerHTML = data.vehicles.slice().sort((a,b) => (a.plate||'').localeCompare(b.plate||'', 'ru'))
+    .map(v => `<option value="${v.id}">${v.plate} — ${v.make}${v.driver ? ' · ' + v.driver : ''}</option>`).join('');
+  if (presetVid) selEl.value = presetVid;
+}
+
+function openAddRepair(vid) {
+  editingRepairId = null;
+  document.getElementById('repairModalTitle').textContent = 'Добавить ремонт';
+  document.getElementById('repairDeleteBtn').style.display = 'none';
+  const sel = document.getElementById('rp_vehicle');
+  populateRepairVehicleSelect(sel, vid || selectedVehicleId);
+  document.getElementById('rp_vehicle_wrap').style.display = vid ? 'none' : '';
+  const now = new Date();
+  document.getElementById('rp_invoice_date').value = fmtDate(now.toISOString().split('T')[0]);
+  ['rp_invoice_no','rp_description','rp_note'].forEach(id => document.getElementById(id).value = '');
+  ['rp_cost','rp_mileage'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('rp_paid').checked = false;
+  // предзаполнить пробег из последней записи по ТС, если известен
+  const presetVid = vid || selectedVehicleId;
+  const v = presetVid && data.vehicles.find(x => x.id === presetVid);
+  if (v) {
+    const totalKm = recsFor(v.id).reduce((s, r) => s + (r.km || 0), 0);
+    const curOdo = (v.odometer || 0) + totalKm;
+    if (curOdo > 0) document.getElementById('rp_mileage').value = Math.round(curOdo);
+  }
+  openModal('repairModal');
+}
+
+function openEditRepair(id) {
+  const r = (data.repairs || []).find(x => x.id === id);
+  if (!r) return;
+  editingRepairId = id;
+  document.getElementById('repairModalTitle').textContent = 'Редактировать ремонт';
+  document.getElementById('repairDeleteBtn').style.display = '';
+  const sel = document.getElementById('rp_vehicle');
+  populateRepairVehicleSelect(sel, r.vehicleId);
+  document.getElementById('rp_vehicle_wrap').style.display = '';
+  document.getElementById('rp_invoice_no').value   = r.invoiceNo || '';
+  document.getElementById('rp_invoice_date').value = fmtDate(r.invoiceDate);
+  document.getElementById('rp_cost').value         = r.cost ?? '';
+  document.getElementById('rp_mileage').value      = r.mileage ?? '';
+  document.getElementById('rp_description').value  = r.description || '';
+  document.getElementById('rp_paid').checked       = !!r.paid;
+  document.getElementById('rp_note').value         = r.note || '';
+  openModal('repairModal');
+}
+
+function saveRepair() {
+  const vehicleId   = document.getElementById('rp_vehicle').value;
+  const invoiceDate = parseDate(document.getElementById('rp_invoice_date').value.trim());
+  const cost        = parseFloat(document.getElementById('rp_cost').value);
+  const description = document.getElementById('rp_description').value.trim();
+  if (!vehicleId)     { showFieldError('Выберите транспортное средство', 'rp_vehicle'); return; }
+  if (!invoiceDate)   { showFieldError('Укажите дату счёта в формате ДД.ММ.ГГГГ', 'rp_invoice_date'); return; }
+  if (isNaN(cost))    { showFieldError('Укажите сумму ремонта', 'rp_cost'); return; }
+  if (!description)   { showFieldError('Укажите описание ремонта', 'rp_description'); return; }
+  const obj = {
+    vehicleId,
+    invoiceNo:   document.getElementById('rp_invoice_no').value.trim(),
+    invoiceDate,
+    cost,
+    mileage:     parseFloat(document.getElementById('rp_mileage').value) || null,
+    description,
+    paid:        document.getElementById('rp_paid').checked,
+    note:        document.getElementById('rp_note').value.trim(),
+  };
+  if (!data.repairs) data.repairs = [];
+  if (editingRepairId) {
+    Object.assign(data.repairs.find(x => x.id === editingRepairId), obj);
+  } else {
+    obj.id = 'rp_' + Date.now();
+    data.repairs.push(obj);
+  }
+  saveData(data);
+  closeModal('repairModal');
+  const v = data.vehicles.find(x => x.id === selectedVehicleId);
+  if (v) renderDetail(v);
+  if (document.getElementById('repairsJournalModal').classList.contains('open')) renderRepairsJournal();
+}
+
+function deleteRepair(id) {
+  if (!confirm('Удалить эту запись о ремонте?')) return;
+  data.repairs = (data.repairs || []).filter(r => r.id !== id);
+  saveData(data);
+  closeModal('repairModal');
+  const v = data.vehicles.find(x => x.id === selectedVehicleId);
+  if (v) renderDetail(v);
+  if (document.getElementById('repairsJournalModal').classList.contains('open')) renderRepairsJournal();
+}
+
+function toggleRepairPaid(id) {
+  const r = (data.repairs || []).find(x => x.id === id);
+  if (!r) return;
+  r.paid = !r.paid;
+  saveData(data);
+  const v = data.vehicles.find(x => x.id === selectedVehicleId);
+  if (v) renderDetail(v);
+  if (document.getElementById('repairsJournalModal').classList.contains('open')) renderRepairsJournal();
+}
+
+// ─── ОБЩИЙ ЖУРНАЛ РЕМОНТА (ВСЕ ТС) ───────────────────────
+function openRepairsJournal() {
+  const sel = document.getElementById('rj_vehicle_filter');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Все ТС</option>' + data.vehicles.slice()
+    .sort((a,b) => (a.plate||'').localeCompare(b.plate||'', 'ru'))
+    .map(v => `<option value="${v.id}">${v.plate} — ${v.make}</option>`).join('');
+  sel.value = cur || '';
+  renderRepairsJournal();
+  openModal('repairsJournalModal');
+}
+
+function renderRepairsJournal() {
+  const vidFilter    = document.getElementById('rj_vehicle_filter').value;
+  const statusFilter = document.getElementById('rj_status_filter').value;
+  let recs = (data.repairs || []).slice();
+  if (vidFilter)    recs = recs.filter(r => r.vehicleId === vidFilter);
+  if (statusFilter) recs = recs.filter(r => statusFilter === 'paid' ? r.paid : !r.paid);
+  recs.sort((a, b) => new Date(b.invoiceDate) - new Date(a.invoiceDate));
+
+  const totalCost  = recs.reduce((s, r) => s + (r.cost || 0), 0);
+  const unpaidCost = recs.filter(r => !r.paid).reduce((s, r) => s + (r.cost || 0), 0);
+
+  let rows = '';
+  if (!recs.length) {
+    rows = `<tr><td colspan="8" class="empty-table">Нет записей о ремонте.</td></tr>`;
+  } else {
+    recs.forEach(r => {
+      const v = data.vehicles.find(x => x.id === r.vehicleId);
+      rows += `<tr>
+        <td style="padding:10px 14px;font-size:13px;font-weight:600">${v ? v.plate : '—'}<div style="font-weight:400;color:var(--text3);font-size:11px">${v ? v.make : ''}</div></td>
+        <td class="td-day">${fmtDate(r.invoiceDate)}</td>
+        <td style="padding:10px 14px;font-size:13px">${r.invoiceNo || '—'}</td>
+        <td class="td-num">${r.mileage != null ? r.mileage.toLocaleString('ru') + ' км' : '—'}</td>
+        <td class="td-num" style="font-weight:600">${r.cost != null ? r.cost.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ₽' : '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${r.description || '—'}</td>
+        <td class="td-num">
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:700;color:${r.paid ? 'var(--green)' : 'var(--red)'}">
+            <input type="checkbox" ${r.paid ? 'checked' : ''} onchange="toggleRepairPaid('${r.id}')" style="width:auto;accent-color:var(--accent)">
+            ${r.paid ? 'Оплачено' : 'Не оплачено'}
+          </label>
+        </td>
+        <td class="td-actions">
+          <button class="icon-btn" onclick="openEditRepair('${r.id}')">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="icon-btn del" onclick="deleteRepair('${r.id}')">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+          </button>
+        </td>
+      </tr>`;
+    });
+  }
+
+  document.getElementById('repairsJournalBody').innerHTML = `
+    <div class="table-wrap" style="margin-top:14px">
+      <div class="table-toolbar">
+        <div class="table-toolbar-left">
+          <span style="color:var(--text3);font-weight:400;font-size:12px">${recs.length} записей · ${totalCost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})} ₽ всего${unpaidCost > 0 ? ` · <span style="color:var(--red);font-weight:600">${unpaidCost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})} ₽ не оплачено</span>` : ''}</span>
+        </div>
+      </div>
+      <div class="table-scroll" style="max-height:52vh">
+        <table>
+          <thead><tr>
+            <th>ТС</th><th>Дата счёта</th><th>№ счёта</th><th>Пробег</th>
+            <th>Сумма</th><th>Описание</th><th>Статус оплаты</th><th></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
 }
 
 // ─── VEHICLE CRUD ────────────────────────────────────────
@@ -4564,7 +5161,8 @@ function doGenExport() {
 function exportAllGensToXlsx(dateFrom, dateTo) {
   const gens = data.generators || [];
   if (!gens.length) return;
-  const NC = 13;
+  const NC = 16;
+  const inPeriod = d => (!dateFrom || d >= dateFrom) && (!dateTo || d <= dateTo);
   function filterGenRecs(gid) {
     const recs = genRecsFor(gid);
     if (!dateFrom && !dateTo) return recs;
@@ -4620,14 +5218,19 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
 
   hdr('  СВОДКА ПО ВИДАМ ТОПЛИВА', ST.secT);
   const fHS=cs({bold:true,sz:10,color:{rgb:P.white}},P.teal,{horizontal:'center',vertical:'center',wrapText:true},bAll('medium',P.teal));
-  [[0,3,'Вид топлива'],[3,3,'Выдано, л'],[6,3,'Факт. расход, л'],[9,3,'Остаток, л']].forEach(([c,span,h])=>{
+  [[0,3,'Вид топлива'],[3,2,'Выдано, л'],[5,2,'По норме, л'],[7,2,'Факт. расход, л'],[9,2,'Экономия, л'],[11,2,'Перерасход, л'],[13,4,'Остаток, л']].forEach(([c,span,h])=>{
     put(R(),c,h,fHS);merge(R(),c,R(),c+span-1);
   });
   fill(R(),fHS);rowH(R(),22);next();
   const gIss={diesel:0,gasoline:0,gas:0},gAct={diesel:0,gasoline:0,gas:0},gBal={diesel:0,gasoline:0,gas:0};
+  const gNorm={diesel:0,gasoline:0,gas:0},gEcon={diesel:0,gasoline:0,gas:0},gOver={diesel:0,gasoline:0,gas:0};
   gens.forEach(g=>{
     const ft=g.fuel||'diesel';
-    filterGenRecs(g.id).forEach(r=>{gIss[ft]+=(r.fuelIssued||0);gAct[ft]+=(r.fuelActual||0);});
+    let gn=0, ga=0;
+    filterGenRecs(g.id).forEach(r=>{gIss[ft]+=(r.fuelIssued||0);gAct[ft]+=(r.fuelActual||0);gn+=(r.fuelUsed||0);ga+=(r.fuelActual||0);});
+    gNorm[ft]+=gn;
+    gEcon[ft]+=Math.max(0,gn-ga);
+    gOver[ft]+=Math.max(0,ga-gn);
     const bm=computeGenFuelBalances(g.id);
     const sorted=genRecsFor(g.id).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
     gBal[ft]+=sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
@@ -4639,14 +5242,58 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     const bBg=bal<0?P.redPale:bal===0?P.gray2:P.greenPale;
     const sL=cs({bold:true,sz:10,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',indent:1},bAll('thin',P.gray3));
     const sN=cs({sz:10,color:{rgb:P.text}},bg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
+    const sEcon=cs({bold:true,sz:10,color:{rgb:P.green}},P.greenPale,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
+    const sOver=cs({bold:true,sz:10,color:{rgb:P.red}},P.redPale,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
     const sB=cs({bold:true,sz:10,color:{rgb:bal<0?P.red:bal===0?P.gray4:P.green}},bBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
     put(R(),0,fuelLabels[ft],sL);merge(R(),0,R(),2);fill(R(),sL);
-    put(R(),3,+gIss[ft].toFixed(2),sN);merge(R(),3,R(),5);
-    put(R(),6,+gAct[ft].toFixed(2),sN);merge(R(),6,R(),8);
-    put(R(),9,bal,sB);merge(R(),9,R(),11);fillRange(R(),cs(null,bg,null,{}),12,NC);
+    put(R(),3,+gIss[ft].toFixed(2),sN);merge(R(),3,R(),4);
+    put(R(),5,+gNorm[ft].toFixed(2),sN);merge(R(),5,R(),6);
+    put(R(),7,+gAct[ft].toFixed(2),sN);merge(R(),7,R(),8);
+    put(R(),9,+gEcon[ft].toFixed(2),gEcon[ft]>0?sEcon:sN);merge(R(),9,R(),10);
+    put(R(),11,+gOver[ft].toFixed(2),gOver[ft]>0?sOver:sN);merge(R(),11,R(),12);
+    put(R(),13,bal,sB);merge(R(),13,R(),16);
     rowH(R(),20);next();
   });
   spacer();
+
+  // ── СВОДКА ПО ЁМКОСТЯМ (ТОПЛИВНЫЕ БАКИ) ──
+  if ((data.tanks || []).length) {
+    const secTk=cs({bold:true,sz:11,color:{rgb:P.white}},'0D9488',{horizontal:'left',vertical:'center',indent:1},bAll('medium','0D9488'));
+    hdr('  СВОДКА ПО ЁМКОСТЯМ (ОСТАТКИ ТОПЛИВА)', secTk);
+    const hTk=cs({bold:true,sz:10,color:{rgb:P.white}},P.navyMid,{horizontal:'left',vertical:'center',indent:1,wrapText:true},bAll('medium',P.navy));
+    const hTkC=cs({bold:true,sz:10,color:{rgb:P.white}},P.navyMid,{horizontal:'center',vertical:'center',wrapText:true},bAll('medium',P.navy));
+    [[0,4,'Наименование'],[4,4,'Местонахождение / Объект'],[8,2,'Вид топлива'],[10,2,'Объём, л'],[12,2,'Приход за период, л'],[14,2,'Расход за период, л'],[16,1,'Остаток, л']]
+      .forEach(([c,span,t])=>{ put(R(),c,t,c===0||c===4?hTk:hTkC); merge(R(),c,R(),c+span-1); });
+    rowH(R(),24);next();
+    let tkIncTot=0, tkIssTot=0, tkBalTot=0;
+    tanksAll().slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','ru')).forEach((t,i)=>{
+      const bg=i%2===0?P.white:P.gray1;
+      const income=(data.tankIncomes||[]).filter(r=>r.tankId===t.id&&inPeriod(r.date)).reduce((s,r)=>s+(r.amount||0),0);
+      const boundGenIds=new Set((data.generators||[]).filter(g=>g.tankId===t.id).map(g=>g.id));
+      const issued=(data.genRecords||[]).filter(r=>boundGenIds.has(r.generatorId)&&inPeriod(r.date)).reduce((s,r)=>s+(r.fuelIssued||0),0);
+      const cb=computeTankBalance(t.id);
+      tkIncTot+=income; tkIssTot+=issued; tkBalTot+=cb.balance;
+      const bBg=cb.balance<0?P.redPale:cb.balance===0?P.gray2:P.greenPale;
+      const sB=cs({bold:true,sz:10,color:{rgb:cb.balance<0?P.red:cb.balance===0?P.gray4:P.green}},bBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
+      put(R(),0,t.name||'—',ST.tdL(bg));merge(R(),0,R(),3);
+      put(R(),4,[t.location,t.object].filter(Boolean).join(' · ')||'—',ST.tdL(bg));merge(R(),4,R(),7);
+      put(R(),8,fuelLabels[t.fuel||'diesel'],ST.tdC(bg));merge(R(),8,R(),9);
+      put(R(),10,t.capacity!=null?+t.capacity:'—',ST.tdC(bg));merge(R(),10,R(),11);
+      put(R(),12,+income.toFixed(2),ST.tdR(bg));merge(R(),12,R(),13);
+      put(R(),14,+issued.toFixed(2),ST.tdR(bg));merge(R(),14,R(),15);
+      put(R(),16,+cb.balance.toFixed(2),sB);
+      rowH(R(),20);next();
+    });
+    const tkTL=cs({bold:true,sz:11,color:{rgb:P.text}},P.navyLight,{horizontal:'left',vertical:'center',indent:1},bAll('medium',P.navy));
+    const tkTN=cs({bold:true,sz:11,color:{rgb:P.text}},P.navyLight,{horizontal:'right',vertical:'center',indent:1},bAll('medium',P.navy));
+    put(R(),0,'ИТОГО',tkTL);merge(R(),0,R(),11);fill(R(),tkTL);
+    put(R(),12,+tkIncTot.toFixed(2),tkTN);merge(R(),12,R(),13);
+    put(R(),14,+tkIssTot.toFixed(2),tkTN);merge(R(),14,R(),15);
+    const tkBalRound=+tkBalTot.toFixed(2);
+    put(R(),16,tkBalRound,cs({bold:true,sz:11,color:{rgb:tkBalRound<0?P.red:P.green}},P.navyLight,{horizontal:'right',vertical:'center',indent:1},bAll('medium',P.navy)));
+    rowH(R(),22);next();
+    spacer();
+  }
 
   // ── СВОДКА ПО МЕСТОНАХОЖДЕНИЯМ (СОСТОЯНИЕ ДЭС) ──
   {
@@ -4656,6 +5303,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     const hL=cs({bold:true,sz:10,color:{rgb:P.white}},P.navyMid,{horizontal:'left',vertical:'center',indent:1,wrapText:true},bAll('medium',P.navy));
     [[0,6,'Местонахождение'],[6,2,'В работе'],[8,2,'В резерве'],[10,2,'В ремонте'],[12,2,'Всего ДЭС']]
       .forEach(([c,span,t])=>{ put(R(),c,t,c===0?hL:ST.tHead); merge(R(),c,R(),c+span-1); });
+    fillRange(R(),ST.tHead,14,NC);
     rowH(R(),24);next();
     let lWork=0,lRes=0,lRep=0,lTot=0;
     locBreak.forEach(([name,r],i)=>{
@@ -4685,11 +5333,11 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
   spacer();
 
   hdr('  ПЕРЕЧЕНЬ ДИЗЕЛЬНЫХ ГЕНЕРАТОРОВ (ПО МЕСТОНАХОЖДЕНИЮ)', ST.secN);
-  ['№','Наименование','Серийный номер','Ответственное лицо','Местонахождение','Мощность, кВт','Вид топлива','Состояние','Наработка, мтч','Выдано, л','Факт. расход, л','Остаток в баке, л','Стоимость ДЭС, руб.','Примечание']
+  ['№','Наименование','Серийный номер','Ответственное лицо','Местонахождение','Мощность, кВт','Вид топлива','Состояние','Наработка, мтч','Выдано, л','По норме, л','Факт. расход, л','Экономия, л','Перерасход, л','Остаток в баке, л','Стоимость ДЭС, руб.','Примечание']
     .forEach((h,c)=>put(R(),c,h,ST.tHead));
   rowH(R(),28);next();
   const gensByLoc=gens.slice().sort((a,b)=>{const la=(a.location||'￿').toLowerCase(),lb=(b.location||'￿').toLowerCase();return la<lb?-1:la>lb?1:0;});
-  let totH=0,totIss=0,totAct=0,totBal=0,totCost=0, curLoc=null, gNum=0, zebra=0;
+  let totH=0,totIss=0,totNorm=0,totAct=0,totEcon=0,totOver=0,totBal=0,totCost=0, curLoc=null, gNum=0, zebra=0;
   gensByLoc.forEach(g=>{
     const locGroup=g.location||'— Без местонахождения —';
     if(locGroup!==curLoc){
@@ -4701,11 +5349,14 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     const recs=filterGenRecs(g.id);
     const hours=recs.reduce((s,r)=>s+(r.hours||0),0);
     const issued=recs.reduce((s,r)=>s+(r.fuelIssued||0),0);
+    const norm=recs.reduce((s,r)=>s+(r.fuelUsed||0),0);
     const actual=recs.reduce((s,r)=>s+(r.fuelActual||0),0);
+    const economy=Math.max(0,norm-actual);
+    const overrun=Math.max(0,actual-norm);
     const bm=computeGenFuelBalances(g.id);
     const sorted=genRecsFor(g.id).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
     const bal=sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
-    totH+=hours;totIss+=issued;totAct+=actual;totBal+=bal;
+    totH+=hours;totIss+=issued;totNorm+=norm;totAct+=actual;totEcon+=economy;totOver+=overrun;totBal+=bal;
     if(g.cost!=null) totCost+=g.cost;
     const fBal=+bal.toFixed(2);
     const bBg=fBal<0?P.redPale:fBal===0?P.gray2:P.greenPale;
@@ -4714,21 +5365,28 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     const sBg=!g.status?P.gray2:st==='в работе'?P.greenPale:st==='резерв'?P.bluePale:P.redPale;
     const sC=!g.status?P.gray4:st==='в работе'?P.green:st==='резерв'?P.blue:P.red;
     const sStatus=cs({bold:true,sz:10,color:{rgb:sC}},sBg,{horizontal:'center',vertical:'center'},bAll('thin',P.gray3));
+    const sEcon=cs({bold:true,sz:10,color:{rgb:P.green}},P.greenPale,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
+    const sOver=cs({bold:true,sz:10,color:{rgb:P.red}},P.redPale,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
     put(R(),0,gNum,ST.tdC(bg));put(R(),1,g.name||'—',ST.tdL(bg));put(R(),2,g.serial||'—',ST.tdC(bg));
     put(R(),3,g.responsible||'—',ST.tdL(bg));put(R(),4,g.location||'—',ST.tdL(bg));
     put(R(),5,g.power!=null?g.power:'—',ST.tdC(bg));put(R(),6,fuelLabels[g.fuel||'diesel'],ST.tdC(bg));
     put(R(),7,g.status||'—',sStatus);put(R(),8,+hours.toFixed(1),ST.tdR(bg));
-    put(R(),9,+issued.toFixed(2),ST.tdR(bg));put(R(),10,+actual.toFixed(2),ST.tdR(bg));put(R(),11,fBal,sB);
-    put(R(),12,g.cost!=null?g.cost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tdR(bg));
-    put(R(),13,g.note||'—',ST.tdL(bg));
+    put(R(),9,+issued.toFixed(2),ST.tdR(bg));put(R(),10,+norm.toFixed(2),ST.tdR(bg));put(R(),11,+actual.toFixed(2),ST.tdR(bg));
+    put(R(),12,economy>0?+economy.toFixed(2):'—',economy>0?sEcon:ST.tdR(bg));
+    put(R(),13,overrun>0?+overrun.toFixed(2):'—',overrun>0?sOver:ST.tdR(bg));
+    put(R(),14,fBal,sB);
+    put(R(),15,g.cost!=null?g.cost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tdR(bg));
+    put(R(),16,g.note||'—',ST.tdL(bg));
     rowH(R(),20);next();
   });
   put(R(),0,'ИТОГО',ST.totL);merge(R(),0,R(),7);fill(R(),ST.totL);
-  put(R(),8,+totH.toFixed(1),ST.tot);put(R(),9,+totIss.toFixed(2),ST.tot);put(R(),10,+totAct.toFixed(2),ST.tot);
+  put(R(),8,+totH.toFixed(1),ST.tot);put(R(),9,+totIss.toFixed(2),ST.tot);put(R(),10,+totNorm.toFixed(2),ST.tot);put(R(),11,+totAct.toFixed(2),ST.tot);
+  put(R(),12,+totEcon.toFixed(2),cs({bold:true,sz:10,color:{rgb:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
+  put(R(),13,+totOver.toFixed(2),cs({bold:true,sz:10,color:{rgb:P.red}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
   const tBal=+totBal.toFixed(2);
-  put(R(),11,tBal,cs({bold:true,sz:10,color:{rgb:tBal<0?P.red:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
-  put(R(),12,totCost>0?totCost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tot);
-  put(R(),13,'',ST.tot);
+  put(R(),14,tBal,cs({bold:true,sz:10,color:{rgb:tBal<0?P.red:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
+  put(R(),15,totCost>0?totCost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tot);
+  put(R(),16,'',ST.tot);
   rowH(R(),22);next();
   spacer();
 
@@ -4764,7 +5422,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     merge(R(),7,R(),NC);put(R(),7,'',ST.tot);
     rowH(R(),22);next();
   }
-  ws['!cols']=[{wch:4},{wch:22},{wch:16},{wch:20},{wch:20},{wch:10},{wch:12},{wch:12},{wch:12},{wch:10},{wch:12},{wch:14},{wch:16},{wch:28}];
+  ws['!cols']=[{wch:4},{wch:22},{wch:16},{wch:20},{wch:20},{wch:10},{wch:12},{wch:12},{wch:12},{wch:10},{wch:10},{wch:12},{wch:11},{wch:11},{wch:12},{wch:16},{wch:28}];
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Все ДЭС');
   const fname=`ДЭС_Сводка_${dateFrom?fmtDate(dateFrom).replace(/\./g,'-')+'_'+fmtDate(dateTo).replace(/\./g,'-'):'ВсёВремя'}.xlsx`;
@@ -4848,7 +5506,10 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
   hdr('  ПОКАЗАТЕЛИ ЗА ПЕРИОД', ST.secT);
   const totHours=filtRecs.reduce((s,r)=>s+(r.hours||0),0);
   const totIssued=filtRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
+  const totNorm=filtRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
   const totActual=filtRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
+  const totEconomy=Math.max(0,totNorm-totActual);
+  const totOverrun=Math.max(0,totActual-totNorm);
   const avgCons=totHours>0&&totActual>0?totActual/totHours:0;
   const balMap=computeGenFuelBalances(gid);
   const lastRec=allRecs[allRecs.length-1];
@@ -4857,7 +5518,10 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
     ['Наработка за период, мтч', +totHours.toFixed(1)],
     ['Количество записей', filtRecs.length],
     ['Выдано топлива за период, л', +totIssued.toFixed(2)],
+    ['Расход по норме за период, л', +totNorm.toFixed(2)],
     ['Фактический расход за период, л', +totActual.toFixed(2)],
+    ['Экономия топлива, л', totEconomy>0?+totEconomy.toFixed(2):'—'],
+    ['Перерасход топлива, л', totOverrun>0?+totOverrun.toFixed(2):'—'],
     ['Средний расход, л/мтч', avgCons>0?+avgCons.toFixed(2):'—'],
     ['Текущий остаток в баке, л', +curBal.toFixed(2)],
   ].forEach(([label,val],i)=>{
