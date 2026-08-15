@@ -1,6 +1,6 @@
 {
   "name": "dispetcherizaciya-avto",
-  "version": "2.0.25",
+  "version": "2.0.26",
   "description": "Диспетчеризация авто группы компаний ООО Технрайз Велл Сервис",
   "main": "electron/main.js",
   "scripts": {
@@ -28,7 +28,9 @@
       "package.json"
     ],
     "asarUnpack": [
-      "node_modules/node-unrar-js/**"
+      "node_modules/node-unrar-js/**",
+      "node_modules/tesseract.js/**",
+      "node_modules/tesseract.js-core/**"
     ],
     "win": {
       "target": [
@@ -54,6 +56,7 @@
     "exceljs": "^4.4.0",
     "iconv-lite": "^0.7.3",
     "node-unrar-js": "^2.0.2",
-    "pdfjs-dist": "^3.0.0"
+    "pdfjs-dist": "^3.0.0",
+    "tesseract.js": "^7.0.0"
   }
 }

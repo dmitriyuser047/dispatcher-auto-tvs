@@ -10,6 +10,7 @@ import ExcelJS from "exceljs";
 import iconv from "iconv-lite";
 import pkg from "pdfjs-dist/build/pdf.js";
 const { getDocument } = pkg;
+import Tesseract from "tesseract.js";
 
 export const DEFAULT_CONFIG = {
   supplier: 'ООО "Башпромсбыт"',
@@ -245,19 +246,163 @@ function extractMoneyFromLine(line) {
   return m ? m[1].replace(/\s/g, "").replace(".", ",") : null;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  OCR для сканированных PDF (изображения без текстового слоя)
+// ═══════════════════════════════════════════════════════════════════
+
+let ocrWorker = null;
+
+async function getOcrWorker() {
+  if (!ocrWorker) {
+    ocrWorker = await Tesseract.createWorker("rus");
+  }
+  return ocrWorker;
+}
+
+async function extractPageImage(page) {
+  const ops = await page.getOperatorList();
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    if (ops.fnArray[i] === 85 || ops.fnArray[i] === 82) {
+      const imgName = ops.argsArray[i][0];
+      const imgData = await page.objs.get(imgName);
+      if (imgData && imgData.data && imgData.width && imgData.height) return imgData;
+    }
+  }
+  return null;
+}
+
+function rgbToBmpBuffer(imgData) {
+  const { width, height, data } = imgData;
+  const channels = data.length / (width * height);
+  const rowBytes = width * 3;
+  const rowPad = (4 - (rowBytes % 4)) % 4;
+  const paddedRow = rowBytes + rowPad;
+  const pixelDataSize = paddedRow * height;
+  const fileSize = 54 + pixelDataSize;
+  const buf = Buffer.alloc(fileSize);
+  buf.write("BM", 0);
+  buf.writeUInt32LE(fileSize, 2);
+  buf.writeUInt32LE(54, 10);
+  buf.writeUInt32LE(40, 14);
+  buf.writeInt32LE(width, 18);
+  buf.writeInt32LE(-height, 22);
+  buf.writeUInt16LE(1, 26);
+  buf.writeUInt16LE(24, 28);
+  buf.writeUInt32LE(0, 30);
+  buf.writeUInt32LE(pixelDataSize, 34);
+  let offset = 54;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const srcIdx = (y * width + x) * channels;
+      buf[offset++] = data[srcIdx + 2];
+      buf[offset++] = data[srcIdx + 1];
+      buf[offset++] = data[srcIdx];
+    }
+    for (let p = 0; p < rowPad; p++) buf[offset++] = 0;
+  }
+  return buf;
+}
+
+function isPhotoPage(imgData) {
+  if (!imgData || imgData.width < 400 || imgData.height < 400) return true;
+  const { data, width, height } = imgData;
+  const channels = data.length / (width * height);
+  const step = Math.max(1, Math.floor(width * height / 5000));
+  let darkCount = 0, totalSampled = 0;
+  for (let i = 0; i < width * height; i += step) {
+    const idx = i * channels;
+    const gray = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+    if (gray < 80) darkCount++;
+    totalSampled++;
+  }
+  const darkRatio = darkCount / totalSampled;
+  return darkRatio > 0.35;
+}
+
+async function ocrPageImage(page, worker) {
+  const imgData = await extractPageImage(page);
+  if (!imgData) return "";
+  if (isPhotoPage(imgData)) return "";
+  const bmp = rgbToBmpBuffer(imgData);
+  const tmpFile = path.join(os.tmpdir(), `ocr_${Date.now()}_${Math.random().toString(36).slice(2)}.bmp`);
+  try {
+    fs.writeFileSync(tmpFile, bmp);
+    const result = await worker.recognize(tmpFile);
+    return result.data.text || "";
+  } finally {
+    try { fs.unlinkSync(tmpFile); } catch {}
+  }
+}
+
+function ocrTextToLines(text) {
+  return buildVisualLines(
+    text.split(/\n/).filter(s => s.trim()).map((s, i) => ({
+      str: s,
+      transform: [1, 0, 0, 1, 0, -i * 12],
+      width: s.length * 6,
+      height: 10,
+    }))
+  );
+}
+
 async function pdfToLayout(filePathOrBuffer) {
   const data = typeof filePathOrBuffer === "string"
     ? new Uint8Array(fs.readFileSync(filePathOrBuffer))
     : new Uint8Array(filePathOrBuffer);
   const doc = await getDocument({ data, useSystemFonts: true }).promise;
   const allLines = [];
+  let hasText = false;
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
     const content = await page.getTextContent();
     const pageLines = buildVisualLines(content.items);
+    if (pageLines.length > 0) hasText = true;
     allLines.push(...pageLines);
   }
+  if (hasText || doc.numPages === 0) return allLines;
+
+  const worker = await getOcrWorker();
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const text = await ocrPageImage(page, worker);
+    if (text) allLines.push(...ocrTextToLines(text));
+  }
   return allLines;
+}
+
+async function pdfToPageLayouts(filePathOrBuffer) {
+  const data = typeof filePathOrBuffer === "string"
+    ? new Uint8Array(fs.readFileSync(filePathOrBuffer))
+    : new Uint8Array(filePathOrBuffer);
+  const doc = await getDocument({ data, useSystemFonts: true }).promise;
+  const pages = [];
+  let hasText = false;
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    const pageLines = buildVisualLines(content.items);
+    if (pageLines.length > 0) hasText = true;
+    pages.push(pageLines);
+  }
+  if (hasText) return pages;
+
+  const worker = await getOcrWorker();
+  const ocrPages = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const text = await ocrPageImage(page, worker);
+    ocrPages.push(text ? ocrTextToLines(text) : []);
+  }
+  return ocrPages;
+}
+
+function isInvoiceStartPage(pageLines) {
+  return pageLines.some(l => /сч[её]т\s*(на\s*оплату|[-–]\s*договор)/i.test(l.text));
+}
+
+function isUpdPage(pageLines) {
+  const text = pageLines.map(l => l.text).join(" ");
+  return /универсальн\S*\s+передаточн|счет-фактура\s*№|упд\s*№/i.test(text);
 }
 
 async function pdfToText(filePath) {
@@ -547,27 +692,7 @@ async function processArchiveFolder(folder, config, archiveLabel = "") {
   };
 }
 
-async function processSinglePdf(filePath, config, label = "") {
-  const layout = await pdfToLayout(filePath);
-  const flatText = linesToText(layout);
-  const baseName = path.basename(filePath);
-  const type = classifyPdf(filePath);
-
-  let inv = smartParseDocument(layout);
-
-  let upd = parseUpdText(flatText);
-  if (!upd.updNumber && inv.invoiceNumber) {
-    upd = { updNumber: inv.invoiceNumber, updDate: inv.invoiceDate };
-  }
-
-  if (!inv.total) return null;
-  if (!inv.description) inv.description = label || baseName;
-
-  const combinedForObject = `${inv.description} ${label}`;
-  const objRule = matchRules(combinedForObject, config.objectRules, { object: "", contract: "" });
-  const catRule = matchRules(inv.description, config.categoryRules, { category: config.fallbackCategory, statья: config.fallbackStatья });
-
-  const isFromUpd = type === "upd" || !inv.invoiceNumber;
+function buildRowFromParsed(inv, upd, config, label, baseName, isFromUpd) {
   const basisLabel = isFromUpd
     ? `Счет-фактура №${inv.invoiceNumber || '?'} от ${inv.invoiceDate || '?'}`
     : `Счет №${inv.invoiceNumber || '?'} от ${inv.invoiceDate || '?'}`;
@@ -576,6 +701,10 @@ async function processSinglePdf(filePath, config, label = "") {
   const updLabel = upd.updNumber
     ? `УПД (${upd.updNumber} от ${upd.updDate}) на ${totalStr}`
     : `УПД на ${totalStr}`;
+
+  const combinedForObject = `${inv.description} ${label}`;
+  const objRule = matchRules(combinedForObject, config.objectRules, { object: "", contract: "" });
+  const catRule = matchRules(inv.description, config.categoryRules, { category: config.fallbackCategory, statья: config.fallbackStatья });
 
   return {
     sum: parseFloat(extractNumber(totalStr) || 0),
@@ -589,6 +718,58 @@ async function processSinglePdf(filePath, config, label = "") {
     statья: catRule.statья,
     sourceFolder: baseName,
   };
+}
+
+async function processSinglePdf(filePath, config, label = "") {
+  const baseName = path.basename(filePath);
+  const type = classifyPdf(filePath);
+
+  const pageLayouts = await pdfToPageLayouts(filePath);
+
+  const invoicePageIdxs = [];
+  for (let i = 0; i < pageLayouts.length; i++) {
+    if (isInvoiceStartPage(pageLayouts[i])) invoicePageIdxs.push(i);
+  }
+
+  if (invoicePageIdxs.length <= 1) {
+    const layout = pageLayouts.flat();
+    const flatText = linesToText(layout);
+    let inv = smartParseDocument(layout);
+    let upd = parseUpdText(flatText);
+    if (!upd.updNumber && inv.invoiceNumber) {
+      upd = { updNumber: inv.invoiceNumber, updDate: inv.invoiceDate };
+    }
+    if (!inv.total) return null;
+    if (!inv.description) inv.description = label || baseName;
+    const isFromUpd = type === "upd" || !inv.invoiceNumber;
+    return buildRowFromParsed(inv, upd, config, label, baseName, isFromUpd);
+  }
+
+  const rows = [];
+  for (let g = 0; g < invoicePageIdxs.length; g++) {
+    const startPage = invoicePageIdxs[g];
+    const endPage = g + 1 < invoicePageIdxs.length ? invoicePageIdxs[g + 1] : pageLayouts.length;
+
+    const invoiceLines = pageLayouts[startPage];
+    let inv = smartParseDocument(invoiceLines);
+
+    let updLines = null;
+    for (let p = startPage + 1; p < endPage; p++) {
+      if (isUpdPage(pageLayouts[p])) { updLines = pageLayouts[p]; break; }
+    }
+
+    let upd = {};
+    if (updLines) upd = parseUpdText(linesToText(updLines));
+    if (!upd.updNumber && inv.invoiceNumber) {
+      upd = { updNumber: inv.invoiceNumber, updDate: inv.invoiceDate };
+    }
+
+    if (!inv.total) continue;
+    if (!inv.description) inv.description = label || baseName;
+    rows.push(buildRowFromParsed(inv, upd, config, label, baseName, false));
+  }
+
+  return rows.length === 1 ? rows[0] : rows.length > 0 ? rows : null;
 }
 
 /**
@@ -698,10 +879,13 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}) {
         // Счёт без пары — обрабатываем отдельно
         processedPaths.add(inv.path);
         try {
-          const row = await processSinglePdf(inv.path, config, inv.name);
-          if (row) {
-            rows.push(row);
-            onLog({ type: "ok", text: `${inv.name} → ${row.sum.toLocaleString("ru-RU")} руб.` });
+          const result = await processSinglePdf(inv.path, config, inv.name);
+          if (Array.isArray(result)) {
+            rows.push(...result);
+            onLog({ type: "ok", text: `${inv.name} → ${result.length} счетов (${result.reduce((s, r) => s + r.sum, 0).toLocaleString("ru-RU")} руб.)` });
+          } else if (result) {
+            rows.push(result);
+            onLog({ type: "ok", text: `${inv.name} → ${result.sum.toLocaleString("ru-RU")} руб.` });
           } else {
             onLog({ type: "warn", text: `${inv.name} — не удалось распознать` });
           }
@@ -716,10 +900,13 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}) {
       if (processedPaths.has(f.path)) continue;
       processedPaths.add(f.path);
       try {
-        const row = await processSinglePdf(f.path, config, f.name);
-        if (row) {
-          rows.push(row);
-          onLog({ type: "ok", text: `${f.name} → ${row.sum.toLocaleString("ru-RU")} руб.` });
+        const result = await processSinglePdf(f.path, config, f.name);
+        if (Array.isArray(result)) {
+          rows.push(...result);
+          onLog({ type: "ok", text: `${f.name} → ${result.length} счетов (${result.reduce((s, r) => s + r.sum, 0).toLocaleString("ru-RU")} руб.)` });
+        } else if (result) {
+          rows.push(result);
+          onLog({ type: "ok", text: `${f.name} → ${result.sum.toLocaleString("ru-RU")} руб.` });
         } else {
           onLog({ type: "warn", text: `${f.name} — не удалось распознать` });
         }
