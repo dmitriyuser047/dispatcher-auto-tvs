@@ -7,4 +7,8 @@ contextBridge.exposeInMainWorld("reestrAPI", {
   loadStatyi: () => ipcRenderer.invoke("load-statyi"),
   openConfig: () => ipcRenderer.invoke("open-config"),
   save: (filename, xlsxBase64) => ipcRenderer.invoke("save-xlsx", { filename, xlsxBase64 }),
+  checkUpdate: () => ipcRenderer.invoke("check-update"),
+  getAppVersion: () => ipcRenderer.invoke("get-app-version"),
+  openUrl: (url) => ipcRenderer.invoke("open-url", url),
+  onUpdateAvailable: (cb) => ipcRenderer.on("update-available", (_, info) => cb(info)),
 });

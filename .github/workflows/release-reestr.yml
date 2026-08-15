@@ -50,3 +50,27 @@ jobs:
             Скачайте и запустите установщик ниже.
           files: ReestrBuilder/dist/ReestrBuilder-Setup-${{ steps.pkg.outputs.version }}.exe
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update version.json
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git pull --rebase origin main
+          $v    = "${{ steps.pkg.outputs.version }}"
+          $tag  = "${{ github.ref_name }}"
+          $repo = "${{ github.repository }}"
+          $url  = "https://github.com/$repo/releases/download/$tag/ReestrBuilder-Setup-$v.exe"
+          $date = Get-Date -Format "yyyy-MM-dd"
+          $json = [ordered]@{
+            version = $v
+            date    = $date
+            notes   = "Доступна версия $v. Нажмите «Скачать обновление»."
+            url     = $url
+          } | ConvertTo-Json
+          [System.IO.File]::WriteAllText("ReestrBuilder/version.json", $json, [System.Text.UTF8Encoding]::new($false))
+          git add ReestrBuilder/version.json
+          git commit -m "chore: release $tag"
+          git push origin main
