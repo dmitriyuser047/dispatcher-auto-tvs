@@ -176,45 +176,59 @@
   #sidebarSummary::-webkit-scrollbar { width: 4px; }
   #sidebarSummary::-webkit-scrollbar-thumb { background: #b0bec5; border-radius: 4px; }
 
-  .vehicle-card {
-    padding: 12px 14px;
-    border-radius: var(--radius);
+  .vehicle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 6px;
     cursor: pointer;
-    margin-bottom: 4px;
+    margin-bottom: 1px;
     border: 1px solid transparent;
-    transition: all .15s;
-    position: relative;
+    transition: all .12s;
+    min-height: 36px;
   }
-  .vehicle-card:hover { background: var(--bg3); }
-  .vehicle-card.active {
-    background: rgba(59,130,246,0.12);
-    border-color: rgba(59,130,246,0.4);
+  .vehicle-row:hover { background: var(--bg3); }
+  .vehicle-row.active {
+    background: rgba(59,130,246,0.10);
+    border-color: rgba(59,130,246,0.35);
   }
-  .vc-plate {
-    font-size: 15px;
+  .vr-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .vr-plate {
+    font-size: 12px;
     font-weight: 700;
     font-family: 'Courier New', monospace;
-    background: var(--bg4);
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 4px;
-    border: 1px solid var(--border2);
-    letter-spacing: 1.5px;
-    margin-bottom: 7px;
+    letter-spacing: 0.5px;
     color: var(--text);
-  }
-  .vc-make { font-size: 15px; font-weight: 700; margin-bottom: 5px; color: var(--text); }
-  .vc-driver { font-size: 13px; color: var(--text2); }
-  .vc-org { font-size: 12px; color: var(--text3); margin-top: 3px; }
-  .vc-badge {
-    font-size: 11px;
-    background: rgba(22,163,74,0.1);
-    color: #16a34a;
-    border: 1px solid rgba(22,163,74,0.3);
-    padding: 3px 9px;
-    border-radius: 20px;
-    font-weight: 700;
+    flex-shrink: 0;
     white-space: nowrap;
+  }
+  .vr-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+    gap: 0;
+  }
+  .vr-make {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .vr-driver {
+    font-size: 11px;
+    color: var(--text3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .empty-list {
     padding: 32px 16px;
@@ -2414,37 +2428,19 @@ function renderVehicleList() {
     return;
   }
   list.innerHTML = filtered.map(v => {
-    const vRecs = recsFor(v.id);
-    const totalKm = vRecs.reduce((s, r) => s + (r.km || 0), 0);
     const statusColor = !v.status ? null
       : v.status === 'На ходу' ? 'var(--green)'
       : v.status === 'В резерве' ? 'var(--accent)'
       : v.status === 'В ремонте' || v.status === 'После ДТП' ? 'var(--red)'
       : 'var(--yellow)';
-    const fuelBadge = { diesel: { label: 'Дизель', cls: 'diesel' }, gasoline: { label: 'Бензин', cls: 'gasoline' }, gas: { label: 'Газ (ГБО)', cls: 'gas' } };
-    const fb = v.fuel ? fuelBadge[v.fuel] : null;
-    const actualKm = (v.odometer || 0) + totalKm;
-    return `<div class="vehicle-card ${selectedVehicleId === v.id ? 'active' : ''}" onclick="selectVehicle('${v.id}')" style="display:flex;flex-direction:column">
-      <div style="flex:1;min-width:0;overflow:hidden">
-        <div class="vc-plate">${v.plate}</div>
-        <div class="vc-make" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.make}</div>
-        <div class="vc-driver" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="display:inline;margin-right:4px"><circle cx="12" cy="8" r="4"/><path d="M6 20v-2a6 6 0 0112 0v2"/></svg>
-          ${v.driver}
-        </div>
-        ${v.org ? `<div class="vc-org" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.org}${v.object ? ' · ' + v.object : ''}</div>` : ''}
-        ${v.fuelcard ? `<div class="vc-org" style="font-family:'Courier New',monospace;letter-spacing:0.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-          <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="display:inline;margin-right:3px;vertical-align:middle"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>${v.fuelcard}
-        </div>` : ''}
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;align-items:center">
-        <div class="vc-badge">${Math.round(totalKm).toLocaleString('ru')} км</div>
-        ${v.status ? `<div style="font-size:11px;font-weight:700;color:${statusColor};background:${statusColor}1a;border:1px solid ${statusColor}4d;padding:3px 9px;border-radius:20px;white-space:nowrap">${v.status}</div>` : ''}
-        ${fb ? `<span class="fuel-tag ${fb.cls}" style="font-size:11px;padding:3px 9px">${fb.label}</span>` : ''}
-        ${(v.odometer || totalKm > 0) ? `<div style="font-size:11px;font-weight:600;color:#64748b;white-space:nowrap">Одометр: ${Math.round(actualKm).toLocaleString('ru')} км</div>` : ''}
-      </div>
+    return `<div class="vehicle-row ${selectedVehicleId === v.id ? 'active' : ''}" onclick="selectVehicle('${v.id}')">
+      ${statusColor ? `<span class="vr-dot" style="background:${statusColor}"></span>` : '<span class="vr-dot" style="background:var(--text3);opacity:.3"></span>'}
+      <span class="vr-plate">${v.plate}</span>
+      <span class="vr-info">
+        <span class="vr-make">${v.make}</span>
+        <span class="vr-driver">${v.driver || ''}</span>
+      </span>
     </div>`;
-
   }).join('');
 }
 
