@@ -1,0 +1,52 @@
+name: Build & Release ReestrBuilder
+
+on:
+  push:
+    tags:
+      - 'reestr-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ReestrBuilder/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ReestrBuilder
+        run: npm ci
+
+      - name: Build Electron app
+        working-directory: ReestrBuilder
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Get version
+        id: pkg
+        shell: pwsh
+        run: |
+          $v = (Get-Content ReestrBuilder/package.json -Raw | ConvertFrom-Json).version
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release & upload installer
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Реестр-Билдер v${{ steps.pkg.outputs.version }}"
+          body: |
+            ## Реестр-Билдер v${{ steps.pkg.outputs.version }}
+
+            Визуальный движок PDF, 2-шаговый интерфейс, автоклассификация.
+
+            Скачайте и запустите установщик ниже.
+          files: ReestrBuilder/dist/ReestrBuilder-Setup-${{ steps.pkg.outputs.version }}.exe
+          token: ${{ secrets.GITHUB_TOKEN }}
