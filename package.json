@@ -18,6 +18,15 @@
     "directories": {
       "output": "dist"
     },
+    "files": [
+      "electron/**",
+      "vendor/**",
+      "ReestrBuilder/lib.mjs",
+      "ReestrBuilder/config.json",
+      "ReestrBuilder/statyi.json",
+      "index.html",
+      "package.json"
+    ],
     "asarUnpack": [
       "node_modules/node-unrar-js/**"
     ],
@@ -41,6 +50,10 @@
   },
   "allowScripts": {},
   "dependencies": {
-    "node-unrar-js": "^2.0.2"
+    "adm-zip": "^0.5.0",
+    "exceljs": "^4.4.0",
+    "iconv-lite": "^0.7.3",
+    "node-unrar-js": "^2.0.2",
+    "pdfjs-dist": "^3.0.0"
   }
 }

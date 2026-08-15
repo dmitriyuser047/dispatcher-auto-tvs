@@ -18,3 +18,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateAvailable: (cb)   => ipcRenderer.on('update-available',  (_e, info) => cb(info)),
   onDownloadProgress: (cb)  => ipcRenderer.on('download-progress', (_e, pct)  => cb(pct)),
 });
+
+contextBridge.exposeInMainWorld('reestrAPI', {
+  parseInvoices: (arrayBuffer) => ipcRenderer.invoke('reestr-parse-invoices', arrayBuffer),
+  parsePdfs:     (pdfFiles)    => ipcRenderer.invoke('reestr-parse-pdfs', pdfFiles),
+  buildXlsx:     (data)        => ipcRenderer.invoke('reestr-build-xlsx', data),
+  loadStatyi:    ()            => ipcRenderer.invoke('reestr-load-statyi'),
+  save:          (filename, xlsxBase64) => ipcRenderer.invoke('reestr-save-xlsx', { filename, xlsxBase64 }),
+});

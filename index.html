@@ -850,6 +850,9 @@
         Добавить ёмкость
       </button>
     </div>
+    <div id="hdrReestr" style="display:none;gap:10px;align-items:center">
+      <span style="font-size:13px;color:var(--text2)">Реестр на оплату из архива со счетами и УПД</span>
+    </div>
   </div>
 </header>
 
@@ -903,6 +906,10 @@
       <button class="sec-tab" id="tabGenerators" onclick="switchSection('generators')">
         <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2"/><path d="M12 12v4m-2-2h4"/></svg>
         ДЭС
+      </button>
+      <button class="sec-tab" id="tabReestr" onclick="switchSection('reestr')">
+        <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        Реестр
       </button>
     </div>
 
@@ -5619,8 +5626,10 @@ function switchSection(section) {
   activeSection = section;
   document.getElementById('tabVehicles').classList.toggle('active', section === 'vehicles');
   document.getElementById('tabGenerators').classList.toggle('active', section === 'generators');
+  document.getElementById('tabReestr').classList.toggle('active', section === 'reestr');
   document.getElementById('hdrVehicles').style.display    = section === 'vehicles'   ? 'flex' : 'none';
   document.getElementById('hdrGenerators').style.display  = section === 'generators' ? 'flex' : 'none';
+  document.getElementById('hdrReestr').style.display      = section === 'reestr'     ? 'flex' : 'none';
   document.getElementById('sidebarVehicleHeader').style.display   = section === 'vehicles'   ? '' : 'none';
   document.getElementById('sidebarGeneratorHeader').style.display = section === 'generators' ? '' : 'none';
   document.getElementById('vehicleList').style.display    = section === 'vehicles'   ? '' : 'none';
@@ -5635,19 +5644,27 @@ function switchSection(section) {
   document.getElementById('tankList').style.display       = 'none';
   document.getElementById('btnAddTank').style.display     = 'none';
   document.getElementById('btnAddGen').style.display       = section === 'generators' ? '' : 'none';
-  document.getElementById('sidebarSummary').style.display  = '';
+  document.getElementById('sidebarSummary').style.display  = section === 'reestr' ? 'none' : '';
   historyFullscreen = false;
   selectedVehicleId = null;
   selectedGeneratorId = null;
-  document.getElementById('mainContent').innerHTML = section === 'vehicles'
-    ? `<div class="welcome">
-        <svg width="72" height="72" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><path d="M1 17l2-6h18l2 6M5 11l1-4h12l1 4M9 17v2m6-2v2M3 17h18"/><circle cx="7" cy="18.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="17" cy="18.5" r="1.5" fill="currentColor" stroke="none"/></svg>
-        <h2>Выберите транспортное средство</h2><p>Выберите ТС из списка слева или добавьте новое</p></div>`
-    : `<div class="welcome">
-        <svg width="72" height="72" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2"/><path d="M12 12v4m-2-2h4"/></svg>
-        <h2>Выберите дизельный генератор</h2><p>Выберите ДЭС из списка слева или добавьте новый</p></div>`;
-  if (section === 'vehicles') renderVehicleList();
-  else renderGeneratorList();
+
+  // Скрываем/показываем сайдбар для реестра
+  document.querySelector('.sidebar').style.display = section === 'reestr' ? 'none' : '';
+
+  if (section === 'reestr') {
+    renderReestrSection();
+  } else {
+    document.getElementById('mainContent').innerHTML = section === 'vehicles'
+      ? `<div class="welcome">
+          <svg width="72" height="72" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><path d="M1 17l2-6h18l2 6M5 11l1-4h12l1 4M9 17v2m6-2v2M3 17h18"/><circle cx="7" cy="18.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="17" cy="18.5" r="1.5" fill="currentColor" stroke="none"/></svg>
+          <h2>Выберите транспортное средство</h2><p>Выберите ТС из списка слева или добавьте новое</p></div>`
+      : `<div class="welcome">
+          <svg width="72" height="72" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2"/><path d="M12 12v4m-2-2h4"/></svg>
+          <h2>Выберите дизельный генератор</h2><p>Выберите ДЭС из списка слева или добавьте новый</p></div>`;
+    if (section === 'vehicles') renderVehicleList();
+    else renderGeneratorList();
+  }
 }
 
 // ─── GENERATOR LIST ──────────────────────────────────────
@@ -6961,6 +6978,333 @@ function renderGenSidebarSummary() {
   </div>`;
   list?.appendChild(div);
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  РЕЕСТР-БИЛДЕР (встроенный)
+// ═══════════════════════════════════════════════════════════════
+let reestrFiles = [];
+let reestrRows = [];
+let reestrStatyi = [];
+let reestrLastResult = null;
+let reestrStatyiLoaded = false;
+
+async function loadReestrStatyi() {
+  if (reestrStatyiLoaded) return;
+  if (window.reestrAPI) {
+    reestrStatyi = await window.reestrAPI.loadStatyi();
+    reestrStatyiLoaded = true;
+  }
+}
+
+function renderReestrSection() {
+  loadReestrStatyi();
+  const mc = document.getElementById('mainContent');
+  mc.innerHTML = `
+    <div style="padding:28px;max-width:1100px;margin:0 auto;overflow-y:auto;height:100%">
+      <h2 style="font-size:22px;font-weight:700;margin:0 0 4px;display:flex;align-items:center;gap:8px">
+        <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        Реестр-Билдер
+      </h2>
+      <p style="color:var(--text2);margin:0 0 20px;font-size:13px">Собирает реестр на оплату из архива со счетами и УПД</p>
+
+      <!-- Шаг 1: Загрузка -->
+      <div id="reestrUpload" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">
+        <div id="reestrDropzone" style="border:2px dashed var(--border);border-radius:10px;padding:32px 20px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s">
+          <div style="font-size:28px;margin-bottom:6px">📦</div>
+          <div style="font-size:14px;font-weight:600">Перетащите сюда zip-архив или PDF-файлы</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:4px">ZIP-архив со счетами или отдельные PDF — можно несколько</div>
+          <input type="file" id="reestrFileInput" accept=".zip,.pdf" multiple style="display:none">
+        </div>
+        <div id="reestrFileChips" style="display:flex;flex-direction:column;gap:6px;margin-top:12px"></div>
+        <button class="btn btn-primary" id="reestrParseBtn" disabled style="width:100%;margin-top:14px;justify-content:center">
+          <span class="reestr-spinner" style="display:none;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite"></span>
+          <span id="reestrParseBtnLabel">Распознать счета</span>
+        </button>
+        <div id="reestrError" style="display:none;border:1px solid var(--red);background:color-mix(in srgb,var(--red) 8%,transparent);color:var(--red);border-radius:8px;padding:10px 12px;font-size:13px;margin-top:12px"></div>
+      </div>
+
+      <!-- Лог -->
+      <div id="reestrLogCard" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;flex-wrap:wrap;gap:6px">
+          <span id="reestrSummaryCount" style="font-size:16px;font-weight:700">—</span>
+          <span id="reestrSummaryAmount" style="font-size:13px;color:var(--text2)"></span>
+        </div>
+        <div id="reestrLog" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;font-family:ui-monospace,monospace;font-size:12px"></div>
+      </div>
+
+      <!-- Шаг 2: Таблица -->
+      <div id="reestrReviewCard" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">
+        <h3 style="margin:0 0 4px;font-size:16px;font-weight:700">Проверка и выбор статей</h3>
+        <p style="color:var(--text3);font-size:12px;margin:0 0 14px">Проверьте распознанные данные. Измените статью БДДС в выпадающем списке, если нужно.</p>
+        <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:700px">
+            <thead><tr style="background:var(--accent);color:#fff">
+              <th style="padding:8px;text-align:left;font-weight:600">№</th>
+              <th style="padding:8px;text-align:left;font-weight:600">Сумма</th>
+              <th style="padding:8px;text-align:left;font-weight:600">Описание</th>
+              <th style="padding:8px;text-align:left;font-weight:600">Объект</th>
+              <th style="padding:8px;text-align:left;font-weight:600">Статья БДДС</th>
+              <th style="padding:8px;width:36px"></th>
+            </tr></thead>
+            <tbody id="reestrReviewBody"></tbody>
+          </table>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:10px 0 0;font-size:14px;font-weight:700">
+          <span style="color:var(--text2)">Итого:</span>
+          <span id="reestrReviewTotal">0,00 руб.</span>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button class="btn btn-ghost" id="reestrAddRowBtn" style="flex:1;justify-content:center">+ Добавить строку</button>
+          <button class="btn btn-ghost" id="reestrBackBtn" style="flex:0;justify-content:center">← Назад</button>
+          <button class="btn btn-primary" id="reestrBuildBtn" style="flex:1;justify-content:center">
+            <span class="reestr-spinner" style="display:none;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite"></span>
+            <span id="reestrBuildBtnLabel">Сформировать реестр</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Шаг 3: Готово -->
+      <div id="reestrDoneCard" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
+          <span id="reestrDoneCount" style="font-size:16px;font-weight:700">—</span>
+          <span id="reestrDoneAmount" style="font-size:13px;color:var(--text2)"></span>
+        </div>
+        <button class="btn btn-primary" id="reestrDownloadBtn" style="width:100%;justify-content:center">⬇ Скачать реестр.xlsx</button>
+      </div>
+
+      <p style="color:var(--text3);font-size:11px;text-align:center;margin-top:20px">
+        Правила определения объектов и категорий — в файле <code style="background:var(--bg3);padding:1px 5px;border-radius:4px">config.json</code>.
+        Справочник статей БДДС: <span id="reestrStatyiCount">...</span> статей.
+      </p>
+    </div>`;
+
+  reestrBindEvents();
+  if (reestrStatyi.length) {
+    const el = document.getElementById('reestrStatyiCount');
+    if (el) el.textContent = reestrStatyi.length;
+  }
+}
+
+function reestrBindEvents() {
+  const dropzone = document.getElementById('reestrDropzone');
+  const fileInput = document.getElementById('reestrFileInput');
+  dropzone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', e => { reestrAddFiles(e.target.files); fileInput.value = ''; });
+  ['dragenter','dragover'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.style.borderColor = 'var(--accent)'; dropzone.style.background = 'color-mix(in srgb, var(--accent) 6%, transparent)'; }));
+  ['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.style.borderColor = ''; dropzone.style.background = ''; }));
+  dropzone.addEventListener('drop', e => reestrAddFiles(e.dataTransfer.files));
+  document.getElementById('reestrParseBtn').addEventListener('click', reestrParse);
+  document.getElementById('reestrAddRowBtn').addEventListener('click', () => {
+    reestrRows.push({ sum:0, date:new Date().toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'}), category:'', description:'', naz:'', obj:'', dog:'', osn:'', updLabel:'', 'statья':'', sourceFolder:'вручную' });
+    reestrRenderTable();
+  });
+  document.getElementById('reestrBackBtn').addEventListener('click', () => {
+    document.getElementById('reestrReviewCard').style.display = 'none';
+    document.getElementById('reestrDoneCard').style.display = 'none';
+    document.getElementById('reestrLogCard').style.display = 'none';
+    reestrRows = [];
+  });
+  document.getElementById('reestrBuildBtn').addEventListener('click', reestrBuild);
+  document.getElementById('reestrDownloadBtn').addEventListener('click', reestrDownload);
+}
+
+function reestrAddFiles(fileList) {
+  for (const file of fileList) {
+    const ext = file.name.toLowerCase().split('.').pop();
+    if (ext !== 'zip' && ext !== 'pdf') continue;
+    if (ext === 'zip' && reestrFiles.some(f => f.type === 'zip')) continue;
+    if (reestrFiles.some(f => f.file.name === file.name && f.file.size === file.size)) continue;
+    reestrFiles.push({ file, type: ext });
+  }
+  reestrRenderChips();
+  document.getElementById('reestrParseBtn').disabled = reestrFiles.length === 0;
+}
+
+function reestrRenderChips() {
+  const el = document.getElementById('reestrFileChips');
+  el.innerHTML = '';
+  reestrFiles.forEach((f, i) => {
+    const chip = document.createElement('div');
+    chip.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px';
+    chip.innerHTML = `<span>${f.type === 'zip' ? '📦' : '📄'}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.file.name}</span><span style="font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;background:${f.type === 'zip' ? 'var(--accent)' : 'var(--green)'};color:#fff">${f.type.toUpperCase()}</span><span style="cursor:pointer;color:var(--text3)" onclick="reestrRemoveFile(${i})">✕</span>`;
+    el.appendChild(chip);
+  });
+}
+
+function reestrRemoveFile(i) {
+  reestrFiles.splice(i, 1);
+  reestrRenderChips();
+  document.getElementById('reestrParseBtn').disabled = reestrFiles.length === 0;
+}
+
+async function reestrParse() {
+  if (!reestrFiles.length) return;
+  const errorEl = document.getElementById('reestrError');
+  errorEl.style.display = 'none';
+  document.getElementById('reestrLogCard').style.display = 'none';
+  document.getElementById('reestrReviewCard').style.display = 'none';
+  document.getElementById('reestrDoneCard').style.display = 'none';
+  const btn = document.getElementById('reestrParseBtn');
+  btn.disabled = true;
+  btn.querySelector('.reestr-spinner').style.display = 'inline-block';
+  document.getElementById('reestrParseBtnLabel').textContent = 'Распознаю…';
+  try {
+    const zipFiles = reestrFiles.filter(f => f.type === 'zip');
+    const pdfFiles = reestrFiles.filter(f => f.type === 'pdf');
+    let allRows = [], allLog = [];
+    if (zipFiles.length > 0) {
+      const ab = await zipFiles[0].file.arrayBuffer();
+      const d = await window.reestrAPI.parseInvoices(ab);
+      allRows.push(...d.rows); allLog.push(...d.log);
+    }
+    if (pdfFiles.length > 0) {
+      const payload = [];
+      for (const pf of pdfFiles) { payload.push({ name: pf.file.name, buffer: await pf.file.arrayBuffer() }); }
+      const d = await window.reestrAPI.parsePdfs(payload);
+      allRows.push(...d.rows); allLog.push(...d.log);
+    }
+    reestrRows = allRows;
+    reestrRenderLog(allLog);
+    if (reestrRows.length > 0) {
+      reestrRenderTable();
+      document.getElementById('reestrReviewCard').style.display = '';
+    }
+  } catch (e) {
+    errorEl.textContent = '⚠ ' + e.message;
+    errorEl.style.display = '';
+  } finally {
+    btn.disabled = false;
+    btn.querySelector('.reestr-spinner').style.display = 'none';
+    document.getElementById('reestrParseBtnLabel').textContent = 'Распознать счета';
+  }
+}
+
+function reestrRenderLog(entries) {
+  document.getElementById('reestrLogCard').style.display = '';
+  const logEl = document.getElementById('reestrLog');
+  logEl.innerHTML = '';
+  const icons = { ok: '✓', warn: '!', info: '·' };
+  const colors = { ok: 'var(--green)', warn: 'var(--yellow)', info: 'var(--text3)' };
+  entries.forEach(({ type, text }) => {
+    const row = document.createElement('div');
+    row.style.cssText = `padding:5px 10px;border-bottom:1px solid var(--border);display:flex;gap:6px;color:${colors[type] || 'var(--text)'}`;
+    row.innerHTML = `<span style="width:14px;text-align:center;flex-shrink:0">${icons[type] || '·'}</span><span>${text}</span>`;
+    logEl.appendChild(row);
+  });
+  const okCount = entries.filter(l => l.type === 'ok').length;
+  const warnCount = entries.filter(l => l.type === 'warn').length;
+  document.getElementById('reestrSummaryCount').textContent = okCount + (warnCount ? ' из ' + (okCount + warnCount) : '') + ' счетов распознано';
+  const totalSum = reestrRows.reduce((s, r) => s + r.sum, 0);
+  document.getElementById('reestrSummaryAmount').textContent = 'на сумму ' + totalSum.toLocaleString('ru-RU') + ' руб.';
+}
+
+function reestrUpdateTotal() {
+  const total = reestrRows.reduce((s, r) => s + (r.sum || 0), 0);
+  const el = document.getElementById('reestrReviewTotal');
+  if (el) el.textContent = total.toLocaleString('ru-RU', { minimumFractionDigits: 2 }) + ' руб.';
+}
+
+function reestrBuildStatyaSelect(row, idx) {
+  const sel = document.createElement('select');
+  sel.style.cssText = 'width:100%;min-width:200px;padding:4px 6px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);cursor:pointer;font-family:inherit';
+  const emptyOpt = document.createElement('option');
+  emptyOpt.value = ''; emptyOpt.textContent = '— выберите —';
+  sel.appendChild(emptyOpt);
+  const groups = {};
+  reestrStatyi.forEach(s => { const g = s.vid || 'Прочее'; if (!groups[g]) groups[g] = []; groups[g].push(s); });
+  for (const [gName, items] of Object.entries(groups)) {
+    const og = document.createElement('optgroup'); og.label = gName;
+    items.forEach(s => { const o = document.createElement('option'); o.value = s.label; o.textContent = s.label; if (row['statья'] && s.label === row['statья']) o.selected = true; og.appendChild(o); });
+    sel.appendChild(og);
+  }
+  if (row['statья'] && !sel.value) {
+    const code = row['statья'].split(',')[0].trim();
+    for (const o of sel.options) { if (o.value.startsWith(code + ',')) { o.selected = true; break; } }
+  }
+  if (row['statья'] && !sel.value) {
+    const c = document.createElement('option'); c.value = row['statья']; c.textContent = row['statья'] + ' (авто)'; c.selected = true;
+    sel.insertBefore(c, sel.children[1]);
+  }
+  sel.addEventListener('change', () => { reestrRows[idx]['statья'] = sel.value; });
+  return sel;
+}
+
+function reestrRenderTable() {
+  const tbody = document.getElementById('reestrReviewBody');
+  tbody.innerHTML = '';
+  reestrRows.forEach((row, i) => {
+    const tr = document.createElement('tr');
+    if (i % 2 === 1) tr.style.background = 'var(--bg3)';
+
+    const tdN = document.createElement('td'); tdN.style.cssText = 'padding:6px 8px;text-align:center;font-weight:700;color:var(--text3);border-bottom:1px solid var(--border)'; tdN.textContent = i + 1; tr.appendChild(tdN);
+
+    const tdS = document.createElement('td'); tdS.style.cssText = 'padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)';
+    const sumInp = document.createElement('input'); sumInp.type = 'text'; sumInp.value = (row.sum || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2 });
+    sumInp.style.cssText = 'width:90px;text-align:right;padding:3px 5px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);font-family:inherit;font-weight:700';
+    sumInp.addEventListener('change', () => { const v = parseFloat(sumInp.value.replace(/\s/g,'').replace(',','.')); reestrRows[i].sum = isNaN(v) ? 0 : v; sumInp.value = reestrRows[i].sum.toLocaleString('ru-RU',{minimumFractionDigits:2}); reestrUpdateTotal(); });
+    tdS.appendChild(sumInp); tr.appendChild(tdS);
+
+    const tdD = document.createElement('td'); tdD.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    const descInp = document.createElement('textarea'); descInp.value = (row.description || '').replace(/\\n/g, '\n');
+    descInp.style.cssText = 'width:100%;padding:3px 5px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);font-family:inherit;resize:vertical;min-height:40px';
+    descInp.addEventListener('change', () => { reestrRows[i].description = descInp.value; });
+    tdD.appendChild(descInp); tr.appendChild(tdD);
+
+    const tdO = document.createElement('td'); tdO.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    const objInp = document.createElement('input'); objInp.type = 'text'; objInp.value = row.obj || '';
+    objInp.style.cssText = 'width:100%;padding:3px 5px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);font-family:inherit';
+    objInp.addEventListener('change', () => { reestrRows[i].obj = objInp.value; });
+    tdO.appendChild(objInp); tr.appendChild(tdO);
+
+    const tdSt = document.createElement('td'); tdSt.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    tdSt.appendChild(reestrBuildStatyaSelect(row, i)); tr.appendChild(tdSt);
+
+    const tdDel = document.createElement('td'); tdDel.style.cssText = 'padding:6px 8px;text-align:center;border-bottom:1px solid var(--border)';
+    const delBtn = document.createElement('button'); delBtn.textContent = '✕';
+    delBtn.style.cssText = 'background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 4px;border-radius:4px';
+    delBtn.addEventListener('mouseenter', () => { delBtn.style.color = 'var(--red)'; });
+    delBtn.addEventListener('mouseleave', () => { delBtn.style.color = 'var(--text3)'; });
+    delBtn.addEventListener('click', () => { reestrRows.splice(i, 1); reestrRenderTable(); });
+    tdDel.appendChild(delBtn); tr.appendChild(tdDel);
+
+    tbody.appendChild(tr);
+  });
+  reestrUpdateTotal();
+}
+
+async function reestrBuild() {
+  const btn = document.getElementById('reestrBuildBtn');
+  btn.disabled = true;
+  btn.querySelector('.reestr-spinner').style.display = 'inline-block';
+  document.getElementById('reestrBuildBtnLabel').textContent = 'Формирую…';
+  try {
+    const d = await window.reestrAPI.buildXlsx({ rows: reestrRows });
+    reestrLastResult = d;
+    document.getElementById('reestrDoneCard').style.display = '';
+    document.getElementById('reestrDoneCount').textContent = reestrRows.length + ' строк в реестре';
+    document.getElementById('reestrDoneAmount').textContent = 'на сумму ' + d.total.toLocaleString('ru-RU') + ' руб.';
+    document.getElementById('reestrReviewCard').style.display = 'none';
+  } catch (e) {
+    const errorEl = document.getElementById('reestrError');
+    errorEl.textContent = '⚠ ' + e.message;
+    errorEl.style.display = '';
+  } finally {
+    btn.disabled = false;
+    btn.querySelector('.reestr-spinner').style.display = 'none';
+    document.getElementById('reestrBuildBtnLabel').textContent = 'Сформировать реестр';
+  }
+}
+
+async function reestrDownload() {
+  if (!reestrLastResult) return;
+  const r = await window.reestrAPI.save(reestrLastResult.filename, reestrLastResult.xlsxBase64);
+  if (r.saved) {
+    const btn = document.getElementById('reestrDownloadBtn');
+    btn.textContent = '✓ Сохранено';
+    setTimeout(() => { btn.textContent = '⬇ Скачать реестр.xlsx'; }, 2000);
+  }
+}
+
 </script>
 </body>
 </html>

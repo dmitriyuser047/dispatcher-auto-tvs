@@ -256,6 +256,57 @@ app.whenReady().then(() => {
     }
   });
 
+  // ─── РЕЕСТР-БИЛДЕР ──────────────────────────────────────
+  const REESTR_DIR = path.join(__dirname, '..', 'ReestrBuilder');
+  const REESTR_LIB_URL = 'file:///' + path.join(REESTR_DIR, 'lib.mjs').replace(/\\/g, '/');
+
+  ipcMain.handle('reestr-parse-invoices', async (event, zipArrayBuffer) => {
+    const { parseInvoices, loadConfig } = await import(REESTR_LIB_URL);
+    const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
+    const log = [];
+    const rows = await parseInvoices(Buffer.from(zipArrayBuffer), config, (msg) => log.push(msg));
+    return { log, rows, config };
+  });
+
+  ipcMain.handle('reestr-parse-pdfs', async (event, pdfFilesRaw) => {
+    const { parsePdfFiles, loadConfig } = await import(REESTR_LIB_URL);
+    const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
+    const log = [];
+    const pdfFiles = pdfFilesRaw.map(f => ({ name: f.name, buffer: Buffer.from(f.buffer) }));
+    const rows = await parsePdfFiles(pdfFiles, config, (msg) => log.push(msg));
+    return { log, rows, config };
+  });
+
+  ipcMain.handle('reestr-build-xlsx', async (event, { rows }) => {
+    const { buildXlsxFromRows, loadConfig } = await import(REESTR_LIB_URL);
+    const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
+    const { buffer, total } = await buildXlsxFromRows(rows, config);
+    return {
+      filename: `Реестр_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      xlsxBase64: buffer.toString('base64'),
+      total,
+    };
+  });
+
+  ipcMain.handle('reestr-load-statyi', async () => {
+    const p = path.join(REESTR_DIR, 'statyi.json');
+    if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8'));
+    return [];
+  });
+
+  ipcMain.handle('reestr-save-xlsx', async (event, { filename, xlsxBase64 }) => {
+    const senderWin = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePath } = await dialog.showSaveDialog(senderWin, {
+      title: 'Сохранить реестр',
+      defaultPath: path.join(app.getPath('downloads'), filename),
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+    });
+    if (canceled || !filePath) return { saved: false };
+    fs.writeFileSync(filePath, Buffer.from(xlsxBase64, 'base64'));
+    shell.showItemInFolder(filePath);
+    return { saved: true, path: filePath };
+  });
+
   createWindow();
 
   app.on('activate', () => {
