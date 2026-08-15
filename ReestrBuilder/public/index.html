@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Реестр-Билдер</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --text: #1c1f26;
+    --muted: #6b7280;
+    --border: #e2e4e9;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-light: #dbeafe;
+    --ok: #15803d;
+    --ok-bg: #f0fdf4;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --info: #6b7280;
+    --shadow: 0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.06);
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --card: #1c1f26;
+      --text: #e8e9ec;
+      --muted: #93969e;
+      --border: #2c2f38;
+      --accent: #4f83f1;
+      --accent-hover: #6a97f4;
+      --accent-light: #1e2a45;
+      --ok: #4ade80;
+      --ok-bg: #0f2418;
+      --warn: #fbbf24;
+      --warn-bg: #2a2110;
+      --info: #93969e;
+      --shadow: 0 1px 3px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 36px 16px;
+  }
+  .wrap { width: 100%; max-width: 1060px; }
+  .title { font-size: 26px; font-weight: 700; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
+  .subtitle { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+
+  /* --- STEP 1: dropzone --- */
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 36px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .dropzone .icon { font-size: 34px; margin-bottom: 8px; }
+  .dropzone .main { font-size: 15px; font-weight: 600; }
+  .dropzone .sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  input[type=file] { display: none; }
+
+  #fileChips { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+  .file-chip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 13px;
+  }
+  .file-chip .icon { flex-shrink: 0; }
+  .file-chip .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-chip .badge { font-size: 11px; padding: 2px 7px; border-radius: 6px; font-weight: 600; flex-shrink: 0; }
+  .file-chip .badge.zip { background: var(--accent-light); color: var(--accent); }
+  .file-chip .badge.pdf { background: var(--ok-bg); color: var(--ok); }
+  .file-chip .remove { cursor: pointer; color: var(--muted); font-size: 15px; flex-shrink: 0; }
+
+  .btn {
+    appearance: none;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 20px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 16px;
+    background: var(--accent);
+    color: #fff;
+    transition: background .15s, opacity .15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn:hover:not(:disabled) { background: var(--accent-hover); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  .btn.secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    display: none;
+  }
+  .btn.loading .spinner { display: inline-block; }
+  .btn.loading .btn-label { opacity: .85; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* --- LOG --- */
+  .log-card { display: none; }
+  .log-card.show { display: block; }
+  .summary { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; flex-wrap: wrap; gap: 6px; }
+  .summary .count { font-size: 18px; font-weight: 700; }
+  .summary .amount { font-size: 15px; color: var(--muted); }
+  .summary .count.warn { color: var(--warn); }
+
+  .log {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+  }
+  .log-row { padding: 7px 12px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; }
+  .log-row:last-child { border-bottom: none; }
+  .log-row .tag { flex-shrink: 0; width: 16px; text-align: center; }
+  .log-row.ok { color: var(--ok); background: var(--ok-bg); }
+  .log-row.warn { color: var(--warn); background: var(--warn-bg); }
+  .log-row.info { color: var(--info); }
+
+  .error-box {
+    display: none;
+    border: 1px solid #dc2626;
+    background: color-mix(in srgb, #dc2626 8%, transparent);
+    color: #dc2626;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 14px;
+    margin-top: 14px;
+  }
+  .error-box.show { display: block; }
+
+  /* --- STEP 2: review table --- */
+  .review-card { display: none; }
+  .review-card.show { display: block; }
+  .review-card h2 { margin: 0 0 4px; font-size: 18px; font-weight: 700; }
+  .review-card .review-hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+
+  .review-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .review-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 750px;
+  }
+  .review-table th {
+    background: var(--accent);
+    color: #fff;
+    padding: 10px 10px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+  .review-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .review-table tr:nth-child(even) td { background: var(--accent-light); }
+  .review-table td.num { text-align: center; font-weight: 700; color: var(--muted); width: 36px; }
+  .review-table td.sum { text-align: right; font-weight: 700; white-space: nowrap; }
+  .review-table td.desc { max-width: 260px; white-space: pre-line; word-break: break-word; }
+  .review-table td.obj { max-width: 140px; white-space: pre-line; word-break: break-word; }
+  .review-table td.actions { text-align: center; width: 40px; }
+
+  .edit-input {
+    width: 100%;
+    padding: 4px 6px;
+    font-size: 12.5px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card);
+    color: var(--text);
+    font-family: inherit;
+  }
+  .edit-input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+  textarea.edit-input { resize: vertical; min-height: 50px; }
+  .edit-input.sum-input { width: 100px; text-align: right; }
+
+  .del-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px;
+    border-radius: 6px;
+    transition: color .15s, background .15s;
+  }
+  .del-btn:hover { color: #dc2626; background: color-mix(in srgb, #dc2626 10%, transparent); }
+
+  .review-total {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 12px 0 0;
+    font-size: 15px;
+    font-weight: 700;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .review-total .total-label { color: var(--muted); }
+  .review-total .total-sum { color: var(--text); }
+
+  .statya-select {
+    width: 100%;
+    min-width: 220px;
+    padding: 6px 8px;
+    font-size: 12.5px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card);
+    color: var(--text);
+    cursor: pointer;
+    appearance: auto;
+  }
+  .statya-select:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+  .statya-select.changed { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
+
+  .review-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .review-actions .btn { flex: 1; }
+
+  .footer-note { color: var(--muted); font-size: 12.5px; text-align: center; margin-top: 24px; line-height: 1.6; }
+  .footer-note code { background: var(--border); padding: 1px 5px; border-radius: 4px; }
+  .footer-note a { color: var(--accent); text-decoration: none; }
+  .footer-note a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="title">📋 Реестр-Билдер</h1>
+    <p class="subtitle">Собирает реестр на оплату из архива со счетами и УПД — автоматически, за секунды.</p>
+
+    <!-- STEP 1: загрузка -->
+    <div class="card" id="uploadCard">
+      <div class="dropzone" id="dropzone">
+        <div class="icon">📦</div>
+        <div class="main">Перетащите сюда zip-архив или PDF-файлы</div>
+        <div class="sub">ZIP-архив со счетами или отдельные PDF (счета, УПД) — можно несколько</div>
+        <input type="file" id="fileInput" accept=".zip,.pdf" multiple />
+      </div>
+      <div id="fileChips"></div>
+      <button class="btn" id="parseBtn" disabled>
+        <span class="spinner"></span>
+        <span class="btn-label" id="parseBtnLabel">Распознать счета</span>
+      </button>
+      <div class="error-box" id="errorBox"></div>
+    </div>
+
+    <!-- LOG -->
+    <div class="card log-card" id="logCard">
+      <div class="summary">
+        <span class="count" id="summaryCount">—</span>
+        <span class="amount" id="summaryAmount"></span>
+      </div>
+      <div class="log" id="log"></div>
+    </div>
+
+    <!-- STEP 2: редактирование -->
+    <div class="card review-card" id="reviewCard">
+      <h2>Проверка и выбор статей</h2>
+      <p class="review-hint">Проверьте распознанные данные. Измените статью БДДС в выпадающем списке, если нужно.</p>
+
+      <div class="review-table-wrap">
+        <table class="review-table">
+          <thead>
+            <tr>
+              <th>№</th>
+              <th>Сумма</th>
+              <th>Описание</th>
+              <th>Объект</th>
+              <th>Статья БДДС</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="reviewBody"></tbody>
+        </table>
+      </div>
+
+      <div class="review-total">
+        <span class="total-label">Итого:</span>
+        <span class="total-sum" id="reviewTotal">0,00 руб.</span>
+      </div>
+
+      <div class="review-actions">
+        <button class="btn secondary" id="addRowBtn">+ Добавить строку</button>
+        <button class="btn secondary" id="backBtn">← Назад</button>
+        <button class="btn" id="buildBtn">
+          <span class="spinner"></span>
+          <span class="btn-label" id="buildBtnLabel">Сформировать реестр</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- STEP 3: скачивание -->
+    <div class="card log-card" id="doneCard">
+      <div class="summary">
+        <span class="count" id="doneCount">—</span>
+        <span class="amount" id="doneAmount"></span>
+      </div>
+      <button class="btn" id="downloadBtn">⬇ Скачать реестр.xlsx</button>
+    </div>
+
+    <p class="footer-note">
+      Правила определения объектов и категорий — в файле <code>config.json</code>
+      (<a href="#" id="openConfigLink">открыть</a>).<br>
+      Справочник статей БДДС загружен из <code>statyi.json</code> (<span id="statyiCount">…</span> статей).
+    </p>
+  </div>
+
+<script>
+  /* ───── Элементы ───── */
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const fileChips = document.getElementById('fileChips');
+  const parseBtn = document.getElementById('parseBtn');
+  const parseBtnLabel = document.getElementById('parseBtnLabel');
+  const errorBox = document.getElementById('errorBox');
+  const logCard = document.getElementById('logCard');
+  const logEl = document.getElementById('log');
+  const summaryCount = document.getElementById('summaryCount');
+  const summaryAmount = document.getElementById('summaryAmount');
+  const reviewCard = document.getElementById('reviewCard');
+  const reviewBody = document.getElementById('reviewBody');
+  const reviewTotal = document.getElementById('reviewTotal');
+  const addRowBtn = document.getElementById('addRowBtn');
+  const backBtn = document.getElementById('backBtn');
+  const buildBtn = document.getElementById('buildBtn');
+  const buildBtnLabel = document.getElementById('buildBtnLabel');
+  const doneCard = document.getElementById('doneCard');
+  const doneCount = document.getElementById('doneCount');
+  const doneAmount = document.getElementById('doneAmount');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const openConfigLink = document.getElementById('openConfigLink');
+  const statyiCountEl = document.getElementById('statyiCount');
+
+  /* ───── Состояние ───── */
+  let selectedFiles = [];
+  let parsedRows = [];
+  let statyiList = [];
+  let lastResult = null;
+
+  /* ───── Загрузка справочника статей ───── */
+  async function loadStatyi() {
+    if (window.reestrAPI) {
+      statyiList = await window.reestrAPI.loadStatyi();
+    } else {
+      try {
+        const res = await fetch('/statyi.json');
+        statyiList = await res.json();
+      } catch (e) {
+        console.warn('Не удалось загрузить статьи:', e);
+      }
+    }
+    statyiCountEl.textContent = statyiList.length;
+  }
+  loadStatyi();
+
+  /* ───── Config ───── */
+  openConfigLink.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (window.reestrAPI) {
+      await window.reestrAPI.openConfig();
+    } else {
+      alert('config.json лежит рядом со server.mjs');
+    }
+  });
+
+  /* ───── Файлы ───── */
+  function addFiles(fileList) {
+    for (const file of fileList) {
+      const ext = file.name.toLowerCase().split('.').pop();
+      if (ext !== 'zip' && ext !== 'pdf') {
+        showError('Поддерживаются только ZIP и PDF файлы');
+        continue;
+      }
+      // ZIP может быть только один
+      if (ext === 'zip' && selectedFiles.some(f => f.type === 'zip')) {
+        showError('Можно загрузить только один ZIP-архив');
+        continue;
+      }
+      // Не добавляем дубликаты
+      if (selectedFiles.some(f => f.file.name === file.name && f.file.size === file.size)) continue;
+      selectedFiles.push({ file, type: ext });
+      hideError();
+    }
+    renderFileChips();
+    parseBtn.disabled = selectedFiles.length === 0;
+  }
+
+  function removeFile(index) {
+    selectedFiles.splice(index, 1);
+    renderFileChips();
+    parseBtn.disabled = selectedFiles.length === 0;
+  }
+
+  function renderFileChips() {
+    fileChips.innerHTML = '';
+    selectedFiles.forEach((f, i) => {
+      const chip = document.createElement('div');
+      chip.className = 'file-chip';
+      const icon = f.type === 'zip' ? '📦' : '📄';
+      chip.innerHTML = `<span class="icon">${icon}</span>`
+        + `<span class="name">${escapeHtml(f.file.name)}</span>`
+        + `<span class="badge ${f.type}">${f.type.toUpperCase()}</span>`
+        + `<span class="remove" title="Убрать">✕</span>`;
+      chip.querySelector('.remove').addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeFile(i);
+      });
+      fileChips.appendChild(chip);
+    });
+  }
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => { addFiles(e.target.files); fileInput.value = ''; });
+
+  ['dragenter', 'dragover'].forEach(evt =>
+    dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('drag'); }));
+  ['dragleave', 'drop'].forEach(evt =>
+    dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove('drag'); }));
+  dropzone.addEventListener('drop', (e) => addFiles(e.dataTransfer.files));
+
+  function showError(msg) { errorBox.textContent = '⚠ ' + msg; errorBox.classList.add('show'); }
+  function hideError() { errorBox.classList.remove('show'); }
+  function escapeHtml(s) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+  function renderLog(entries) {
+    logEl.innerHTML = '';
+    const icons = { ok: '✓', warn: '!', info: '·' };
+    entries.forEach(({ type, text }) => {
+      const row = document.createElement('div');
+      row.className = 'log-row ' + type;
+      row.innerHTML = '<span class="tag">' + (icons[type] || '·') + '</span><span>' + escapeHtml(text) + '</span>';
+      logEl.appendChild(row);
+    });
+  }
+
+  /* ───── STEP 1: Распознавание ───── */
+  parseBtn.addEventListener('click', async () => {
+    if (selectedFiles.length === 0) return;
+    hideError();
+    logCard.classList.remove('show');
+    reviewCard.classList.remove('show');
+    doneCard.classList.remove('show');
+    parseBtn.disabled = true;
+    parseBtn.classList.add('loading');
+    parseBtnLabel.textContent = 'Распознаю…';
+
+    try {
+      const zipFiles = selectedFiles.filter(f => f.type === 'zip');
+      const pdfFiles = selectedFiles.filter(f => f.type === 'pdf');
+      let allRows = [];
+      let allLog = [];
+
+      // Обработка ZIP (если есть)
+      if (zipFiles.length > 0) {
+        const zipFile = zipFiles[0].file;
+        let data;
+        if (window.reestrAPI) {
+          const arrayBuffer = await zipFile.arrayBuffer();
+          data = await window.reestrAPI.parseInvoices(arrayBuffer);
+        } else {
+          const res = await fetch('/parse', { method: 'POST', body: zipFile });
+          data = await res.json();
+          if (!res.ok || data.error) throw new Error(data.error || 'Ошибка сервера');
+        }
+        allRows.push(...data.rows);
+        allLog.push(...data.log);
+      }
+
+      // Обработка PDF (если есть)
+      if (pdfFiles.length > 0) {
+        const pdfPayload = [];
+        for (const pf of pdfFiles) {
+          const ab = await pf.file.arrayBuffer();
+          pdfPayload.push({ name: pf.file.name, buffer: ab });
+        }
+        let data;
+        if (window.reestrAPI) {
+          data = await window.reestrAPI.parsePdfs(pdfPayload);
+        } else {
+          const res = await fetch('/parse-pdfs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ files: pdfPayload.map(f => ({ name: f.name, buffer: Array.from(new Uint8Array(f.buffer)) })) }),
+          });
+          data = await res.json();
+          if (!res.ok || data.error) throw new Error(data.error || 'Ошибка сервера');
+        }
+        allRows.push(...data.rows);
+        allLog.push(...data.log);
+      }
+
+      parsedRows = allRows;
+
+      // Лог
+      logCard.classList.add('show');
+      renderLog(allLog);
+      const okCount = allLog.filter(l => l.type === 'ok').length;
+      const warnCount = allLog.filter(l => l.type === 'warn').length;
+      summaryCount.textContent = okCount + (warnCount ? ' из ' + (okCount + warnCount) : '') + ' счетов распознано';
+      summaryCount.className = 'count' + (warnCount ? ' warn' : '');
+      const totalSum = parsedRows.reduce((s, r) => s + r.sum, 0);
+      summaryAmount.textContent = 'на сумму ' + totalSum.toLocaleString('ru-RU') + ' руб.';
+
+      if (parsedRows.length > 0) {
+        renderReviewTable();
+        reviewCard.classList.add('show');
+      }
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      parseBtn.disabled = false;
+      parseBtn.classList.remove('loading');
+      parseBtnLabel.textContent = 'Распознать счета';
+    }
+  });
+
+  /* ───── STEP 2: Таблица редактирования ───── */
+  function updateReviewTotal() {
+    const total = parsedRows.reduce((s, r) => s + (r.sum || 0), 0);
+    reviewTotal.textContent = total.toLocaleString('ru-RU', { minimumFractionDigits: 2 }) + ' руб.';
+  }
+
+  function buildStatyaSelect(row, idx) {
+    const select = document.createElement('select');
+    select.className = 'statya-select';
+
+    const emptyOpt = document.createElement('option');
+    emptyOpt.value = '';
+    emptyOpt.textContent = '— выберите статью —';
+    select.appendChild(emptyOpt);
+
+    const groups = {};
+    statyiList.forEach(s => {
+      const g = s.vid || 'Прочее';
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(s);
+    });
+
+    for (const [groupName, items] of Object.entries(groups)) {
+      const optgroup = document.createElement('optgroup');
+      optgroup.label = groupName;
+      items.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.label;
+        opt.textContent = s.label;
+        if (row.statья && s.label === row.statья) opt.selected = true;
+        optgroup.appendChild(opt);
+      });
+      select.appendChild(optgroup);
+    }
+
+    if (row.statья && !select.value) {
+      const code = row.statья.split(',')[0].trim();
+      for (const opt of select.options) {
+        if (opt.value.startsWith(code + ',')) { opt.selected = true; break; }
+      }
+    }
+    if (row.statья && !select.value) {
+      const custom = document.createElement('option');
+      custom.value = row.statья;
+      custom.textContent = row.statья + ' (авто)';
+      custom.selected = true;
+      select.insertBefore(custom, select.children[1]);
+    }
+
+    const originalValue = select.value;
+    select.addEventListener('change', () => {
+      parsedRows[idx].statья = select.value;
+      select.classList.toggle('changed', select.value !== originalValue);
+    });
+    return select;
+  }
+
+  function renderReviewTable() {
+    reviewBody.innerHTML = '';
+    parsedRows.forEach((row, i) => {
+      const tr = document.createElement('tr');
+
+      // №
+      const tdNum = document.createElement('td');
+      tdNum.className = 'num';
+      tdNum.textContent = i + 1;
+      tr.appendChild(tdNum);
+
+      // Сумма (редактируемая)
+      const tdSum = document.createElement('td');
+      tdSum.className = 'sum';
+      const sumInput = document.createElement('input');
+      sumInput.type = 'text';
+      sumInput.className = 'edit-input sum-input';
+      sumInput.value = (row.sum || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2 });
+      sumInput.addEventListener('change', () => {
+        const val = parseFloat(sumInput.value.replace(/\s/g, '').replace(',', '.'));
+        parsedRows[i].sum = isNaN(val) ? 0 : val;
+        sumInput.value = parsedRows[i].sum.toLocaleString('ru-RU', { minimumFractionDigits: 2 });
+        updateReviewTotal();
+      });
+      tdSum.appendChild(sumInput);
+      tr.appendChild(tdSum);
+
+      // Описание (редактируемое)
+      const tdDesc = document.createElement('td');
+      tdDesc.className = 'desc';
+      const descInput = document.createElement('textarea');
+      descInput.className = 'edit-input';
+      descInput.value = (row.description || '').replace(/\\n/g, '\n');
+      descInput.addEventListener('change', () => { parsedRows[i].description = descInput.value; });
+      tdDesc.appendChild(descInput);
+      tr.appendChild(tdDesc);
+
+      // Объект (редактируемый)
+      const tdObj = document.createElement('td');
+      tdObj.className = 'obj';
+      const objInput = document.createElement('input');
+      objInput.type = 'text';
+      objInput.className = 'edit-input';
+      objInput.value = row.obj || '';
+      objInput.addEventListener('change', () => { parsedRows[i].obj = objInput.value; });
+      tdObj.appendChild(objInput);
+      tr.appendChild(tdObj);
+
+      // Статья — select
+      const tdStatya = document.createElement('td');
+      tdStatya.appendChild(buildStatyaSelect(row, i));
+      tr.appendChild(tdStatya);
+
+      // Удалить
+      const tdDel = document.createElement('td');
+      tdDel.className = 'actions';
+      const delBtn = document.createElement('button');
+      delBtn.className = 'del-btn';
+      delBtn.title = 'Удалить строку';
+      delBtn.textContent = '✕';
+      delBtn.addEventListener('click', () => {
+        parsedRows.splice(i, 1);
+        renderReviewTable();
+        updateReviewTotal();
+      });
+      tdDel.appendChild(delBtn);
+      tr.appendChild(tdDel);
+
+      reviewBody.appendChild(tr);
+    });
+    updateReviewTotal();
+  }
+
+  /* ───── Добавить строку ───── */
+  addRowBtn.addEventListener('click', () => {
+    parsedRows.push({
+      sum: 0,
+      date: new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+      category: '',
+      description: '',
+      naz: '',
+      obj: '',
+      dog: '',
+      osn: '',
+      updLabel: '',
+      statья: '',
+      sourceFolder: 'вручную',
+    });
+    renderReviewTable();
+    reviewBody.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
+  /* ───── Назад ───── */
+  backBtn.addEventListener('click', () => {
+    reviewCard.classList.remove('show');
+    doneCard.classList.remove('show');
+    logCard.classList.remove('show');
+    parsedRows = [];
+  });
+
+  /* ───── STEP 3: Генерация Excel ───── */
+  buildBtn.addEventListener('click', async () => {
+    buildBtn.disabled = true;
+    buildBtn.classList.add('loading');
+    buildBtnLabel.textContent = 'Формирую…';
+
+    try {
+      let data;
+      if (window.reestrAPI) {
+        data = await window.reestrAPI.buildXlsx({ rows: parsedRows });
+      } else {
+        const res = await fetch('/build-xlsx', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: parsedRows }),
+        });
+        data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || 'Ошибка');
+      }
+
+      lastResult = data;
+      doneCard.classList.add('show');
+      doneCount.textContent = parsedRows.length + ' строк в реестре';
+      doneAmount.textContent = 'на сумму ' + data.total.toLocaleString('ru-RU') + ' руб.';
+      reviewCard.classList.remove('show');
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      buildBtn.disabled = false;
+      buildBtn.classList.remove('loading');
+      buildBtnLabel.textContent = 'Сформировать реестр';
+    }
+  });
+
+  /* ───── Скачивание ───── */
+  downloadBtn.addEventListener('click', async () => {
+    if (!lastResult) return;
+
+    if (window.reestrAPI) {
+      const r = await window.reestrAPI.save(lastResult.filename, lastResult.xlsxBase64);
+      if (r.saved) {
+        downloadBtn.textContent = '✓ Сохранено';
+        setTimeout(() => { downloadBtn.textContent = '⬇ Скачать реестр.xlsx'; }, 2000);
+      }
+      return;
+    }
+
+    const bytes = atob(lastResult.xlsxBase64);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    const blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = lastResult.filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+</script>
+</body>
+</html>
