@@ -965,6 +965,11 @@
         Добавить ТС
       </button>
       <input type="file" id="xlsImportInput" accept=".xls,.xlsx" style="display:none" onchange="importVehiclesFromXls(this)">
+      <button class="btn btn-ghost" onclick="document.getElementById('fuelImportInput').click()" title="Загрузить заправки из отчёта по топливным картам (xlsx)">
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 15v4c0 1.1.9 2 2 2h14a2 2 0 002-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+        Импорт заправок
+      </button>
+      <input type="file" id="fuelImportInput" accept=".xls,.xlsx" style="display:none" onchange="importFuelFromXls(this)">
     </div>
     <div id="hdrGenerators" style="display:none;gap:10px;align-items:center">
       <button class="btn btn-ghost" onclick="exportDesForOtherComputer()" title="Сохранить данные ДЭС (генераторы, записи, ёмкости, приход) в JSON-файл для переноса на другой компьютер">
@@ -4948,6 +4953,165 @@ function importVehiclesFromXls(input) {
 
       let msg = `Импорт завершён: добавлено ${added} ТС.`;
       if (skipped > 0) msg += `\nПропущено дубликатов (по госномеру): ${skipped}.`;
+      alert(msg);
+    } catch(err) {
+      alert('Ошибка при чтении файла: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ─── ИМПОРТ ЗАПРАВОК ИЗ ОТЧЁТА ПО ТОПЛИВНЫМ КАРТАМ ──────
+function importFuelFromXls(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+
+      let headerRow = -1;
+      for (let i = 0; i < Math.min(rows.length, 15); i++) {
+        const row = rows[i].map(c => String(c).toLowerCase());
+        if (row.some(c => c.includes('количество')) && row.some(c => c.includes('транзакци'))) {
+          headerRow = i;
+          break;
+        }
+      }
+      if (headerRow === -1) {
+        alert('Не удалось найти заголовки отчёта по топливным картам.\nОжидаются столбцы: Дата транзакции, Количество, Тип транзакции, Комментарий.');
+        return;
+      }
+
+      const headers = rows[headerRow].map(c => String(c).trim().toLowerCase());
+      function col(keywords) {
+        return headers.findIndex(h => keywords.some(k => h.includes(k)));
+      }
+      const cDate    = col(['дата транзакц']);
+      const cType    = col(['тип транзакц']);
+      const cQty     = col(['количество']);
+      const cFuel    = col(['товар']);
+      const cComment = col(['комментар']);
+      const cCard    = col(['номер карт']);
+
+      if (cDate === -1 || cQty === -1) {
+        alert('Не найдены обязательные столбцы: Дата транзакции, Количество.');
+        return;
+      }
+
+      const transactions = [];
+      for (let i = headerRow + 1; i < rows.length; i++) {
+        const row = rows[i];
+        const typeVal = cType !== -1 ? String(row[cType] || '').trim() : '';
+        if (typeVal && typeVal.toLowerCase() !== 'покупка') continue;
+
+        const qty = parseFloat(String(row[cQty] || '0').replace(',', '.'));
+        if (!qty || qty <= 0) continue;
+
+        let dateStr = row[cDate];
+        if (!dateStr) continue;
+        let parsedDate = null;
+        if (typeof dateStr === 'string') {
+          const m = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+          if (m) parsedDate = m[1] + '-' + m[2] + '-' + m[3];
+          else {
+            const m2 = dateStr.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+            if (m2) parsedDate = m2[3] + '-' + m2[2] + '-' + m2[1];
+          }
+        }
+        if (!parsedDate) continue;
+
+        const comment = cComment !== -1 ? String(row[cComment] || '').trim() : '';
+        const cardNo  = cCard !== -1 ? String(row[cCard] || '').trim() : '';
+        const fuel    = cFuel !== -1 ? String(row[cFuel] || '').trim() : '';
+
+        let plate = '';
+        if (comment) {
+          const pm = comment.match(/^([А-ЯЁа-яё]\d{3}[А-ЯЁа-яё]{2})/);
+          if (pm) plate = pm[1].toUpperCase();
+        }
+
+        transactions.push({ date: parsedDate, qty, plate, cardNo, fuel, comment });
+      }
+
+      if (!transactions.length) {
+        alert('В файле не найдено транзакций типа «Покупка» с ненулевым количеством.');
+        return;
+      }
+
+      function matchVehicle(tx) {
+        if (tx.plate) {
+          const p = tx.plate.toLowerCase();
+          const v = data.vehicles.find(v => (v.plate || '').toLowerCase().replace(/\s/g, '').includes(p));
+          if (v) return v;
+        }
+        if (tx.cardNo) {
+          const cn = tx.cardNo.replace(/\s/g, '');
+          const v = data.vehicles.find(v => (v.fuelcard || '').replace(/\s/g, '') === cn);
+          if (v) return v;
+        }
+        if (tx.comment) {
+          const cLow = tx.comment.toLowerCase();
+          const v = data.vehicles.find(v => {
+            const p = (v.plate || '').toLowerCase().replace(/\s/g, '');
+            return p && cLow.includes(p);
+          });
+          if (v) return v;
+        }
+        return null;
+      }
+
+      let added = 0, updated = 0, skipped = 0;
+      const unmatched = new Set();
+
+      transactions.forEach(tx => {
+        const v = matchVehicle(tx);
+        if (!v) {
+          unmatched.add(tx.comment || tx.cardNo || 'неизвестно');
+          skipped++;
+          return;
+        }
+
+        const existing = (data.records || []).find(r =>
+          r.vehicleId === v.id && r.date === tx.date
+        );
+
+        if (existing) {
+          existing.fuelIssued = (existing.fuelIssued || 0) + tx.qty;
+          if (!existing.note) existing.note = '';
+          if (!existing.note.includes('заправка')) {
+            existing.note = (existing.note ? existing.note + '; ' : '') + 'заправка ' + tx.fuel + ' ' + tx.qty + 'л';
+          }
+          updated++;
+        } else {
+          if (!data.records) data.records = [];
+          data.records.push({
+            id: 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+            vehicleId: v.id,
+            date: tx.date,
+            km: 0,
+            fuelIssued: tx.qty,
+            note: 'заправка ' + tx.fuel + ' ' + tx.qty + 'л',
+          });
+          added++;
+        }
+      });
+
+      saveData(data);
+      const v = data.vehicles.find(x => x.id === selectedVehicleId);
+      if (v) renderDetail(v);
+
+      let msg = `Импорт заправок завершён.\n\nДобавлено записей: ${added}\nОбновлено записей: ${updated}`;
+      if (skipped > 0) {
+        msg += `\nНе найдено ТС: ${skipped}`;
+        const unmArr = [...unmatched].slice(0, 5);
+        msg += '\n\nНе удалось сопоставить:\n' + unmArr.join('\n');
+        if (unmatched.size > 5) msg += '\n...и ещё ' + (unmatched.size - 5);
+      }
       alert(msg);
     } catch(err) {
       alert('Ошибка при чтении файла: ' + err.message);
