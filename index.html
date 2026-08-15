@@ -46,7 +46,7 @@
     --border2: #3a4150;
     --shadow: 0 4px 24px rgba(0,0,0,0.5);
   }
-  html { background: var(--bg); }
+  html { background: var(--bg); scroll-behavior: smooth; }
 
   body {
     font-family: 'Segoe UI', system-ui, sans-serif;
@@ -201,11 +201,11 @@
     border: 1px solid var(--border2);
     letter-spacing: 1.5px;
     margin-bottom: 7px;
-    color: #1e293b;
+    color: var(--text);
   }
-  .vc-make { font-size: 15px; font-weight: 700; margin-bottom: 5px; color: #1e293b; }
-  .vc-driver { font-size: 13px; color: #475569; }
-  .vc-org { font-size: 12px; color: #64748b; margin-top: 3px; }
+  .vc-make { font-size: 15px; font-weight: 700; margin-bottom: 5px; color: var(--text); }
+  .vc-driver { font-size: 13px; color: var(--text2); }
+  .vc-org { font-size: 12px; color: var(--text3); margin-top: 3px; }
   .vc-badge {
     font-size: 11px;
     background: rgba(22,163,74,0.1);
@@ -507,7 +507,7 @@
   }
   input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   input::placeholder, textarea::placeholder { color: var(--text3); }
-  select option { background: #ffffff; color: #1e293b; }
+  select option { background: var(--bg2); color: var(--text); }
 
   /* fuel tag */
   .fuel-tag {
@@ -794,6 +794,122 @@
   .gen-ss-loc { font-size: 11px; color: var(--text3); grid-column: 1; margin-top: -3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .gen-ss-hours { font-weight: 600; color: var(--text2); white-space: nowrap; font-size: 11px; }
   .gen-ss-bal { font-weight: 700; white-space: nowrap; font-size: 11px; }
+
+  /* ─── CONTENT FADE-IN ─── */
+  #mainContent > * {
+    animation: fadeInContent .2s ease;
+  }
+  @keyframes fadeInContent {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ─── IMPROVED MODALS ─── */
+  .modal::-webkit-scrollbar { width: 5px; }
+  .modal::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+  .modal-body .form-row + .form-row { margin-top: 2px; }
+  .modal-body .form-group label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .form-group input:hover, .form-group textarea:hover, .form-group select:hover {
+    border-color: var(--border2);
+  }
+  .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(37,99,235,0.1);
+  }
+
+  /* ─── REESTR TABLE IMPROVEMENTS ─── */
+  .reestr-action-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 5px;
+    transition: all .15s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .reestr-action-btn:hover { background: var(--bg4); }
+  .reestr-action-btn.repair { color: var(--accent); }
+  .reestr-action-btn.repair:hover { color: var(--green); background: rgba(22,163,74,0.08); }
+  .reestr-action-btn.delete { color: var(--text3); }
+  .reestr-action-btn.delete:hover { color: var(--red); background: rgba(220,38,38,0.08); }
+  .reestr-linked { color: var(--green); font-weight: 700; font-size: 14px; cursor: default; }
+
+  /* ─── SUMMARY CARD ─── */
+  .summary-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    transition: border-color .15s;
+  }
+  .summary-card:hover { border-color: var(--accent); }
+  .summary-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+  }
+  .summary-card-cats {
+    border-top: 1px solid var(--border);
+    padding-top: 6px;
+  }
+  .summary-cat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+    font-size: 12px;
+    color: var(--text2);
+  }
+  .summary-total {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 16px;
+    font-weight: 700;
+    font-size: 15px;
+    border-top: 2px solid var(--accent);
+    margin-top: 6px;
+  }
+
+  /* ─── INVOICE BADGE ─── */
+  .invoice-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+  }
+  .invoice-badge svg { flex-shrink: 0; }
+  .category-tag {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--bg3);
+    color: var(--text3);
+    margin-top: 3px;
+    display: inline-block;
+  }
+
+  /* ─── TOGGLE BTN ─── */
+  .toggle-btn {
+    padding: 5px 12px;
+    font-size: 12px;
+    border-radius: 7px;
+    border: 1px solid var(--border2);
+    background: transparent;
+    color: var(--text2);
+    cursor: pointer;
+    font-weight: 500;
+    font-family: inherit;
+    transition: all .15s;
+  }
+  .toggle-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .toggle-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
@@ -1351,6 +1467,12 @@
         <textarea id="rp_description" rows="3" placeholder="Перечень выполненных работ, замена деталей..."></textarea>
       </div>
       <div class="form-group">
+        <label>Статья БДДС</label>
+        <select id="rp_category">
+          <option value="">— не указана —</option>
+        </select>
+      </div>
+      <div class="form-group">
         <label style="display:flex;align-items:center;gap:10px;font-weight:400;cursor:pointer;margin:0">
           <input type="checkbox" id="rp_paid" style="width:auto;accent-color:var(--accent)">
           Оплачено
@@ -1380,13 +1502,14 @@
     </div>
     <div class="modal-body">
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-        <select id="rj_vehicle_filter" class="fsel" style="max-width:260px" onchange="renderRepairsJournal()"></select>
-        <select id="rj_status_filter" class="fsel" style="max-width:200px" onchange="renderRepairsJournal()">
+        <select id="rj_vehicle_filter" class="fsel" style="max-width:260px" onchange="repairsJournalSummaryMode ? renderRepairsSummary() : renderRepairsJournal()"></select>
+        <select id="rj_status_filter" class="fsel" style="max-width:200px" onchange="repairsJournalSummaryMode ? renderRepairsSummary() : renderRepairsJournal()">
           <option value="">Все статусы оплаты</option>
           <option value="paid">Оплачено</option>
           <option value="unpaid">Не оплачено</option>
         </select>
         <div style="flex:1"></div>
+        <button class="toggle-btn" id="rjSummaryToggle" onclick="toggleRepairsSummary()">Сводка</button>
         <button class="btn btn-primary btn-sm" onclick="openAddRepair(null)">
           <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           + Ремонт
@@ -2800,10 +2923,10 @@ function renderRepairSection(vid) {
     recs.forEach(r => {
       rows += `<tr>
         <td class="td-day">${fmtDate(r.invoiceDate)}</td>
-        <td style="padding:10px 14px;font-size:13px;font-weight:600">${r.invoiceNo || '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;font-weight:600">${r.invoiceNo ? '<span class="invoice-badge"><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' + r.invoiceNo + '</span>' : '—'}</td>
         <td class="td-num">${r.mileage != null ? r.mileage.toLocaleString('ru') + ' км' : '—'}</td>
         <td class="td-num" style="font-weight:600">${r.cost != null ? r.cost.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ₽' : '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${r.description || '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${r.description || '—'}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + r.category.split(',')[0].trim() + '</span></div>' : ''}</td>
         <td class="td-num">
           <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:700;color:${r.paid ? 'var(--green)' : 'var(--red)'}">
             <input type="checkbox" ${r.paid ? 'checked' : ''} onchange="toggleRepairPaid('${r.id}')" style="width:auto;accent-color:var(--accent)">
@@ -2846,6 +2969,14 @@ function renderRepairSection(vid) {
   </div>`;
 }
 
+async function populateRepairCategorySelect(presetValue) {
+  await loadReestrStatyi();
+  const sel = document.getElementById('rp_category');
+  sel.innerHTML = '<option value="">— не указана —</option>' +
+    reestrStatyi.map(s => `<option value="${s.label}">${s.label}</option>`).join('');
+  if (presetValue) sel.value = presetValue;
+}
+
 function populateRepairVehicleSelect(selEl, presetVid) {
   selEl.innerHTML = data.vehicles.slice().sort((a,b) => (a.plate||'').localeCompare(b.plate||'', 'ru'))
     .map(v => `<option value="${v.id}">${v.plate} — ${v.make}${v.driver ? ' · ' + v.driver : ''}</option>`).join('');
@@ -2864,6 +2995,7 @@ function openAddRepair(vid) {
   ['rp_invoice_no','rp_description','rp_note'].forEach(id => document.getElementById(id).value = '');
   ['rp_cost','rp_mileage'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('rp_paid').checked = false;
+  populateRepairCategorySelect('');
   // предзаполнить пробег из последней записи по ТС, если известен
   const presetVid = vid || selectedVehicleId;
   const v = presetVid && data.vehicles.find(x => x.id === presetVid);
@@ -2891,6 +3023,7 @@ function openEditRepair(id) {
   document.getElementById('rp_description').value  = r.description || '';
   document.getElementById('rp_paid').checked       = !!r.paid;
   document.getElementById('rp_note').value         = r.note || '';
+  populateRepairCategorySelect(r.category || '');
   openModal('repairModal');
 }
 
@@ -2912,6 +3045,7 @@ function saveRepair() {
     description,
     paid:        document.getElementById('rp_paid').checked,
     note:        document.getElementById('rp_note').value.trim(),
+    category:    document.getElementById('rp_category').value,
   };
   if (!data.repairs) data.repairs = [];
   if (editingRepairId) {
@@ -2924,7 +3058,10 @@ function saveRepair() {
   closeModal('repairModal');
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   if (v) renderDetail(v);
-  if (document.getElementById('repairsJournalModal').classList.contains('open')) renderRepairsJournal();
+  if (document.getElementById('repairsJournalModal').classList.contains('open')) {
+    repairsJournalSummaryMode ? renderRepairsSummary() : renderRepairsJournal();
+  }
+  if (document.getElementById('reestrReviewBody') && reestrRows.length) reestrRenderTable();
 }
 
 function deleteRepair(id) {
@@ -2955,6 +3092,9 @@ function openRepairsJournal() {
     .sort((a,b) => (a.plate||'').localeCompare(b.plate||'', 'ru'))
     .map(v => `<option value="${v.id}">${v.plate} — ${v.make}</option>`).join('');
   sel.value = cur || '';
+  repairsJournalSummaryMode = false;
+  const togBtn = document.getElementById('rjSummaryToggle');
+  if (togBtn) { togBtn.textContent = 'Сводка'; togBtn.classList.remove('active'); }
   renderRepairsJournal();
   openModal('repairsJournalModal');
 }
@@ -2979,10 +3119,10 @@ function renderRepairsJournal() {
       rows += `<tr>
         <td style="padding:10px 14px;font-size:13px;font-weight:600">${v ? v.plate : '—'}<div style="font-weight:400;color:var(--text3);font-size:11px">${v ? v.make : ''}</div></td>
         <td class="td-day">${fmtDate(r.invoiceDate)}</td>
-        <td style="padding:10px 14px;font-size:13px">${r.invoiceNo || '—'}</td>
+        <td style="padding:10px 14px;font-size:13px">${r.invoiceNo ? '<span class="invoice-badge"><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' + r.invoiceNo + '</span>' : '—'}</td>
         <td class="td-num">${r.mileage != null ? r.mileage.toLocaleString('ru') + ' км' : '—'}</td>
         <td class="td-num" style="font-weight:600">${r.cost != null ? r.cost.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ₽' : '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${r.description || '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${r.description || '—'}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + r.category.split(',')[0].trim() + '</span></div>' : ''}</td>
         <td class="td-num">
           <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:700;color:${r.paid ? 'var(--green)' : 'var(--red)'}">
             <input type="checkbox" ${r.paid ? 'checked' : ''} onchange="toggleRepairPaid('${r.id}')" style="width:auto;accent-color:var(--accent)">
@@ -3018,6 +3158,93 @@ function renderRepairsJournal() {
         </table>
       </div>
     </div>`;
+}
+
+let repairsJournalSummaryMode = false;
+
+function toggleRepairsSummary() {
+  repairsJournalSummaryMode = !repairsJournalSummaryMode;
+  const btn = document.getElementById('rjSummaryToggle');
+  btn.textContent = repairsJournalSummaryMode ? 'Таблица' : 'Сводка';
+  btn.classList.toggle('active', repairsJournalSummaryMode);
+  if (repairsJournalSummaryMode) renderRepairsSummary();
+  else renderRepairsJournal();
+}
+
+function renderRepairsSummary() {
+  const vidFilter    = document.getElementById('rj_vehicle_filter').value;
+  const statusFilter = document.getElementById('rj_status_filter').value;
+  let recs = (data.repairs || []).slice();
+  if (vidFilter)    recs = recs.filter(r => r.vehicleId === vidFilter);
+  if (statusFilter) recs = recs.filter(r => statusFilter === 'paid' ? r.paid : !r.paid);
+
+  const groups = {};
+  recs.forEach(r => {
+    if (!groups[r.vehicleId]) groups[r.vehicleId] = [];
+    groups[r.vehicleId].push(r);
+  });
+
+  const grandTotal = recs.reduce((s, r) => s + (r.cost || 0), 0);
+  const grandUnpaid = recs.filter(r => !r.paid).reduce((s, r) => s + (r.cost || 0), 0);
+
+  let html = '<div style="margin-top:14px">';
+  const vids = Object.keys(groups).sort((a, b) => {
+    const va = data.vehicles.find(x => x.id === a);
+    const vb = data.vehicles.find(x => x.id === b);
+    return ((va && va.plate) || '').localeCompare((vb && vb.plate) || '', 'ru');
+  });
+
+  if (!recs.length) {
+    html += '<div class="empty-table">Нет записей о ремонте.</div>';
+  }
+
+  vids.forEach(vid => {
+    const v = data.vehicles.find(x => x.id === vid);
+    const items = groups[vid];
+    const total = items.reduce((s, r) => s + (r.cost || 0), 0);
+    const unpaid = items.filter(r => !r.paid).reduce((s, r) => s + (r.cost || 0), 0);
+
+    const cats = {};
+    items.forEach(r => {
+      const cat = r.category ? r.category.split(',')[0].trim() : 'Без категории';
+      if (!cats[cat]) cats[cat] = { sum: 0, count: 0 };
+      cats[cat].sum += (r.cost || 0);
+      cats[cat].count++;
+    });
+
+    let catRows = '';
+    Object.keys(cats).sort().forEach(cat => {
+      catRows += `<div class="summary-cat-row">
+        <span>${cat} (${cats[cat].count})</span>
+        <span style="font-weight:600">${cats[cat].sum.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2})} &#8381;</span>
+      </div>`;
+    });
+
+    html += `<div class="summary-card">
+      <div class="summary-card-header">
+        <div>
+          <span style="font-weight:700;font-size:14px">${v ? v.plate : '—'}</span>
+          <span style="color:var(--text3);font-size:12px;margin-left:8px">${v ? v.make : ''}</span>
+        </div>
+        <div style="text-align:right">
+          <span style="font-weight:700;font-size:14px">${total.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2})} &#8381;</span>
+          <span style="font-size:11px;color:var(--text3);margin-left:6px">${items.length} рем.</span>
+          ${unpaid > 0 ? '<div style="font-size:11px;color:var(--red);font-weight:600">' + unpaid.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' &#8381; не оплачено</div>' : ''}
+        </div>
+      </div>
+      <div class="summary-card-cats">${catRows}</div>
+    </div>`;
+  });
+
+  if (recs.length) {
+    html += `<div class="summary-total">
+      <span>Итого по всем ТС</span>
+      <span>${grandTotal.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2})} &#8381;${grandUnpaid > 0 ? ' <span style="font-size:12px;color:var(--red);font-weight:600">(' + grandUnpaid.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' &#8381; не оплачено)</span>' : ''}</span>
+    </div>`;
+  }
+  html += '</div>';
+
+  document.getElementById('repairsJournalBody').innerHTML = html;
 }
 
 // ─── VEHICLE CRUD ────────────────────────────────────────
@@ -7048,6 +7275,7 @@ function renderReestrSection() {
               <th style="padding:8px;text-align:left;font-weight:600">Описание</th>
               <th style="padding:8px;text-align:left;font-weight:600">Объект</th>
               <th style="padding:8px;text-align:left;font-weight:600">Статья БДДС</th>
+              <th style="padding:8px;width:36px" title="В журнал ремонта"></th>
               <th style="padding:8px;width:36px"></th>
             </tr></thead>
             <tbody id="reestrReviewBody"></tbody>
@@ -7263,17 +7491,58 @@ function reestrRenderTable() {
     const tdSt = document.createElement('td'); tdSt.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
     tdSt.appendChild(reestrBuildStatyaSelect(row, i)); tr.appendChild(tdSt);
 
+    const tdRep = document.createElement('td'); tdRep.style.cssText = 'padding:6px 8px;text-align:center;border-bottom:1px solid var(--border)';
+    const alreadyLinked = (data.repairs || []).some(r => r.invoiceNo && row.osn && r.invoiceNo === row.osn);
+    if (alreadyLinked) {
+      tdRep.innerHTML = '<span class="reestr-linked" title="Уже в журнале ремонта">&#10003;</span>';
+    } else {
+      const repBtn = document.createElement('button'); repBtn.title = 'В журнал ремонта';
+      repBtn.className = 'reestr-action-btn repair';
+      repBtn.innerHTML = '<svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>';
+      repBtn.addEventListener('click', () => reestrToRepair(i));
+      tdRep.appendChild(repBtn);
+    }
+    tr.appendChild(tdRep);
+
     const tdDel = document.createElement('td'); tdDel.style.cssText = 'padding:6px 8px;text-align:center;border-bottom:1px solid var(--border)';
     const delBtn = document.createElement('button'); delBtn.textContent = '✕';
-    delBtn.style.cssText = 'background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 4px;border-radius:4px';
-    delBtn.addEventListener('mouseenter', () => { delBtn.style.color = 'var(--red)'; });
-    delBtn.addEventListener('mouseleave', () => { delBtn.style.color = 'var(--text3)'; });
+    delBtn.className = 'reestr-action-btn delete';
     delBtn.addEventListener('click', () => { reestrRows.splice(i, 1); reestrRenderTable(); });
     tdDel.appendChild(delBtn); tr.appendChild(tdDel);
 
     tbody.appendChild(tr);
   });
   reestrUpdateTotal();
+}
+
+function reestrToRepair(idx) {
+  const row = reestrRows[idx];
+  if (!row) return;
+  editingRepairId = null;
+  document.getElementById('repairModalTitle').textContent = 'Добавить ремонт';
+  document.getElementById('repairDeleteBtn').style.display = 'none';
+  const sel = document.getElementById('rp_vehicle');
+  populateRepairVehicleSelect(sel);
+  document.getElementById('rp_vehicle_wrap').style.display = '';
+  if (row.obj) {
+    const objLow = row.obj.toLowerCase();
+    const match = data.vehicles.find(v =>
+      (v.plate && v.plate.toLowerCase().includes(objLow)) ||
+      (v.make && v.make.toLowerCase().includes(objLow)) ||
+      (v.object && v.object.toLowerCase().includes(objLow)) ||
+      (objLow.includes((v.plate||'').toLowerCase()) && v.plate)
+    );
+    if (match) sel.value = match.id;
+  }
+  document.getElementById('rp_invoice_date').value = row.date || fmtDate(new Date().toISOString().split('T')[0]);
+  document.getElementById('rp_invoice_no').value = row.osn || '';
+  document.getElementById('rp_cost').value = row.sum || '';
+  document.getElementById('rp_description').value = (row.description || '').replace(/\\n/g, '\n');
+  document.getElementById('rp_mileage').value = '';
+  document.getElementById('rp_paid').checked = false;
+  document.getElementById('rp_note').value = '';
+  populateRepairCategorySelect(row['statья'] || '');
+  openModal('repairModal');
 }
 
 async function reestrBuild() {
