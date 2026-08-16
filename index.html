@@ -7767,6 +7767,15 @@ function renderReestrSection() {
           <span class="reestr-spinner" style="display:none;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite"></span>
           <span id="reestrParseBtnLabel">Распознать счета</span>
         </button>
+        <div id="reestrProgressWrap" style="display:none;margin-top:10px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-secondary);margin-bottom:4px">
+            <span id="reestrProgressFile"></span>
+            <span id="reestrProgressCount"></span>
+          </div>
+          <div style="height:6px;border-radius:3px;background:var(--surface-alt);overflow:hidden">
+            <div id="reestrProgressBar" style="height:100%;border-radius:3px;background:var(--primary);transition:width .3s;width:0%"></div>
+          </div>
+        </div>
         <div id="reestrError" style="display:none;border:1px solid var(--red);background:color-mix(in srgb,var(--red) 8%,transparent);color:var(--red);border-radius:8px;padding:10px 12px;font-size:13px;margin-top:12px"></div>
       </div>
 
@@ -7896,6 +7905,19 @@ async function reestrParse() {
   btn.disabled = true;
   btn.querySelector('.reestr-spinner').style.display = 'inline-block';
   document.getElementById('reestrParseBtnLabel').textContent = 'Распознаю…';
+  const progressWrap = document.getElementById('reestrProgressWrap');
+  const progressBar = document.getElementById('reestrProgressBar');
+  const progressFile = document.getElementById('reestrProgressFile');
+  const progressCount = document.getElementById('reestrProgressCount');
+  progressWrap.style.display = 'none';
+  window.reestrAPI.onProgress(({ current, total, fileName }) => {
+    progressWrap.style.display = '';
+    progressBar.style.width = Math.round((current / total) * 100) + '%';
+    const shortName = fileName.length > 40 ? fileName.slice(0, 37) + '…' : fileName;
+    progressFile.textContent = shortName;
+    progressCount.textContent = current + ' / ' + total;
+    document.getElementById('reestrParseBtnLabel').textContent = 'Распознаю ' + current + '/' + total + '…';
+  });
   try {
     const zipFiles = reestrFiles.filter(f => f.type === 'zip');
     const pdfFiles = reestrFiles.filter(f => f.type === 'pdf');
@@ -7921,6 +7943,8 @@ async function reestrParse() {
     errorEl.textContent = '⚠ ' + e.message;
     errorEl.style.display = '';
   } finally {
+    window.reestrAPI.offProgress();
+    progressWrap.style.display = 'none';
     btn.disabled = false;
     btn.querySelector('.reestr-spinner').style.display = 'none';
     document.getElementById('reestrParseBtnLabel').textContent = 'Распознать счета';

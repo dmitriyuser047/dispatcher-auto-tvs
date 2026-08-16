@@ -37,4 +37,6 @@ contextBridge.exposeInMainWorld('reestrAPI', {
   buildXlsx:     (data)        => ipcRenderer.invoke('reestr-build-xlsx', data),
   loadStatyi:    ()            => ipcRenderer.invoke('reestr-load-statyi'),
   save:          (filename, xlsxBase64) => ipcRenderer.invoke('reestr-save-xlsx', { filename, xlsxBase64 }),
+  onProgress:    (cb)          => ipcRenderer.on('reestr-progress', (_e, p) => cb(p)),
+  offProgress:   ()            => ipcRenderer.removeAllListeners('reestr-progress'),
 });

@@ -252,9 +252,23 @@ function extractMoneyFromLine(line) {
 
 let ocrWorker = null;
 
+function findLangPath() {
+  const candidates = [
+    path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..'),
+    path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..', 'resources', 'app'),
+    path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..', 'resources', 'app.asar.unpacked'),
+  ];
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'rus.traineddata'))) return dir;
+  }
+  return null;
+}
+
 async function getOcrWorker() {
   if (!ocrWorker) {
-    ocrWorker = await Tesseract.createWorker("rus");
+    const langDir = findLangPath();
+    const opts = langDir ? { langPath: langDir, gzip: false } : {};
+    ocrWorker = await Tesseract.createWorker("rus", undefined, opts);
   }
   return ocrWorker;
 }
@@ -819,7 +833,7 @@ export async function parseInvoices(zipBuffer, config, onLog = () => {}) {
  * Шаг 1 (альт.): разбор отдельных PDF-файлов.
  * @param {Array<{name: string, buffer: Buffer}>} pdfFiles
  */
-export async function parsePdfFiles(pdfFiles, config, onLog = () => {}) {
+export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgress = () => {}) {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "reestr-pdf-"));
   try {
     onLog({ type: "info", text: `Загружено PDF-файлов: ${pdfFiles.length}` });
@@ -840,6 +854,8 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}) {
 
     const rows = [];
     const processedPaths = new Set();
+    const totalFiles = savedPaths.length;
+    let doneFiles = 0;
 
     // Пробуем объединить счёт + УПД в пары (по похожим именам)
     for (const inv of invoices) {
@@ -856,7 +872,7 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}) {
       }
 
       if (matchedUpd) {
-        // Пара найдена — обрабатываем вместе через папку
+        onProgress({ current: doneFiles + 1, total: totalFiles, fileName: inv.name });
         const pairDir = path.join(workDir, `pair_${rows.length}`);
         fs.mkdirSync(pairDir, { recursive: true });
         fs.copyFileSync(inv.path, path.join(pairDir, inv.name));
@@ -875,8 +891,9 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}) {
         } catch (e) {
           onLog({ type: "warn", text: `${inv.name} — ошибка: ${e.message}` });
         }
+        doneFiles += 2;
       } else {
-        // Счёт без пары — обрабатываем отдельно
+        onProgress({ current: doneFiles + 1, total: totalFiles, fileName: inv.name });
         processedPaths.add(inv.path);
         try {
           const result = await processSinglePdf(inv.path, config, inv.name);
@@ -892,12 +909,14 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}) {
         } catch (e) {
           onLog({ type: "warn", text: `${inv.name} — ошибка: ${e.message}` });
         }
+        doneFiles++;
       }
     }
 
     // Оставшиеся УПД (без пары) и прочие PDF
     for (const f of [...upds, ...others]) {
       if (processedPaths.has(f.path)) continue;
+      onProgress({ current: doneFiles + 1, total: totalFiles, fileName: f.name });
       processedPaths.add(f.path);
       try {
         const result = await processSinglePdf(f.path, config, f.name);
@@ -913,6 +932,7 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}) {
       } catch (e) {
         onLog({ type: "warn", text: `${f.name} — ошибка: ${e.message}` });
       }
+      doneFiles++;
     }
 
     rows.sort((a, b) => ddmmyyyyToSortable(a.date).localeCompare(ddmmyyyyToSortable(b.date)));

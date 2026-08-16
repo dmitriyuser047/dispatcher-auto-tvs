@@ -24,6 +24,7 @@
       "ReestrBuilder/lib.mjs",
       "ReestrBuilder/config.json",
       "ReestrBuilder/statyi.json",
+      "rus.traineddata",
       "index.html",
       "package.json"
     ],

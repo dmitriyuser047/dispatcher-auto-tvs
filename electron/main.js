@@ -389,7 +389,10 @@ app.whenReady().then(() => {
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const log = [];
     const pdfFiles = pdfFilesRaw.map(f => ({ name: f.name, buffer: Buffer.from(f.buffer) }));
-    const rows = await parsePdfFiles(pdfFiles, config, (msg) => log.push(msg));
+    const rows = await parsePdfFiles(pdfFiles, config,
+      (msg) => log.push(msg),
+      (progress) => event.sender.send('reestr-progress', progress)
+    );
     return { log, rows, config };
   });
 
