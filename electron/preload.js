@@ -16,6 +16,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   switchUser:        (idx)       => ipcRenderer.invoke('switch-user', idx),
   chooseDataFolder:  ()          => ipcRenderer.invoke('choose-data-folder'),
 
+  // Сетевой сервер
+  serverStart:   ()              => ipcRenderer.invoke('server-start'),
+  serverStop:    ()              => ipcRenderer.invoke('server-stop'),
+  serverStatus:  ()              => ipcRenderer.invoke('server-status'),
+  serverPing:    (host, port)    => ipcRenderer.invoke('server-ping', host, port),
+
   // Обновления
   getAppVersion:  ()        => ipcRenderer.invoke('get-app-version'),
   checkUpdate:    ()        => ipcRenderer.invoke('check-update'),

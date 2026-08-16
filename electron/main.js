@@ -3,6 +3,7 @@ const path    = require('path');
 const fs      = require('fs');
 const os      = require('os');
 const updater = require('./updater');
+const server  = require('./server');
 const { createExtractorFromData } = require('node-unrar-js');
 
 const DEFAULT_DATA_DIR = path.join(os.homedir(), 'Documents', 'ДиспетчеризацияАвто_ТВС');
@@ -12,7 +13,14 @@ function loadSettings() {
   try {
     if (fs.existsSync(SETTINGS_FILE)) return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
   } catch {}
-  return { users: [{ name: 'Пользователь', dataDir: DEFAULT_DATA_DIR }], activeUser: 0 };
+  return {
+    users: [{ name: 'Пользователь', dataDir: DEFAULT_DATA_DIR }],
+    activeUser: 0,
+    networkMode: 'local',
+    serverPort: 3377,
+    remoteHost: '',
+    remotePort: 3377,
+  };
 }
 
 function saveSettings(s) {
@@ -103,13 +111,30 @@ app.whenReady().then(() => {
     });
   });
 
-  ipcMain.handle('read-data', () => {
+  function isClientMode() { return settings.networkMode === 'client' && settings.remoteHost; }
+
+  ipcMain.handle('read-data', async () => {
+    if (isClientMode()) {
+      try {
+        return await server.fetchData(settings.remoteHost, settings.remotePort || 3377);
+      } catch (e) {
+        return null;
+      }
+    }
     const f = getDataFile();
     if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8');
     return null;
   });
 
-  ipcMain.handle('write-data', (_event, jsonStr) => {
+  ipcMain.handle('write-data', async (_event, jsonStr) => {
+    if (isClientMode()) {
+      try {
+        const res = await server.postData(settings.remoteHost, settings.remotePort || 3377, jsonStr);
+        return res && res.ok;
+      } catch (e) {
+        return false;
+      }
+    }
     ensureDirs();
     createDailyBackup();
     fs.writeFileSync(getDataFile(), jsonStr, 'utf8');
@@ -123,7 +148,7 @@ app.whenReady().then(() => {
   ipcMain.handle('save-settings', (_event, newSettings) => {
     settings = newSettings;
     saveSettings(settings);
-    ensureDirs();
+    if (!isClientMode()) ensureDirs();
     return true;
   });
 
@@ -131,7 +156,7 @@ app.whenReady().then(() => {
     if (idx < 0 || idx >= settings.users.length) return { ok: false };
     settings.activeUser = idx;
     saveSettings(settings);
-    ensureDirs();
+    if (!isClientMode()) ensureDirs();
     return { ok: true };
   });
 
@@ -145,6 +170,44 @@ app.whenReady().then(() => {
     if (canceled || !filePaths || !filePaths[0]) return { ok: false };
     return { ok: true, path: filePaths[0] };
   });
+
+  ipcMain.handle('server-start', async () => {
+    const port = settings.serverPort || 3377;
+    const user = getActiveUser();
+    return await server.start({
+      port,
+      dataFile: getDataFile(),
+      backupFn: () => { ensureDirs(); createDailyBackup(); },
+      serverName: user.name || os.hostname(),
+    });
+  });
+
+  ipcMain.handle('server-stop', () => {
+    server.stop();
+    return { ok: true };
+  });
+
+  ipcMain.handle('server-status', () => {
+    return {
+      running: server.isRunning(),
+      ips: server.getLocalIPs(),
+      port: settings.serverPort || 3377,
+    };
+  });
+
+  ipcMain.handle('server-ping', async (_event, host, port) => {
+    return await server.ping(host, port || 3377);
+  });
+
+  // Автозапуск сервера если настроен режим "server"
+  if (settings.networkMode === 'server') {
+    server.start({
+      port: settings.serverPort || 3377,
+      dataFile: getDataFile(),
+      backupFn: () => { ensureDirs(); createDailyBackup(); },
+      serverName: getActiveUser().name || os.hostname(),
+    });
+  }
 
   // Импорт данных из RAR-архива (data.json + backups) для пополнения базы
   ipcMain.handle('import-rar', async (event) => {
