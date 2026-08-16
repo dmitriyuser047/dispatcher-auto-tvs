@@ -7732,14 +7732,24 @@ function renderGenSidebarSummary() {
 let reestrFiles = [];
 let reestrRows = [];
 let reestrStatyi = [];
+let reestrContracts = [];
 let reestrLastResult = null;
 let reestrStatyiLoaded = false;
+let reestrContractsLoaded = false;
 
 async function loadReestrStatyi() {
   if (reestrStatyiLoaded) return;
   if (window.reestrAPI) {
     reestrStatyi = await window.reestrAPI.loadStatyi();
     reestrStatyiLoaded = true;
+  }
+}
+
+async function loadReestrContracts() {
+  if (reestrContractsLoaded) return;
+  if (window.reestrAPI) {
+    reestrContracts = await window.reestrAPI.loadContracts();
+    reestrContractsLoaded = true;
   }
 }
 
@@ -7758,9 +7768,9 @@ function renderReestrSection() {
       <div id="reestrUpload" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">
         <div id="reestrDropzone" style="border:2px dashed var(--border);border-radius:10px;padding:32px 20px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s">
           <div style="font-size:28px;margin-bottom:6px">📦</div>
-          <div style="font-size:14px;font-weight:600">Перетащите сюда zip-архив или PDF-файлы</div>
-          <div style="font-size:12px;color:var(--text3);margin-top:4px">ZIP-архив со счетами или отдельные PDF — можно несколько</div>
-          <input type="file" id="reestrFileInput" accept=".zip,.pdf" multiple style="display:none">
+          <div style="font-size:14px;font-weight:600">Перетащите сюда файлы со счетами</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:4px">ZIP, PDF, JPG, PNG, TIFF, BMP — можно несколько</div>
+          <input type="file" id="reestrFileInput" accept=".zip,.pdf,.jpg,.jpeg,.png,.tif,.tiff,.bmp" multiple style="display:none">
         </div>
         <div id="reestrFileChips" style="display:flex;flex-direction:column;gap:6px;margin-top:12px"></div>
         <button class="btn btn-primary" id="reestrParseBtn" disabled style="width:100%;margin-top:14px;justify-content:center">
@@ -7776,6 +7786,7 @@ function renderReestrSection() {
             <div id="reestrProgressBar" style="height:100%;border-radius:3px;background:var(--primary);transition:width .3s;width:0%"></div>
           </div>
         </div>
+        <button class="btn btn-ghost" id="reestrOpenWindowBtn" style="display:none;width:100%;margin-top:8px;justify-content:center">Открыть реестр</button>
         <div id="reestrError" style="display:none;border:1px solid var(--red);background:color-mix(in srgb,var(--red) 8%,transparent);color:var(--red);border-radius:8px;padding:10px 12px;font-size:13px;margin-top:12px"></div>
       </div>
 
@@ -7851,6 +7862,13 @@ function reestrBindEvents() {
   ['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.style.borderColor = ''; dropzone.style.background = ''; }));
   dropzone.addEventListener('drop', e => reestrAddFiles(e.dataTransfer.files));
   document.getElementById('reestrParseBtn').addEventListener('click', reestrParse);
+  document.getElementById('reestrOpenWindowBtn').addEventListener('click', async () => {
+    if (reestrRows.length > 0) {
+      await loadReestrStatyi();
+      await loadReestrContracts();
+      await window.electronAPI.openReestrWindow({ rows: reestrRows, log: [], statyi: reestrStatyi, contracts: reestrContracts });
+    }
+  });
   document.getElementById('reestrAddRowBtn').addEventListener('click', () => {
     reestrRows.push({ sum:0, date:new Date().toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'}), category:'', description:'', naz:'', obj:'', dog:'', osn:'', updLabel:'', 'statья':'', sourceFolder:'вручную' });
     reestrRenderTable();
@@ -7865,13 +7883,15 @@ function reestrBindEvents() {
   document.getElementById('reestrDownloadBtn').addEventListener('click', reestrDownload);
 }
 
+const REESTR_IMG_EXTS = ['jpg','jpeg','png','tif','tiff','bmp'];
 function reestrAddFiles(fileList) {
   for (const file of fileList) {
     const ext = file.name.toLowerCase().split('.').pop();
-    if (ext !== 'zip' && ext !== 'pdf') continue;
-    if (ext === 'zip' && reestrFiles.some(f => f.type === 'zip')) continue;
+    const type = ext === 'zip' ? 'zip' : ext === 'pdf' ? 'pdf' : REESTR_IMG_EXTS.includes(ext) ? 'img' : null;
+    if (!type) continue;
+    if (type === 'zip' && reestrFiles.some(f => f.type === 'zip')) continue;
     if (reestrFiles.some(f => f.file.name === file.name && f.file.size === file.size)) continue;
-    reestrFiles.push({ file, type: ext });
+    reestrFiles.push({ file, type });
   }
   reestrRenderChips();
   document.getElementById('reestrParseBtn').disabled = reestrFiles.length === 0;
@@ -7883,7 +7903,10 @@ function reestrRenderChips() {
   reestrFiles.forEach((f, i) => {
     const chip = document.createElement('div');
     chip.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px';
-    chip.innerHTML = `<span>${f.type === 'zip' ? '📦' : '📄'}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.file.name}</span><span style="font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;background:${f.type === 'zip' ? 'var(--accent)' : 'var(--green)'};color:#fff">${f.type.toUpperCase()}</span><span style="cursor:pointer;color:var(--text3)" onclick="reestrRemoveFile(${i})">✕</span>`;
+    const icon = f.type === 'zip' ? '📦' : f.type === 'img' ? '🖼' : '📄';
+    const color = f.type === 'zip' ? 'var(--accent)' : f.type === 'img' ? 'var(--yellow)' : 'var(--green)';
+    const label = f.type === 'img' ? f.file.name.split('.').pop().toUpperCase() : f.type.toUpperCase();
+    chip.innerHTML = `<span>${icon}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.file.name}</span><span style="font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;background:${color};color:#fff">${label}</span><span style="cursor:pointer;color:var(--text3)" onclick="reestrRemoveFile(${i})">✕</span>`;
     el.appendChild(chip);
   });
 }
@@ -7918,26 +7941,38 @@ async function reestrParse() {
     progressCount.textContent = current + ' / ' + total;
     document.getElementById('reestrParseBtnLabel').textContent = 'Распознаю ' + current + '/' + total + '…';
   });
+  window.reestrAPI.onOcrPage(({ page, totalPages }) => {
+    progressWrap.style.display = '';
+    progressFile.textContent = 'OCR стр. ' + page + ' / ' + totalPages;
+    progressBar.style.width = Math.round((page / totalPages) * 100) + '%';
+    document.getElementById('reestrParseBtnLabel').textContent = 'OCR стр. ' + page + '/' + totalPages + '…';
+  });
   try {
     const zipFiles = reestrFiles.filter(f => f.type === 'zip');
     const pdfFiles = reestrFiles.filter(f => f.type === 'pdf');
+    const imgFiles = reestrFiles.filter(f => f.type === 'img');
     let allRows = [], allLog = [];
     if (zipFiles.length > 0) {
       const ab = await zipFiles[0].file.arrayBuffer();
       const d = await window.reestrAPI.parseInvoices(ab);
       allRows.push(...d.rows); allLog.push(...d.log);
     }
-    if (pdfFiles.length > 0) {
+    if (pdfFiles.length > 0 || imgFiles.length > 0) {
       const payload = [];
       for (const pf of pdfFiles) { payload.push({ name: pf.file.name, buffer: await pf.file.arrayBuffer() }); }
+      for (const im of imgFiles) { payload.push({ name: im.file.name, buffer: await im.file.arrayBuffer() }); }
       const d = await window.reestrAPI.parsePdfs(payload);
       allRows.push(...d.rows); allLog.push(...d.log);
     }
     reestrRows = allRows;
-    reestrRenderLog(allLog);
     if (reestrRows.length > 0) {
-      reestrRenderTable();
-      document.getElementById('reestrReviewCard').style.display = '';
+      await loadReestrStatyi();
+      await loadReestrContracts();
+      document.getElementById('reestrOpenWindowBtn').style.display = '';
+      await window.electronAPI.openReestrWindow({ rows: reestrRows, log: allLog, statyi: reestrStatyi, contracts: reestrContracts });
+    } else {
+      document.getElementById('reestrOpenWindowBtn').style.display = 'none';
+      reestrRenderLog(allLog);
     }
   } catch (e) {
     errorEl.textContent = '⚠ ' + e.message;

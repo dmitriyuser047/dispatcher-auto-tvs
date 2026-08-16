@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   switchUser:        (idx)       => ipcRenderer.invoke('switch-user', idx),
   chooseDataFolder:  ()          => ipcRenderer.invoke('choose-data-folder'),
 
+  // Окно реестра
+  openReestrWindow: (data) => ipcRenderer.invoke('open-reestr-window', data),
+
   // Сетевой сервер
   serverStart:   ()              => ipcRenderer.invoke('server-start'),
   serverStop:    ()              => ipcRenderer.invoke('server-stop'),
@@ -36,7 +39,9 @@ contextBridge.exposeInMainWorld('reestrAPI', {
   parsePdfs:     (pdfFiles)    => ipcRenderer.invoke('reestr-parse-pdfs', pdfFiles),
   buildXlsx:     (data)        => ipcRenderer.invoke('reestr-build-xlsx', data),
   loadStatyi:    ()            => ipcRenderer.invoke('reestr-load-statyi'),
+  loadContracts: ()            => ipcRenderer.invoke('reestr-load-contracts'),
   save:          (filename, xlsxBase64) => ipcRenderer.invoke('reestr-save-xlsx', { filename, xlsxBase64 }),
   onProgress:    (cb)          => ipcRenderer.on('reestr-progress', (_e, p) => cb(p)),
-  offProgress:   ()            => ipcRenderer.removeAllListeners('reestr-progress'),
+  onOcrPage:     (cb)          => ipcRenderer.on('reestr-ocr-page', (_e, p) => cb(p)),
+  offProgress:   ()            => { ipcRenderer.removeAllListeners('reestr-progress'); ipcRenderer.removeAllListeners('reestr-ocr-page'); },
 });

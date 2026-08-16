@@ -341,8 +341,14 @@ async function ocrPageImage(page, worker) {
   const tmpFile = path.join(os.tmpdir(), `ocr_${Date.now()}_${Math.random().toString(36).slice(2)}.bmp`);
   try {
     fs.writeFileSync(tmpFile, bmp);
-    const result = await worker.recognize(tmpFile);
+    const result = await Promise.race([
+      worker.recognize(tmpFile),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('OCR timeout')), 120000)),
+    ]);
     return result.data.text || "";
+  } catch (e) {
+    if (e.message === 'OCR timeout') return "";
+    throw e;
   } finally {
     try { fs.unlinkSync(tmpFile); } catch {}
   }
@@ -359,7 +365,7 @@ function ocrTextToLines(text) {
   );
 }
 
-async function pdfToLayout(filePathOrBuffer) {
+async function pdfToLayout(filePathOrBuffer, onOcrPage = () => {}) {
   const data = typeof filePathOrBuffer === "string"
     ? new Uint8Array(fs.readFileSync(filePathOrBuffer))
     : new Uint8Array(filePathOrBuffer);
@@ -377,6 +383,7 @@ async function pdfToLayout(filePathOrBuffer) {
 
   const worker = await getOcrWorker();
   for (let i = 1; i <= doc.numPages; i++) {
+    onOcrPage({ page: i, totalPages: doc.numPages });
     const page = await doc.getPage(i);
     const text = await ocrPageImage(page, worker);
     if (text) allLines.push(...ocrTextToLines(text));
@@ -384,7 +391,7 @@ async function pdfToLayout(filePathOrBuffer) {
   return allLines;
 }
 
-async function pdfToPageLayouts(filePathOrBuffer) {
+async function pdfToPageLayouts(filePathOrBuffer, onOcrPage = () => {}) {
   const data = typeof filePathOrBuffer === "string"
     ? new Uint8Array(fs.readFileSync(filePathOrBuffer))
     : new Uint8Array(filePathOrBuffer);
@@ -403,6 +410,7 @@ async function pdfToPageLayouts(filePathOrBuffer) {
   const worker = await getOcrWorker();
   const ocrPages = [];
   for (let i = 1; i <= doc.numPages; i++) {
+    onOcrPage({ page: i, totalPages: doc.numPages });
     const page = await doc.getPage(i);
     const text = await ocrPageImage(page, worker);
     ocrPages.push(text ? ocrTextToLines(text) : []);
@@ -734,11 +742,11 @@ function buildRowFromParsed(inv, upd, config, label, baseName, isFromUpd) {
   };
 }
 
-async function processSinglePdf(filePath, config, label = "") {
+async function processSinglePdf(filePath, config, label = "", onOcrPage = () => {}) {
   const baseName = path.basename(filePath);
   const type = classifyPdf(filePath);
 
-  const pageLayouts = await pdfToPageLayouts(filePath);
+  const pageLayouts = await pdfToPageLayouts(filePath, onOcrPage);
 
   const invoicePageIdxs = [];
   for (let i = 0; i < pageLayouts.length; i++) {
@@ -833,24 +841,29 @@ export async function parseInvoices(zipBuffer, config, onLog = () => {}) {
  * Шаг 1 (альт.): разбор отдельных PDF-файлов.
  * @param {Array<{name: string, buffer: Buffer}>} pdfFiles
  */
-export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgress = () => {}) {
+const IMG_EXTS = /\.(jpe?g|png|tiff?|bmp)$/i;
+
+export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgress = () => {}, onOcrPage = () => {}) {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "reestr-pdf-"));
   try {
-    onLog({ type: "info", text: `Загружено PDF-файлов: ${pdfFiles.length}` });
+    onLog({ type: "info", text: `Загружено файлов: ${pdfFiles.length}` });
 
-    // Сохраняем PDF на диск
     const savedPaths = [];
     for (const f of pdfFiles) {
       const filePath = path.join(workDir, f.name);
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       fs.writeFileSync(filePath, Buffer.from(f.buffer));
-      savedPaths.push({ name: f.name, path: filePath });
+      const isImage = IMG_EXTS.test(f.name);
+      savedPaths.push({ name: f.name, path: filePath, isImage });
     }
 
-    // Разделяем на счета и УПД для попытки объединения в пары
-    const invoices = savedPaths.filter(f => /счет/i.test(f.name) && !/упд/i.test(f.name));
-    const upds = savedPaths.filter(f => /упд/i.test(f.name));
-    const others = savedPaths.filter(f => !invoices.includes(f) && !upds.includes(f));
+    const pdfSaved = savedPaths.filter(f => !f.isImage);
+    const imgSaved = savedPaths.filter(f => f.isImage);
+
+    // Разделяем PDF на счета и УПД для попытки объединения в пары
+    const invoices = pdfSaved.filter(f => /счет/i.test(f.name) && !/упд/i.test(f.name));
+    const upds = pdfSaved.filter(f => /упд/i.test(f.name));
+    const others = pdfSaved.filter(f => !invoices.includes(f) && !upds.includes(f));
 
     const rows = [];
     const processedPaths = new Set();
@@ -896,7 +909,7 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgre
         onProgress({ current: doneFiles + 1, total: totalFiles, fileName: inv.name });
         processedPaths.add(inv.path);
         try {
-          const result = await processSinglePdf(inv.path, config, inv.name);
+          const result = await processSinglePdf(inv.path, config, inv.name, onOcrPage);
           if (Array.isArray(result)) {
             rows.push(...result);
             onLog({ type: "ok", text: `${inv.name} → ${result.length} счетов (${result.reduce((s, r) => s + r.sum, 0).toLocaleString("ru-RU")} руб.)` });
@@ -919,7 +932,7 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgre
       onProgress({ current: doneFiles + 1, total: totalFiles, fileName: f.name });
       processedPaths.add(f.path);
       try {
-        const result = await processSinglePdf(f.path, config, f.name);
+        const result = await processSinglePdf(f.path, config, f.name, onOcrPage);
         if (Array.isArray(result)) {
           rows.push(...result);
           onLog({ type: "ok", text: `${f.name} → ${result.length} счетов (${result.reduce((s, r) => s + r.sum, 0).toLocaleString("ru-RU")} руб.)` });
@@ -935,6 +948,40 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgre
       doneFiles++;
     }
 
+    // Изображения — OCR напрямую
+    for (const img of imgSaved) {
+      onProgress({ current: doneFiles + 1, total: savedPaths.length, fileName: img.name });
+      onOcrPage({ page: 1, totalPages: 1 });
+      try {
+        const worker = await getOcrWorker();
+        const result = await Promise.race([
+          worker.recognize(img.path),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('OCR timeout')), 120000)),
+        ]);
+        const text = (result.data.text || "").trim();
+        if (!text) {
+          onLog({ type: "warn", text: `${img.name} — не удалось распознать текст` });
+          doneFiles++;
+          continue;
+        }
+        const lines = ocrTextToLines(text);
+        const inv = smartParseDocument(lines);
+        if (inv.total) {
+          if (!inv.description) inv.description = img.name;
+          const upd = { updNumber: inv.invoiceNumber || "", updDate: inv.invoiceDate || "" };
+          const row = buildRowFromParsed(inv, upd, config, img.name, img.name, false);
+          rows.push(row);
+          onLog({ type: "ok", text: `${img.name} → ${row.sum.toLocaleString("ru-RU")} руб.` });
+        } else {
+          onLog({ type: "warn", text: `${img.name} — не удалось распознать сумму` });
+        }
+      } catch (e) {
+        const msg = e.message === 'OCR timeout' ? 'таймаут OCR' : e.message;
+        onLog({ type: "warn", text: `${img.name} — ошибка: ${msg}` });
+      }
+      doneFiles++;
+    }
+
     rows.sort((a, b) => ddmmyyyyToSortable(a.date).localeCompare(ddmmyyyyToSortable(b.date)));
     return rows;
   } finally {
@@ -946,39 +993,61 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgre
  * Шаг 2: генерация Excel из (отредактированных) строк.
  */
 export async function buildXlsxFromRows(rows, config) {
-  const ACCENT = "FF2563EB";
-  const HEADER_TEXT = "FFFFFFFF";
-  const TITLE_TEXT = "FF111827";
-  const SUBTITLE_TEXT = "FF6B7280";
-  const BAND_FILL = "FFF3F6FB";
-  const BORDER_COLOR = "FFD9DEE8";
-  const TOTAL_FILL = "FFDBEAFE";
-  const FONT = "Calibri";
+  const FONT = "Times New Roman";
+  const FILL_BLUE = { type: "pattern", pattern: "solid", fgColor: { argb: "FFBDD7EE" }, bgColor: { indexed: 64 } };
+  const BORDER_ALL = {
+    left:   { style: "thin", color: { indexed: 64 } },
+    right:  { style: "thin", color: { indexed: 64 } },
+    top:    { style: "thin", color: { indexed: 64 } },
+    bottom: { style: "thin", color: { indexed: 64 } },
+  };
+  const COLS = 12;
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("РЕЕСТР", { views: [{ showGridLines: false }] });
 
-  ws.mergeCells("A1:J1");
+  // Row 1 — title
+  ws.mergeCells("A1:L1");
   ws.getCell("A1").value = `Реестр б/н от ${new Date().toLocaleDateString("ru-RU")}`;
-  ws.getCell("A1").font = { bold: true, size: 18, name: FONT, color: { argb: TITLE_TEXT } };
-  ws.getCell("A1").alignment = { vertical: "middle" };
-  ws.getRow(1).height = 30;
+  ws.getCell("A1").font = { bold: true, size: 14, name: FONT };
+  ws.getCell("A1").alignment = { horizontal: "left", vertical: "top" };
+  ws.getCell("A1").border = { bottom: { style: "thin", color: { indexed: 64 } } };
+  for (let c = 2; c <= COLS; c++) {
+    ws.getCell(1, c).font = { bold: true, size: 14, name: FONT };
+    ws.getCell(1, c).border = { bottom: { style: "thin", color: { indexed: 64 } } };
+    ws.getCell(1, c).alignment = { horizontal: "left", vertical: "top" };
+  }
+  ws.getRow(1).height = 18.75;
 
-  ws.mergeCells("A2:J2");
+  // Row 2 — company
+  ws.mergeCells("A2:L2");
   ws.getCell("A2").value = config.payerFullName;
-  ws.getCell("A2").font = { bold: true, size: 11, name: FONT, color: { argb: SUBTITLE_TEXT } };
-  ws.getCell("A2").alignment = { vertical: "middle" };
-  ws.getRow(2).height = 20;
+  ws.getCell("A2").font = { bold: true, size: 8, name: FONT };
+  ws.getCell("A2").fill = FILL_BLUE;
+  ws.getCell("A2").alignment = { horizontal: "center", vertical: "middle" };
+  ws.getCell("A2").border = BORDER_ALL;
+  for (let c = 2; c <= COLS; c++) {
+    ws.getCell(2, c).font = { bold: true, size: 8, name: FONT };
+    ws.getCell(2, c).fill = FILL_BLUE;
+    ws.getCell(2, c).alignment = { horizontal: "center", vertical: "middle" };
+    ws.getCell(2, c).border = BORDER_ALL;
+  }
+  ws.getRow(2).height = 20.25;
 
-  const headers = ["№", "Сумма, руб.", "Контрагент", "Назначение платежа", "Объект", "Доходный договор", "Инициатор платежа", "Номер договора с контрагентом", "ОСНОВАНИЕ", "ФИНКОНТРОЛЬ"];
+  // Row 3 — headers
+  const headers = ["№", "Сумма, руб.", "Контрагент", "Назначение платежа", "Объект", "Доходный договор", "Инициатор платежа", "Номер договора с контрагентом", "Номер ТС", "Общая сумма затрат на ТС (ТО, ремонт, з/ч, доп.оборудование)", "ОСНОВАНИЕ", "ФИНКОНТРОЛЬ"];
   ws.spliceRows(3, 1, headers);
-  ws.getRow(3).eachCell(c => {
-    c.font = { bold: true, name: FONT, size: 10.5, color: { argb: HEADER_TEXT } };
-    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: ACCENT } };
-    c.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-  });
-  ws.getRow(3).height = 32;
+  for (let c = 1; c <= COLS; c++) {
+    const cell = ws.getCell(3, c);
+    cell.font = { bold: true, size: 8, name: FONT };
+    cell.fill = FILL_BLUE;
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = BORDER_ALL;
+  }
+  ws.getCell(3, 6).font = { size: 8, name: FONT };
+  ws.getRow(3).height = 29.25;
 
+  // Data rows
   let r = 4;
   const total = rows.reduce((s, x) => s + x.sum, 0);
 
@@ -993,53 +1062,61 @@ export async function buildXlsxFromRows(rows, config) {
     ws.getCell(r, 6).value = row.dog;
     ws.getCell(r, 7).value = config.initiator;
     ws.getCell(r, 8).value = config.contractNumber;
-    ws.getCell(r, 9).value = row.osn;
-    ws.getCell(r, 10).value = `ПО ДОГОВОРУ ${config.contractNumber}\nВ 1С ПРОВЕДЕНО\n${row.updLabel}\nСТАТЬЯ ${row.statья}\nОперационные расходы`;
+    ws.getCell(r, 9).value = '';
+    ws.getCell(r, 10).value = '';
+    ws.getCell(r, 11).value = row.osn;
+    ws.getCell(r, 12).value = `ПО ДОГОВОРУ ${config.contractNumber}\nВ 1С ПРОВЕДЕНО\n${row.updLabel}\nСТАТЬЯ ${row['statья'] || row.statья || ''}\nОперационные расходы`;
 
-    const isBand = i % 2 === 1;
-    for (let c = 1; c <= 10; c++) {
+    for (let c = 1; c <= COLS; c++) {
       const cell = ws.getCell(r, c);
-      cell.alignment = { wrapText: true, vertical: "top" };
-      cell.font = { name: FONT, size: 10 };
-      if (isBand) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: BAND_FILL } };
+      cell.font = { bold: true, size: 8, name: FONT };
+      cell.alignment = { horizontal: "left", vertical: "top", wrapText: true };
+      cell.border = BORDER_ALL;
     }
     ws.getCell(r, 1).alignment = { horizontal: "center", vertical: "top" };
     ws.getCell(r, 2).alignment = { horizontal: "right", vertical: "top" };
     ws.getCell(r, 2).numFmt = "#,##0.00";
-    ws.getCell(r, 2).font = { name: FONT, size: 10, bold: true };
+    ws.getCell(r, 6).font = { size: 8, name: FONT };
+    ws.getCell(r, 6).alignment = { vertical: "top", wrapText: true };
+    ws.getCell(r, 7).font = { size: 8, name: FONT };
+    ws.getCell(r, 7).alignment = { vertical: "top", wrapText: true };
+    ws.getCell(r, 10).font = { size: 8, name: FONT, color: { argb: "FFFF0000" } };
+    ws.getCell(r, 10).alignment = { vertical: "top", wrapText: true };
+    ws.getCell(r, 12).font = { size: 8, name: FONT };
+    ws.getCell(r, 12).alignment = { horizontal: "left", vertical: "top", wrapText: true };
     r++;
   });
 
+  // Total row
   const lastDataRow = r - 1;
   ws.getCell(r, 2).value = { formula: `SUM(B4:B${lastDataRow})` };
   ws.getCell(r, 2).numFmt = "#,##0.00";
   ws.getCell(r, 3).value = "ВСЕГО";
-  for (let c = 1; c <= 10; c++) {
-    ws.getCell(r, c).font = { bold: true, name: FONT, size: 11 };
-    ws.getCell(r, c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: TOTAL_FILL } };
-    ws.getCell(r, c).border = { top: { style: "medium", color: { argb: ACCENT } } };
+  for (let c = 1; c <= COLS; c++) {
+    const cell = ws.getCell(r, c);
+    cell.font = { bold: true, size: 8, name: FONT };
+    cell.alignment = { horizontal: "left", vertical: "top" };
+    cell.border = BORDER_ALL;
   }
-  ws.getCell(r, 2).alignment = { horizontal: "right" };
+  ws.getCell(r, 1).alignment = { horizontal: "center", vertical: "top" };
+  ws.getCell(r, 2).alignment = { horizontal: "right", vertical: "top" };
 
-  for (let rr = 3; rr <= r; rr++) {
-    for (let c = 1; c <= 10; c++) {
-      const existingBorder = ws.getCell(rr, c).border || {};
-      ws.getCell(rr, c).border = {
-        ...existingBorder,
-        top: existingBorder.top || { style: "thin", color: { argb: BORDER_COLOR } },
-        bottom: { style: "thin", color: { argb: BORDER_COLOR } },
-        left: { style: "thin", color: { argb: BORDER_COLOR } },
-        right: { style: "thin", color: { argb: BORDER_COLOR } },
-      };
-    }
-  }
-
-  ws.autoFilter = `A3:J3`;
+  ws.autoFilter = "A3:L3";
   ws.views = [{ state: "frozen", ySplit: 3, showGridLines: false }];
 
   ws.columns = [
-    { width: 5 }, { width: 14 }, { width: 18 }, { width: 45 }, { width: 20 },
-    { width: 20 }, { width: 16 }, { width: 20 }, { width: 22 }, { width: 45 },
+    { width: 4.43 },   // №
+    { width: 12 },     // Сумма
+    { width: 18.43 },  // Контрагент
+    { width: 33.71 },  // Назначение
+    { width: 15.57 },  // Объект
+    { width: 19.86 },  // Доходный договор
+    { width: 12.14 },  // Инициатор
+    { width: 15.57 },  // Номер договора
+    { width: 14.14 },  // Номер ТС
+    { width: 0.14 },   // Общая сумма затрат (скрыт)
+    { width: 12.43 },  // ОСНОВАНИЕ
+    { width: 39.29 },  // ФИНКОНТРОЛЬ
   ];
 
   const buffer = await wb.xlsx.writeBuffer();

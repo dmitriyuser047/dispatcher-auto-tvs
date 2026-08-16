@@ -377,22 +377,27 @@ app.whenReady().then(() => {
   const REESTR_LIB_URL = 'file:///' + path.join(REESTR_DIR, 'lib.mjs').replace(/\\/g, '/');
 
   ipcMain.handle('reestr-parse-invoices', async (event, zipArrayBuffer) => {
+    console.log('[reestr] parse-invoices start');
     const { parseInvoices, loadConfig } = await import(REESTR_LIB_URL);
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const log = [];
-    const rows = await parseInvoices(Buffer.from(zipArrayBuffer), config, (msg) => log.push(msg));
+    const rows = await parseInvoices(Buffer.from(zipArrayBuffer), config, (msg) => { log.push(msg); console.log('[reestr] log:', msg.type, msg.text); });
+    console.log('[reestr] parse-invoices done, rows:', rows.length);
     return { log, rows, config };
   });
 
   ipcMain.handle('reestr-parse-pdfs', async (event, pdfFilesRaw) => {
+    console.log('[reestr] parse-pdfs start, files:', pdfFilesRaw.length);
     const { parsePdfFiles, loadConfig } = await import(REESTR_LIB_URL);
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const log = [];
     const pdfFiles = pdfFilesRaw.map(f => ({ name: f.name, buffer: Buffer.from(f.buffer) }));
     const rows = await parsePdfFiles(pdfFiles, config,
-      (msg) => log.push(msg),
-      (progress) => event.sender.send('reestr-progress', progress)
+      (msg) => { log.push(msg); console.log('[reestr] log:', msg.type, msg.text); },
+      (progress) => { event.sender.send('reestr-progress', progress); },
+      (ocr) => { event.sender.send('reestr-ocr-page', ocr); }
     );
+    console.log('[reestr] parse-pdfs done, rows:', rows.length);
     return { log, rows, config };
   });
 
@@ -413,6 +418,12 @@ app.whenReady().then(() => {
     return [];
   });
 
+  ipcMain.handle('reestr-load-contracts', async () => {
+    const p = path.join(REESTR_DIR, 'contracts.json');
+    if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8'));
+    return [];
+  });
+
   ipcMain.handle('reestr-save-xlsx', async (event, { filename, xlsxBase64 }) => {
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePath } = await dialog.showSaveDialog(senderWin, {
@@ -424,6 +435,37 @@ app.whenReady().then(() => {
     fs.writeFileSync(filePath, Buffer.from(xlsxBase64, 'base64'));
     shell.showItemInFolder(filePath);
     return { saved: true, path: filePath };
+  });
+
+  // ─── Отдельное окно реестра ───
+  let reestrWindowData = null;
+
+  ipcMain.handle('open-reestr-window', (event, data) => {
+    reestrWindowData = data;
+    const parentWin = BrowserWindow.fromWebContents(event.sender);
+    const iconPath = path.join(__dirname, '../build/icon.ico');
+    const reestrWin = new BrowserWindow({
+      width: 1400,
+      height: 900,
+      minWidth: 900,
+      minHeight: 600,
+      title: 'Реестр счетов',
+      icon: fs.existsSync(iconPath) ? iconPath : undefined,
+      parent: parentWin || undefined,
+      webPreferences: {
+        preload: path.join(__dirname, 'reestr-preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    reestrWin.setMenuBarVisibility(false);
+    reestrWin.loadFile(path.join(__dirname, '../reestr-window.html'));
+    return true;
+  });
+
+  ipcMain.handle('reestr-window-data', () => {
+    console.log('[reestr-window] data request, rows:', reestrWindowData?.rows?.length, 'statyi:', reestrWindowData?.statyi?.length);
+    return reestrWindowData;
   });
 
   createWindow();

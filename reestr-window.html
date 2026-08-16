@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Реестр счетов</title>
+<style>
+  :root {
+    --bg: #f0f4f8; --bg2: #ffffff; --bg3: #e8edf3; --bg4: #dde3ec;
+    --accent: #2563eb; --accent2: #1d4ed8; --green: #16a34a; --red: #dc2626;
+    --text: #1e293b; --text2: #475569; --text3: #94a3b8;
+    --border: #cbd5e1; --border2: #b0bec5; --radius: 10px;
+    --shadow: 0 4px 24px rgba(0,0,0,0.12);
+  }
+  [data-theme="dark"] {
+    --bg: #0f1117; --bg2: #171a21; --bg3: #1f242e; --bg4: #262c38;
+    --accent: #3b82f6; --accent2: #2563eb; --green: #22c55e; --red: #ef4444;
+    --text: #e5ebf3; --text2: #a3b1c2; --text3: #6b7889;
+    --border: #2a303c; --border2: #3a4150;
+    --shadow: 0 4px 24px rgba(0,0,0,0.5);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: var(--bg); }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .toolbar {
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    padding: 12px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+  }
+  .toolbar h1 { font-size: 16px; font-weight: 700; flex: 1; }
+  .toolbar .summary { font-size: 13px; color: var(--text2); }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 16px; border-radius: 7px; border: none;
+    cursor: pointer; font-size: 13px; font-weight: 500; transition: all .15s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border2); }
+  .btn-ghost:hover { background: var(--bg3); color: var(--text); }
+
+  .content { flex: 1; overflow: auto; padding: 16px 20px; }
+
+  .log-card {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; margin-bottom: 16px;
+  }
+  .log-card summary {
+    cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text2);
+    user-select: none; list-style: none;
+  }
+  .log-card summary::before { content: '▸ '; }
+  .log-card[open] summary::before { content: '▾ '; }
+  .log-list { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+  .log-item { font-size: 12px; padding: 2px 0; }
+  .log-ok { color: var(--green); } .log-ok::before { content: '✓ '; }
+  .log-warn { color: var(--red); } .log-warn::before { content: '! '; }
+  .log-info { color: var(--text3); } .log-info::before { content: '· '; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 900px; }
+  thead tr { background: var(--accent); color: #fff; }
+  th { padding: 8px; text-align: left; font-weight: 600; white-space: nowrap; }
+  .table-wrap {
+    overflow-x: auto; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg2);
+  }
+  .total-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 10px 0; font-size: 14px; font-weight: 700;
+  }
+
+  .action-btn {
+    background: none; border: none; cursor: pointer; border-radius: 4px;
+    width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+    transition: all .15s;
+  }
+  .action-btn:hover { background: var(--bg4); }
+  .action-btn.delete { color: var(--text3); }
+  .action-btn.delete:hover { color: var(--red); background: rgba(220,38,38,0.08); }
+
+  .done-card {
+    background: var(--bg2); border: 1px solid var(--green); border-radius: var(--radius);
+    padding: 20px; margin-top: 16px; display: none;
+  }
+  .done-card .done-info { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+
+  /* Searchable dropdown */
+  .statya-picker { position: relative; min-width: 220px; }
+  .statya-selected {
+    width: 100%; padding: 4px 24px 4px 6px; font-size: 11px;
+    border: 1px solid var(--border); border-radius: 5px;
+    background: var(--bg2); color: var(--text); cursor: pointer;
+    font-family: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-height: 24px; display: flex; align-items: center;
+  }
+  .statya-selected::after {
+    content: '▾'; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    font-size: 10px; color: var(--text3); pointer-events: none;
+  }
+  .statya-dropdown {
+    display: none; position: fixed;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: var(--shadow); z-index: 1000; max-height: 280px;
+    flex-direction: column; width: 320px;
+  }
+  .statya-dropdown.open { display: flex; }
+  .statya-search {
+    padding: 6px 8px; border: none; border-bottom: 1px solid var(--border);
+    font-size: 12px; font-family: inherit; background: var(--bg);
+    color: var(--text); outline: none; border-radius: 6px 6px 0 0;
+  }
+  .statya-search::placeholder { color: var(--text3); }
+  .statya-options { overflow-y: auto; max-height: 240px; }
+  .statya-group { padding: 4px 8px; font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; }
+  .statya-option {
+    padding: 5px 8px; font-size: 11px; cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .statya-option:hover { background: var(--bg3); }
+  .statya-option.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-weight: 600; }
+  .statya-option.hidden { display: none; }
+
+  .contract-picker { position: relative; min-width: 180px; }
+  .contract-selected {
+    width: 100%; padding: 4px 24px 4px 6px; font-size: 11px;
+    border: 1px solid var(--border); border-radius: 5px;
+    background: var(--bg2); color: var(--text); cursor: pointer;
+    font-family: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-height: 24px; display: flex; align-items: center;
+  }
+  .contract-selected::after {
+    content: '▾'; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    font-size: 10px; color: var(--text3); pointer-events: none;
+  }
+  .contract-dropdown {
+    display: none; position: fixed;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: var(--shadow); z-index: 1000; max-height: 280px;
+    flex-direction: column; width: 360px;
+  }
+  .contract-dropdown.open { display: flex; }
+  .contract-search {
+    padding: 6px 8px; border: none; border-bottom: 1px solid var(--border);
+    font-size: 12px; font-family: inherit; background: var(--bg);
+    color: var(--text); outline: none; border-radius: 6px 6px 0 0;
+  }
+  .contract-search::placeholder { color: var(--text3); }
+  .contract-options { overflow-y: auto; max-height: 240px; }
+  .contract-group { padding: 4px 8px; font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; }
+  .contract-option {
+    padding: 5px 8px; font-size: 11px; cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .contract-option:hover { background: var(--bg3); }
+  .contract-option.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-weight: 600; }
+  .contract-option.hidden { display: none; }
+  .contract-option .co-obj { font-size: 10px; color: var(--text3); margin-left: 4px; }
+
+  .spinner {
+    display: none; width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,.4); border-top-color: #fff;
+    border-radius: 50%; animation: spin .7s linear infinite;
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <h1>Реестр счетов</h1>
+  <span class="summary" id="summaryCount"></span>
+  <span class="summary" id="summaryAmount"></span>
+  <button class="btn btn-ghost" id="addRowBtn">+ Строка</button>
+  <button class="btn btn-primary" id="buildBtn">
+    <span class="spinner" id="buildSpinner"></span>
+    <span id="buildBtnLabel">Сформировать реестр</span>
+  </button>
+</div>
+
+<div class="content">
+  <details class="log-card" id="logCard" style="display:none">
+    <summary id="logSummary">Лог распознавания</summary>
+    <div class="log-list" id="logList"></div>
+  </details>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th style="width:36px">№</th>
+        <th style="width:110px">Сумма</th>
+        <th>Описание</th>
+        <th style="width:140px">Объект</th>
+        <th style="min-width:220px">Статья БДДС</th>
+        <th style="min-width:180px">Договор</th>
+        <th style="width:36px"></th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="total-row">
+    <span style="color:var(--text2)">Итого:</span>
+    <span id="totalAmount">0,00 руб.</span>
+  </div>
+
+  <div class="done-card" id="doneCard">
+    <div class="done-info">
+      <span id="doneCount" style="font-size:16px;font-weight:700">—</span>
+      <span id="doneAmount" style="font-size:13px;color:var(--text2)"></span>
+    </div>
+    <button class="btn btn-primary" id="downloadBtn" style="width:100%;justify-content:center">⬇ Скачать реестр.xlsx</button>
+  </div>
+</div>
+
+<script>
+const theme = localStorage.getItem('theme');
+if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+
+let rows = [];
+let statyi = [];
+let contracts = [];
+let lastResult = null;
+let activeDropdown = null;
+
+document.addEventListener('click', (e) => {
+  if (activeDropdown && !activeDropdown.parentElement.contains(e.target)) {
+    activeDropdown.classList.remove('open');
+    activeDropdown = null;
+  }
+});
+
+function matchContract(objText) {
+  if (!objText || !contracts.length) return '';
+  const t = objText.toLowerCase();
+  let best = null;
+  let bestLen = 0;
+  for (const c of contracts) {
+    if (!c.contract) continue;
+    const words = c.obj.toLowerCase().split(/[\s,./]+/).filter(w => w.length > 2);
+    let matched = 0;
+    for (const w of words) {
+      if (t.includes(w)) matched++;
+    }
+    if (matched > bestLen) { bestLen = matched; best = c; }
+  }
+  if (bestLen >= 1 && best) return best.contract;
+  return '';
+}
+
+async function init() {
+  const d = await window.reestrWindow.getData();
+  rows = d.rows || [];
+  statyi = d.statyi || [];
+  contracts = d.contracts || [];
+  console.log('[reestr-window] init: rows=' + rows.length + ' statyi=' + statyi.length + ' contracts=' + contracts.length);
+  rows.forEach(r => {
+    if (!r.dog && r.obj) r.dog = matchContract(r.obj);
+  });
+  renderLog(d.log);
+  renderTable();
+  updateSummary();
+}
+
+function renderLog(entries) {
+  if (!entries || !entries.length) return;
+  const card = document.getElementById('logCard');
+  card.style.display = '';
+  const list = document.getElementById('logList');
+  list.innerHTML = '';
+  const ok = entries.filter(e => e.type === 'ok').length;
+  const warn = entries.filter(e => e.type === 'warn').length;
+  document.getElementById('logSummary').textContent =
+    `Лог распознавания — ${ok} успешно` + (warn ? `, ${warn} с предупреждениями` : '');
+  entries.forEach(e => {
+    const div = document.createElement('div');
+    div.className = 'log-item log-' + (e.type || 'info');
+    div.textContent = e.text;
+    list.appendChild(div);
+  });
+}
+
+function updateSummary() {
+  document.getElementById('summaryCount').textContent = rows.length + ' строк';
+  const total = rows.reduce((s, r) => s + (r.sum || 0), 0);
+  document.getElementById('summaryAmount').textContent = total.toLocaleString('ru-RU', { minimumFractionDigits: 2 }) + ' руб.';
+  document.getElementById('totalAmount').textContent = total.toLocaleString('ru-RU', { minimumFractionDigits: 2 }) + ' руб.';
+}
+
+function buildStatyaPicker(row, idx) {
+  const wrap = document.createElement('div');
+  wrap.className = 'statya-picker';
+
+  const selected = document.createElement('div');
+  selected.className = 'statya-selected';
+  selected.textContent = row['statья'] || '— выберите —';
+  if (!row['statья']) selected.style.color = 'var(--text3)';
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'statya-dropdown';
+
+  const search = document.createElement('input');
+  search.className = 'statya-search';
+  search.type = 'text';
+  search.placeholder = 'Поиск статьи…';
+  dropdown.appendChild(search);
+
+  const optionsWrap = document.createElement('div');
+  optionsWrap.className = 'statya-options';
+
+  const emptyOpt = document.createElement('div');
+  emptyOpt.className = 'statya-option' + (!row['statья'] ? ' selected' : '');
+  emptyOpt.textContent = '— не указана —';
+  emptyOpt.dataset.value = '';
+  optionsWrap.appendChild(emptyOpt);
+
+  const groups = {};
+  statyi.forEach(s => { const g = s.vid || 'Прочее'; if (!groups[g]) groups[g] = []; groups[g].push(s); });
+
+  for (const [gName, items] of Object.entries(groups)) {
+    const groupEl = document.createElement('div');
+    groupEl.className = 'statya-group';
+    groupEl.textContent = gName;
+    optionsWrap.appendChild(groupEl);
+
+    items.forEach(s => {
+      const opt = document.createElement('div');
+      opt.className = 'statya-option' + (row['statья'] === s.label ? ' selected' : '');
+      opt.textContent = s.label;
+      opt.dataset.value = s.label;
+      opt.dataset.search = s.label.toLowerCase();
+      optionsWrap.appendChild(opt);
+    });
+  }
+
+  if (row['statья'] && !optionsWrap.querySelector('.statya-option.selected')) {
+    const code = row['statья'].split(',')[0].trim();
+    const match = optionsWrap.querySelector(`.statya-option[data-value^="${code},"]`);
+    if (match) match.classList.add('selected');
+    else {
+      const custom = document.createElement('div');
+      custom.className = 'statya-option selected';
+      custom.textContent = row['statья'] + ' (авто)';
+      custom.dataset.value = row['statья'];
+      custom.dataset.search = row['statья'].toLowerCase();
+      optionsWrap.insertBefore(custom, optionsWrap.children[1]);
+    }
+  }
+
+  dropdown.appendChild(optionsWrap);
+  wrap.appendChild(selected);
+  wrap.appendChild(dropdown);
+
+  selected.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (activeDropdown && activeDropdown !== dropdown) activeDropdown.classList.remove('open');
+    dropdown.classList.toggle('open');
+    activeDropdown = dropdown.classList.contains('open') ? dropdown : null;
+    if (activeDropdown) {
+      const rect = selected.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (spaceBelow < 200) {
+        dropdown.style.bottom = (window.innerHeight - rect.top + 2) + 'px';
+        dropdown.style.top = 'auto';
+      } else {
+        dropdown.style.top = (rect.bottom + 2) + 'px';
+        dropdown.style.bottom = 'auto';
+      }
+      dropdown.style.left = rect.left + 'px';
+      search.value = ''; filterOptions(''); search.focus();
+    }
+  });
+
+  search.addEventListener('input', () => filterOptions(search.value.toLowerCase()));
+  search.addEventListener('click', (e) => e.stopPropagation());
+
+  function filterOptions(query) {
+    optionsWrap.querySelectorAll('.statya-option').forEach(opt => {
+      if (!query || opt.dataset.value === '' || (opt.dataset.search && opt.dataset.search.includes(query))) {
+        opt.classList.remove('hidden');
+      } else {
+        opt.classList.add('hidden');
+      }
+    });
+    optionsWrap.querySelectorAll('.statya-group').forEach(g => {
+      let next = g.nextElementSibling;
+      let hasVisible = false;
+      while (next && !next.classList.contains('statya-group')) {
+        if (next.classList.contains('statya-option') && !next.classList.contains('hidden')) hasVisible = true;
+        next = next.nextElementSibling;
+      }
+      g.style.display = hasVisible ? '' : 'none';
+    });
+  }
+
+  optionsWrap.addEventListener('click', (e) => {
+    const opt = e.target.closest('.statya-option');
+    if (!opt) return;
+    e.stopPropagation();
+    optionsWrap.querySelectorAll('.statya-option.selected').forEach(o => o.classList.remove('selected'));
+    opt.classList.add('selected');
+    const val = opt.dataset.value;
+    rows[idx]['statья'] = val;
+    selected.textContent = val || '— выберите —';
+    selected.style.color = val ? '' : 'var(--text3)';
+    dropdown.classList.remove('open');
+    activeDropdown = null;
+  });
+
+  return wrap;
+}
+
+function buildContractPicker(row, idx) {
+  const wrap = document.createElement('div');
+  wrap.className = 'contract-picker';
+
+  const selected = document.createElement('div');
+  selected.className = 'contract-selected';
+  selected.textContent = row.dog || '— выберите —';
+  if (!row.dog) selected.style.color = 'var(--text3)';
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'contract-dropdown';
+
+  const search = document.createElement('input');
+  search.className = 'contract-search';
+  search.type = 'text';
+  search.placeholder = 'Поиск договора…';
+  dropdown.appendChild(search);
+
+  const optionsWrap = document.createElement('div');
+  optionsWrap.className = 'contract-options';
+
+  const emptyOpt = document.createElement('div');
+  emptyOpt.className = 'contract-option' + (!row.dog ? ' selected' : '');
+  emptyOpt.textContent = '— не указан —';
+  emptyOpt.dataset.value = '';
+  optionsWrap.appendChild(emptyOpt);
+
+  const groups = {};
+  contracts.forEach(c => {
+    const g = c.company || 'Без компании';
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(c);
+  });
+
+  for (const [gName, items] of Object.entries(groups)) {
+    const groupEl = document.createElement('div');
+    groupEl.className = 'contract-group';
+    groupEl.textContent = gName;
+    optionsWrap.appendChild(groupEl);
+
+    items.forEach(c => {
+      const opt = document.createElement('div');
+      const label = c.contract || '(без номера)';
+      opt.className = 'contract-option' + (row.dog === c.contract ? ' selected' : '');
+      opt.innerHTML = label + '<span class="co-obj">' + c.obj + '</span>';
+      opt.dataset.value = c.contract;
+      opt.dataset.search = (c.contract + ' ' + c.obj + ' ' + (c.note || '')).toLowerCase();
+      optionsWrap.appendChild(opt);
+    });
+  }
+
+  dropdown.appendChild(optionsWrap);
+  wrap.appendChild(selected);
+  wrap.appendChild(dropdown);
+
+  selected.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (activeDropdown && activeDropdown !== dropdown) activeDropdown.classList.remove('open');
+    dropdown.classList.toggle('open');
+    activeDropdown = dropdown.classList.contains('open') ? dropdown : null;
+    if (activeDropdown) {
+      const rect = selected.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (spaceBelow < 200) {
+        dropdown.style.bottom = (window.innerHeight - rect.top + 2) + 'px';
+        dropdown.style.top = 'auto';
+      } else {
+        dropdown.style.top = (rect.bottom + 2) + 'px';
+        dropdown.style.bottom = 'auto';
+      }
+      dropdown.style.left = Math.min(rect.left, window.innerWidth - 370) + 'px';
+      search.value = '';
+      filterContractOptions('');
+      search.focus();
+    }
+  });
+
+  search.addEventListener('input', () => filterContractOptions(search.value.toLowerCase()));
+  search.addEventListener('click', (e) => e.stopPropagation());
+
+  function filterContractOptions(query) {
+    optionsWrap.querySelectorAll('.contract-option').forEach(opt => {
+      if (!query || opt.dataset.value === '' || (opt.dataset.search && opt.dataset.search.includes(query))) {
+        opt.classList.remove('hidden');
+      } else {
+        opt.classList.add('hidden');
+      }
+    });
+    optionsWrap.querySelectorAll('.contract-group').forEach(g => {
+      let next = g.nextElementSibling;
+      let hasVisible = false;
+      while (next && !next.classList.contains('contract-group')) {
+        if (next.classList.contains('contract-option') && !next.classList.contains('hidden')) hasVisible = true;
+        next = next.nextElementSibling;
+      }
+      g.style.display = hasVisible ? '' : 'none';
+    });
+  }
+
+  optionsWrap.addEventListener('click', (e) => {
+    const opt = e.target.closest('.contract-option');
+    if (!opt) return;
+    e.stopPropagation();
+    optionsWrap.querySelectorAll('.contract-option.selected').forEach(o => o.classList.remove('selected'));
+    opt.classList.add('selected');
+    const val = opt.dataset.value;
+    rows[idx].dog = val;
+    selected.textContent = val || '— выберите —';
+    selected.style.color = val ? '' : 'var(--text3)';
+    dropdown.classList.remove('open');
+    activeDropdown = null;
+  });
+
+  return wrap;
+}
+
+function renderTable() {
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  rows.forEach((row, i) => {
+    const tr = document.createElement('tr');
+    if (i % 2 === 1) tr.style.background = 'var(--bg3)';
+
+    const tdN = document.createElement('td');
+    tdN.style.cssText = 'padding:6px 8px;text-align:center;font-weight:700;color:var(--text3);border-bottom:1px solid var(--border)';
+    tdN.textContent = i + 1;
+    tr.appendChild(tdN);
+
+    const tdS = document.createElement('td');
+    tdS.style.cssText = 'padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)';
+    const sumInp = document.createElement('input');
+    sumInp.type = 'text';
+    sumInp.value = (row.sum || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2 });
+    sumInp.style.cssText = 'width:90px;text-align:right;padding:3px 5px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);font-family:inherit;font-weight:700';
+    sumInp.addEventListener('change', () => {
+      const v = parseFloat(sumInp.value.replace(/\s/g, '').replace(',', '.'));
+      rows[i].sum = isNaN(v) ? 0 : v;
+      sumInp.value = rows[i].sum.toLocaleString('ru-RU', { minimumFractionDigits: 2 });
+      updateSummary();
+    });
+    tdS.appendChild(sumInp);
+    tr.appendChild(tdS);
+
+    const tdD = document.createElement('td');
+    tdD.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    const descInp = document.createElement('textarea');
+    descInp.value = (row.description || '').replace(/\\n/g, '\n');
+    descInp.style.cssText = 'width:100%;padding:3px 5px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);font-family:inherit;resize:vertical;min-height:40px';
+    descInp.addEventListener('change', () => { rows[i].description = descInp.value; });
+    tdD.appendChild(descInp);
+    tr.appendChild(tdD);
+
+    const tdO = document.createElement('td');
+    tdO.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    const objInp = document.createElement('input');
+    objInp.type = 'text';
+    objInp.value = row.obj || '';
+    objInp.style.cssText = 'width:100%;padding:3px 5px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);font-family:inherit';
+    objInp.addEventListener('change', () => { rows[i].obj = objInp.value; });
+    tdO.appendChild(objInp);
+    tr.appendChild(tdO);
+
+    const tdSt = document.createElement('td');
+    tdSt.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    tdSt.appendChild(buildStatyaPicker(row, i));
+    tr.appendChild(tdSt);
+
+    const tdDog = document.createElement('td');
+    tdDog.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    tdDog.appendChild(buildContractPicker(row, i));
+    tr.appendChild(tdDog);
+
+    const tdDel = document.createElement('td');
+    tdDel.style.cssText = 'padding:6px 8px;text-align:center;border-bottom:1px solid var(--border)';
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '✕';
+    delBtn.className = 'action-btn delete';
+    delBtn.addEventListener('click', () => { rows.splice(i, 1); renderTable(); updateSummary(); });
+    tdDel.appendChild(delBtn);
+    tr.appendChild(tdDel);
+
+    tbody.appendChild(tr);
+  });
+}
+
+document.getElementById('addRowBtn').addEventListener('click', () => {
+  rows.push({
+    sum: 0,
+    date: new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+    category: '', description: '', naz: '', obj: '', dog: '', osn: '', updLabel: '', 'statья': '', sourceFolder: 'вручную'
+  });
+  renderTable();
+  updateSummary();
+});
+
+document.getElementById('buildBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('buildBtn');
+  btn.disabled = true;
+  document.getElementById('buildSpinner').style.display = 'inline-block';
+  document.getElementById('buildBtnLabel').textContent = 'Формирую…';
+  try {
+    const d = await window.reestrAPI.buildXlsx({ rows });
+    lastResult = d;
+    const r = await window.reestrAPI.save(d.filename, d.xlsxBase64);
+    if (r.saved) {
+      document.getElementById('buildBtnLabel').textContent = '✓ Сохранено';
+      setTimeout(() => { document.getElementById('buildBtnLabel').textContent = 'Сформировать реестр'; }, 2000);
+    }
+  } catch (e) {
+    alert('Ошибка: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    document.getElementById('buildSpinner').style.display = 'none';
+  }
+});
+
+document.getElementById('downloadBtn').addEventListener('click', async () => {
+  if (!lastResult) return;
+  const r = await window.reestrAPI.save(lastResult.filename, lastResult.xlsxBase64);
+  if (r.saved) {
+    const btn = document.getElementById('downloadBtn');
+    btn.textContent = '✓ Сохранено';
+    setTimeout(() => { btn.textContent = '⬇ Скачать реестр.xlsx'; }, 2000);
+  }
+});
+
+init();
+</script>
+</body>
+</html>
