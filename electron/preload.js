@@ -10,6 +10,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportJson:     (jsonStr, defaultFileName) => ipcRenderer.invoke('export-json', jsonStr, defaultFileName),
   importJsonFile: ()        => ipcRenderer.invoke('import-json-file'),
 
+  // Настройки / пользователи
+  getSettings:       ()          => ipcRenderer.invoke('get-settings'),
+  saveSettings:      (s)         => ipcRenderer.invoke('save-settings', s),
+  switchUser:        (idx)       => ipcRenderer.invoke('switch-user', idx),
+  chooseDataFolder:  ()          => ipcRenderer.invoke('choose-data-folder'),
+
   // Обновления
   getAppVersion:  ()        => ipcRenderer.invoke('get-app-version'),
   checkUpdate:    ()        => ipcRenderer.invoke('check-update'),

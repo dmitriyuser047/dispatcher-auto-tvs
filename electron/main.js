@@ -5,28 +5,54 @@ const os      = require('os');
 const updater = require('./updater');
 const { createExtractorFromData } = require('node-unrar-js');
 
-const DATA_DIR   = path.join(os.homedir(), 'Documents', 'ДиспетчеризацияАвто_ТВС');
-const DATA_FILE  = path.join(DATA_DIR, 'data.json');
-const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+const DEFAULT_DATA_DIR = path.join(os.homedir(), 'Documents', 'ДиспетчеризацияАвто_ТВС');
+const SETTINGS_FILE   = path.join(app.getPath('userData'), 'settings.json');
+
+function loadSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+  } catch {}
+  return { users: [{ name: 'Пользователь', dataDir: DEFAULT_DATA_DIR }], activeUser: 0 };
+}
+
+function saveSettings(s) {
+  const dir = path.dirname(SETTINGS_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2), 'utf8');
+}
+
+let settings = loadSettings();
+
+function getActiveUser() {
+  const idx = settings.activeUser || 0;
+  return settings.users[idx] || settings.users[0] || { name: 'Пользователь', dataDir: DEFAULT_DATA_DIR };
+}
+
+function getDataDir()   { return getActiveUser().dataDir || DEFAULT_DATA_DIR; }
+function getDataFile()  { return path.join(getDataDir(), 'data.json'); }
+function getBackupDir() { return path.join(getDataDir(), 'backups'); }
 
 function ensureDirs() {
-  if (!fs.existsSync(DATA_DIR))   fs.mkdirSync(DATA_DIR,   { recursive: true });
-  if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const dd = getDataDir();
+  const bd = getBackupDir();
+  if (!fs.existsSync(dd)) fs.mkdirSync(dd, { recursive: true });
+  if (!fs.existsSync(bd)) fs.mkdirSync(bd, { recursive: true });
 }
 
 function createDailyBackup() {
-  if (!fs.existsSync(DATA_FILE)) return;
+  const dataFile  = getDataFile();
+  const backupDir = getBackupDir();
+  if (!fs.existsSync(dataFile)) return;
   const today = new Date().toISOString().slice(0, 10);
-  const dest  = path.join(BACKUP_DIR, `data_${today}.json`);
+  const dest  = path.join(backupDir, `data_${today}.json`);
   if (!fs.existsSync(dest)) {
-    fs.copyFileSync(DATA_FILE, dest);
-    // Оставляем последние 30 ежедневных бэкапов
-    const list = fs.readdirSync(BACKUP_DIR)
+    fs.copyFileSync(dataFile, dest);
+    const list = fs.readdirSync(backupDir)
       .filter(f => f.startsWith('data_') && f.endsWith('.json'))
       .sort();
     if (list.length > 30) {
       list.slice(0, list.length - 30)
-        .forEach(f => fs.unlinkSync(path.join(BACKUP_DIR, f)));
+        .forEach(f => fs.unlinkSync(path.join(backupDir, f)));
     }
   }
 }
@@ -78,20 +104,47 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('read-data', () => {
-    if (fs.existsSync(DATA_FILE)) {
-      return fs.readFileSync(DATA_FILE, 'utf8');
-    }
+    const f = getDataFile();
+    if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8');
     return null;
   });
 
   ipcMain.handle('write-data', (_event, jsonStr) => {
     ensureDirs();
     createDailyBackup();
-    fs.writeFileSync(DATA_FILE, jsonStr, 'utf8');
+    fs.writeFileSync(getDataFile(), jsonStr, 'utf8');
     return true;
   });
 
-  ipcMain.handle('get-data-path', () => DATA_DIR);
+  ipcMain.handle('get-data-path', () => getDataDir());
+
+  ipcMain.handle('get-settings', () => settings);
+
+  ipcMain.handle('save-settings', (_event, newSettings) => {
+    settings = newSettings;
+    saveSettings(settings);
+    ensureDirs();
+    return true;
+  });
+
+  ipcMain.handle('switch-user', async (_event, idx) => {
+    if (idx < 0 || idx >= settings.users.length) return { ok: false };
+    settings.activeUser = idx;
+    saveSettings(settings);
+    ensureDirs();
+    return { ok: true };
+  });
+
+  ipcMain.handle('choose-data-folder', async (event) => {
+    const senderWin = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
+      title: 'Выберите папку для хранения данных',
+      defaultPath: getDataDir(),
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (canceled || !filePaths || !filePaths[0]) return { ok: false };
+    return { ok: true, path: filePaths[0] };
+  });
 
   // Импорт данных из RAR-архива (data.json + backups) для пополнения базы
   ipcMain.handle('import-rar', async (event) => {
@@ -189,7 +242,7 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('open-data-folder', () => shell.openPath(DATA_DIR));
+  ipcMain.handle('open-data-folder', () => shell.openPath(getDataDir()));
 
   ipcMain.handle('get-app-version', () => app.getVersion());
 

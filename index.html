@@ -792,6 +792,31 @@
   }
   .sec-tab:hover { color: var(--text); background: var(--bg3); }
   .sec-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .sec-tab-settings { flex: 0 0 auto; padding: 10px 10px; }
+
+  /* ─── SETTINGS MODAL ─── */
+  .settings-section { margin-bottom: 18px; }
+  .settings-section-title { font-size: 13px; font-weight: 700; margin-bottom: 8px; color: var(--text); }
+  .settings-user-card {
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px;
+    background: var(--bg2); cursor: pointer; transition: all .15s;
+  }
+  .settings-user-card:hover { border-color: var(--accent); }
+  .settings-user-card.active { border-color: var(--accent); background: var(--bg3); }
+  .settings-user-avatar {
+    width: 32px; height: 32px; border-radius: 50%; background: var(--accent);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px; flex-shrink: 0;
+  }
+  .settings-user-name { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
+  .settings-user-path { font-size: 10px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .settings-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .settings-path-row {
+    display: flex; align-items: center; gap: 8px; margin-top: 6px;
+    padding: 6px 10px; background: var(--bg2); border-radius: 6px; border: 1px solid var(--border);
+  }
+  .settings-path-text { font-size: 11px; color: var(--text2); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ─── GENERATOR SIDEBAR SUMMARY ─── */
   .gen-ss-row {
@@ -995,6 +1020,18 @@
   </div>
 </header>
 
+<!-- SETTINGS MODAL -->
+<div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeModal('settingsModal')">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <h2 class="modal-title">Настройки</h2>
+      <button class="modal-close" onclick="closeModal('settingsModal')">&times;</button>
+    </div>
+    <div class="modal-body" id="settingsBody" style="padding:16px 20px">
+    </div>
+  </div>
+</div>
+
 <!-- UPDATE BANNER -->
 <div id="updateBanner" style="display:none;background:#1e3a5f;border-bottom:1px solid #2d5a8e;padding:10px 24px;align-items:center;gap:14px;flex-wrap:wrap">
   <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#60a5fa" stroke-width="2" style="flex-shrink:0">
@@ -1049,6 +1086,9 @@
       <button class="sec-tab" id="tabReestr" onclick="switchSection('reestr')">
         <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
         Реестр
+      </button>
+      <button class="sec-tab sec-tab-settings" id="tabSettings" onclick="openSettingsModal()" title="Настройки">
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       </button>
     </div>
 
@@ -3598,9 +3638,15 @@ function renderSidebarSummary() {
       <div class="ss-divider"></div>
       <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
         <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--text3);flex-shrink:0">
+          <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>
+        </svg>
+        <span style="font-size:10px;color:var(--text2);flex:1" id="sidebarUserLabel">Пользователь</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+        <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--text3);flex-shrink:0">
           <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
         </svg>
-        <span style="font-size:10px;color:var(--text3);flex:1">Данные: Документы\\ДиспетчеризацияАвто_ТВС</span>
+        <span style="font-size:10px;color:var(--text3);flex:1" id="sidebarDataPath">Данные: ...</span>
         <button class="btn btn-ghost btn-sm" onclick="window.electronAPI.openDataFolder()" style="font-size:10px;padding:2px 7px;white-space:nowrap" title="Открыть папку с данными и бэкапами">Открыть</button>
       </div>
       <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
@@ -4972,7 +5018,7 @@ function importFuelFromXls(input) {
     try {
       const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
 
       let headerRow = -1;
       for (let i = 0; i < Math.min(rows.length, 15); i++) {
@@ -5012,14 +5058,26 @@ function importFuelFromXls(input) {
         const qty = parseFloat(String(row[cQty] || '0').replace(',', '.'));
         if (!qty || qty <= 0) continue;
 
-        let dateStr = row[cDate];
-        if (!dateStr) continue;
+        let dateVal = row[cDate];
+        if (!dateVal) continue;
         let parsedDate = null;
-        if (typeof dateStr === 'string') {
-          const m = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
-          if (m) parsedDate = m[1] + '-' + m[2] + '-' + m[3];
+        if (dateVal instanceof Date) {
+          const y = dateVal.getFullYear();
+          const m = String(dateVal.getMonth() + 1).padStart(2, '0');
+          const d = String(dateVal.getDate()).padStart(2, '0');
+          parsedDate = y + '-' + m + '-' + d;
+        } else if (typeof dateVal === 'number') {
+          const dt = new Date(Math.round((dateVal - 25569) * 86400 * 1000));
+          const y = dt.getFullYear();
+          const m = String(dt.getMonth() + 1).padStart(2, '0');
+          const d = String(dt.getDate()).padStart(2, '0');
+          parsedDate = y + '-' + m + '-' + d;
+        } else {
+          const s = String(dateVal);
+          const m1 = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+          if (m1) parsedDate = m1[1] + '-' + m1[2] + '-' + m1[3];
           else {
-            const m2 = dateStr.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+            const m2 = s.match(/(\d{2})\.(\d{2})\.(\d{4})/);
             if (m2) parsedDate = m2[3] + '-' + m2[2] + '-' + m2[1];
           }
         }
@@ -5065,9 +5123,10 @@ function importFuelFromXls(input) {
         return null;
       }
 
-      let added = 0, updated = 0, skipped = 0;
+      let added = 0, updated = 0, skipped = 0, duplicates = 0;
       const unmatched = new Set();
 
+      const groupedByVehicleDate = {};
       transactions.forEach(tx => {
         const v = matchVehicle(tx);
         if (!v) {
@@ -5075,27 +5134,41 @@ function importFuelFromXls(input) {
           skipped++;
           return;
         }
+        const key = v.id + '|' + tx.date;
+        if (!groupedByVehicleDate[key]) groupedByVehicleDate[key] = { v, date: tx.date, totalQty: 0, fuels: [] };
+        groupedByVehicleDate[key].totalQty += tx.qty;
+        groupedByVehicleDate[key].fuels.push(tx.fuel + ' ' + tx.qty + 'л');
+      });
 
+      Object.values(groupedByVehicleDate).forEach(grp => {
         const existing = (data.records || []).find(r =>
-          r.vehicleId === v.id && r.date === tx.date
+          r.vehicleId === grp.v.id && r.date === grp.date
         );
 
         if (existing) {
-          existing.fuelIssued = (existing.fuelIssued || 0) + tx.qty;
+          if (existing.fuelIssued && Math.abs(existing.fuelIssued - grp.totalQty) < 0.01) {
+            duplicates++;
+            return;
+          }
+          if (existing.fuelIssued && existing.note && existing.note.includes('заправка')) {
+            duplicates++;
+            return;
+          }
+          existing.fuelIssued = (existing.fuelIssued || 0) + grp.totalQty;
           if (!existing.note) existing.note = '';
           if (!existing.note.includes('заправка')) {
-            existing.note = (existing.note ? existing.note + '; ' : '') + 'заправка ' + tx.fuel + ' ' + tx.qty + 'л';
+            existing.note = (existing.note ? existing.note + '; ' : '') + grp.fuels.join(', ');
           }
           updated++;
         } else {
           if (!data.records) data.records = [];
           data.records.push({
             id: 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
-            vehicleId: v.id,
-            date: tx.date,
+            vehicleId: grp.v.id,
+            date: grp.date,
             km: 0,
-            fuelIssued: tx.qty,
-            note: 'заправка ' + tx.fuel + ' ' + tx.qty + 'л',
+            fuelIssued: grp.totalQty,
+            note: 'заправка: ' + grp.fuels.join(', '),
           });
           added++;
         }
@@ -5106,6 +5179,7 @@ function importFuelFromXls(input) {
       if (v) renderDetail(v);
 
       let msg = `Импорт заправок завершён.\n\nДобавлено записей: ${added}\nОбновлено записей: ${updated}`;
+      if (duplicates > 0) msg += `\nУже загружено (пропущено): ${duplicates}`;
       if (skipped > 0) {
         msg += `\nНе найдено ТС: ${skipped}`;
         const unmArr = [...unmatched].slice(0, 5);
@@ -5277,7 +5351,154 @@ function doRarMerge() {
   populateOrgSelect();
   updateFilterUI();
   renderVehicleList();
+  if (window.electronAPI && window.electronAPI.getSettings) {
+    _appSettings = await window.electronAPI.getSettings();
+    const u = _appSettings.users[_appSettings.activeUser || 0];
+    if (u) {
+      const el = document.getElementById('sidebarUserLabel');
+      if (el) el.textContent = u.name || 'Пользователь';
+      const dp = document.getElementById('sidebarDataPath');
+      if (dp) dp.textContent = 'Данные: ' + (u.dataDir || '').replace(/\\/g, '\\');
+    }
+  }
 })();
+
+// ─── НАСТРОЙКИ / ПОЛЬЗОВАТЕЛИ ────────────────────────────
+let _appSettings = null;
+
+async function openSettingsModal() {
+  if (!window.electronAPI || !window.electronAPI.getSettings) {
+    alert('Настройки доступны только в Electron-приложении');
+    return;
+  }
+  _appSettings = await window.electronAPI.getSettings();
+  renderSettingsBody();
+  openModal('settingsModal');
+}
+
+function renderSettingsBody() {
+  const s = _appSettings;
+  if (!s || !s.users) return;
+  const body = document.getElementById('settingsBody');
+  const users = s.users;
+  const activeIdx = s.activeUser || 0;
+
+  body.innerHTML = `
+    <div class="settings-section">
+      <div class="settings-section-title">Пользователи</div>
+      ${users.map((u, i) => `
+        <div class="settings-user-card ${i === activeIdx ? 'active' : ''}" onclick="settingsSwitchUser(${i})">
+          <div class="settings-user-avatar">${(u.name || 'П')[0].toUpperCase()}</div>
+          <div style="flex:1;min-width:0">
+            <div class="settings-user-name">${u.name || 'Без имени'}</div>
+            <div class="settings-user-path" title="${u.dataDir || ''}">${u.dataDir || 'путь не задан'}</div>
+          </div>
+          <div class="settings-actions">
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();settingsEditUser(${i})" title="Редактировать" style="font-size:11px;padding:3px 8px">
+              <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            ${users.length > 1 ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();settingsDeleteUser(${i})" title="Удалить" style="font-size:11px;padding:3px 8px;color:var(--danger,#ef4444)">
+              <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+            </button>` : ''}
+          </div>
+        </div>
+      `).join('')}
+      <button class="btn btn-ghost" onclick="settingsAddUser()" style="width:100%;margin-top:6px;font-size:12px;padding:8px;border:1px dashed var(--border);border-radius:8px">
+        + Добавить пользователя
+      </button>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Путь хранения данных (текущий пользователь)</div>
+      <div class="settings-path-row">
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--text3);flex-shrink:0">
+          <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+        </svg>
+        <span class="settings-path-text">${users[activeIdx].dataDir || 'не задан'}</span>
+        <button class="btn btn-ghost btn-sm" onclick="settingsChooseFolder()" style="font-size:11px;padding:3px 10px;white-space:nowrap">Изменить</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.electronAPI.openDataFolder()" style="font-size:11px;padding:3px 10px;white-space:nowrap">Открыть</button>
+      </div>
+    </div>
+  `;
+}
+
+async function settingsSwitchUser(idx) {
+  if (!_appSettings || idx === _appSettings.activeUser) return;
+  await window.electronAPI.switchUser(idx);
+  _appSettings.activeUser = idx;
+  data = await loadData();
+  rebuildIndex();
+  populateOrgSelect();
+  updateFilterUI();
+  renderVehicleList();
+  renderSettingsBody();
+  updateSidebarDataPath();
+  showToast('Пользователь: ' + (_appSettings.users[idx].name || 'Без имени'));
+}
+
+async function settingsAddUser() {
+  const name = prompt('Имя нового пользователя:');
+  if (!name || !name.trim()) return;
+  const folderResult = await window.electronAPI.chooseDataFolder();
+  if (!folderResult.ok) return;
+  _appSettings.users.push({ name: name.trim(), dataDir: folderResult.path });
+  await window.electronAPI.saveSettings(_appSettings);
+  renderSettingsBody();
+}
+
+async function settingsEditUser(idx) {
+  const u = _appSettings.users[idx];
+  if (!u) return;
+  const name = prompt('Имя пользователя:', u.name || '');
+  if (name === null) return;
+  u.name = name.trim() || 'Пользователь';
+  await window.electronAPI.saveSettings(_appSettings);
+  renderSettingsBody();
+  updateSidebarDataPath();
+}
+
+async function settingsDeleteUser(idx) {
+  if (_appSettings.users.length <= 1) return;
+  const u = _appSettings.users[idx];
+  if (!confirm('Удалить пользователя "' + (u.name || '') + '"?\nДанные на диске НЕ удаляются.')) return;
+  const wasActive = _appSettings.activeUser;
+  _appSettings.users.splice(idx, 1);
+  if (wasActive === idx) _appSettings.activeUser = 0;
+  else if (wasActive > idx) _appSettings.activeUser = wasActive - 1;
+  await window.electronAPI.saveSettings(_appSettings);
+  data = await loadData();
+  rebuildIndex();
+  populateOrgSelect();
+  updateFilterUI();
+  renderVehicleList();
+  renderSettingsBody();
+  updateSidebarDataPath();
+}
+
+async function settingsChooseFolder() {
+  const result = await window.electronAPI.chooseDataFolder();
+  if (!result.ok) return;
+  const idx = _appSettings.activeUser || 0;
+  _appSettings.users[idx].dataDir = result.path;
+  await window.electronAPI.saveSettings(_appSettings);
+  data = await loadData();
+  rebuildIndex();
+  populateOrgSelect();
+  updateFilterUI();
+  renderVehicleList();
+  renderSettingsBody();
+  updateSidebarDataPath();
+  showToast('Путь данных изменён');
+}
+
+function updateSidebarDataPath() {
+  if (!_appSettings || !_appSettings.users) return;
+  const u = _appSettings.users[_appSettings.activeUser || 0];
+  if (!u) return;
+  const ul = document.getElementById('sidebarUserLabel');
+  if (ul) ul.textContent = u.name || 'Пользователь';
+  const dp = document.getElementById('sidebarDataPath');
+  if (dp) dp.textContent = 'Данные: ' + (u.dataDir || '').replace(/\\/g, '\\');
+}
 
 // ─── AUTO UPDATER ─────────────────────────────────────────
 let _updateInfo = null;
