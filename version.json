@@ -1,6 +1,6 @@
 {
-  "version": "2.0.29",
-  "date": "2026-08-15",
-  "notes": "Доступна версия 2.0.29. Нажмите «Скачать обновление».",
-  "url": "https://github.com/dmitriyuser047/dispatcher-auto-tvs/releases/download/v2.0.29/Dispatcher-Setup-2.0.29.exe"
+  "version": "2.0.30",
+  "date": "2026-08-16",
+  "notes": "Отдельное окно реестра, выбор договора, поддержка изображений, стиль xlsx",
+  "url": "https://github.com/dmitriyuser047/dispatcher-auto-tvs/releases/download/v2.0.30/Dispatcher-Setup-2.0.30.exe"
 }
