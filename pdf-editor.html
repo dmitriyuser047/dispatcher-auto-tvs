@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>PDF-редактор</title>
+<style>
+  :root {
+    --bg: #f0f4f8; --bg2: #ffffff; --bg3: #e8edf3; --bg4: #dde3ec;
+    --accent: #2563eb; --accent2: #1d4ed8; --green: #16a34a; --red: #dc2626;
+    --text: #1e293b; --text2: #475569; --text3: #94a3b8;
+    --border: #cbd5e1; --border2: #b0bec5; --radius: 8px;
+    --shadow: 0 4px 24px rgba(0,0,0,0.12);
+  }
+  [data-theme="dark"] {
+    --bg: #0f1117; --bg2: #171a21; --bg3: #1f242e; --bg4: #262c38;
+    --accent: #3b82f6; --accent2: #2563eb; --green: #22c55e; --red: #ef4444;
+    --text: #e5ebf3; --text2: #a3b1c2; --text3: #6b7889;
+    --border: #2a303c; --border2: #3a4150;
+    --shadow: 0 4px 24px rgba(0,0,0,0.5);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    display: flex; flex-direction: column;
+  }
+
+  .toolbar {
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    padding: 8px 16px; display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  }
+  .toolbar h1 { font-size: 14px; font-weight: 700; margin-right: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
+  .toolbar .sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
+
+  .tool-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    padding: 6px 10px; border-radius: 6px; border: 1px solid transparent;
+    cursor: pointer; font-size: 12px; font-weight: 500; background: transparent;
+    color: var(--text2); transition: all .15s; font-family: inherit;
+  }
+  .tool-btn:hover { background: var(--bg3); color: var(--text); }
+  .tool-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .tool-btn svg { width: 16px; height: 16px; }
+
+  .btn-save {
+    background: var(--accent); color: #fff; border: none;
+    padding: 6px 14px; border-radius: 6px; cursor: pointer;
+    font-size: 12px; font-weight: 600; font-family: inherit;
+  }
+  .btn-save:hover { background: var(--accent2); }
+
+  .workspace { flex: 1; display: flex; overflow: hidden; }
+
+  .pages-panel {
+    width: 120px; background: var(--bg2); border-right: 1px solid var(--border);
+    overflow-y: auto; flex-shrink: 0; padding: 8px;
+  }
+  .page-thumb {
+    width: 100%; margin-bottom: 8px; cursor: pointer; border: 2px solid transparent;
+    border-radius: 4px; overflow: hidden; position: relative;
+  }
+  .page-thumb.active { border-color: var(--accent); }
+  .page-thumb canvas { width: 100%; display: block; }
+  .page-thumb-num {
+    position: absolute; bottom: 2px; right: 4px;
+    font-size: 9px; color: #fff; background: rgba(0,0,0,0.5);
+    padding: 1px 4px; border-radius: 3px;
+  }
+
+  .canvas-area {
+    flex: 1; overflow: auto; display: flex; justify-content: center; align-items: flex-start;
+    padding: 20px; background: var(--bg);
+  }
+
+  .page-container {
+    position: relative; box-shadow: var(--shadow); background: #fff;
+    display: inline-block;
+  }
+  .page-container canvas { display: block; }
+
+  .text-overlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  .text-overlay.tool-text { pointer-events: auto; cursor: crosshair; }
+  .text-overlay.tool-erase { pointer-events: auto; cursor: crosshair; }
+  .text-overlay.tool-stamp { pointer-events: auto; cursor: crosshair; }
+  .text-overlay.tool-sealrm { pointer-events: auto; cursor: crosshair; }
+  .text-overlay.tool-sealrm .text-block,
+  .text-overlay.tool-sealrm .stamp-block { pointer-events: none; }
+  .text-overlay.tool-stamp .text-block,
+  .text-overlay.tool-stamp .stamp-block { pointer-events: none; }
+
+  .sealrm-rect {
+    position: absolute; border: 2px dashed #e040fb; background: rgba(224,64,251,0.08);
+    pointer-events: none;
+  }
+
+  .stamp-block {
+    position: absolute; pointer-events: auto; cursor: move;
+    border: 2px dashed rgba(22,163,74,0.6); box-sizing: border-box;
+    background: rgba(255,255,240,0.15); z-index: 10;
+  }
+  .stamp-block:hover { border-color: var(--green); background: rgba(255,255,240,0.3); }
+  .stamp-block.selected { border-color: var(--green); box-shadow: 0 0 8px rgba(22,163,74,0.3); border-style: solid; }
+  .stamp-block img { width: 100%; height: 100%; display: block; pointer-events: none; }
+
+  .stamp-select-rect {
+    position: absolute; border: 2px dashed var(--green); background: rgba(22,163,74,0.08);
+    pointer-events: none;
+  }
+
+  .text-block {
+    position: absolute; pointer-events: auto; cursor: move;
+    padding: 1px 2px; line-height: 1.2;
+    white-space: pre; border: 1px solid transparent; min-width: 4px; min-height: 10px;
+    color: transparent;
+  }
+  .text-block:hover { border-color: rgba(37,99,235,0.3); background: rgba(37,99,235,0.04); color: var(--accent); }
+  .text-block.selected { border-color: var(--accent); background: rgba(37,99,235,0.06); color: var(--text); }
+  .text-block.editing { cursor: text; border-color: var(--accent); background: rgba(255,255,255,0.95); color: #000; }
+
+  .delete-handle {
+    position: absolute; top: -10px; right: -10px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--red); color: #fff; font-size: 11px; line-height: 20px; text-align: center;
+    display: none; cursor: pointer; border: 2px solid #fff; z-index: 10;
+  }
+  .selected > .delete-handle { display: block; }
+
+  .erase-rect {
+    position: absolute; border: 2px dashed var(--red); background: rgba(220,38,38,0.08);
+    pointer-events: none;
+  }
+
+  .zoom-controls {
+    display: flex; align-items: center; gap: 4px; margin-left: auto;
+  }
+  .zoom-btn {
+    width: 28px; height: 28px; border-radius: 5px; border: 1px solid var(--border);
+    background: var(--bg2); color: var(--text); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
+  }
+  .zoom-btn:hover { background: var(--bg3); }
+  .zoom-label { font-size: 12px; color: var(--text2); min-width: 40px; text-align: center; }
+
+  .status-bar {
+    background: var(--bg2); border-top: 1px solid var(--border);
+    padding: 4px 16px; font-size: 11px; color: var(--text3); flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <h1 id="fileName">PDF-редактор</h1>
+  <div class="sep"></div>
+  <button class="tool-btn active" id="toolSelect" onclick="setTool('select')">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>
+    Выделение
+  </button>
+  <button class="tool-btn" id="toolText" onclick="setTool('text')">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>
+    Текст
+  </button>
+  <button class="tool-btn" id="toolStamp" onclick="setTool('stamp')">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
+    Область
+  </button>
+  <button class="tool-btn" id="toolSealrm" onclick="setTool('sealrm')">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="4" y1="4" x2="20" y2="20"/></svg>
+    Убрать печать
+  </button>
+  <button class="tool-btn" id="toolErase" onclick="setTool('erase')">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M20 5H9l-7 7 7 7h11a2 2 0 002-2V7a2 2 0 00-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
+    Стереть
+  </button>
+  <div class="sep"></div>
+  <button class="btn-save" onclick="savePdf()">Сохранить</button>
+  <button class="tool-btn" onclick="savePdfAs()">Сохранить как…</button>
+  <div id="sealrmControls" style="display:none; align-items:center; gap:6px;">
+    <label style="font-size:11px;color:var(--text2);white-space:nowrap;">Толщина подписи:</label>
+    <input type="range" id="sealrmThreshold" min="1" max="8" value="3" style="width:80px;" oninput="document.getElementById('sealrmVal').textContent=this.value+'px'">
+    <span id="sealrmVal" style="font-size:11px;color:var(--text2);min-width:30px;">3px</span>
+  </div>
+  <div class="zoom-controls">
+    <button class="zoom-btn" onclick="changeZoom(-0.25)">−</button>
+    <span class="zoom-label" id="zoomLabel">100%</span>
+    <button class="zoom-btn" onclick="changeZoom(0.25)">+</button>
+  </div>
+</div>
+
+<div class="workspace">
+  <div class="pages-panel" id="pagesPanel"></div>
+  <div class="canvas-area" id="canvasArea">
+    <div class="page-container" id="pageContainer">
+      <canvas id="pdfCanvas"></canvas>
+      <div class="text-overlay" id="textOverlay"></div>
+    </div>
+  </div>
+</div>
+
+<div class="status-bar" id="statusBar">Загрузка…</div>
+
+<script src="./node_modules/pdfjs-dist/build/pdf.min.js"></script>
+<script src="./node_modules/pdf-lib/dist/pdf-lib.min.js"></script>
+<script>
+const theme = localStorage.getItem('theme');
+if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = './node_modules/pdfjs-dist/build/pdf.worker.min.js';
+
+let pdfBytes = null;
+let pdfDoc = null;
+let currentPage = 1;
+let totalPages = 0;
+let zoom = 1.5;
+let currentTool = 'select';
+let selectedEl = null;
+let isDragging = false;
+let dragOff = { x: 0, y: 0 };
+let pageEdits = {};
+let filePath = '';
+let eraseStart = null;
+let eraseRect = null;
+let stampStart = null;
+let stampRect = null;
+let sealrmStart = null;
+let sealrmRect = null;
+let sealrmOrigData = null;
+
+function status(msg) { document.getElementById('statusBar').textContent = msg; }
+
+function setTool(tool) {
+  currentTool = tool;
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  const id = 'tool' + tool.charAt(0).toUpperCase() + tool.slice(1);
+  const el = document.getElementById(id);
+  if (el) el.classList.add('active');
+  const ov = document.getElementById('textOverlay');
+  ov.className = 'text-overlay' + (tool !== 'select' ? ' tool-' + tool : '');
+  document.getElementById('sealrmControls').style.display = tool === 'sealrm' ? 'flex' : 'none';
+  deselectAll();
+}
+
+function deselectAll() {
+  if (selectedEl) { selectedEl.classList.remove('selected'); selectedEl = null; }
+}
+
+function changeZoom(delta) {
+  zoom = Math.max(0.5, Math.min(4, zoom + delta));
+  document.getElementById('zoomLabel').textContent = Math.round(zoom / 1.5 * 100) + '%';
+  renderPage(currentPage);
+}
+
+function getEdits(p) {
+  if (!pageEdits[p]) pageEdits[p] = { textBlocks: null, eraseAreas: [], stampBlocks: [] };
+  return pageEdits[p];
+}
+
+async function init() {
+  const d = await window.pdfEditor.getData();
+  if (!d) { status('Ошибка загрузки'); return; }
+  pdfBytes = Uint8Array.from(atob(d.pdfBase64), c => c.charCodeAt(0));
+  filePath = d.filePath;
+  document.getElementById('fileName').textContent = d.fileName;
+  document.title = 'PDF-редактор — ' + d.fileName;
+
+  pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
+  totalPages = pdfDoc.numPages;
+  status('Страниц: ' + totalPages);
+  renderThumbs();
+  renderPage(1);
+}
+
+async function renderThumbs() {
+  const panel = document.getElementById('pagesPanel');
+  panel.innerHTML = '';
+  for (let i = 1; i <= totalPages; i++) {
+    const page = await pdfDoc.getPage(i);
+    const vp = page.getViewport({ scale: 0.3 });
+    const div = document.createElement('div');
+    div.className = 'page-thumb' + (i === 1 ? ' active' : '');
+    div.dataset.page = i;
+    const c = document.createElement('canvas');
+    c.width = vp.width; c.height = vp.height;
+    await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+    div.appendChild(c);
+    const num = document.createElement('div');
+    num.className = 'page-thumb-num'; num.textContent = i;
+    div.appendChild(num);
+    div.onclick = () => goToPage(i);
+    panel.appendChild(div);
+  }
+}
+
+function goToPage(n) {
+  if (n < 1 || n > totalPages) return;
+  currentPage = n;
+  document.querySelectorAll('.page-thumb').forEach(t =>
+    t.classList.toggle('active', +t.dataset.page === n));
+  renderPage(n);
+}
+
+async function renderPage(pn) {
+  const page = await pdfDoc.getPage(pn);
+  const vp = page.getViewport({ scale: zoom });
+  const canvas = document.getElementById('pdfCanvas');
+  canvas.width = vp.width; canvas.height = vp.height;
+  const ctx = canvas.getContext('2d');
+
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+
+  const edits = getEdits(pn);
+
+  edits.eraseAreas.forEach(a => {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(a.x * zoom, a.y * zoom, a.w * zoom, a.h * zoom);
+  });
+
+  if (!edits.textBlocks) {
+    edits.textBlocks = [];
+    const tc = await page.getTextContent();
+    tc.items.forEach(item => {
+      if (!item.str.trim()) return;
+      const tx = pdfjsLib.Util.transform(vp.transform, item.transform);
+      edits.textBlocks.push({
+        text: item.str,
+        origX: tx[4] / zoom, origY: (tx[5] - item.height * zoom) / zoom,
+        x: tx[4] / zoom, y: (tx[5] - item.height * zoom) / zoom,
+        fontSize: item.height,
+        deleted: false, moved: false, edited: false, isNew: false,
+      });
+    });
+  }
+
+  const overlay = document.getElementById('textOverlay');
+  overlay.innerHTML = '';
+
+  edits.textBlocks.forEach((block, idx) => {
+    if (block.deleted) return;
+    const div = document.createElement('div');
+    div.className = 'text-block';
+    div.dataset.idx = idx;
+    div.style.left = (block.x * zoom) + 'px';
+    div.style.top = (block.y * zoom) + 'px';
+    div.style.fontSize = (block.fontSize * zoom) + 'px';
+    div.textContent = block.text;
+
+    const del = document.createElement('div');
+    del.className = 'delete-handle'; del.textContent = '✕';
+    del.onclick = (e) => { e.stopPropagation(); block.deleted = true; div.remove(); };
+    div.appendChild(del);
+
+    div.addEventListener('mousedown', (e) => onBlockDown(e, div, block, idx));
+    div.addEventListener('dblclick', () => startEdit(div, block));
+    overlay.appendChild(div);
+  });
+
+  edits.stampBlocks.forEach((stamp, si) => {
+    if (stamp.deleted) return;
+    const div = document.createElement('div');
+    div.className = 'stamp-block';
+    div.dataset.stampIdx = si;
+    div.style.left = (stamp.x * zoom) + 'px';
+    div.style.top = (stamp.y * zoom) + 'px';
+    div.style.width = (stamp.w * zoom) + 'px';
+    div.style.height = (stamp.h * zoom) + 'px';
+    const img = document.createElement('img');
+    img.src = stamp.dataUrl;
+    div.appendChild(img);
+    const del = document.createElement('div');
+    del.className = 'delete-handle'; del.textContent = '✕';
+    del.onclick = (e) => { e.stopPropagation(); stamp.deleted = true; div.remove(); };
+    div.appendChild(del);
+    div.addEventListener('mousedown', (e) => onStampDown(e, div, stamp, si));
+    overlay.appendChild(div);
+  });
+
+  status('Страница ' + pn + ' из ' + totalPages);
+}
+
+function startEdit(div, block) {
+  div.contentEditable = true;
+  div.classList.add('editing');
+  const delH = div.querySelector('.delete-handle');
+  if (delH) delH.style.display = 'none';
+  div.focus();
+  const handler = () => {
+    div.contentEditable = false;
+    div.classList.remove('editing');
+    if (delH) delH.style.display = '';
+    const newText = div.textContent.replace(/✕$/, '').replace(/✕/g, '');
+    if (newText !== block.text) { block.text = newText; block.edited = true; }
+    div.removeEventListener('blur', handler);
+  };
+  div.addEventListener('blur', handler);
+}
+
+function onBlockDown(e, div, block, idx) {
+  if (currentTool === 'erase') { block.deleted = true; div.remove(); return; }
+  if (div.contentEditable === 'true') return;
+  e.preventDefault();
+  deselectAll();
+  currentTool = 'select';
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  const sel = document.getElementById('toolSelect');
+  if (sel) sel.classList.add('active');
+  const ov = document.getElementById('textOverlay');
+  ov.className = 'text-overlay';
+  document.getElementById('sealrmControls').style.display = 'none';
+  selectedEl = div;
+  div.classList.add('selected');
+  isDragging = true;
+  const r = div.getBoundingClientRect();
+  dragOff.x = e.clientX - r.left;
+  dragOff.y = e.clientY - r.top;
+}
+
+function onStampDown(e, div, stamp, si) {
+  if (currentTool === 'erase') { stamp.deleted = true; div.remove(); return; }
+  e.preventDefault();
+  e.stopPropagation();
+  deselectAll();
+  currentTool = 'select';
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  const sel = document.getElementById('toolSelect');
+  if (sel) sel.classList.add('active');
+  const ov = document.getElementById('textOverlay');
+  ov.className = 'text-overlay';
+  document.getElementById('sealrmControls').style.display = 'none';
+  selectedEl = div;
+  div.classList.add('selected');
+  selectedEl._stamp = stamp;
+  isDragging = true;
+  const r = div.getBoundingClientRect();
+  dragOff.x = e.clientX - r.left;
+  dragOff.y = e.clientY - r.top;
+}
+
+document.addEventListener('mousemove', (e) => {
+  if (isDragging && selectedEl) {
+    const cr = document.getElementById('pageContainer').getBoundingClientRect();
+    const x = e.clientX - cr.left - dragOff.x;
+    const y = e.clientY - cr.top - dragOff.y;
+    selectedEl.style.left = x + 'px';
+    selectedEl.style.top = y + 'px';
+    console.log('drag move', x.toFixed(0), y.toFixed(0));
+    if (selectedEl._stamp) {
+      selectedEl._stamp.x = x / zoom;
+      selectedEl._stamp.y = y / zoom;
+      selectedEl._stamp.moved = true;
+    } else {
+      const idx = +selectedEl.dataset.idx;
+      const edits = getEdits(currentPage);
+      if (edits.textBlocks[idx]) {
+        edits.textBlocks[idx].x = x / zoom;
+        edits.textBlocks[idx].y = y / zoom;
+        edits.textBlocks[idx].moved = true;
+      }
+    }
+  }
+  if (stampStart && stampRect) {
+    const cr = document.getElementById('pageContainer').getBoundingClientRect();
+    const ex = e.clientX - cr.left, ey = e.clientY - cr.top;
+    const x = Math.min(stampStart.x, ex), y = Math.min(stampStart.y, ey);
+    const w = Math.abs(ex - stampStart.x), h = Math.abs(ey - stampStart.y);
+    stampRect.style.left = x + 'px'; stampRect.style.top = y + 'px';
+    stampRect.style.width = w + 'px'; stampRect.style.height = h + 'px';
+  }
+  if (sealrmStart && sealrmRect) {
+    const cr = document.getElementById('pageContainer').getBoundingClientRect();
+    const ex = e.clientX - cr.left, ey = e.clientY - cr.top;
+    const x = Math.min(sealrmStart.x, ex), y = Math.min(sealrmStart.y, ey);
+    const w = Math.abs(ex - sealrmStart.x), h = Math.abs(ey - sealrmStart.y);
+    sealrmRect.style.left = x + 'px'; sealrmRect.style.top = y + 'px';
+    sealrmRect.style.width = w + 'px'; sealrmRect.style.height = h + 'px';
+  }
+  if (eraseStart && eraseRect) {
+    const cr = document.getElementById('pageContainer').getBoundingClientRect();
+    const ex = e.clientX - cr.left;
+    const ey = e.clientY - cr.top;
+    const x = Math.min(eraseStart.x, ex), y = Math.min(eraseStart.y, ey);
+    const w = Math.abs(ex - eraseStart.x), h = Math.abs(ey - eraseStart.y);
+    eraseRect.style.left = x + 'px'; eraseRect.style.top = y + 'px';
+    eraseRect.style.width = w + 'px'; eraseRect.style.height = h + 'px';
+  }
+});
+
+document.addEventListener('mouseup', async (e) => {
+  isDragging = false;
+  if (eraseStart && eraseRect) {
+    const cr = document.getElementById('pageContainer').getBoundingClientRect();
+    const ex = e.clientX - cr.left, ey = e.clientY - cr.top;
+    const x = Math.min(eraseStart.x, ex) / zoom, y = Math.min(eraseStart.y, ey) / zoom;
+    const w = Math.abs(ex - eraseStart.x) / zoom, h = Math.abs(ey - eraseStart.y) / zoom;
+    eraseRect.remove(); eraseRect = null; eraseStart = null;
+    if (w > 2 && h > 2) {
+      getEdits(currentPage).eraseAreas.push({ x, y, w, h });
+      renderPage(currentPage);
+    }
+  }
+  if (sealrmStart && sealrmRect) {
+    const cr2 = document.getElementById('pageContainer').getBoundingClientRect();
+    const ex2 = e.clientX - cr2.left, ey2 = e.clientY - cr2.top;
+    const px2 = Math.min(sealrmStart.x, ex2), py2 = Math.min(sealrmStart.y, ey2);
+    const pw2 = Math.abs(ex2 - sealrmStart.x), ph2 = Math.abs(ey2 - sealrmStart.y);
+    sealrmRect.remove(); sealrmRect = null; sealrmStart = null;
+    if (pw2 > 5 && ph2 > 5) {
+      removeSealFromArea(px2, py2, pw2, ph2);
+    }
+  }
+  if (stampStart && stampRect) {
+    const cr = document.getElementById('pageContainer').getBoundingClientRect();
+    const ex = e.clientX - cr.left, ey = e.clientY - cr.top;
+    const px = Math.min(stampStart.x, ex), py = Math.min(stampStart.y, ey);
+    const pw = Math.abs(ex - stampStart.x), ph = Math.abs(ey - stampStart.y);
+    stampRect.remove(); stampRect = null; stampStart = null;
+    if (pw > 5 && ph > 5) {
+      const canvas = document.getElementById('pdfCanvas');
+      const tmpC = document.createElement('canvas');
+      tmpC.width = pw; tmpC.height = ph;
+      const tCtx = tmpC.getContext('2d');
+      tCtx.drawImage(canvas, px, py, pw, ph, 0, 0, pw, ph);
+      const imd = tCtx.getImageData(0, 0, pw, ph);
+      const dd = imd.data;
+      for (let i = 0; i < dd.length; i += 4) {
+        const lum = dd[i] * 0.299 + dd[i+1] * 0.587 + dd[i+2] * 0.114;
+        if (lum > 220) { dd[i+3] = 0; }
+        else if (lum > 180) { dd[i+3] = Math.round(255 * (1 - (lum - 180) / 40)); }
+      }
+      tCtx.putImageData(imd, 0, 0);
+      const dataUrl = tmpC.toDataURL('image/png');
+      const x = px / zoom, y = py / zoom, w = pw / zoom, h = ph / zoom;
+      getEdits(currentPage).stampBlocks.push({
+        dataUrl, origX: x, origY: y, x, y, w, h,
+        deleted: false, moved: false,
+      });
+      getEdits(currentPage).eraseAreas.push({ x, y, w, h });
+      await renderPage(currentPage);
+      currentTool = 'select';
+      document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+      const selBtn = document.getElementById('toolSelect');
+      if (selBtn) selBtn.classList.add('active');
+      const ov2 = document.getElementById('textOverlay');
+      ov2.className = 'text-overlay';
+      document.getElementById('sealrmControls').style.display = 'none';
+      const stampIdx = getEdits(currentPage).stampBlocks.length - 1;
+      const stampDiv = document.querySelector('[data-stamp-idx="' + stampIdx + '"]');
+      if (stampDiv) {
+        selectedEl = stampDiv;
+        stampDiv.classList.add('selected');
+        selectedEl._stamp = getEdits(currentPage).stampBlocks[stampIdx];
+      }
+      status('Область захвачена — перетащите на новое место');
+    }
+  }
+});
+
+document.getElementById('textOverlay').addEventListener('mousedown', (e) => {
+  if (e.target !== e.currentTarget && currentTool !== 'sealrm' && currentTool !== 'stamp') return;
+  if (currentTool === 'text') {
+    e.preventDefault();
+    const cr = document.getElementById('pageContainer').getBoundingClientRect();
+    const x = (e.clientX - cr.left) / zoom;
+    const y = (e.clientY - cr.top) / zoom;
+    getEdits(currentPage).textBlocks.push({
+      text: 'Текст', x, y, fontSize: 10, deleted: false, moved: false, edited: true, isNew: true,
+    });
+    renderPage(currentPage);
+  }
+  if (currentTool === 'erase') {
+    e.preventDefault();
+    const cr = document.getElementById('pageContainer').getBoundingClientRect();
+    eraseStart = { x: e.clientX - cr.left, y: e.clientY - cr.top };
+    eraseRect = document.createElement('div');
+    eraseRect.className = 'erase-rect';
+    eraseRect.style.left = eraseStart.x + 'px'; eraseRect.style.top = eraseStart.y + 'px';
+    document.getElementById('textOverlay').appendChild(eraseRect);
+  }
+  if (currentTool === 'stamp') {
+    e.preventDefault();
+    const cr = document.getElementById('pageContainer').getBoundingClientRect();
+    stampStart = { x: e.clientX - cr.left, y: e.clientY - cr.top };
+    stampRect = document.createElement('div');
+    stampRect.className = 'stamp-select-rect';
+    stampRect.style.left = stampStart.x + 'px'; stampRect.style.top = stampStart.y + 'px';
+    document.getElementById('textOverlay').appendChild(stampRect);
+  }
+  if (currentTool === 'sealrm') {
+    e.preventDefault();
+    const cr = document.getElementById('pageContainer').getBoundingClientRect();
+    sealrmStart = { x: e.clientX - cr.left, y: e.clientY - cr.top };
+    sealrmRect = document.createElement('div');
+    sealrmRect.className = 'sealrm-rect';
+    sealrmRect.style.left = sealrmStart.x + 'px'; sealrmRect.style.top = sealrmStart.y + 'px';
+    document.getElementById('textOverlay').appendChild(sealrmRect);
+  }
+});
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.text-block') && !e.target.closest('.stamp-block')) deselectAll();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Delete' && selectedEl && !selectedEl.classList.contains('editing')) {
+    if (selectedEl._stamp) {
+      selectedEl._stamp.deleted = true;
+    } else {
+      const idx = +selectedEl.dataset.idx;
+      const edits = getEdits(currentPage);
+      if (edits.textBlocks[idx]) edits.textBlocks[idx].deleted = true;
+    }
+    selectedEl.remove(); selectedEl = null;
+  }
+  if (e.ctrlKey && e.key === 's') { e.preventDefault(); savePdf(); }
+  if (e.ctrlKey && e.key === 'z') {
+    e.preventDefault();
+    if (sealrmOrigData) {
+      const canvas = document.getElementById('pdfCanvas');
+      canvas.getContext('2d').putImageData(sealrmOrigData.imgData, sealrmOrigData.px, sealrmOrigData.py);
+      const edits = getEdits(currentPage);
+      edits.stampBlocks.splice(sealrmOrigData.editIdx, 1);
+      edits.eraseAreas.splice(sealrmOrigData.eraseIdx, 1);
+      sealrmOrigData = null;
+      setTool('sealrm');
+      status('Отменено. Измените порог и повторите.');
+    }
+  }
+});
+
+function removeSealFromArea(px, py, pw, ph) {
+  const canvas = document.getElementById('pdfCanvas');
+  const ctx = canvas.getContext('2d');
+  const origData = ctx.getImageData(px, py, pw, ph);
+  const imgData = ctx.getImageData(px, py, pw, ph);
+  const d = imgData.data;
+  const W = pw, H = ph;
+
+  const gray = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    gray[i] = d[i*4] * 0.299 + d[i*4+1] * 0.587 + d[i*4+2] * 0.114;
+  }
+
+  const isDark = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) isDark[i] = gray[i] < 210 ? 1 : 0;
+
+  // --- Sobel edge detection ---
+  const edgeMag = new Float32Array(W * H);
+  const edgeDx = new Float32Array(W * H);
+  const edgeDy = new Float32Array(W * H);
+  for (let y = 1; y < H - 1; y++) {
+    for (let x = 1; x < W - 1; x++) {
+      const idx = y * W + x;
+      const gx = -gray[(y-1)*W+x-1] - 2*gray[y*W+x-1] - gray[(y+1)*W+x-1]
+                + gray[(y-1)*W+x+1] + 2*gray[y*W+x+1] + gray[(y+1)*W+x+1];
+      const gy = -gray[(y-1)*W+x-1] - 2*gray[(y-1)*W+x] - gray[(y-1)*W+x+1]
+                + gray[(y+1)*W+x-1] + 2*gray[(y+1)*W+x] + gray[(y+1)*W+x+1];
+      edgeMag[idx] = Math.sqrt(gx * gx + gy * gy);
+      edgeDx[idx] = gx; edgeDy[idx] = gy;
+    }
+  }
+
+  // --- Circle detection via gradient voting ---
+  const step = 4;
+  const accumW = Math.ceil(W / step), accumH = Math.ceil(H / step);
+  const accum = new Float32Array(accumW * accumH);
+  const edgeThr = 40;
+  for (let y = 2; y < H - 2; y++) {
+    for (let x = 2; x < W - 2; x++) {
+      const idx = y * W + x;
+      if (edgeMag[idx] < edgeThr) continue;
+      const mag = Math.sqrt(edgeDx[idx] ** 2 + edgeDy[idx] ** 2);
+      if (mag < 1) continue;
+      const nx = edgeDx[idx] / mag, ny = edgeDy[idx] / mag;
+      for (let rr = 30; rr < Math.min(W, H) * 0.55; rr += 4) {
+        const ax = Math.round(x + nx * rr), ay = Math.round(y + ny * rr);
+        if (ax >= 0 && ax < W && ay >= 0 && ay < H)
+          accum[Math.floor(ay / step) * accumW + Math.floor(ax / step)] += 1;
+        const bx = Math.round(x - nx * rr), by = Math.round(y - ny * rr);
+        if (bx >= 0 && bx < W && by >= 0 && by < H)
+          accum[Math.floor(by / step) * accumW + Math.floor(bx / step)] += 1;
+      }
+    }
+  }
+  let bestVal = 0, bestAx = 0, bestAy = 0;
+  for (let i = 0; i < accumW * accumH; i++) {
+    if (accum[i] > bestVal) { bestVal = accum[i]; bestAx = i % accumW; bestAy = Math.floor(i / accumW); }
+  }
+  let circleCx = bestAx * step + step / 2;
+  let circleCy = bestAy * step + step / 2;
+
+  // Refine center by searching nearby at pixel resolution
+  let bestRef = 0;
+  let refCx = circleCx, refCy = circleCy;
+  for (let dy = -step; dy <= step; dy++) {
+    for (let dx = -step; dx <= step; dx++) {
+      const cx = circleCx + dx, cy = circleCy + dy;
+      if (cx < 0 || cx >= W || cy < 0 || cy >= H) continue;
+      let score = 0;
+      for (let y = 2; y < H - 2; y += 2) {
+        for (let x = 2; x < W - 2; x += 2) {
+          if (edgeMag[y * W + x] < edgeThr) continue;
+          const mag = Math.sqrt(edgeDx[y*W+x]**2 + edgeDy[y*W+x]**2);
+          if (mag < 1) continue;
+          const vx = x - cx, vy = y - cy;
+          const vl = Math.sqrt(vx*vx + vy*vy);
+          if (vl < 10) continue;
+          const dot = Math.abs((edgeDx[y*W+x] * vx + edgeDy[y*W+x] * vy) / (mag * vl));
+          if (dot > 0.7) score++;
+        }
+      }
+      if (score > bestRef) { bestRef = score; refCx = cx; refCy = cy; }
+    }
+  }
+  circleCx = refCx; circleCy = refCy;
+
+  // Find radius via radial histogram of edge pixels
+  const maxPossibleR = Math.max(W, H) * 0.6;
+  const radialBins = new Float32Array(Math.ceil(maxPossibleR));
+  for (let y = 2; y < H - 2; y++) {
+    for (let x = 2; x < W - 2; x++) {
+      if (edgeMag[y * W + x] < edgeThr) continue;
+      const r = Math.sqrt((x - circleCx) ** 2 + (y - circleCy) ** 2);
+      if (r < maxPossibleR && r >= 5) {
+        const mag = Math.sqrt(edgeDx[y*W+x]**2 + edgeDy[y*W+x]**2);
+        if (mag < 1) continue;
+        const vx = x - circleCx, vy = y - circleCy;
+        const vl = Math.sqrt(vx*vx + vy*vy);
+        const dot = Math.abs((edgeDx[y*W+x] * vx + edgeDy[y*W+x] * vy) / (mag * vl));
+        if (dot > 0.5) radialBins[Math.round(r)] += dot;
+      }
+    }
+  }
+  // Smooth radial histogram
+  const smoothR = new Float32Array(radialBins.length);
+  for (let r = 3; r < radialBins.length - 3; r++) {
+    let s = 0;
+    for (let dr = -3; dr <= 3; dr++) s += radialBins[r + dr];
+    smoothR[r] = s / (2 * Math.PI * Math.max(r, 1));
+  }
+  let circleR = 0, bestRv = 0;
+  for (let r = 20; r < smoothR.length; r++) {
+    if (smoothR[r] > bestRv) { bestRv = smoothR[r]; circleR = r; }
+  }
+  console.log('Seal circle:', circleCx.toFixed(0), circleCy.toFixed(0), 'R=' + circleR);
+
+  // --- Distance transform for stroke thickness ---
+  const dt = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const idx = y * W + x;
+      if (!isDark[idx]) { dt[idx] = 0; continue; }
+      const up = y > 0 ? dt[(y - 1) * W + x] : 0;
+      const left = x > 0 ? dt[y * W + x - 1] : 0;
+      dt[idx] = Math.min(up, left) + 1;
+    }
+  }
+  for (let y = H - 1; y >= 0; y--) {
+    for (let x = W - 1; x >= 0; x--) {
+      const idx = y * W + x;
+      if (!isDark[idx]) continue;
+      const down = y < H - 1 ? dt[(y + 1) * W + x] : 0;
+      const right = x < W - 1 ? dt[y * W + x + 1] : 0;
+      dt[idx] = Math.min(dt[idx], Math.min(down, right) + 1);
+    }
+  }
+
+  const strokeThr = +document.getElementById('sealrmThreshold').value;
+
+  // --- Color clustering (2-means) to separate stamp ink from signature ink ---
+  // Seed cluster 1 from pixels on the detected circle boundary
+  let s1r = 0, s1g = 0, s1b = 0, s1n = 0;
+  let s2r = 0, s2g = 0, s2b = 0, s2n = 0;
+  const band = Math.max(6, circleR * 0.1);
+  for (let i = 0; i < W * H; i++) {
+    if (!isDark[i]) continue;
+    const x = i % W, y = Math.floor(i / W);
+    const r = Math.sqrt((x - circleCx) ** 2 + (y - circleCy) ** 2);
+    if (Math.abs(r - circleR) < band) {
+      s1r += d[i*4]; s1g += d[i*4+1]; s1b += d[i*4+2]; s1n++;
+    } else if (r > circleR + band * 2) {
+      s2r += d[i*4]; s2g += d[i*4+1]; s2b += d[i*4+2]; s2n++;
+    }
+  }
+  if (s1n > 0) { s1r /= s1n; s1g /= s1n; s1b /= s1n; }
+  else { s1r = 150; s1g = 150; s1b = 170; }
+  if (s2n > 0) { s2r /= s2n; s2g /= s2n; s2b /= s2n; }
+  else { s2r = 40; s2g = 40; s2b = 50; }
+
+  for (let iter = 0; iter < 8; iter++) {
+    let n1r=0, n1g=0, n1b=0, n1n=0, n2r=0, n2g=0, n2b=0, n2n=0;
+    for (let i = 0; i < W * H; i++) {
+      if (!isDark[i]) continue;
+      const pr = d[i*4], pg = d[i*4+1], pb = d[i*4+2];
+      const d1 = (pr-s1r)**2 + (pg-s1g)**2 + (pb-s1b)**2;
+      const d2 = (pr-s2r)**2 + (pg-s2g)**2 + (pb-s2b)**2;
+      if (d1 <= d2) { n1r += pr; n1g += pg; n1b += pb; n1n++; }
+      else { n2r += pr; n2g += pg; n2b += pb; n2n++; }
+    }
+    if (n1n > 0) { s1r = n1r/n1n; s1g = n1g/n1n; s1b = n1b/n1n; }
+    if (n2n > 0) { s2r = n2r/n2n; s2g = n2g/n2n; s2b = n2b/n2n; }
+  }
+  // Determine which cluster is the stamp (lighter = stamp usually)
+  const lum1 = s1r * 0.299 + s1g * 0.587 + s1b * 0.114;
+  const lum2 = s2r * 0.299 + s2g * 0.587 + s2b * 0.114;
+  let stampR, stampG, stampB, signR, signG, signB;
+  if (lum1 > lum2) {
+    stampR = s1r; stampG = s1g; stampB = s1b;
+    signR = s2r; signG = s2g; signB = s2b;
+  } else {
+    stampR = s2r; stampG = s2g; stampB = s2b;
+    signR = s1r; signG = s1g; signB = s1b;
+  }
+  console.log('Stamp color:', stampR.toFixed(0), stampG.toFixed(0), stampB.toFixed(0));
+  console.log('Signature color:', signR.toFixed(0), signG.toFixed(0), signB.toFixed(0));
+
+  // --- Multi-factor classification ---
+  const isSeal = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const idx = y * W + x;
+      if (!isDark[idx]) continue;
+
+      const r = Math.sqrt((x - circleCx) ** 2 + (y - circleCy) ** 2);
+      const onCircle = Math.abs(r - circleR) < band;
+      const insideCircle = r < circleR * 1.05;
+
+      const pr = d[idx*4], pg = d[idx*4+1], pb = d[idx*4+2];
+      const dStamp = Math.sqrt((pr-stampR)**2 + (pg-stampG)**2 + (pb-stampB)**2);
+      const dSign  = Math.sqrt((pr-signR)**2 + (pg-signG)**2 + (pb-signB)**2);
+      const colorIsStamp = dStamp < dSign;
+
+      const thin = dt[idx] <= strokeThr;
+
+      let score = 0;
+      if (onCircle) score += 0.6;
+      else if (insideCircle) score += 0.15;
+      if (colorIsStamp) score += 0.35;
+      if (!thin) score += 0.15;
+      if (gray[idx] > 160) score += 0.1;
+
+      if (onCircle) {
+        isSeal[idx] = 1;
+      } else if (insideCircle && score >= 0.5 && !(thin && !colorIsStamp)) {
+        isSeal[idx] = 1;
+      } else if (!insideCircle && colorIsStamp && !thin && gray[idx] > 140) {
+        isSeal[idx] = 1;
+      }
+    }
+  }
+
+  // Light propagation: fill small gaps inside seal regions
+  for (let pass = 0; pass < 2; pass++) {
+    const next = new Uint8Array(isSeal);
+    for (let y = 1; y < H - 1; y++) {
+      for (let x = 1; x < W - 1; x++) {
+        const idx = y * W + x;
+        if (!isDark[idx] || isSeal[idx]) continue;
+        if (dt[idx] <= 1) continue;
+        let sN = 0;
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++)
+            if (isSeal[(y+dy)*W+(x+dx)]) sN++;
+        if (sN >= 6) next[idx] = 1;
+      }
+    }
+    for (let i = 0; i < W * H; i++) isSeal[i] = next[i];
+  }
+
+  // Remove seal pixels (set to white)
+  for (let i = 0; i < W * H; i++) {
+    if (isSeal[i]) { d[i*4] = 255; d[i*4+1] = 255; d[i*4+2] = 255; }
+  }
+
+  ctx.putImageData(imgData, px, py);
+
+  const x = px / zoom, y2 = py / zoom, w = pw / zoom, h2 = ph / zoom;
+  const tmpC = document.createElement('canvas');
+  tmpC.width = pw; tmpC.height = ph;
+  tmpC.getContext('2d').drawImage(canvas, px, py, pw, ph, 0, 0, pw, ph);
+  const dataUrl = tmpC.toDataURL('image/png');
+
+  const edits = getEdits(currentPage);
+  edits.eraseAreas.push({ x, y: y2, w, h: h2 });
+  edits.stampBlocks.push({
+    dataUrl, origX: x, origY: y2, x, y: y2, w, h: h2,
+    deleted: false, moved: false,
+  });
+
+  sealrmOrigData = { imgData: origData, px, py, pw, ph, editIdx: edits.stampBlocks.length - 1, eraseIdx: edits.eraseAreas.length - 1 };
+  status('Печать удалена. Ctrl+Z — отмена. Порог = толщина штриха подписи.');
+}
+
+async function buildEditedPdf() {
+  const { PDFDocument, rgb, StandardFonts } = PDFLib;
+  const doc = await PDFDocument.load(pdfBytes);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const pages = doc.getPages();
+
+  for (let p = 1; p <= totalPages; p++) {
+    const edits = getEdits(p);
+    const page = pages[p - 1];
+    const { width, height } = page.getSize();
+    const pdfPage = await pdfDoc.getPage(p);
+    const origVp = pdfPage.getViewport({ scale: 1 });
+    const sx = width / origVp.width;
+    const sy = height / origVp.height;
+
+    edits.eraseAreas.forEach(a => {
+      page.drawRectangle({
+        x: a.x * sx, y: height - (a.y + a.h) * sy,
+        width: a.w * sx, height: a.h * sy,
+        color: rgb(1, 1, 1),
+      });
+    });
+
+    edits.textBlocks.forEach(block => {
+      if (block.deleted && !block.isNew) {
+        page.drawRectangle({
+          x: block.origX * sx, y: height - (block.origY + block.fontSize) * sy,
+          width: (block.text.length * block.fontSize * 0.6) * sx,
+          height: block.fontSize * sy * 1.2,
+          color: rgb(1, 1, 1),
+        });
+      }
+    });
+
+    edits.textBlocks.forEach(block => {
+      if (block.deleted) return;
+      if (block.isNew || block.edited || block.moved) {
+        if (!block.isNew) {
+          page.drawRectangle({
+            x: block.origX * sx, y: height - (block.origY + block.fontSize) * sy,
+            width: (block.text.length * block.fontSize * 0.6) * sx,
+            height: block.fontSize * sy * 1.2,
+            color: rgb(1, 1, 1),
+          });
+        }
+        const fs = block.fontSize * sx;
+        page.drawText(block.text, {
+          x: block.x * sx,
+          y: height - (block.y + block.fontSize) * sy,
+          size: Math.max(4, Math.min(72, fs)),
+          font, color: rgb(0, 0, 0),
+        });
+      }
+    });
+
+    for (const stamp of edits.stampBlocks) {
+      if (stamp.deleted) continue;
+      const resp = await fetch(stamp.dataUrl);
+      const imgBytes = new Uint8Array(await resp.arrayBuffer());
+      const pngImg = await doc.embedPng(imgBytes);
+      page.drawImage(pngImg, {
+        x: stamp.x * sx,
+        y: height - (stamp.y + stamp.h) * sy,
+        width: stamp.w * sx,
+        height: stamp.h * sy,
+      });
+    }
+  }
+
+  const saved = await doc.save();
+  const bytes = new Uint8Array(saved);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+async function savePdf() {
+  status('Сохранение…');
+  try {
+    const base64 = await buildEditedPdf();
+    const r = await window.pdfEditor.save(base64, filePath);
+    status(r.saved ? 'Сохранено: ' + r.path : 'Отменено');
+  } catch (e) { status('Ошибка: ' + e.message); console.error(e); }
+}
+
+async function savePdfAs() {
+  status('Сохранение…');
+  try {
+    const base64 = await buildEditedPdf();
+    const r = await window.pdfEditor.saveAs(base64);
+    status(r.saved ? 'Сохранено: ' + r.path : 'Отменено');
+  } catch (e) { status('Ошибка: ' + e.message); console.error(e); }
+}
+
+init();
+</script>
+</body>
+</html>

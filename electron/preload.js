@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Окно реестра
   openReestrWindow: (data) => ipcRenderer.invoke('open-reestr-window', data),
+  openPdfEditor: () => ipcRenderer.invoke('open-pdf-editor'),
 
   // Сетевой сервер
   serverStart:   ()              => ipcRenderer.invoke('server-start'),

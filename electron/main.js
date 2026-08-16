@@ -463,6 +463,73 @@ app.whenReady().then(() => {
     return true;
   });
 
+  // ─── PDF Editor ───
+  ipcMain.handle('open-pdf-editor', async (event) => {
+    const senderWin = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
+      title: 'Выберите PDF-файл для редактирования',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      properties: ['openFile'],
+    });
+    if (canceled || !filePaths || !filePaths[0]) return { ok: false };
+
+    const pdfPath = filePaths[0];
+    const pdfData = fs.readFileSync(pdfPath);
+
+    const iconPath = path.join(__dirname, '../build/icon.ico');
+    const pdfWin = new BrowserWindow({
+      width: 1400,
+      height: 900,
+      minWidth: 900,
+      minHeight: 600,
+      title: 'PDF-редактор — ' + path.basename(pdfPath),
+      icon: fs.existsSync(iconPath) ? iconPath : undefined,
+      parent: senderWin || undefined,
+      webPreferences: {
+        preload: path.join(__dirname, 'pdf-preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    pdfWin.setMenuBarVisibility(false);
+    pdfEditorData = { pdfBase64: pdfData.toString('base64'), filePath: pdfPath, fileName: path.basename(pdfPath) };
+    pdfWin.loadFile(path.join(__dirname, '../pdf-editor.html'));
+    return { ok: true };
+  });
+
+  let pdfEditorData = null;
+
+  ipcMain.handle('pdf-editor-data', () => pdfEditorData);
+
+  ipcMain.handle('pdf-editor-save', async (event, { pdfBase64, filePath }) => {
+    const senderWin = BrowserWindow.fromWebContents(event.sender);
+    let savePath = filePath;
+    if (!savePath) {
+      const { canceled, filePath: fp } = await dialog.showSaveDialog(senderWin, {
+        title: 'Сохранить PDF',
+        defaultPath: pdfEditorData ? pdfEditorData.filePath : 'edited.pdf',
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      });
+      if (canceled || !fp) return { saved: false };
+      savePath = fp;
+    }
+    fs.writeFileSync(savePath, Buffer.from(pdfBase64, 'base64'));
+    return { saved: true, path: savePath };
+  });
+
+  ipcMain.handle('pdf-editor-save-as', async (event, { pdfBase64 }) => {
+    const senderWin = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePath } = await dialog.showSaveDialog(senderWin, {
+      title: 'Сохранить PDF как…',
+      defaultPath: pdfEditorData ? pdfEditorData.filePath.replace('.pdf', '_edited.pdf') : 'edited.pdf',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (canceled || !filePath) return { saved: false };
+    fs.writeFileSync(filePath, Buffer.from(pdfBase64, 'base64'));
+    shell.showItemInFolder(filePath);
+    return { saved: true, path: filePath };
+  });
+
   ipcMain.handle('reestr-window-data', () => {
     console.log('[reestr-window] data request, rows:', reestrWindowData?.rows?.length, 'statyi:', reestrWindowData?.statyi?.length);
     return reestrWindowData;
