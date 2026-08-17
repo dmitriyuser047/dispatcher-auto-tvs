@@ -535,6 +535,16 @@ app.whenReady().then(() => {
     return reestrWindowData;
   });
 
+  ipcMain.handle('reestr-save-rows', (event, rows) => {
+    const allWindows = BrowserWindow.getAllWindows();
+    for (const w of allWindows) {
+      if (w.webContents !== event.sender) {
+        w.webContents.send('reestr-rows-saved', rows);
+      }
+    }
+    return { ok: true };
+  });
+
   createWindow();
 
   app.on('activate', () => {

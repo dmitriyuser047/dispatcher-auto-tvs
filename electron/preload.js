@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installUpdate:  ()        => ipcRenderer.invoke('install-update'),
   onUpdateAvailable: (cb)   => ipcRenderer.on('update-available',  (_e, info) => cb(info)),
   onDownloadProgress: (cb)  => ipcRenderer.on('download-progress', (_e, pct)  => cb(pct)),
+  onReestrRowsSaved: (cb)   => ipcRenderer.on('reestr-rows-saved', (_e, rows) => cb(rows)),
 });
 
 contextBridge.exposeInMainWorld('reestrAPI', {

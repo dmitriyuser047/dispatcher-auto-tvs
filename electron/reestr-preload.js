@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld('reestrAPI', {
 contextBridge.exposeInMainWorld('reestrWindow', {
   getData: () => ipcRenderer.invoke('reestr-window-data'),
   toRepair: (rowData) => ipcRenderer.send('reestr-to-repair', rowData),
+  saveRows: (rows) => ipcRenderer.invoke('reestr-save-rows', rows),
 });

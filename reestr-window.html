@@ -29,10 +29,20 @@
 
   .toolbar {
     background: var(--bg2); border-bottom: 1px solid var(--border);
-    padding: 12px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+    padding: 12px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; flex-wrap: wrap;
   }
-  .toolbar h1 { font-size: 16px; font-weight: 700; flex: 1; }
+  .toolbar h1 { font-size: 16px; font-weight: 700; }
   .toolbar .summary { font-size: 13px; color: var(--text2); }
+  .toolbar-spacer { flex: 1; }
+  .toolbar-row2 {
+    width: 100%; display: flex; align-items: center; gap: 10px; margin-top: 4px;
+    padding-top: 8px; border-top: 1px solid var(--border);
+  }
+  .toolbar-row2 label { font-size: 12px; color: var(--text2); font-weight: 600; white-space: nowrap; }
+  .toolbar-row2 select {
+    padding: 4px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 5px;
+    background: var(--bg2); color: var(--text); font-family: inherit; min-width: 180px;
+  }
 
   .btn {
     display: inline-flex; align-items: center; gap: 6px;
@@ -43,6 +53,8 @@
   .btn-primary:hover { background: var(--accent2); }
   .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border2); }
   .btn-ghost:hover { background: var(--bg3); color: var(--text); }
+  .btn-green { background: var(--green); color: #fff; }
+  .btn-green:hover { opacity: 0.9; }
 
   .content { flex: 1; overflow: auto; padding: 16px 20px; }
 
@@ -62,7 +74,7 @@
   .log-warn { color: var(--red); } .log-warn::before { content: '! '; }
   .log-info { color: var(--text3); } .log-info::before { content: '· '; }
 
-  table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 900px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 1550px; }
   thead tr { background: var(--accent); color: #fff; }
   th { padding: 8px; text-align: left; font-weight: 600; white-space: nowrap; }
   .table-wrap {
@@ -89,77 +101,48 @@
   }
   .done-card .done-info { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
 
-  /* Searchable dropdown */
-  .statya-picker { position: relative; min-width: 220px; }
-  .statya-selected {
+  /* Searchable dropdown — reused for statya, contract, object */
+  .dd-picker { position: relative; min-width: 140px; }
+  .dd-selected {
     width: 100%; padding: 4px 24px 4px 6px; font-size: 11px;
     border: 1px solid var(--border); border-radius: 5px;
     background: var(--bg2); color: var(--text); cursor: pointer;
     font-family: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     min-height: 24px; display: flex; align-items: center;
   }
-  .statya-selected::after {
+  .dd-selected::after {
     content: '▾'; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
     font-size: 10px; color: var(--text3); pointer-events: none;
   }
-  .statya-dropdown {
+  .dd-dropdown {
     display: none; position: fixed;
     background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
     box-shadow: var(--shadow); z-index: 1000; max-height: 280px;
     flex-direction: column; width: 320px;
   }
-  .statya-dropdown.open { display: flex; }
-  .statya-search {
+  .dd-dropdown.open { display: flex; }
+  .dd-search {
     padding: 6px 8px; border: none; border-bottom: 1px solid var(--border);
     font-size: 12px; font-family: inherit; background: var(--bg);
     color: var(--text); outline: none; border-radius: 6px 6px 0 0;
   }
-  .statya-search::placeholder { color: var(--text3); }
-  .statya-options { overflow-y: auto; max-height: 240px; }
-  .statya-group { padding: 4px 8px; font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; }
-  .statya-option {
+  .dd-search::placeholder { color: var(--text3); }
+  .dd-options { overflow-y: auto; max-height: 240px; }
+  .dd-group { padding: 4px 8px; font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; }
+  .dd-option {
     padding: 5px 8px; font-size: 11px; cursor: pointer;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .statya-option:hover { background: var(--bg3); }
-  .statya-option.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-weight: 600; }
-  .statya-option.hidden { display: none; }
+  .dd-option:hover { background: var(--bg3); }
+  .dd-option.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-weight: 600; }
+  .dd-option.hidden { display: none; }
+  .dd-option .co-obj { font-size: 10px; color: var(--text3); margin-left: 4px; }
 
-  .contract-picker { position: relative; min-width: 180px; }
-  .contract-selected {
-    width: 100%; padding: 4px 24px 4px 6px; font-size: 11px;
+  .razdel-sel {
+    width: 100%; padding: 3px 5px; font-size: 11px;
     border: 1px solid var(--border); border-radius: 5px;
-    background: var(--bg2); color: var(--text); cursor: pointer;
-    font-family: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    min-height: 24px; display: flex; align-items: center;
+    background: var(--bg2); color: var(--text); font-family: inherit;
   }
-  .contract-selected::after {
-    content: '▾'; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-    font-size: 10px; color: var(--text3); pointer-events: none;
-  }
-  .contract-dropdown {
-    display: none; position: fixed;
-    background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
-    box-shadow: var(--shadow); z-index: 1000; max-height: 280px;
-    flex-direction: column; width: 360px;
-  }
-  .contract-dropdown.open { display: flex; }
-  .contract-search {
-    padding: 6px 8px; border: none; border-bottom: 1px solid var(--border);
-    font-size: 12px; font-family: inherit; background: var(--bg);
-    color: var(--text); outline: none; border-radius: 6px 6px 0 0;
-  }
-  .contract-search::placeholder { color: var(--text3); }
-  .contract-options { overflow-y: auto; max-height: 240px; }
-  .contract-group { padding: 4px 8px; font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; }
-  .contract-option {
-    padding: 5px 8px; font-size: 11px; cursor: pointer;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .contract-option:hover { background: var(--bg3); }
-  .contract-option.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-weight: 600; }
-  .contract-option.hidden { display: none; }
-  .contract-option .co-obj { font-size: 10px; color: var(--text3); margin-left: 4px; }
 
   .spinner {
     display: none; width: 14px; height: 14px;
@@ -174,11 +157,14 @@
   <h1>Реестр счетов</h1>
   <span class="summary" id="summaryCount"></span>
   <span class="summary" id="summaryAmount"></span>
+  <span class="toolbar-spacer"></span>
   <button class="btn btn-ghost" id="addRowBtn">+ Строка</button>
+  <button class="btn btn-green" id="saveBtn">Сохранить</button>
   <button class="btn btn-primary" id="buildBtn">
     <span class="spinner" id="buildSpinner"></span>
     <span id="buildBtnLabel">Сформировать реестр</span>
   </button>
+
 </div>
 
 <div class="content">
@@ -191,11 +177,15 @@
     <table>
       <thead><tr>
         <th style="width:36px">№</th>
-        <th style="width:110px">Сумма</th>
-        <th>Описание</th>
+        <th style="width:100px">Сумма</th>
+        <th style="min-width:140px">Описание</th>
+        <th style="width:120px">Раздел</th>
+        <th style="width:120px">Компания</th>
+        <th style="min-width:130px">Контрагент</th>
         <th style="width:140px">Объект</th>
-        <th style="min-width:220px">Статья БДДС</th>
-        <th style="min-width:180px">Договор</th>
+        <th style="min-width:180px">Статья БДДС</th>
+        <th style="width:140px">Тип оплаты</th>
+        <th style="min-width:160px">Договор</th>
         <th style="width:36px"></th>
       </tr></thead>
       <tbody id="tbody"></tbody>
@@ -211,13 +201,16 @@
       <span id="doneCount" style="font-size:16px;font-weight:700">—</span>
       <span id="doneAmount" style="font-size:13px;color:var(--text2)"></span>
     </div>
-    <button class="btn btn-primary" id="downloadBtn" style="width:100%;justify-content:center">⬇ Скачать реестр.xlsx</button>
+    <button class="btn btn-primary" id="downloadBtn" style="width:100%;justify-content:center">Скачать реестр.xlsx</button>
   </div>
 </div>
 
 <script>
 const theme = localStorage.getItem('theme');
 if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+
+const RAZDELY = ['Логистика', 'ТО и ремонт', 'Аренда', 'Офисные платежи', 'ГСМ ДЭС и авто'];
+const PAY_TYPES = ['ОПЛАТА ПО ФАКТУ', 'ОПЛАТА 50%', 'ПРЕДОПЛАТА 100%', 'ПРЕДОПЛАТА 50%'];
 
 let rows = [];
 let statyi = [];
@@ -231,6 +224,18 @@ document.addEventListener('click', (e) => {
     activeDropdown = null;
   }
 });
+
+function getUniqueCompanies() {
+  const set = new Set();
+  contracts.forEach(c => { if (c.company) set.add(c.company); });
+  return [...set];
+}
+
+function getUniqueObjects() {
+  const set = new Set();
+  contracts.forEach(c => { if (c.obj) set.add(c.obj); });
+  return [...set].sort();
+}
 
 function matchContract(objText) {
   if (!objText || !contracts.length) return '';
@@ -250,14 +255,15 @@ function matchContract(objText) {
   return '';
 }
 
+
 async function init() {
   const d = await window.reestrWindow.getData();
   rows = d.rows || [];
   statyi = d.statyi || [];
   contracts = d.contracts || [];
-  console.log('[reestr-window] init: rows=' + rows.length + ' statyi=' + statyi.length + ' contracts=' + contracts.length);
   rows.forEach(r => {
     if (!r.dog && r.obj) r.dog = matchContract(r.obj);
+    if (!r.razdel) r.razdel = '';
   });
   renderLog(d.log);
   renderTable();
@@ -289,64 +295,57 @@ function updateSummary() {
   document.getElementById('totalAmount').textContent = total.toLocaleString('ru-RU', { minimumFractionDigits: 2 }) + ' руб.';
 }
 
-function buildStatyaPicker(row, idx) {
+function buildDropdownPicker(currentVal, items, placeholder, onSelect) {
   const wrap = document.createElement('div');
-  wrap.className = 'statya-picker';
-
+  wrap.className = 'dd-picker';
   const selected = document.createElement('div');
-  selected.className = 'statya-selected';
-  selected.textContent = row['statья'] || '— выберите —';
-  if (!row['statья']) selected.style.color = 'var(--text3)';
+  selected.className = 'dd-selected';
+  selected.textContent = currentVal || placeholder;
+  if (!currentVal) selected.style.color = 'var(--text3)';
 
   const dropdown = document.createElement('div');
-  dropdown.className = 'statya-dropdown';
+  dropdown.className = 'dd-dropdown';
 
   const search = document.createElement('input');
-  search.className = 'statya-search';
+  search.className = 'dd-search';
   search.type = 'text';
-  search.placeholder = 'Поиск статьи…';
+  search.placeholder = 'Поиск…';
   dropdown.appendChild(search);
 
   const optionsWrap = document.createElement('div');
-  optionsWrap.className = 'statya-options';
+  optionsWrap.className = 'dd-options';
 
   const emptyOpt = document.createElement('div');
-  emptyOpt.className = 'statya-option' + (!row['statья'] ? ' selected' : '');
-  emptyOpt.textContent = '— не указана —';
+  emptyOpt.className = 'dd-option' + (!currentVal ? ' selected' : '');
+  emptyOpt.textContent = placeholder;
   emptyOpt.dataset.value = '';
   optionsWrap.appendChild(emptyOpt);
 
-  const groups = {};
-  statyi.forEach(s => { const g = s.vid || 'Прочее'; if (!groups[g]) groups[g] = []; groups[g].push(s); });
-
-  for (const [gName, items] of Object.entries(groups)) {
-    const groupEl = document.createElement('div');
-    groupEl.className = 'statya-group';
-    groupEl.textContent = gName;
-    optionsWrap.appendChild(groupEl);
-
-    items.forEach(s => {
+  let hasGroups = false;
+  items.forEach(item => {
+    if (item.group) {
+      hasGroups = true;
+      const g = document.createElement('div');
+      g.className = 'dd-group';
+      g.textContent = item.group;
+      optionsWrap.appendChild(g);
+    } else {
       const opt = document.createElement('div');
-      opt.className = 'statya-option' + (row['statья'] === s.label ? ' selected' : '');
-      opt.textContent = s.label;
-      opt.dataset.value = s.label;
-      opt.dataset.search = s.label.toLowerCase();
+      opt.className = 'dd-option' + (currentVal === item.value ? ' selected' : '');
+      opt.innerHTML = item.html || item.label;
+      opt.dataset.value = item.value;
+      opt.dataset.search = (item.search || item.label).toLowerCase();
       optionsWrap.appendChild(opt);
-    });
-  }
-
-  if (row['statья'] && !optionsWrap.querySelector('.statya-option.selected')) {
-    const code = row['statья'].split(',')[0].trim();
-    const match = optionsWrap.querySelector(`.statya-option[data-value^="${code},"]`);
-    if (match) match.classList.add('selected');
-    else {
-      const custom = document.createElement('div');
-      custom.className = 'statya-option selected';
-      custom.textContent = row['statья'] + ' (авто)';
-      custom.dataset.value = row['statья'];
-      custom.dataset.search = row['statья'].toLowerCase();
-      optionsWrap.insertBefore(custom, optionsWrap.children[1]);
     }
+  });
+
+  if (currentVal && !optionsWrap.querySelector('.dd-option.selected')) {
+    const custom = document.createElement('div');
+    custom.className = 'dd-option selected';
+    custom.textContent = currentVal + ' (авто)';
+    custom.dataset.value = currentVal;
+    custom.dataset.search = currentVal.toLowerCase();
+    optionsWrap.insertBefore(custom, optionsWrap.children[1]);
   }
 
   dropdown.appendChild(optionsWrap);
@@ -368,42 +367,46 @@ function buildStatyaPicker(row, idx) {
         dropdown.style.top = (rect.bottom + 2) + 'px';
         dropdown.style.bottom = 'auto';
       }
-      dropdown.style.left = rect.left + 'px';
-      search.value = ''; filterOptions(''); search.focus();
+      dropdown.style.left = Math.min(rect.left, window.innerWidth - 330) + 'px';
+      search.value = '';
+      filterOpts('');
+      search.focus();
     }
   });
 
-  search.addEventListener('input', () => filterOptions(search.value.toLowerCase()));
+  search.addEventListener('input', () => filterOpts(search.value.toLowerCase()));
   search.addEventListener('click', (e) => e.stopPropagation());
 
-  function filterOptions(query) {
-    optionsWrap.querySelectorAll('.statya-option').forEach(opt => {
+  function filterOpts(query) {
+    optionsWrap.querySelectorAll('.dd-option').forEach(opt => {
       if (!query || opt.dataset.value === '' || (opt.dataset.search && opt.dataset.search.includes(query))) {
         opt.classList.remove('hidden');
       } else {
         opt.classList.add('hidden');
       }
     });
-    optionsWrap.querySelectorAll('.statya-group').forEach(g => {
-      let next = g.nextElementSibling;
-      let hasVisible = false;
-      while (next && !next.classList.contains('statya-group')) {
-        if (next.classList.contains('statya-option') && !next.classList.contains('hidden')) hasVisible = true;
-        next = next.nextElementSibling;
-      }
-      g.style.display = hasVisible ? '' : 'none';
-    });
+    if (hasGroups) {
+      optionsWrap.querySelectorAll('.dd-group').forEach(g => {
+        let next = g.nextElementSibling;
+        let hasVisible = false;
+        while (next && !next.classList.contains('dd-group')) {
+          if (next.classList.contains('dd-option') && !next.classList.contains('hidden')) hasVisible = true;
+          next = next.nextElementSibling;
+        }
+        g.style.display = hasVisible ? '' : 'none';
+      });
+    }
   }
 
   optionsWrap.addEventListener('click', (e) => {
-    const opt = e.target.closest('.statya-option');
+    const opt = e.target.closest('.dd-option');
     if (!opt) return;
     e.stopPropagation();
-    optionsWrap.querySelectorAll('.statya-option.selected').forEach(o => o.classList.remove('selected'));
+    optionsWrap.querySelectorAll('.dd-option.selected').forEach(o => o.classList.remove('selected'));
     opt.classList.add('selected');
     const val = opt.dataset.value;
-    rows[idx]['statья'] = val;
-    selected.textContent = val || '— выберите —';
+    onSelect(val);
+    selected.textContent = val || placeholder;
     selected.style.color = val ? '' : 'var(--text3)';
     dropdown.classList.remove('open');
     activeDropdown = null;
@@ -412,134 +415,60 @@ function buildStatyaPicker(row, idx) {
   return wrap;
 }
 
-function buildContractPicker(row, idx) {
-  const wrap = document.createElement('div');
-  wrap.className = 'contract-picker';
-
-  const selected = document.createElement('div');
-  selected.className = 'contract-selected';
-  selected.textContent = row.dog || '— выберите —';
-  if (!row.dog) selected.style.color = 'var(--text3)';
-
-  const dropdown = document.createElement('div');
-  dropdown.className = 'contract-dropdown';
-
-  const search = document.createElement('input');
-  search.className = 'contract-search';
-  search.type = 'text';
-  search.placeholder = 'Поиск договора…';
-  dropdown.appendChild(search);
-
-  const optionsWrap = document.createElement('div');
-  optionsWrap.className = 'contract-options';
-
-  const emptyOpt = document.createElement('div');
-  emptyOpt.className = 'contract-option' + (!row.dog ? ' selected' : '');
-  emptyOpt.textContent = '— не указан —';
-  emptyOpt.dataset.value = '';
-  optionsWrap.appendChild(emptyOpt);
-
+function buildStatyaItems() {
+  const items = [];
   const groups = {};
-  contracts.forEach(c => {
-    const g = c.company || 'Без компании';
-    if (!groups[g]) groups[g] = [];
-    groups[g].push(c);
-  });
+  statyi.forEach(s => { const g = s.vid || 'Прочее'; if (!groups[g]) groups[g] = []; groups[g].push(s); });
+  for (const [gName, list] of Object.entries(groups)) {
+    items.push({ group: gName });
+    list.forEach(s => items.push({ value: s.label, label: s.label, search: s.label }));
+  }
+  return items;
+}
 
-  for (const [gName, items] of Object.entries(groups)) {
-    const groupEl = document.createElement('div');
-    groupEl.className = 'contract-group';
-    groupEl.textContent = gName;
-    optionsWrap.appendChild(groupEl);
-
-    items.forEach(c => {
-      const opt = document.createElement('div');
+function buildContractItems() {
+  const items = [];
+  const groups = {};
+  contracts.forEach(c => { const g = c.company || 'Без компании'; if (!groups[g]) groups[g] = []; groups[g].push(c); });
+  for (const [gName, list] of Object.entries(groups)) {
+    items.push({ group: gName });
+    list.forEach(c => {
       const label = c.contract || '(без номера)';
-      opt.className = 'contract-option' + (row.dog === c.contract ? ' selected' : '');
-      opt.innerHTML = label + '<span class="co-obj">' + c.obj + '</span>';
-      opt.dataset.value = c.contract;
-      opt.dataset.search = (c.contract + ' ' + c.obj + ' ' + (c.note || '')).toLowerCase();
-      optionsWrap.appendChild(opt);
+      items.push({
+        value: c.contract,
+        label: label,
+        html: label + '<span class="co-obj">' + c.obj + '</span>',
+        search: c.contract + ' ' + c.obj + ' ' + (c.note || '')
+      });
     });
   }
+  return items;
+}
 
-  dropdown.appendChild(optionsWrap);
-  wrap.appendChild(selected);
-  wrap.appendChild(dropdown);
-
-  selected.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (activeDropdown && activeDropdown !== dropdown) activeDropdown.classList.remove('open');
-    dropdown.classList.toggle('open');
-    activeDropdown = dropdown.classList.contains('open') ? dropdown : null;
-    if (activeDropdown) {
-      const rect = selected.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      if (spaceBelow < 200) {
-        dropdown.style.bottom = (window.innerHeight - rect.top + 2) + 'px';
-        dropdown.style.top = 'auto';
-      } else {
-        dropdown.style.top = (rect.bottom + 2) + 'px';
-        dropdown.style.bottom = 'auto';
-      }
-      dropdown.style.left = Math.min(rect.left, window.innerWidth - 370) + 'px';
-      search.value = '';
-      filterContractOptions('');
-      search.focus();
-    }
-  });
-
-  search.addEventListener('input', () => filterContractOptions(search.value.toLowerCase()));
-  search.addEventListener('click', (e) => e.stopPropagation());
-
-  function filterContractOptions(query) {
-    optionsWrap.querySelectorAll('.contract-option').forEach(opt => {
-      if (!query || opt.dataset.value === '' || (opt.dataset.search && opt.dataset.search.includes(query))) {
-        opt.classList.remove('hidden');
-      } else {
-        opt.classList.add('hidden');
-      }
-    });
-    optionsWrap.querySelectorAll('.contract-group').forEach(g => {
-      let next = g.nextElementSibling;
-      let hasVisible = false;
-      while (next && !next.classList.contains('contract-group')) {
-        if (next.classList.contains('contract-option') && !next.classList.contains('hidden')) hasVisible = true;
-        next = next.nextElementSibling;
-      }
-      g.style.display = hasVisible ? '' : 'none';
-    });
-  }
-
-  optionsWrap.addEventListener('click', (e) => {
-    const opt = e.target.closest('.contract-option');
-    if (!opt) return;
-    e.stopPropagation();
-    optionsWrap.querySelectorAll('.contract-option.selected').forEach(o => o.classList.remove('selected'));
-    opt.classList.add('selected');
-    const val = opt.dataset.value;
-    rows[idx].dog = val;
-    selected.textContent = val || '— выберите —';
-    selected.style.color = val ? '' : 'var(--text3)';
-    dropdown.classList.remove('open');
-    activeDropdown = null;
-  });
-
-  return wrap;
+function buildObjectItems() {
+  const items = [];
+  getUniqueObjects().forEach(obj => items.push({ value: obj, label: obj, search: obj }));
+  return items;
 }
 
 function renderTable() {
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
+  const statyaItems = buildStatyaItems();
+  const contractItems = buildContractItems();
+  const objectItems = buildObjectItems();
+
   rows.forEach((row, i) => {
     const tr = document.createElement('tr');
     if (i % 2 === 1) tr.style.background = 'var(--bg3)';
 
+    // №
     const tdN = document.createElement('td');
     tdN.style.cssText = 'padding:6px 8px;text-align:center;font-weight:700;color:var(--text3);border-bottom:1px solid var(--border)';
     tdN.textContent = i + 1;
     tr.appendChild(tdN);
 
+    // Сумма
     const tdS = document.createElement('td');
     tdS.style.cssText = 'padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)';
     const sumInp = document.createElement('input');
@@ -555,35 +484,80 @@ function renderTable() {
     tdS.appendChild(sumInp);
     tr.appendChild(tdS);
 
+    // Описание
     const tdD = document.createElement('td');
     tdD.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
     const descInp = document.createElement('textarea');
     descInp.value = (row.description || '').replace(/\\n/g, '\n');
-    descInp.style.cssText = 'width:100%;padding:3px 5px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);font-family:inherit;resize:vertical;min-height:40px';
+    descInp.style.cssText = 'width:100%;padding:3px 5px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);font-family:inherit;resize:vertical;min-height:36px';
     descInp.addEventListener('change', () => { rows[i].description = descInp.value; });
     tdD.appendChild(descInp);
     tr.appendChild(tdD);
 
+    // Раздел
+    const tdR = document.createElement('td');
+    tdR.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    const razdelSel = document.createElement('select');
+    razdelSel.className = 'razdel-sel';
+    razdelSel.innerHTML = '<option value="">—</option>' + RAZDELY.map(r => `<option value="${r}"${row.razdel === r ? ' selected' : ''}>${r}</option>`).join('');
+    razdelSel.addEventListener('change', () => { rows[i].razdel = razdelSel.value; });
+    tdR.appendChild(razdelSel);
+    tr.appendChild(tdR);
+
+    // Компания
+    const tdComp = document.createElement('td');
+    tdComp.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    const compSel = document.createElement('select');
+    compSel.className = 'razdel-sel';
+    compSel.innerHTML = '<option value="">—</option>' + getUniqueCompanies().map(c => `<option value="${c}"${row.company === c ? ' selected' : ''}>${c}</option>`).join('');
+    compSel.addEventListener('change', () => { rows[i].company = compSel.value; });
+    tdComp.appendChild(compSel);
+    tr.appendChild(tdComp);
+
+    // Поставщик
+    const tdSup = document.createElement('td');
+    tdSup.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    const supInp = document.createElement('input');
+    supInp.type = 'text';
+    supInp.value = row.supplier || '';
+    supInp.placeholder = 'Контрагент';
+    supInp.style.cssText = 'width:100%;padding:3px 5px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);font-family:inherit';
+    supInp.addEventListener('change', () => { rows[i].supplier = supInp.value; });
+    tdSup.appendChild(supInp);
+    tr.appendChild(tdSup);
+
+    // Объект (dropdown)
     const tdO = document.createElement('td');
     tdO.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
-    const objInp = document.createElement('input');
-    objInp.type = 'text';
-    objInp.value = row.obj || '';
-    objInp.style.cssText = 'width:100%;padding:3px 5px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);font-family:inherit';
-    objInp.addEventListener('change', () => { rows[i].obj = objInp.value; });
-    tdO.appendChild(objInp);
+    tdO.appendChild(buildDropdownPicker(row.obj, objectItems, '— объект —', (val) => {
+      rows[i].obj = val;
+      if (val && !rows[i].dog) rows[i].dog = matchContract(val);
+    }));
     tr.appendChild(tdO);
 
+    // Статья БДДС
     const tdSt = document.createElement('td');
     tdSt.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
-    tdSt.appendChild(buildStatyaPicker(row, i));
+    tdSt.appendChild(buildDropdownPicker(row['statья'], statyaItems, '— статья —', (val) => { rows[i]['statья'] = val; }));
     tr.appendChild(tdSt);
 
+    // Тип оплаты
+    const tdPay = document.createElement('td');
+    tdPay.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    const paySel = document.createElement('select');
+    paySel.className = 'razdel-sel';
+    paySel.innerHTML = PAY_TYPES.map(p => `<option value="${p}"${(row.payType || 'ОПЛАТА ПО ФАКТУ') === p ? ' selected' : ''}>${p}</option>`).join('');
+    paySel.addEventListener('change', () => { rows[i].payType = paySel.value; });
+    tdPay.appendChild(paySel);
+    tr.appendChild(tdPay);
+
+    // Договор
     const tdDog = document.createElement('td');
     tdDog.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
-    tdDog.appendChild(buildContractPicker(row, i));
+    tdDog.appendChild(buildDropdownPicker(row.dog, contractItems, '— договор —', (val) => { rows[i].dog = val; }));
     tr.appendChild(tdDog);
 
+    // Удалить
     const tdDel = document.createElement('td');
     tdDel.style.cssText = 'padding:6px 8px;text-align:center;border-bottom:1px solid var(--border)';
     const delBtn = document.createElement('button');
@@ -601,10 +575,20 @@ document.getElementById('addRowBtn').addEventListener('click', () => {
   rows.push({
     sum: 0,
     date: new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }),
-    category: '', description: '', naz: '', obj: '', dog: '', osn: '', updLabel: '', 'statья': '', sourceFolder: 'вручную'
+    category: '', description: '', razdel: '', obj: '', dog: '', osn: '', updLabel: '', 'statья': '',
+    company: '', supplier: '', payType: 'ОПЛАТА ПО ФАКТУ', sourceFolder: 'вручную'
   });
   renderTable();
   updateSummary();
+});
+
+document.getElementById('saveBtn').addEventListener('click', async () => {
+  if (window.reestrWindow && window.reestrWindow.saveRows) {
+    await window.reestrWindow.saveRows(rows);
+    const btn = document.getElementById('saveBtn');
+    btn.textContent = 'Сохранено';
+    setTimeout(() => { btn.textContent = 'Сохранить'; }, 1500);
+  }
 });
 
 document.getElementById('buildBtn').addEventListener('click', async () => {
@@ -617,7 +601,7 @@ document.getElementById('buildBtn').addEventListener('click', async () => {
     lastResult = d;
     const r = await window.reestrAPI.save(d.filename, d.xlsxBase64);
     if (r.saved) {
-      document.getElementById('buildBtnLabel').textContent = '✓ Сохранено';
+      document.getElementById('buildBtnLabel').textContent = 'Сохранено';
       setTimeout(() => { document.getElementById('buildBtnLabel').textContent = 'Сформировать реестр'; }, 2000);
     }
   } catch (e) {
@@ -633,8 +617,8 @@ document.getElementById('downloadBtn').addEventListener('click', async () => {
   const r = await window.reestrAPI.save(lastResult.filename, lastResult.xlsxBase64);
   if (r.saved) {
     const btn = document.getElementById('downloadBtn');
-    btn.textContent = '✓ Сохранено';
-    setTimeout(() => { btn.textContent = '⬇ Скачать реестр.xlsx'; }, 2000);
+    btn.textContent = 'Сохранено';
+    setTimeout(() => { btn.textContent = 'Скачать реестр.xlsx'; }, 2000);
   }
 });
 

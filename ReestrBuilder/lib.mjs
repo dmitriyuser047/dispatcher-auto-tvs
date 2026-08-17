@@ -186,7 +186,8 @@ function detectTableRegion(lines) {
     const t = lines[i].text.toLowerCase();
     if (/наименован\S*\s+(?:товар|работ|услуг)/i.test(t) ||
         /№\s*п\/?п.*наименован/i.test(t) ||
-        (/(?:кол|ед)/.test(t) && /цена|стоимость|сумма/.test(t))) {
+        (/(?:кол|ед)/.test(t) && /цена|стоимость|сумма/.test(t)) ||
+        (/наименован/i.test(t) && /(?:цена|сумма|кол)/i.test(t))) {
       headerIdx = i;
       break;
     }
@@ -199,10 +200,19 @@ function detectTableRegion(lines) {
       }
     }
   }
+  // OCR fallback: ищем строку с несколькими ключевыми словами таблицы
+  if (headerIdx === -1) {
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i].text.toLowerCase();
+      const keywords = ['наименован', 'кол', 'цена', 'сумма', 'ед', 'стоимость'];
+      const found = keywords.filter(k => t.includes(k));
+      if (found.length >= 2) { headerIdx = i; break; }
+    }
+  }
 
   for (let i = headerIdx + 1; i < lines.length; i++) {
-    const t = lines[i].text.toLowerCase();
-    if (/^итого\b|^всего\b|всего к оплате/i.test(t.trim())) {
+    const t = lines[i].text.trim().toLowerCase();
+    if (/^итого\b|^всего\b|всего к оплате|^в том числе ндс/i.test(t)) {
       endIdx = i;
       break;
     }
@@ -225,10 +235,14 @@ function extractTableItems(lines) {
     for (const cell of line.cells) {
       const t = cell.text.trim();
       if (/^[\d\s.,]+$/.test(t)) continue;
-      if (/^\d{1,3}$/.test(t)) continue;
-      if (/^(шт|л|кг|м[²³]?|т|час|усл|компл)\.?$/i.test(t)) continue;
+      if (/^\d{1,5}$/.test(t)) continue;
+      if (/^(шт|л|кг|м[²³]?|т|час|усл|компл|руб|коп)\.?$/i.test(t)) continue;
       if (/^\d[\d\s]*[.,]\d{2}$/.test(t)) continue;
-      if (t.length > 3) descParts.push(t);
+      if (/^\d[\d\s.,]*\s*(руб|р\b|₽)/i.test(t)) continue;
+      if (/^\d+[.,]?\d*\s*(шт|л|кг|м|т|час|усл|компл)/i.test(t)) continue;
+      if (/^[\d\s.,]+%$/.test(t)) continue;
+      const cleaned = t.replace(/\s*\d[\d\s]*[.,]\d{2}\s*/g, ' ').replace(/\s+/g, ' ').trim();
+      if (cleaned.length > 3) descParts.push(cleaned);
     }
     if (descParts.length) items.push(descParts.join(" "));
   }
@@ -268,7 +282,7 @@ async function getOcrWorker() {
   if (!ocrWorker) {
     const langDir = findLangPath();
     const opts = langDir ? { langPath: langDir, gzip: false } : {};
-    ocrWorker = await Tesseract.createWorker("rus", undefined, opts);
+    ocrWorker = await Tesseract.createWorker("rus+eng", undefined, opts);
   }
   return ocrWorker;
 }
@@ -283,6 +297,58 @@ async function extractPageImage(page) {
     }
   }
   return null;
+}
+
+function preprocessForOcr(imgData) {
+  const { width, height, data } = imgData;
+  const channels = data.length / (width * height);
+  const gray = new Uint8Array(width * height);
+  for (let i = 0; i < width * height; i++) {
+    const idx = i * channels;
+    gray[i] = Math.round(0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+  }
+
+  // Adaptive threshold (Sauvola-like): 15x15 window
+  const winR = 7;
+  const binary = new Uint8Array(width * height);
+  const integral = new Float64Array(width * height);
+  const integralSq = new Float64Array(width * height);
+  for (let y = 0; y < height; y++) {
+    let rowSum = 0, rowSumSq = 0;
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      const v = gray[idx];
+      rowSum += v;
+      rowSumSq += v * v;
+      integral[idx] = rowSum + (y > 0 ? integral[idx - width] : 0);
+      integralSq[idx] = rowSumSq + (y > 0 ? integralSq[idx - width] : 0);
+    }
+  }
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.max(0, x - winR) - 1, y0 = Math.max(0, y - winR) - 1;
+      const x1 = Math.min(width - 1, x + winR), y1 = Math.min(height - 1, y + winR);
+      const count = (x1 - x0) * (y1 - y0);
+      let sum = integral[y1 * width + x1];
+      let sumSq = integralSq[y1 * width + x1];
+      if (x0 >= 0) { sum -= integral[y1 * width + x0]; sumSq -= integralSq[y1 * width + x0]; }
+      if (y0 >= 0) { sum -= integral[y0 * width + x1]; sumSq -= integralSq[y0 * width + x1]; }
+      if (x0 >= 0 && y0 >= 0) { sum += integral[y0 * width + x0]; sumSq += integralSq[y0 * width + x0]; }
+      const mean = sum / count;
+      const variance = sumSq / count - mean * mean;
+      const std = Math.sqrt(Math.max(0, variance));
+      const k = 0.2;
+      const threshold = mean * (1 + k * (std / 128 - 1));
+      binary[y * width + x] = gray[y * width + x] > threshold ? 255 : 0;
+    }
+  }
+
+  const outData = new Uint8Array(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    outData[i * 4] = outData[i * 4 + 1] = outData[i * 4 + 2] = binary[i];
+    outData[i * 4 + 3] = 255;
+  }
+  return { width, height, data: outData };
 }
 
 function rgbToBmpBuffer(imgData) {
@@ -337,10 +403,12 @@ async function ocrPageImage(page, worker) {
   const imgData = await extractPageImage(page);
   if (!imgData) return "";
   if (isPhotoPage(imgData)) return "";
-  const bmp = rgbToBmpBuffer(imgData);
+  const processed = preprocessForOcr(imgData);
+  const bmp = rgbToBmpBuffer(processed);
   const tmpFile = path.join(os.tmpdir(), `ocr_${Date.now()}_${Math.random().toString(36).slice(2)}.bmp`);
   try {
     fs.writeFileSync(tmpFile, bmp);
+    await worker.setParameters({ tessedit_pageseg_mode: '6' });
     const result = await Promise.race([
       worker.recognize(tmpFile),
       new Promise((_, reject) => setTimeout(() => reject(new Error('OCR timeout')), 120000)),
@@ -354,15 +422,48 @@ async function ocrPageImage(page, worker) {
   }
 }
 
+function cleanOcrText(text) {
+  return text
+    // Типичные OCR-замены
+    .replace(/[|]/g, 'I')
+    .replace(/0бщ/g, 'Общ')
+    .replace(/0плат/g, 'Оплат')
+    .replace(/\bl\b(?=[А-ЯЁа-яё])/g, '1')
+    // Удаляем мусорные символы между словами
+    .replace(/([а-яё])\s*[_~`]\s*([а-яё])/gi, '$1$2')
+    // Убираем повторяющиеся пробелы но сохраняем табличные
+    .replace(/[ ]{5,}/g, '    ')
+    .trim();
+}
+
 function ocrTextToLines(text) {
-  return buildVisualLines(
-    text.split(/\n/).filter(s => s.trim()).map((s, i) => ({
-      str: s,
-      transform: [1, 0, 0, 1, 0, -i * 12],
-      width: s.length * 6,
-      height: 10,
-    }))
-  );
+  const rawLines = cleanOcrText(text).split(/\n/).filter(s => s.trim());
+  const items = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const s = rawLines[i];
+    // Разбиваем строку на "ячейки" по 2+ пробелам или табуляции (OCR часто разделяет колонки пробелами)
+    const parts = s.split(/\s{2,}|\t/).filter(p => p.trim());
+    if (parts.length > 1) {
+      let xPos = 0;
+      for (const part of parts) {
+        items.push({
+          str: part.trim(),
+          transform: [1, 0, 0, 1, xPos, -i * 12],
+          width: part.length * 6,
+          height: 10,
+        });
+        xPos += part.length * 6 + 60;
+      }
+    } else {
+      items.push({
+        str: s,
+        transform: [1, 0, 0, 1, 0, -i * 12],
+        width: s.length * 6,
+        height: 10,
+      });
+    }
+  }
+  return buildVisualLines(items);
 }
 
 async function pdfToLayout(filePathOrBuffer, onOcrPage = () => {}) {
@@ -386,7 +487,9 @@ async function pdfToLayout(filePathOrBuffer, onOcrPage = () => {}) {
     onOcrPage({ page: i, totalPages: doc.numPages });
     const page = await doc.getPage(i);
     const text = await ocrPageImage(page, worker);
-    if (text) allLines.push(...ocrTextToLines(text));
+    if (text) {
+      allLines.push(...ocrTextToLines(text));
+    }
   }
   return allLines;
 }
@@ -567,10 +670,59 @@ function visualExtractTotal(lines) {
   return null;
 }
 
+function cleanItemText(text) {
+  return text
+    .replace(/^\d{1,3}[\s.)\|]+/, '')
+    .replace(/\d[\d\s]*[.,]\d{2}/g, '')
+    .replace(/\b\d+\s*(шт|л|кг|м|т|час|усл|компл)\.?\b/gi, '')
+    .replace(/\b(шт|л|кг|м[²³]?|т|час|усл|компл|руб|коп)\.?\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function visualExtractDescription(lines) {
   const tableDesc = extractTableItems(lines);
   if (tableDesc) return tableDesc;
 
+  const lineTexts = lines.map(l => l.text);
+
+  // Стратегия 1: работаем по массиву строк напрямую — ищем блок таблицы товаров
+  let headerIdx = -1;
+  let endIdx = lineTexts.length;
+  for (let i = 0; i < lineTexts.length; i++) {
+    const t = lineTexts[i].toLowerCase();
+    if ((/наименован/i.test(t) && /товар|работ|услуг|цена|сумма|кол/i.test(t)) ||
+        (/№\s*п\/?п/i.test(t) && /наименован/i.test(t))) {
+      headerIdx = i;
+      break;
+    }
+  }
+  if (headerIdx >= 0) {
+    for (let i = headerIdx + 1; i < lineTexts.length; i++) {
+      if (/^\s*(итого|всего|в том числе)\b/i.test(lineTexts[i])) { endIdx = i; break; }
+    }
+    const items = [];
+    for (let i = headerIdx + 1; i < endIdx; i++) {
+      const raw = lineTexts[i].trim();
+      if (!raw || raw.length < 4 || /^[\d\s.,]+$/.test(raw)) continue;
+      const cleaned = cleanItemText(raw);
+      if (cleaned.length > 3 && /[а-яёa-z]/i.test(cleaned)) items.push(cleaned);
+    }
+    if (items.length) return items.join('\n');
+  }
+
+  // Стратегия 2: ищем строки после номера (1. Товар) с суммами на той же строке
+  const numberedItems = [];
+  for (const raw of lineTexts) {
+    const m = raw.match(/^\s*\d{1,2}[\s.)\|]+(.+\d[\d\s]*[.,]\d{2})/);
+    if (m) {
+      const cleaned = cleanItemText(m[1]);
+      if (cleaned.length > 3 && /[а-яёa-z]/i.test(cleaned)) numberedItems.push(cleaned);
+    }
+  }
+  if (numberedItems.length) return numberedItems.join('\n');
+
+  // Стратегия 3: регулярки по всему тексту
   const flatText = linesToText(lines);
   const textPatterns = [
     /(?:за |оплата за |оплата по |оказание услуг по |выполнение работ по )([\s\S]{10,400}?)(?:\.\s|\s+(?:Всего|Итого|Сумма|НДС|Без НДС))/i,
@@ -583,12 +735,390 @@ function visualExtractDescription(lines) {
   return null;
 }
 
+function visualExtractSupplier(lines) {
+  const lineTexts = lines.map(l => l.text);
+  const flatText = lineTexts.join(' ');
+
+  const ORG_FORM_RE = /(?:ИП|ООО|ОАО|ЗАО|АО|ПАО)\s*[«"'"]?[^»"'"]{3,80}[»"'"]?/;
+
+  // Определяем Покупателя чтобы его исключить
+  // В счетах-договорах "Плательщик" может быть реквизитами поставщика — ищем именно "Покупатель"/"Заказчик"
+  let buyerName = '';
+  for (let i = 0; i < lineTexts.length; i++) {
+    if (/(?:Покупатель|Заказчик)\s*[:.]?\s*/i.test(lineTexts[i])) {
+      const afterLabel = lineTexts[i].replace(/.*(?:Покупатель|Заказчик)\s*[:.]?\s*/i, '');
+      const orgM = afterLabel.match(ORG_FORM_RE);
+      if (orgM) { buyerName = orgM[0].trim(); break; }
+      if (i + 1 < lineTexts.length) {
+        const nextM = lineTexts[i + 1].match(ORG_FORM_RE);
+        if (nextM) { buyerName = nextM[0].trim(); break; }
+      }
+    }
+  }
+
+  function isBuyer(name) {
+    if (!buyerName) return false;
+    const a = name.replace(/[«»"'"'\s]/g, '').toLowerCase();
+    const b = buyerName.replace(/[«»"'"'\s]/g, '').toLowerCase();
+    return a.includes(b.substring(0, 12)) || b.includes(a.substring(0, 12));
+  }
+
+  function isBank(name) {
+    return /(?:банк|сбербанк|втб|газпромбанк|альфа.?банк|тинькофф|росбанк|совкомбанк|райффайзен|промсвязь|открытие|уралсиб|россельхоз)/i.test(name);
+  }
+
+  // Стратегия 1: явные метки — Поставщик, Продавец, Исполнитель
+  for (let i = 0; i < lineTexts.length; i++) {
+    const t = lineTexts[i];
+    if (/(?:Поставщик|Продавец|Исполнитель|Грузоотправитель)/i.test(t)) {
+      const afterLabel = t.replace(/.*(?:Поставщик|Продавец|Исполнитель|Грузоотправитель)\s*[:.]?\s*/i, '');
+      const orgM = afterLabel.match(ORG_FORM_RE);
+      if (orgM && !isBuyer(orgM[0]) && !isBank(orgM[0])) return orgM[0].replace(/\s{2,}/g, ' ').trim();
+      const nameM = afterLabel.match(/([А-ЯЁ][А-ЯЁа-яё\s«»"'.,\-()]{5,80}?)(?:\s*,?\s*ИНН|\s*\d{10}|$)/);
+      if (nameM && nameM[1].trim().length > 3 && !isBank(nameM[1])) return nameM[1].replace(/\s{2,}/g, ' ').trim();
+      if (i + 1 < lineTexts.length) {
+        const nextOrg = lineTexts[i + 1].match(ORG_FORM_RE);
+        if (nextOrg && !isBuyer(nextOrg[0]) && !isBank(nextOrg[0])) return nextOrg[0].replace(/\s{2,}/g, ' ').trim();
+      }
+    }
+  }
+
+  // Стратегия 2: Получатель (в банковских реквизитах = поставщик)
+  for (let i = 0; i < lineTexts.length; i++) {
+    if (/Получатель/i.test(lineTexts[i])) {
+      const afterLabel = lineTexts[i].replace(/.*Получатель\s*[:.]?\s*/i, '');
+      const orgM = afterLabel.match(ORG_FORM_RE);
+      if (orgM && !isBuyer(orgM[0]) && !isBank(orgM[0])) return orgM[0].replace(/\s{2,}/g, ' ').trim();
+      if (i + 1 < lineTexts.length) {
+        const nextOrg = lineTexts[i + 1].match(ORG_FORM_RE);
+        if (nextOrg && !isBuyer(nextOrg[0]) && !isBank(nextOrg[0])) return nextOrg[0].replace(/\s{2,}/g, ' ').trim();
+      }
+    }
+  }
+
+  // Стратегия 3: подпись — "Предприниматель", ФИО подписанта
+  for (let i = 0; i < lineTexts.length; i++) {
+    const t = lineTexts[i];
+    const signM = t.match(/(?:Предприниматель|Директор|Руководитель|Генеральный директор|Ген\.\s*директор)\s*[_\s]*\(?([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)\)?/i);
+    if (signM) {
+      const shortName = signM[1].trim();
+      const fam = shortName.split(/\s/)[0];
+      const fullIp = flatText.match(new RegExp('ИП\\s+' + fam + '\\s+[А-ЯЁ][а-яё]+\\s+[А-ЯЁ][а-яё]+', 'i'));
+      if (fullIp) return fullIp[0].trim();
+      return 'ИП ' + shortName;
+    }
+    // ФИО рядом с ИНН — "Сидоров Сергей Александрович ИНН 123..."
+    const fioInn = t.match(/([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)\s*,?\s*ИНН/);
+    if (fioInn && !isBuyer('ИП ' + fioInn[1])) {
+      const fullIp = flatText.match(new RegExp('ИП\\s+' + fioInn[1].split(/\s/)[0] + '\\s+[А-ЯЁ][а-яё]+\\s+[А-ЯЁ][а-яё]+', 'i'));
+      if (fullIp) return fullIp[0].trim();
+    }
+  }
+
+  // Стратегия 4: первая организация в тексте, не являющаяся покупателем и не банк
+  for (let i = 0; i < lineTexts.length; i++) {
+    const orgM = lineTexts[i].match(ORG_FORM_RE);
+    if (!orgM) continue;
+    const name = orgM[0].trim();
+    if (isBuyer(name) || isBank(name)) continue;
+    const prevContext = (i > 0 ? lineTexts[i-1] : '') + ' ' + lineTexts[i].substring(0, orgM.index);
+    if (/(?:Покупатель|Заказчик)\s*[:.]?\s*$/i.test(prevContext)) continue;
+    return name;
+  }
+
+  // Стратегия 5: ИП + полное ФИО (часто в банковских реквизитах)
+  const ipFullMatch = flatText.match(/ИП\s+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/);
+  if (ipFullMatch && !isBuyer(ipFullMatch[0])) return ipFullMatch[0].trim();
+
+  // Стратегия 6: ФИО перед ИНН (ИП может быть не указан)
+  const fioBeforeInn = flatText.match(/([А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ][а-яё]{2,})\s*[,\s]*(?:ИНН|инн)\s*[:.]?\s*\d{10,12}/);
+  if (fioBeforeInn && !isBuyer('ИП ' + fioBeforeInn[1])) return 'ИП ' + fioBeforeInn[1].trim();
+
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  СТРУКТУРНЫЙ АНАЛИЗАТОР — разбирает документ по секциям
+//  Работает как ИИ: определяет тип документа, находит секции,
+//  извлекает данные с учётом контекста и OCR-артефактов
+// ═══════════════════════════════════════════════════════════════════
+
+function structuralDocumentAnalysis(lines) {
+  const lineTexts = lines.map(l => l.text);
+  const fullText = lineTexts.join('\n');
+
+  // ── Шаг 1: Определяем тип документа ──
+  const docType = detectDocumentType(fullText);
+
+  // ── Шаг 2: Сегментация — разбиваем на смысловые блоки ──
+  const segments = segmentDocument(lineTexts);
+
+  // ── Шаг 3: Извлечение данных из каждого сегмента ──
+  const result = {};
+
+  // Номер и дата из заголовка
+  const headerData = extractFromHeader(segments.header, fullText);
+  if (headerData.invoiceNumber) result.invoiceNumber = headerData.invoiceNumber;
+  if (headerData.invoiceDate) result.invoiceDate = headerData.invoiceDate;
+
+  // Контрагент: из реквизитов продавца, не покупателя
+  const supplierData = extractSupplierFromSegments(segments, fullText);
+  if (supplierData) result.supplier = supplierData;
+
+  // Товары/услуги из таблицы
+  const items = extractItemsFromTable(segments.table);
+  if (items && items.length) result.description = items.join('\n');
+
+  // Сумма из итогов
+  const total = extractTotalFromSegments(segments, fullText);
+  if (total) result.total = total;
+
+  return result;
+}
+
+function detectDocumentType(text) {
+  if (/сч[её]т[\s-]*договор/i.test(text)) return 'invoice-contract';
+  if (/сч[её]т\s*на\s*оплату/i.test(text)) return 'invoice';
+  if (/счет-фактура|универсальн\S*\s+передаточн/i.test(text)) return 'upd';
+  if (/акт\s*(?:выполненных|оказанных|сверки)/i.test(text)) return 'act';
+  if (/товарная\s*накладная|торг[\s-]*12/i.test(text)) return 'torg12';
+  return 'unknown';
+}
+
+function segmentDocument(lineTexts) {
+  const segments = {
+    header: [],       // заголовок документа (тип, номер, дата)
+    bankDetails: [],  // банковские реквизиты
+    seller: [],       // блок продавца
+    buyer: [],        // блок покупателя
+    table: [],        // таблица товаров/услуг
+    totals: [],       // итоги, суммы
+    signature: [],    // подписи
+    other: [],
+  };
+
+  let currentSegment = 'header';
+  let tableStarted = false;
+  let tableEnded = false;
+
+  for (let i = 0; i < lineTexts.length; i++) {
+    const line = lineTexts[i];
+    const lower = line.toLowerCase();
+
+    // Определяем переход между сегментами
+    if (!tableStarted && /(?:банк|бик|р\/с|р\.с\.|расч[её]т|корр)/i.test(line) && /\d{5,}/.test(line)) {
+      currentSegment = 'bankDetails';
+    } else if (/(?:Поставщик|Продавец|Исполнитель|Грузоотправитель)\s*[:.]?/i.test(line)) {
+      currentSegment = 'seller';
+    } else if (/(?:Покупатель|Заказчик)\s*[:.]?/i.test(line)) {
+      currentSegment = 'buyer';
+    } else if (/Плательщик\s*[:.]?/i.test(line) && !/сч[её]т[\s-]*договор/i.test(fullText.substring(0, 500))) {
+      currentSegment = 'buyer';
+    } else if (!tableStarted && !tableEnded && (
+      (/наименован/i.test(lower) && /(?:товар|работ|услуг|цена|сумма|кол)/i.test(lower)) ||
+      (/№\s*п\/?п/i.test(lower) && /наименован/i.test(lower))
+    )) {
+      currentSegment = 'table';
+      tableStarted = true;
+    } else if (tableStarted && !tableEnded && /^\s*(итого|всего|в том числе)\b/i.test(line.trim())) {
+      tableEnded = true;
+      currentSegment = 'totals';
+    } else if (/(?:руководитель|директор|предприниматель|подпись|м\.?п\.?)/i.test(lower) && tableEnded) {
+      currentSegment = 'signature';
+    }
+
+    segments[currentSegment].push({ text: line, idx: i });
+  }
+
+  return segments;
+}
+
+function extractFromHeader(headerLines, fullText) {
+  const result = {};
+  const headerText = headerLines.map(l => l.text).join(' ');
+
+  // Пробуем извлечь из заголовка
+  const patterns = [
+    /(?:Сч[её]т|СЧЕТ|СЧЁТ)[\s-]*(?:договор|на оплату)?\s*№\s*(\S+)\s+от\s+(\d{1,2})\s+(\S+)\s+(\d{4})/i,
+    /(?:Сч[её]т|СЧЕТ|СЧЁТ)[\s-]*(?:договор|на оплату)?\s*№\s*(\S+)\s+от\s+(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})/i,
+  ];
+  for (const re of patterns) {
+    const m = (headerText || fullText).match(re);
+    if (!m) continue;
+    result.invoiceNumber = m[1].replace(/[.,;:]+$/, '');
+    const mo = monthWordToNum(m[3]);
+    if (mo) {
+      result.invoiceDate = `${m[2].padStart(2, '0')}.${mo}.${m[4]}`;
+    } else {
+      const year = m[4].length === 2 ? '20' + m[4] : m[4];
+      result.invoiceDate = `${m[2].padStart(2, '0')}.${m[3].padStart(2, '0')}.${year}`;
+    }
+    break;
+  }
+  return result;
+}
+
+function extractSupplierFromSegments(segments, fullText) {
+  const ORG_RE = /(?:ИП|ООО|ОАО|ЗАО|АО|ПАО)\s*[«"'"]?[^»"'"]{3,80}[»"'"]?/;
+  const BANK_RE = /(?:банк|сбербанк|втб|газпромбанк|альфа.?банк|тинькофф|росбанк|совкомбанк|райффайзен|промсвязь|открытие|уралсиб|россельхоз)/i;
+
+  // Определяем покупателя для исключения
+  let buyerName = '';
+  for (const line of segments.buyer) {
+    const m = line.text.match(ORG_RE);
+    if (m) { buyerName = m[0]; break; }
+  }
+  if (!buyerName) {
+    const buyerText = segments.buyer.map(l => l.text).join(' ');
+    const m = buyerText.match(ORG_RE);
+    if (m) buyerName = m[0];
+  }
+
+  function matchesBuyer(name) {
+    if (!buyerName) return false;
+    const a = name.replace(/[«»"'"'\s]/g, '').toLowerCase().substring(0, 15);
+    const b = buyerName.replace(/[«»"'"'\s]/g, '').toLowerCase().substring(0, 15);
+    return a.includes(b) || b.includes(a);
+  }
+
+  // 1. Из блока seller
+  for (const line of segments.seller) {
+    const m = line.text.match(ORG_RE);
+    if (m && !matchesBuyer(m[0]) && !BANK_RE.test(m[0])) return m[0].replace(/\s{2,}/g, ' ').trim();
+  }
+
+  // 2. Из банковских реквизитов — ищем "Получатель"
+  for (const line of segments.bankDetails) {
+    if (/Получатель/i.test(line.text)) {
+      const after = line.text.replace(/.*Получатель\s*[:.]?\s*/i, '');
+      const m = after.match(ORG_RE);
+      if (m && !matchesBuyer(m[0]) && !BANK_RE.test(m[0])) return m[0].replace(/\s{2,}/g, ' ').trim();
+      // ИП с полным ФИО
+      const ipM = after.match(/ИП\s+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/);
+      if (ipM && !matchesBuyer(ipM[0])) return ipM[0].trim();
+    }
+  }
+
+  // 3. Из подписи
+  for (const line of segments.signature) {
+    const signM = line.text.match(/(?:Предприниматель|Директор|Руководитель)\s*[_\s]*\(?([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)\)?/i);
+    if (signM) {
+      const fam = signM[1].trim().split(/\s/)[0];
+      const fullIp = fullText.match(new RegExp('ИП\\s+' + fam + '\\s+[А-ЯЁ][а-яё]+\\s+[А-ЯЁ][а-яё]+', 'i'));
+      if (fullIp) return fullIp[0].trim();
+      return 'ИП ' + signM[1].trim();
+    }
+  }
+
+  // 4. ФИО + ИНН (часто ИП без метки "Поставщик")
+  const fioInnPatterns = [
+    /([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)\s*,?\s*ИНН\s*[:.]?\s*\d{10,12}/,
+    /ИНН\s*[:.]?\s*\d{10,12}\s*[,\s]*([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/,
+  ];
+  for (const re of fioInnPatterns) {
+    const fioInn = fullText.match(re);
+    if (fioInn && !matchesBuyer('ИП ' + fioInn[1])) {
+      const fam = fioInn[1].split(/\s/)[0];
+      const ipFull = fullText.match(new RegExp('ИП\\s+' + fam + '\\s+[А-ЯЁ][а-яё]+\\s+[А-ЯЁ][а-яё]+', 'i'));
+      if (ipFull) return ipFull[0].trim();
+      return 'ИП ' + fioInn[1].trim();
+    }
+  }
+
+  // 5. Первая организация в header/bankDetails, не покупатель и не банк
+  for (const seg of [segments.header, segments.bankDetails, segments.other]) {
+    for (const line of seg) {
+      const m = line.text.match(ORG_RE);
+      if (m && !matchesBuyer(m[0]) && !BANK_RE.test(m[0])) return m[0].replace(/\s{2,}/g, ' ').trim();
+    }
+  }
+
+  // 6. Полное ФИО из подписи (без метки "Предприниматель")
+  const signatureText = segments.signature.map(l => l.text).join(' ');
+  const fioSign = signatureText.match(/([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)/);
+  if (fioSign) {
+    const fam = fioSign[1].split(/\s/)[0];
+    const ipFull = fullText.match(new RegExp('ИП\\s+' + fam + '\\s+[А-ЯЁ][а-яё]+\\s+[А-ЯЁ][а-яё]+', 'i'));
+    if (ipFull && !matchesBuyer(ipFull[0])) return ipFull[0].trim();
+    // Ищем полное ФИО (Фамилия Имя Отчество) где-нибудь в тексте
+    const fullFio = fullText.match(new RegExp(fam + '\\s+[А-ЯЁ][а-яё]+\\s+[А-ЯЁ][а-яё]+', 'i'));
+    if (fullFio && !matchesBuyer('ИП ' + fullFio[0])) return 'ИП ' + fullFio[0].trim();
+  }
+
+  // 7. ИП + ФИО где угодно в тексте (последний шанс)
+  const anyIp = fullText.match(/ИП\s+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)/);
+  if (anyIp && !matchesBuyer(anyIp[0])) return anyIp[0].trim();
+
+  // 8. Полное ФИО (3 слова с заглавной) перед ИНН где угодно
+  const anyFioInn = fullText.match(/([А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ][а-яё]{2,}\s+[А-ЯЁ][а-яё]{2,})\s*[,\s]*(?:ИНН|инн)/);
+  if (anyFioInn && !matchesBuyer('ИП ' + anyFioInn[1])) return 'ИП ' + anyFioInn[1].trim();
+
+  return null;
+}
+
+function extractItemsFromTable(tableLines) {
+  if (!tableLines.length) return null;
+  const items = [];
+  for (const line of tableLines) {
+    const raw = line.text.trim();
+    if (!raw || raw.length < 3) continue;
+    if (/^[\d\s.,]+$/.test(raw)) continue;
+    // Пропускаем строку-заголовок таблицы
+    if (/наименован/i.test(raw) && /(?:цена|сумма|кол|ед)/i.test(raw)) continue;
+    if (/^№\s*п\/?п/i.test(raw)) continue;
+
+    let cleaned = raw
+      .replace(/^\d{1,3}[\s.)\|]+/, '')           // №п/п
+      .replace(/\d[\d\s]*[.,]\d{2}/g, '')         // суммы
+      .replace(/\b\d+\s*(шт|л|кг|м|т|час|усл|компл)\.?\b/gi, '')
+      .replace(/\b(шт|л|кг|м[²³]?|т|час|усл|компл|руб|коп)\.?\b/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    // OCR-коррекция: убираем одиночные мусорные символы
+    cleaned = cleaned.replace(/\s[|!1l]\s/g, ' ').replace(/^[|!1l]\s/, '').trim();
+
+    if (cleaned.length > 3 && /[а-яёa-z]/i.test(cleaned)) {
+      items.push(cleaned);
+    }
+  }
+  return items.length ? items : null;
+}
+
+function extractTotalFromSegments(segments, fullText) {
+  // Из блока totals
+  for (const line of segments.totals) {
+    const m = line.text.match(/(\d[\d\s]*[.,]\d{2})/);
+    if (m) return m[1].replace(/\s/g, '').replace('.', ',');
+  }
+  // Fallback — ищем по всему тексту
+  const totalMatch = fullText.match(/(?:всего к оплате|итого|всего)[^:]*:?\s*([\d\s]+[.,]\d{2})/i);
+  if (totalMatch) return totalMatch[1].replace(/\s/g, '').replace('.', ',');
+  return null;
+}
+
 function smartParseDocument(lines) {
+  // Основной парсер — визуальный анализ
   const result = visualExtractNumberDate(lines);
   const total = visualExtractTotal(lines);
   if (total) result.total = total;
   const desc = visualExtractDescription(lines);
   if (desc) result.description = desc;
+  const supplier = visualExtractSupplier(lines);
+  if (supplier) result.supplier = supplier;
+
+  // Если основной парсер не нашёл ключевые поля — запускаем структурный анализатор
+  if (!result.supplier || !result.description || !result.invoiceNumber) {
+    const structural = structuralDocumentAnalysis(lines);
+    if (!result.invoiceNumber && structural.invoiceNumber) {
+      result.invoiceNumber = structural.invoiceNumber;
+      if (structural.invoiceDate) result.invoiceDate = structural.invoiceDate;
+    }
+    if (!result.supplier && structural.supplier) result.supplier = structural.supplier;
+    if (!result.description && structural.description) result.description = structural.description;
+    if (!result.total && structural.total) result.total = structural.total;
+  }
+
   return result;
 }
 
@@ -705,6 +1235,7 @@ async function processArchiveFolder(folder, config, archiveLabel = "") {
     date: inv.invoiceDate || new Date().toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }),
     category: catRule.category,
     description: inv.description,
+    supplier: inv.supplier || '',
     obj: objRule.object,
     dog: objRule.contract,
     osn: basisLabel,
@@ -733,6 +1264,7 @@ function buildRowFromParsed(inv, upd, config, label, baseName, isFromUpd) {
     date: inv.invoiceDate || new Date().toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }),
     category: catRule.category,
     description: inv.description,
+    supplier: inv.supplier || '',
     obj: objRule.object,
     dog: objRule.contract,
     osn: basisLabel,
@@ -1021,7 +1553,8 @@ export async function buildXlsxFromRows(rows, config) {
 
   // Row 2 — company
   ws.mergeCells("A2:L2");
-  ws.getCell("A2").value = config.payerFullName;
+  const company = rows.length && rows[0].company ? rows[0].company : config.payerFullName;
+  ws.getCell("A2").value = company;
   ws.getCell("A2").font = { bold: true, size: 8, name: FONT };
   ws.getCell("A2").fill = FILL_BLUE;
   ws.getCell("A2").alignment = { horizontal: "center", vertical: "middle" };
@@ -1047,44 +1580,78 @@ export async function buildXlsxFromRows(rows, config) {
   ws.getCell(3, 6).font = { size: 8, name: FONT };
   ws.getRow(3).height = 29.25;
 
-  // Data rows
+  // Data rows — group by razdel, each razdel gets a header row
   let r = 4;
   const total = rows.reduce((s, x) => s + x.sum, 0);
 
+  // Group rows by razdel, preserving order of first appearance
+  const razdelOrder = [];
+  const razdelGroups = {};
   rows.forEach((row, i) => {
-    const naz = `${row.category || ''}\n${row.description || ''}\nОПЛАТА ПО ФАКТУ, выполнено ${row.date}`.trim();
+    const key = row.razdel || '';
+    if (!razdelGroups[key]) { razdelGroups[key] = []; razdelOrder.push(key); }
+    razdelGroups[key].push({ row, idx: i });
+  });
 
-    ws.getCell(r, 1).value = i + 1;
-    ws.getCell(r, 2).value = row.sum;
-    ws.getCell(r, 3).value = config.supplier;
-    ws.getCell(r, 4).value = naz;
-    ws.getCell(r, 5).value = row.obj;
-    ws.getCell(r, 6).value = row.dog;
-    ws.getCell(r, 7).value = config.initiator;
-    ws.getCell(r, 8).value = config.contractNumber;
-    ws.getCell(r, 9).value = '';
-    ws.getCell(r, 10).value = '';
-    ws.getCell(r, 11).value = row.osn;
-    ws.getCell(r, 12).value = `ПО ДОГОВОРУ ${config.contractNumber}\nВ 1С ПРОВЕДЕНО\n${row.updLabel}\nСТАТЬЯ ${row['statья'] || row.statья || ''}\nОперационные расходы`;
-
-    for (let c = 1; c <= COLS; c++) {
-      const cell = ws.getCell(r, c);
-      cell.font = { bold: true, size: 8, name: FONT };
-      cell.alignment = { horizontal: "left", vertical: "top", wrapText: true };
-      cell.border = BORDER_ALL;
+  let num = 0;
+  razdelOrder.forEach(razdel => {
+    // Razdel header row
+    if (razdel) {
+      ws.mergeCells(r, 1, r, COLS);
+      ws.getCell(r, 1).value = razdel;
+      ws.getCell(r, 1).font = { bold: true, size: 8, name: FONT };
+      ws.getCell(r, 1).alignment = { horizontal: "center", vertical: "middle" };
+      ws.getCell(r, 1).border = BORDER_ALL;
+      for (let c = 2; c <= COLS; c++) {
+        ws.getCell(r, c).border = BORDER_ALL;
+      }
+      r++;
     }
-    ws.getCell(r, 1).alignment = { horizontal: "center", vertical: "top" };
-    ws.getCell(r, 2).alignment = { horizontal: "right", vertical: "top" };
-    ws.getCell(r, 2).numFmt = "#,##0.00";
-    ws.getCell(r, 6).font = { size: 8, name: FONT };
-    ws.getCell(r, 6).alignment = { vertical: "top", wrapText: true };
-    ws.getCell(r, 7).font = { size: 8, name: FONT };
-    ws.getCell(r, 7).alignment = { vertical: "top", wrapText: true };
-    ws.getCell(r, 10).font = { size: 8, name: FONT, color: { argb: "FFFF0000" } };
-    ws.getCell(r, 10).alignment = { vertical: "top", wrapText: true };
-    ws.getCell(r, 12).font = { size: 8, name: FONT };
-    ws.getCell(r, 12).alignment = { horizontal: "left", vertical: "top", wrapText: true };
-    r++;
+
+    razdelGroups[razdel].forEach(({ row }) => {
+      num++;
+      const rawStatya = row['statья'] || row.statья || '';
+      const statyaText = rawStatya.replace(/^[\d.,\s]+/, '').replace(/^,\s*/, '').trim();
+      const payType = row.payType || 'ОПЛАТА ПО ФАКТУ';
+      const nazParts = [];
+      if (statyaText) nazParts.push(statyaText);
+      if (row.description) nazParts.push(row.description);
+      nazParts.push(payType);
+      const naz = nazParts.join('\n');
+      const osnValue = row.osn || '';
+
+      ws.getCell(r, 1).value = num;
+      ws.getCell(r, 2).value = row.sum;
+      ws.getCell(r, 3).value = row.supplier || config.supplier;
+      ws.getCell(r, 4).value = naz;
+      ws.getCell(r, 5).value = row.obj;
+      ws.getCell(r, 6).value = row.dog;
+      ws.getCell(r, 7).value = config.initiator;
+      ws.getCell(r, 8).value = row.dog || config.contractNumber;
+      ws.getCell(r, 9).value = '';
+      ws.getCell(r, 10).value = '';
+      ws.getCell(r, 11).value = osnValue;
+      ws.getCell(r, 12).value = '';
+
+      for (let c = 1; c <= COLS; c++) {
+        const cell = ws.getCell(r, c);
+        cell.font = { bold: true, size: 8, name: FONT };
+        cell.alignment = { horizontal: "left", vertical: "top", wrapText: true };
+        cell.border = BORDER_ALL;
+      }
+      ws.getCell(r, 1).alignment = { horizontal: "center", vertical: "top" };
+      ws.getCell(r, 2).alignment = { horizontal: "right", vertical: "top" };
+      ws.getCell(r, 2).numFmt = "#,##0.00";
+      ws.getCell(r, 6).font = { size: 8, name: FONT };
+      ws.getCell(r, 6).alignment = { vertical: "top", wrapText: true };
+      ws.getCell(r, 7).font = { size: 8, name: FONT };
+      ws.getCell(r, 7).alignment = { vertical: "top", wrapText: true };
+      ws.getCell(r, 10).font = { size: 8, name: FONT, color: { argb: "FFFF0000" } };
+      ws.getCell(r, 10).alignment = { vertical: "top", wrapText: true };
+      ws.getCell(r, 12).font = { size: 8, name: FONT };
+      ws.getCell(r, 12).alignment = { horizontal: "left", vertical: "top", wrapText: true };
+      r++;
+    });
   });
 
   // Total row
