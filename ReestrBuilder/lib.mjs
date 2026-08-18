@@ -12,6 +12,195 @@ import pkg from "pdfjs-dist/build/pdf.js";
 const { getDocument } = pkg;
 import Tesseract from "tesseract.js";
 
+// ═══════════════════════════════════════════════════════════════════
+//  БАЗА ЗНАНИЙ — самообучение на основе истории счетов
+// ═══════════════════════════════════════════════════════════════════
+
+const KNOWLEDGE_FILE = 'knowledge.json';
+
+function getKnowledgePath() {
+  const candidates = [
+    path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), KNOWLEDGE_FILE),
+    path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..', 'ReestrBuilder', KNOWLEDGE_FILE),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return candidates[0];
+}
+
+export function loadKnowledge() {
+  try {
+    const p = getKnowledgePath();
+    if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8'));
+  } catch {}
+  return { contractors: {}, invoices: [] };
+}
+
+export function saveKnowledge(kb) {
+  try {
+    const p = getKnowledgePath();
+    fs.writeFileSync(p, JSON.stringify(kb, null, 2), 'utf-8');
+  } catch {}
+}
+
+export function learnFromRows(rows) {
+  const kb = loadKnowledge();
+  if (!kb.contractors) kb.contractors = {};
+  if (!kb.invoices) kb.invoices = [];
+
+  for (const row of rows) {
+    if (!row.supplier) continue;
+    let cleanSupplier = row.supplier
+      .replace(/\s*ИНН\s*[:.]?\s*\d{10,12}.*/i, '')
+      .replace(/\s*[Рр][/.]?\s*[Сс][чч]\s*[:.]?\s*\d{10,25}.*/i, '')
+      .replace(/\s*БИК\s*\d+.*/i, '')
+      .replace(/\s*ОГРН\s*\d+.*/i, '')
+      .replace(/\s+[^А-ЯЁа-яё«»"'"()\-].*/,'')
+      .replace(/[,;.\s]+$/, '')
+      .trim();
+    if (!cleanSupplier) cleanSupplier = row.supplier;
+    const key = cleanSupplier.replace(/[«»"'"'\s]/g, '').toLowerCase();
+    if (!key || key.length < 3) continue;
+
+    const existing = kb.contractors[key] || { name: cleanSupplier, count: 0, lastStatya: '', lastObj: '', lastCategory: '' };
+    existing.count = (existing.count || 0) + 1;
+    existing.name = cleanSupplier;
+    if (row['statья']) existing.lastStatya = row['statья'];
+    if (row.obj) existing.lastObj = row.obj;
+    if (row.category) existing.lastCategory = row.category;
+    existing.lastDate = row.date || new Date().toLocaleDateString('ru-RU');
+    kb.contractors[key] = existing;
+
+    if (row.osn) {
+      const invKey = `${row.osn}|${row.sum}`;
+      if (!kb.invoices.some(inv => inv.key === invKey)) {
+        kb.invoices.push({
+          key: invKey,
+          osn: row.osn,
+          sum: row.sum,
+          date: row.date,
+          supplier: row.supplier,
+          addedAt: new Date().toISOString(),
+        });
+        if (kb.invoices.length > 5000) kb.invoices = kb.invoices.slice(-5000);
+      }
+    }
+  }
+
+  saveKnowledge(kb);
+  return kb;
+}
+
+export function applyKnowledge(rows) {
+  const kb = loadKnowledge();
+  if (!kb.contractors || !Object.keys(kb.contractors).length) return { rows, duplicates: [] };
+
+  const duplicates = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+
+    if (row.supplier) {
+      let cleanSup = row.supplier
+        .replace(/\s*ИНН\s*[:.]?\s*\d{10,12}.*/i, '')
+        .replace(/\s*[Рр][/.]?\s*[Сс][чч]\s*[:.]?\s*\d{10,25}.*/i, '')
+        .replace(/\s*БИК\s*\d+.*/i, '')
+        .replace(/\s*ОГРН\s*\d+.*/i, '')
+        .replace(/\s+[^А-ЯЁа-яё«»"'"()\-].*/,'')
+        .replace(/[,;.\s]+$/, '')
+        .trim() || row.supplier;
+      const key = cleanSup.replace(/[«»"'"'\s]/g, '').toLowerCase();
+      const known = kb.contractors[key];
+      if (known) {
+        if (!row['statья'] || row['statья'] === 'ПРОЧИЕ РАСХОДЫ' || row['statья'].includes('Прочие расходы по операционной деятельности')) {
+          if (known.lastStatya) row['statья'] = known.lastStatya;
+        }
+        if (!row.obj && known.lastObj) {
+          row.obj = known.lastObj;
+        }
+        if ((!row.category || row.category === 'ПРОЧИЕ РАСХОДЫ') && known.lastCategory) {
+          row.category = known.lastCategory;
+        }
+        row._knownContractor = true;
+        row._contractorHits = known.count;
+      }
+    }
+
+    // Дубликаты: проверяем по номеру счёта + сумме
+    if (row.osn && kb.invoices) {
+      const invKey = `${row.osn}|${row.sum}`;
+      const dup = kb.invoices.find(inv => inv.key === invKey);
+      if (dup) {
+        duplicates.push({
+          rowIndex: i,
+          osn: row.osn,
+          sum: row.sum,
+          originalDate: dup.date,
+          originalSupplier: dup.supplier,
+          addedAt: dup.addedAt,
+        });
+        row._duplicate = true;
+      }
+    }
+  }
+
+  return { rows, duplicates };
+}
+
+export function getAnalytics(rows) {
+  const bySupplier = {};
+  const byObject = {};
+  const byCategory = {};
+  const byMonth = {};
+  let totalSum = 0;
+
+  for (const row of rows) {
+    const sum = row.sum || 0;
+    totalSum += sum;
+
+    const supplier = row.supplier || 'Не указан';
+    if (!bySupplier[supplier]) bySupplier[supplier] = { count: 0, sum: 0 };
+    bySupplier[supplier].count++;
+    bySupplier[supplier].sum += sum;
+
+    const obj = row.obj || 'Не указан';
+    if (!byObject[obj]) byObject[obj] = { count: 0, sum: 0 };
+    byObject[obj].count++;
+    byObject[obj].sum += sum;
+
+    const cat = row['statья'] || row.category || 'Без категории';
+    if (!byCategory[cat]) byCategory[cat] = { count: 0, sum: 0 };
+    byCategory[cat].count++;
+    byCategory[cat].sum += sum;
+
+    if (row.date) {
+      const parts = row.date.split('.');
+      if (parts.length === 3) {
+        const monthKey = `${parts[1]}.${parts[2]}`;
+        if (!byMonth[monthKey]) byMonth[monthKey] = { count: 0, sum: 0 };
+        byMonth[monthKey].count++;
+        byMonth[monthKey].sum += sum;
+      }
+    }
+  }
+
+  const sortBySum = (obj) => Object.entries(obj)
+    .sort((a, b) => b[1].sum - a[1].sum)
+    .map(([name, data]) => ({ name, ...data }));
+
+  return {
+    totalRows: rows.length,
+    totalSum,
+    bySupplier: sortBySum(bySupplier),
+    byObject: sortBySum(byObject),
+    byCategory: sortBySum(byCategory),
+    byMonth: Object.entries(byMonth)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, data]) => ({ name, ...data })),
+  };
+}
+
 export const DEFAULT_CONFIG = {
   supplier: 'ООО "Башпромсбыт"',
   payerFullName: 'ООО "ИНВЕСТКАПИТАЛГРУПП"',
@@ -851,7 +1040,7 @@ function structuralDocumentAnalysis(lines) {
   const docType = detectDocumentType(fullText);
 
   // ── Шаг 2: Сегментация — разбиваем на смысловые блоки ──
-  const segments = segmentDocument(lineTexts);
+  const segments = segmentDocument(lineTexts, fullText);
 
   // ── Шаг 3: Извлечение данных из каждого сегмента ──
   const result = {};
@@ -885,7 +1074,7 @@ function detectDocumentType(text) {
   return 'unknown';
 }
 
-function segmentDocument(lineTexts) {
+function segmentDocument(lineTexts, docFullText) {
   const segments = {
     header: [],       // заголовок документа (тип, номер, дата)
     bankDetails: [],  // банковские реквизиты
@@ -912,7 +1101,7 @@ function segmentDocument(lineTexts) {
       currentSegment = 'seller';
     } else if (/(?:Покупатель|Заказчик)\s*[:.]?/i.test(line)) {
       currentSegment = 'buyer';
-    } else if (/Плательщик\s*[:.]?/i.test(line) && !/сч[её]т[\s-]*договор/i.test(fullText.substring(0, 500))) {
+    } else if (/Плательщик\s*[:.]?/i.test(line) && !/сч[её]т[\s-]*договор/i.test(docFullText.substring(0, 500))) {
       currentSegment = 'buyer';
     } else if (!tableStarted && !tableEnded && (
       (/наименован/i.test(lower) && /(?:товар|работ|услуг|цена|сумма|кол)/i.test(lower)) ||

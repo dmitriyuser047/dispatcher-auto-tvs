@@ -412,6 +412,21 @@ app.whenReady().then(() => {
     };
   });
 
+  ipcMain.handle('reestr-learn', async (event, rows) => {
+    const { learnFromRows } = await import(REESTR_LIB_URL);
+    return learnFromRows(rows);
+  });
+
+  ipcMain.handle('reestr-apply-knowledge', async (event, rows) => {
+    const { applyKnowledge } = await import(REESTR_LIB_URL);
+    return applyKnowledge(rows);
+  });
+
+  ipcMain.handle('reestr-analytics', async (event, rows) => {
+    const { getAnalytics } = await import(REESTR_LIB_URL);
+    return getAnalytics(rows);
+  });
+
   ipcMain.handle('reestr-load-statyi', async () => {
     const p = path.join(REESTR_DIR, 'statyi.json');
     if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8'));

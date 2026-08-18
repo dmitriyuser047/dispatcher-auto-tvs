@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('reestrAPI', {
   buildXlsx: (data) => ipcRenderer.invoke('reestr-build-xlsx', data),
   save:      (filename, xlsxBase64) => ipcRenderer.invoke('reestr-save-xlsx', { filename, xlsxBase64 }),
+  learn:     (rows) => ipcRenderer.invoke('reestr-learn', rows),
+  analytics: (rows) => ipcRenderer.invoke('reestr-analytics', rows),
 });
 
 contextBridge.exposeInMainWorld('reestrWindow', {

@@ -104,6 +104,41 @@
   .btn-danger:hover { background: #fecaca; }
   .btn-sm { padding: 5px 12px; font-size: 12px; }
 
+  /* ─── DROPDOWN MENU ─── */
+  .dropdown { position: relative; }
+  .dropdown-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    min-width: 220px;
+    padding: 4px;
+    z-index: 100;
+    display: none;
+  }
+  .dropdown-menu.open { display: block; }
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: none;
+    background: none;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    transition: background .1s;
+  }
+  .dropdown-item:hover { background: var(--bg3); }
+  .dropdown-item svg { color: var(--text3); flex-shrink: 0; }
+
   /* ─── LAYOUT ─── */
   .layout {
     display: flex;
@@ -325,24 +360,7 @@
   .vdh-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
   /* Stats row */
-  .stats-row {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-  }
-  .stat-card {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px 18px;
-  }
-  .stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; }
-  .stat-value { font-size: 22px; font-weight: 700; }
-  .stat-unit { font-size: 12px; color: var(--text3); font-weight: 400; }
-  .stat-sub { font-size: 11px; color: var(--text3); margin-top: 4px; }
-  .stat-card.accent-blue { border-color: rgba(59,130,246,0.3); }
-  .stat-card.accent-green { border-color: rgba(34,197,94,0.3); }
-  .stat-card.accent-yellow { border-color: rgba(245,158,11,0.3); }
+  /* stats-row и stat-card стили перенесены ниже к DES STAT CARDS v2 */
 
   /* Month selector */
   .section-header {
@@ -403,7 +421,8 @@
   .table-scroll {
     overflow-x: auto;
     overflow-y: auto;
-    max-height: 420px;
+    max-height: calc(100vh - 380px);
+    min-height: 200px;
   }
   .table-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
   .table-scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
@@ -536,6 +555,124 @@
   .fuel-tag.diesel { background: rgba(217,119,6,0.1); color: #b45309; border: 1px solid rgba(217,119,6,0.3); }
   .fuel-tag.gasoline { background: rgba(37,99,235,0.1); color: #2563eb; border: 1px solid rgba(37,99,235,0.3); }
   .fuel-tag.gas { background: rgba(22,163,74,0.1); color: #16a34a; border: 1px solid rgba(22,163,74,0.3); }
+
+  /* ─── DES GENERATOR CARDS ─── */
+  .gen-card {
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all .15s;
+    border: 1px solid transparent;
+    margin-bottom: 2px;
+  }
+  .gen-card:hover { background: var(--bg3); }
+  .gen-card.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent2);
+  }
+  .gen-card.active .gen-card-sub,
+  .gen-card.active .gen-card-meta { color: rgba(255,255,255,0.75); }
+  .gen-card.active .gen-badge { background: rgba(255,255,255,0.2); color: #fff; border-color: rgba(255,255,255,0.3); }
+  .gen-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .gen-card-name {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .gen-card-power {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: var(--bg3);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .gen-card.active .gen-card-power { background: rgba(255,255,255,0.2); }
+  .gen-card-sub {
+    font-size: 11px;
+    color: var(--text3);
+    margin-top: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .gen-card-meta {
+    font-size: 11px;
+    color: var(--text2);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .gen-card-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+  }
+  .gen-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg3);
+    white-space: nowrap;
+  }
+  .gen-loc-header {
+    padding: 8px 12px 4px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 2px;
+  }
+  .gen-loc-header:not(:first-child) { border-top: 1px solid var(--border); margin-top: 6px; }
+
+  /* ─── DES STAT CARDS v2 ─── */
+  .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  .stat-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--border);
+    border-radius: 10px 10px 0 0;
+  }
+  .stat-card.accent-blue::before { background: #3b82f6; }
+  .stat-card.accent-green::before { background: #22c55e; }
+  .stat-card.accent-yellow::before { background: #f59e0b; }
+  .stat-card.accent-red::before { background: #ef4444; }
+  .stat-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+  .stat-value { font-size: 20px; font-weight: 700; line-height: 1.2; }
+  .stat-unit { font-size: 11px; color: var(--text3); font-weight: 400; }
+  .stat-sub { font-size: 10px; color: var(--text3); margin-top: 3px; }
 
   /* scrollbar global */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -969,18 +1106,33 @@
       <svg id="themeIconSun" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
     </button>
     <div id="hdrVehicles" style="display:flex;gap:10px;align-items:center">
-      <button class="btn btn-ghost" onclick="document.getElementById('xlsImportInput').click()">
-        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Импорт из XLS
-      </button>
-      <button class="btn btn-ghost" onclick="importFromRar()" title="Пополнить базу данными из RAR-архива (data.json + бэкапы)">
-        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-        Импорт из RAR
-      </button>
-      <button class="btn btn-ghost" onclick="importFromJsonFile()" title="Пополнить базу данными из JSON-файла (например, экспорт из приложения ДЭС на другом компьютере)">
-        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-        Импорт из файла
-      </button>
+      <div class="dropdown">
+        <button class="btn btn-ghost" onclick="toggleDropdown('importMenu')">
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Импорт
+          <svg width="10" height="6" viewBox="0 0 10 6" fill="none" style="margin-left:2px"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="dropdown-menu" id="importMenu">
+          <button class="dropdown-item" onclick="document.getElementById('xlsImportInput').click();closeDropdowns()">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Импорт из XLS
+          </button>
+          <button class="dropdown-item" onclick="importFromRar();closeDropdowns()">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+            Импорт из RAR
+          </button>
+          <button class="dropdown-item" onclick="importFromJsonFile();closeDropdowns()">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+            Импорт из файла
+          </button>
+          <button class="dropdown-item" onclick="document.getElementById('fuelImportInput').click();closeDropdowns()">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 15v4c0 1.1.9 2 2 2h14a2 2 0 002-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+            Импорт заправок
+          </button>
+        </div>
+      </div>
+      <input type="file" id="xlsImportInput" accept=".xls,.xlsx" style="display:none" onchange="importVehiclesFromXls(this)">
+      <input type="file" id="fuelImportInput" accept=".xls,.xlsx" style="display:none" onchange="importFuelFromXls(this)">
       <button class="btn btn-ghost" onclick="openRepairsJournal()" title="Общий журнал ремонта по всем ТС">
         <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
         Журнал ремонта
@@ -989,12 +1141,6 @@
         <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Добавить ТС
       </button>
-      <input type="file" id="xlsImportInput" accept=".xls,.xlsx" style="display:none" onchange="importVehiclesFromXls(this)">
-      <button class="btn btn-ghost" onclick="document.getElementById('fuelImportInput').click()" title="Загрузить заправки из отчёта по топливным картам (xlsx)">
-        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 15v4c0 1.1.9 2 2 2h14a2 2 0 002-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-        Импорт заправок
-      </button>
-      <input type="file" id="fuelImportInput" accept=".xls,.xlsx" style="display:none" onchange="importFuelFromXls(this)">
     </div>
     <div id="hdrGenerators" style="display:none;gap:10px;align-items:center">
       <button class="btn btn-ghost" onclick="exportDesForOtherComputer()" title="Сохранить данные ДЭС (генераторы, записи, ёмкости, приход) в JSON-файл для переноса на другой компьютер">
@@ -1181,7 +1327,7 @@
       </div>
     </div>
 
-    <div id="sidebarSummary"></div>
+    <div id="sidebarSummary" data-open="false"></div>
   </div>
 
   <!-- MAIN -->
@@ -2239,6 +2385,19 @@ function applyTheme(theme) {
     sun.style.display  = theme === 'dark' ? '' : 'none';
   }
 }
+function toggleDropdown(id) {
+  const menu = document.getElementById(id);
+  const wasOpen = menu.classList.contains('open');
+  closeDropdowns();
+  if (!wasOpen) menu.classList.add('open');
+}
+function closeDropdowns() {
+  document.querySelectorAll('.dropdown-menu.open').forEach(m => m.classList.remove('open'));
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.dropdown')) closeDropdowns();
+});
+
 function toggleTheme() {
   const cur = localStorage.getItem('theme') === 'dark' ? 'dark' : 'light';
   const next = cur === 'dark' ? 'light' : 'dark';
@@ -2708,7 +2867,7 @@ function renderDetail(v) {
         <div class="stat-value">${avgConsumption > 0 ? avgConsumption.toFixed(1) : '—'} <span class="stat-unit">л/100км</span></div>
         <div class="stat-sub">${v.norm ? 'Норма: ' + v.norm + ' л/100км' : 'Норма не задана'}</div>
       </div>
-      <div class="stat-card" style="border-left:3px solid ${currentFuelBalance < 0 ? 'var(--red)' : currentFuelBalance < 20 ? 'var(--yellow)' : 'var(--green)'}">
+      <div class="stat-card ${currentFuelBalance < 0 ? 'accent-red' : currentFuelBalance < 20 ? 'accent-yellow' : 'accent-green'}">
         <div class="stat-label">Остаток топлива</div>
         <div class="stat-value" style="color:${currentFuelBalance < 0 ? 'var(--red)' : currentFuelBalance < 20 ? 'var(--yellow)' : 'inherit'}">${currentFuelBalance.toLocaleString('ru', {maximumFractionDigits:1})} <span class="stat-unit">л</span></div>
         <div class="stat-sub">${lastRec ? 'После последней записи' : 'Начальный остаток'}</div>
@@ -3518,6 +3677,27 @@ function deleteRecord(id) {
 // ─── MODALS ──────────────────────────────────────────────
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function openGenericModal(title, bodyHtml, width) {
+  let el = document.getElementById('genericModal');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'genericModal';
+    el.className = 'modal';
+    el.innerHTML = `<div class="modal-overlay" onclick="closeModal('genericModal')"></div>
+      <div class="modal-content" style="max-width:${width||600}px;max-height:85vh;overflow-y:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <h3 id="genericModalTitle" style="margin:0;font-size:18px;font-weight:700"></h3>
+          <button onclick="closeModal('genericModal')" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text3)">✕</button>
+        </div>
+        <div id="genericModalBody"></div>
+      </div>`;
+    document.body.appendChild(el);
+  }
+  el.querySelector('.modal-content').style.maxWidth = (width||600) + 'px';
+  document.getElementById('genericModalTitle').textContent = title;
+  document.getElementById('genericModalBody').innerHTML = bodyHtml;
+  openModal('genericModal');
+}
 
 document.querySelectorAll('.modal-overlay').forEach(el => {
   el.addEventListener('click', e => { if (e.target === el) closeModal(el.id); });
@@ -3592,12 +3772,19 @@ function renderSidebarSummary() {
     fuelHtml = `<div style="color:var(--text3);font-size:12px">Нет данных о топливе</div>`;
   }
 
+  const summaryOpen = el.dataset.open !== 'false';
   el.innerHTML = `
     <div class="sidebar-summary">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:6px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;cursor:pointer" onclick="toggleSidebarSummary()">
         <div class="ss-title" style="margin-bottom:0">Общая сводка</div>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-ghost btn-sm" onclick="openActGsmModal()" style="font-size:11px;padding:4px 10px" title="Сформировать акт на списание ГСМ (бензин/дизель)">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:12px;font-weight:600;color:var(--text2)">${data.vehicles.length} ТС</span>
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--text3);transition:transform .2s;transform:rotate(${summaryOpen?'180':'0'}deg)"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div style="display:${summaryOpen?'block':'none'}">
+      <div style="display:flex;gap:6px;margin:8px 0 10px">
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openActGsmModal()" style="font-size:11px;padding:4px 10px" title="Сформировать акт на списание ГСМ (бензин/дизель)">
             <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
               <polyline points="14 2 14 8 20 8"/>
@@ -3605,7 +3792,7 @@ function renderSidebarSummary() {
             </svg>
             Акт ГСМ
           </button>
-          <button class="btn btn-ghost btn-sm" onclick="openExportPeriodModal('xls')" style="font-size:11px;padding:4px 10px">
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openExportPeriodModal('xls')" style="font-size:11px;padding:4px 10px">
             <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
               <polyline points="7 10 12 15 17 10"/>
@@ -3613,7 +3800,7 @@ function renderSidebarSummary() {
             </svg>
             XLS
           </button>
-          <button class="btn btn-ghost btn-sm" onclick="openExportPeriodModal('pdf')" style="font-size:11px;padding:4px 10px" title="Выгрузить общую сводку в PDF">
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openExportPeriodModal('pdf')" style="font-size:11px;padding:4px 10px" title="Выгрузить общую сводку в PDF">
             <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
               <polyline points="14 2 14 8 20 8"/>
@@ -3621,7 +3808,6 @@ function renderSidebarSummary() {
             PDF
           </button>
         </div>
-      </div>
       <div class="ss-row">
         <span class="ss-label">Транспортных средств</span>
         <span class="ss-value">${data.vehicles.length}</span>
@@ -3661,7 +3847,13 @@ function renderSidebarSummary() {
         </svg>
         <span style="font-size:10px;color:var(--text3)" id="sidebarVersionLabel">Версия ...</span>
       </div>` : ''}
+      </div>
     </div>`;
+}
+function toggleSidebarSummary() {
+  const el = document.getElementById('sidebarSummary');
+  el.dataset.open = el.dataset.open === 'false' ? 'true' : 'false';
+  renderSidebarSummary();
 }
 
 // ─── СОСТОЯНИЕ ТС ПО ОБЪЕКТАМ (компактный блок в сводке) ─
@@ -6476,7 +6668,7 @@ function renderGeneratorList() {
     const locGroup = g.location || '— Без местонахождения —';
     if (locGroup !== curLoc) {
       curLoc = locGroup;
-      html += `<div style="padding:6px 12px 4px;font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;border-top:1px solid var(--border);margin-top:4px;display:flex;align-items:center;gap:5px">
+      html += `<div class="gen-loc-header">
         <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
         ${locGroup}
       </div>`;
@@ -6493,20 +6685,22 @@ function renderGeneratorList() {
       fuelBal = lastRec ? (balMap[lastRec.id] ?? (g.fuelBalance || 0)) : (g.fuelBalance || 0);
     }
     const balColor   = fuelBal < 0 ? 'var(--red)' : fuelBal < 50 ? 'var(--yellow)' : 'var(--green)';
-    const stColor    = g.status === 'В работе' ? 'var(--green)' : g.status === 'Резерв' ? 'var(--accent)' : g.status ? 'var(--red)' : null;
+    const stColor    = g.status === 'В работе' ? '#22c55e' : g.status === 'Резерв' ? '#3b82f6' : g.status ? '#ef4444' : null;
+    const stDot      = stColor ? `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${stColor};flex-shrink:0"></span>` : '';
     const fb         = g.fuel ? { label: fuelLabels[g.fuel], cls: fuelClasses[g.fuel] } : null;
-    html += `<div class="vehicle-card ${selectedGeneratorId === g.id ? 'active' : ''}" onclick="selectGenerator('${g.id}')" style="display:flex;flex-direction:column">
-      <div style="flex:1;min-width:0;overflow:hidden">
-        <div class="vc-make" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${g.name}</div>
-        ${g.serial ? `<div class="vc-driver" style="font-family:'Courier New',monospace;letter-spacing:0.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">С/н: ${g.serial}</div>` : ''}
-        ${g.responsible ? `<div class="vc-driver" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Отв.: ${g.responsible}</div>` : ''}
-        ${g.power != null ? `<div class="vc-org">${g.power} кВт</div>` : ''}
+    html += `<div class="gen-card ${selectedGeneratorId === g.id ? 'active' : ''}" onclick="selectGenerator('${g.id}')">
+      <div class="gen-card-top">
+        <div style="flex:1;min-width:0">
+          <div class="gen-card-name">${stDot} ${g.name}</div>
+          <div class="gen-card-sub">${g.serial ? 'С/н: '+g.serial : ''}${g.responsible ? (g.serial?' · ':'')+'Отв.: '+g.responsible : ''}</div>
+        </div>
+        ${g.power != null ? `<div class="gen-card-power">${g.power} кВт</div>` : ''}
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;align-items:center">
-        <div class="vc-badge">${totalHours.toLocaleString('ru',{maximumFractionDigits:1})} мтч</div>
-        <div style="font-size:11px;font-weight:700;color:${balColor};background:${balColor}1a;border:1px solid ${balColor}4d;padding:3px 9px;border-radius:20px;white-space:nowrap">${fuelBal.toLocaleString('ru',{maximumFractionDigits:1})} л</div>
-        ${stColor ? `<div style="font-size:11px;font-weight:700;color:${stColor};background:${stColor}1a;border:1px solid ${stColor}4d;padding:3px 9px;border-radius:20px;white-space:nowrap">${g.status}</div>` : ''}
-        ${fb ? `<span class="fuel-tag ${fb.cls}" style="font-size:11px;padding:3px 9px">${fb.label}</span>` : ''}
+      <div class="gen-card-badges">
+        <div class="gen-badge">${totalHours.toLocaleString('ru',{maximumFractionDigits:1})} мтч</div>
+        <div class="gen-badge" style="color:${balColor};border-color:${balColor}4d;background:${balColor}1a">${fuelBal.toLocaleString('ru',{maximumFractionDigits:1})} л</div>
+        ${g.status ? `<div class="gen-badge" style="color:${stColor};border-color:${stColor}4d;background:${stColor}1a">${g.status}</div>` : ''}
+        ${fb ? `<span class="fuel-tag ${fb.cls}" style="font-size:10px;padding:1px 6px">${fb.label}</span>` : ''}
       </div>
     </div>`;
   });
@@ -6674,7 +6868,7 @@ function renderGenDetail(g) {
         <div class="stat-sub">За всё время</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Наработка за месяц</div>
+        <div class="stat-label">За месяц</div>
         <div class="stat-value">${monthHours.toLocaleString('ru',{maximumFractionDigits:1})} <span class="stat-unit">мтч</span></div>
         <div class="stat-sub">${MONTHS_RU[selectedGenMonth-1]} ${selectedGenYear}</div>
       </div>
@@ -6688,7 +6882,7 @@ function renderGenDetail(g) {
         <div class="stat-value">${avgConsumption>0?avgConsumption.toFixed(1):'—'} <span class="stat-unit">л/мтч</span></div>
         <div class="stat-sub">${g.norm?'Норма: '+g.norm+' л/мтч':'Норма не задана'}</div>
       </div>
-      <div class="stat-card" style="border-left:3px solid ${currentBal<0?'var(--red)':currentBal<50?'var(--yellow)':'var(--green)'}">
+      <div class="stat-card ${currentBal<0?'accent-red':currentBal<50?'accent-yellow':'accent-green'}">
         <div class="stat-label">Остаток в баке</div>
         <div class="stat-value" style="color:${currentBal<0?'var(--red)':currentBal<50?'var(--yellow)':'inherit'}">${currentBal.toLocaleString('ru',{maximumFractionDigits:1})} <span class="stat-unit">л</span></div>
         <div class="stat-sub">${lastRec?'После последней записи':'Начальный остаток'}</div>
@@ -7756,6 +7950,7 @@ let reestrContracts = [];
 let reestrLastResult = null;
 let reestrStatyiLoaded = false;
 let reestrContractsLoaded = false;
+let reestrDuplicates = [];
 
 async function loadReestrStatyi() {
   if (reestrStatyiLoaded) return;
@@ -7843,6 +8038,7 @@ function renderReestrSection() {
         </div>
         <div style="display:flex;gap:10px;margin-top:14px">
           <button class="btn btn-ghost" id="reestrAddRowBtn" style="flex:1;justify-content:center">+ Добавить строку</button>
+          <button class="btn btn-ghost" id="reestrAnalyticsBtn" style="flex:0;justify-content:center" onclick="reestrShowAnalytics()">Аналитика</button>
           <button class="btn btn-ghost" id="reestrBackBtn" style="flex:0;justify-content:center">← Назад</button>
           <button class="btn btn-primary" id="reestrBuildBtn" style="flex:1;justify-content:center">
             <span class="reestr-spinner" style="display:none;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite"></span>
@@ -7989,6 +8185,21 @@ async function reestrParse() {
       const d = await window.reestrAPI.parsePdfs(payload);
       allRows.push(...d.rows); allLog.push(...d.log);
     }
+    // Применяем базу знаний: автозаполнение + поиск дубликатов
+    if (window.reestrAPI.applyKnowledge) {
+      try {
+        const kbResult = await window.reestrAPI.applyKnowledge(allRows);
+        allRows = kbResult.rows;
+        if (kbResult.duplicates && kbResult.duplicates.length) {
+          reestrDuplicates = kbResult.duplicates;
+          allLog.push({ type: 'warn', text: `Найдено возможных дубликатов: ${kbResult.duplicates.length}` });
+        }
+        const autoFilled = allRows.filter(r => r._knownContractor).length;
+        if (autoFilled > 0) {
+          allLog.push({ type: 'info', text: `Автозаполнение из истории: ${autoFilled} строк` });
+        }
+      } catch {}
+    }
     reestrRows = allRows;
     data.reestrRows = reestrRows;
     saveData(data);
@@ -8067,10 +8278,22 @@ function reestrRenderTable() {
   const tbody = document.getElementById('reestrReviewBody');
   tbody.innerHTML = '';
   reestrRows.forEach((row, i) => {
+    const isDup = row._duplicate || reestrDuplicates.some(d => d.rowIndex === i);
+    const isKnown = row._knownContractor;
     const tr = document.createElement('tr');
-    if (i % 2 === 1) tr.style.background = 'var(--bg3)';
+    if (isDup) tr.style.background = 'color-mix(in srgb, var(--red) 10%, transparent)';
+    else if (i % 2 === 1) tr.style.background = 'var(--bg3)';
 
-    const tdN = document.createElement('td'); tdN.style.cssText = 'padding:6px 8px;text-align:center;font-weight:700;color:var(--text3);border-bottom:1px solid var(--border)'; tdN.textContent = i + 1; tr.appendChild(tdN);
+    const tdN = document.createElement('td'); tdN.style.cssText = 'padding:6px 8px;text-align:center;font-weight:700;color:var(--text3);border-bottom:1px solid var(--border)';
+    if (isDup) {
+      const dupInfo = reestrDuplicates.find(d => d.rowIndex === i);
+      tdN.innerHTML = `<span title="Возможный дубликат!\nРанее: ${dupInfo ? dupInfo.originalDate : ''}" style="color:var(--red);cursor:help">⚠ ${i + 1}</span>`;
+    } else if (isKnown) {
+      tdN.innerHTML = `<span title="Контрагент из базы знаний (${row._contractorHits || 0} счетов ранее)" style="color:var(--green,#22c55e);cursor:help">✓ ${i + 1}</span>`;
+    } else {
+      tdN.textContent = i + 1;
+    }
+    tr.appendChild(tdN);
 
     const tdS = document.createElement('td'); tdS.style.cssText = 'padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)';
     const sumInp = document.createElement('input'); sumInp.type = 'text'; sumInp.value = (row.sum || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2 });
@@ -8153,6 +8376,10 @@ async function reestrBuild() {
   btn.querySelector('.reestr-spinner').style.display = 'inline-block';
   document.getElementById('reestrBuildBtnLabel').textContent = 'Формирую…';
   try {
+    // Сохраняем в базу знаний перед формированием
+    if (window.reestrAPI.learn) {
+      try { await window.reestrAPI.learn(reestrRows); } catch {}
+    }
     const d = await window.reestrAPI.buildXlsx({ rows: reestrRows });
     reestrLastResult = d;
     document.getElementById('reestrDoneCard').style.display = '';
@@ -8178,6 +8405,139 @@ async function reestrDownload() {
     btn.textContent = '✓ Сохранено';
     setTimeout(() => { btn.textContent = '⬇ Скачать реестр.xlsx'; }, 2000);
   }
+}
+
+async function reestrShowAnalytics() {
+  if (!reestrRows.length) return;
+  let analytics;
+  try {
+    analytics = await window.reestrAPI.analytics(reestrRows);
+  } catch {
+    analytics = localAnalytics(reestrRows);
+  }
+
+  const fmtSum = (n) => n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pct = (part, total) => total > 0 ? Math.round(part / total * 100) : 0;
+
+  let html = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+        <div style="font-size:24px;font-weight:800;color:var(--accent)">${analytics.totalRows}</div>
+        <div style="font-size:11px;color:var(--text3)">Счетов</div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+        <div style="font-size:24px;font-weight:800;color:var(--accent)">${fmtSum(analytics.totalSum)}</div>
+        <div style="font-size:11px;color:var(--text3)">Общая сумма (руб.)</div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+        <div style="font-size:24px;font-weight:800;color:var(--accent)">${analytics.bySupplier.length}</div>
+        <div style="font-size:11px;color:var(--text3)">Контрагентов</div>
+      </div>
+    </div>`;
+
+  // Таблица по контрагентам
+  html += `<h4 style="margin:0 0 8px;font-size:14px;font-weight:700">По контрагентам</h4>
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:16px;max-height:250px;overflow-y:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--accent);color:#fff;position:sticky;top:0">
+          <th style="padding:6px 8px;text-align:left">Контрагент</th>
+          <th style="padding:6px 8px;text-align:center">Кол-во</th>
+          <th style="padding:6px 8px;text-align:right">Сумма</th>
+          <th style="padding:6px 8px;text-align:right">%</th>
+        </tr></thead><tbody>`;
+  analytics.bySupplier.forEach((s, i) => {
+    html += `<tr style="background:${i%2?'var(--bg3)':'transparent'}">
+      <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${s.name}</td>
+      <td style="padding:5px 8px;text-align:center;border-bottom:1px solid var(--border)">${s.count}</td>
+      <td style="padding:5px 8px;text-align:right;border-bottom:1px solid var(--border);font-weight:600">${fmtSum(s.sum)}</td>
+      <td style="padding:5px 8px;text-align:right;border-bottom:1px solid var(--border);color:var(--text3)">${pct(s.sum, analytics.totalSum)}%</td>
+    </tr>`;
+  });
+  html += '</tbody></table></div>';
+
+  // По объектам
+  if (analytics.byObject.length > 1 || (analytics.byObject.length === 1 && analytics.byObject[0].name !== 'Не указан')) {
+    html += `<h4 style="margin:0 0 8px;font-size:14px;font-weight:700">По объектам</h4>
+      <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:16px;max-height:200px;overflow-y:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:var(--accent);color:#fff;position:sticky;top:0">
+            <th style="padding:6px 8px;text-align:left">Объект</th>
+            <th style="padding:6px 8px;text-align:center">Кол-во</th>
+            <th style="padding:6px 8px;text-align:right">Сумма</th>
+            <th style="padding:6px 8px;text-align:right">%</th>
+          </tr></thead><tbody>`;
+    analytics.byObject.forEach((s, i) => {
+      html += `<tr style="background:${i%2?'var(--bg3)':'transparent'}">
+        <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${s.name}</td>
+        <td style="padding:5px 8px;text-align:center;border-bottom:1px solid var(--border)">${s.count}</td>
+        <td style="padding:5px 8px;text-align:right;border-bottom:1px solid var(--border);font-weight:600">${fmtSum(s.sum)}</td>
+        <td style="padding:5px 8px;text-align:right;border-bottom:1px solid var(--border);color:var(--text3)">${pct(s.sum, analytics.totalSum)}%</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+
+  // По статьям БДДС
+  html += `<h4 style="margin:0 0 8px;font-size:14px;font-weight:700">По статьям БДДС</h4>
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:16px;max-height:200px;overflow-y:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--accent);color:#fff;position:sticky;top:0">
+          <th style="padding:6px 8px;text-align:left">Статья</th>
+          <th style="padding:6px 8px;text-align:center">Кол-во</th>
+          <th style="padding:6px 8px;text-align:right">Сумма</th>
+          <th style="padding:6px 8px;text-align:right">%</th>
+        </tr></thead><tbody>`;
+  analytics.byCategory.forEach((s, i) => {
+    const label = s.name.replace(/^[\d.,\s]+/, '').replace(/^,\s*/, '').trim() || s.name;
+    html += `<tr style="background:${i%2?'var(--bg3)':'transparent'}">
+      <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${label}</td>
+      <td style="padding:5px 8px;text-align:center;border-bottom:1px solid var(--border)">${s.count}</td>
+      <td style="padding:5px 8px;text-align:right;border-bottom:1px solid var(--border);font-weight:600">${fmtSum(s.sum)}</td>
+      <td style="padding:5px 8px;text-align:right;border-bottom:1px solid var(--border);color:var(--text3)">${pct(s.sum, analytics.totalSum)}%</td>
+    </tr>`;
+  });
+  html += '</tbody></table></div>';
+
+  // По месяцам
+  if (analytics.byMonth.length > 1) {
+    html += `<h4 style="margin:0 0 8px;font-size:14px;font-weight:700">По месяцам</h4>
+      <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:16px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:var(--accent);color:#fff">
+            <th style="padding:6px 8px;text-align:left">Месяц</th>
+            <th style="padding:6px 8px;text-align:center">Кол-во</th>
+            <th style="padding:6px 8px;text-align:right">Сумма</th>
+          </tr></thead><tbody>`;
+    analytics.byMonth.forEach((s, i) => {
+      html += `<tr style="background:${i%2?'var(--bg3)':'transparent'}">
+        <td style="padding:5px 8px;border-bottom:1px solid var(--border)">${s.name}</td>
+        <td style="padding:5px 8px;text-align:center;border-bottom:1px solid var(--border)">${s.count}</td>
+        <td style="padding:5px 8px;text-align:right;border-bottom:1px solid var(--border);font-weight:600">${fmtSum(s.sum)}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+
+  openGenericModal('Аналитика реестра', html, 700);
+}
+
+function localAnalytics(rows) {
+  const bySupplier = {}, byObject = {}, byCategory = {}, byMonth = {};
+  let totalSum = 0;
+  for (const row of rows) {
+    const sum = row.sum || 0;
+    totalSum += sum;
+    const s = row.supplier || 'Не указан';
+    if (!bySupplier[s]) bySupplier[s] = { count:0, sum:0 }; bySupplier[s].count++; bySupplier[s].sum += sum;
+    const o = row.obj || 'Не указан';
+    if (!byObject[o]) byObject[o] = { count:0, sum:0 }; byObject[o].count++; byObject[o].sum += sum;
+    const c = row['statья'] || row.category || 'Без категории';
+    if (!byCategory[c]) byCategory[c] = { count:0, sum:0 }; byCategory[c].count++; byCategory[c].sum += sum;
+    if (row.date) { const p = row.date.split('.'); if (p.length===3) { const mk = `${p[1]}.${p[2]}`; if (!byMonth[mk]) byMonth[mk]={count:0,sum:0}; byMonth[mk].count++; byMonth[mk].sum+=sum; } }
+  }
+  const sort = (o) => Object.entries(o).sort((a,b)=>b[1].sum-a[1].sum).map(([name,d])=>({name,...d}));
+  return { totalRows:rows.length, totalSum, bySupplier:sort(bySupplier), byObject:sort(byObject), byCategory:sort(byCategory),
+    byMonth: Object.entries(byMonth).sort((a,b)=>a[0].localeCompare(b[0])).map(([name,d])=>({name,...d})) };
 }
 
 </script>

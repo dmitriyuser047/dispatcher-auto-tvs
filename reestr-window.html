@@ -597,6 +597,9 @@ document.getElementById('buildBtn').addEventListener('click', async () => {
   document.getElementById('buildSpinner').style.display = 'inline-block';
   document.getElementById('buildBtnLabel').textContent = 'Формирую…';
   try {
+    if (window.reestrAPI.learn) {
+      try { await window.reestrAPI.learn(rows); } catch {}
+    }
     const d = await window.reestrAPI.buildXlsx({ rows });
     lastResult = d;
     const r = await window.reestrAPI.save(d.filename, d.xlsxBase64);
