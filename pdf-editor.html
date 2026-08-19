@@ -130,6 +130,8 @@
   }
   .selected > .delete-handle { display: block; }
 
+  .text-overlay.tool-text .text-block,
+  .text-overlay.tool-text .stamp-block { pointer-events: none; }
   .text-overlay.tool-draw { pointer-events: auto; cursor: crosshair; }
   .text-overlay.tool-draw .text-block,
   .text-overlay.tool-draw .stamp-block { pointer-events: none; }
@@ -513,6 +515,7 @@ function startEdit(div, block) {
 }
 
 function onBlockDown(e, div, block, idx) {
+  if (currentTool === 'text') return;
   if (currentTool === 'erase') { block.deleted = true; div.remove(); return; }
   if (div.contentEditable === 'true') return;
   e.preventDefault();
@@ -691,16 +694,25 @@ document.addEventListener('mouseup', async (e) => {
 });
 
 document.getElementById('textOverlay').addEventListener('mousedown', (e) => {
-  if (e.target !== e.currentTarget && currentTool !== 'sealrm' && currentTool !== 'stamp') return;
+  if (e.target !== e.currentTarget && currentTool !== 'sealrm' && currentTool !== 'stamp' && currentTool !== 'text') return;
   if (currentTool === 'text') {
     e.preventDefault();
     const cr = document.getElementById('pageContainer').getBoundingClientRect();
     const x = (e.clientX - cr.left) / zoom;
     const y = (e.clientY - cr.top) / zoom;
-    getEdits(currentPage).textBlocks.push({
-      text: 'Текст', x, y, fontSize: 10, deleted: false, moved: false, edited: true, isNew: true,
-    });
+    const newBlock = {
+      text: '', x, y, fontSize: 12, deleted: false, moved: false, edited: true, isNew: true,
+    };
+    getEdits(currentPage).textBlocks.push(newBlock);
+    const newIdx = getEdits(currentPage).textBlocks.length - 1;
     renderPage(currentPage);
+    setTool('select');
+    const newDiv = document.querySelector('[data-idx="' + newIdx + '"]');
+    if (newDiv) {
+      selectedEl = newDiv;
+      newDiv.classList.add('selected');
+      startEdit(newDiv, newBlock);
+    }
   }
   if (currentTool === 'erase') {
     e.preventDefault();
