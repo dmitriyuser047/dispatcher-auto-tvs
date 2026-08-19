@@ -116,7 +116,7 @@
     position: absolute; pointer-events: auto; cursor: move;
     padding: 1px 2px; line-height: 1.2;
     white-space: pre; border: 1px solid transparent; min-width: 4px; min-height: 10px;
-    color: transparent;
+    color: transparent; z-index: 10;
   }
   .text-block:hover { border-color: rgba(37,99,235,0.3); background: rgba(37,99,235,0.04); color: var(--accent); }
   .text-block.selected { border-color: var(--accent); background: rgba(37,99,235,0.06); color: var(--text); }
@@ -139,7 +139,7 @@
 
   .draw-canvas {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    pointer-events: none;
+    pointer-events: none; z-index: 5;
   }
   .text-overlay.tool-draw .draw-canvas { pointer-events: auto; }
 
@@ -392,6 +392,13 @@ async function renderPage(pn) {
   const overlay = document.getElementById('textOverlay');
   overlay.innerHTML = '';
 
+  // Draw canvas first (behind text/stamp blocks)
+  const drawC = document.createElement('canvas');
+  drawC.className = 'draw-canvas';
+  drawC.width = vp.width; drawC.height = vp.height;
+  drawC.id = 'drawCanvas';
+  overlay.appendChild(drawC);
+
   edits.textBlocks.forEach((block, idx) => {
     if (block.deleted) return;
     const div = document.createElement('div');
@@ -443,12 +450,7 @@ async function renderPage(pn) {
     overlay.appendChild(div);
   });
 
-  // Draw canvas for freehand
-  const drawC = document.createElement('canvas');
-  drawC.className = 'draw-canvas';
-  drawC.width = vp.width; drawC.height = vp.height;
-  drawC.id = 'drawCanvas';
-  overlay.appendChild(drawC);
+  // Initialize draw canvas (already added at top of overlay)
   drawCtx = drawC.getContext('2d');
   drawCtx.lineCap = 'round'; drawCtx.lineJoin = 'round';
   drawCtx.strokeStyle = '#1a1a1a'; drawCtx.lineWidth = 2 * zoom;
