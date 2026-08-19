@@ -532,6 +532,36 @@ app.whenReady().then(() => {
     return { saved: true, path: savePath };
   });
 
+  ipcMain.handle('pdf-editor-merge', async (event) => {
+    const senderWin = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
+      title: 'Выберите PDF для объединения',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      properties: ['openFile', 'multiSelections'],
+    });
+    if (canceled || !filePaths || !filePaths.length) return { ok: false };
+    const files = filePaths.map(fp => ({
+      name: path.basename(fp),
+      base64: fs.readFileSync(fp).toString('base64'),
+    }));
+    return { ok: true, files };
+  });
+
+  ipcMain.handle('pdf-editor-insert-image', async (event) => {
+    const senderWin = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
+      title: 'Выберите изображение',
+      filters: [{ name: 'Изображения', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'webp'] }],
+      properties: ['openFile'],
+    });
+    if (canceled || !filePaths || !filePaths[0]) return { ok: false };
+    const imgPath = filePaths[0];
+    const ext = path.extname(imgPath).toLowerCase();
+    const base64 = fs.readFileSync(imgPath).toString('base64');
+    const dataUrl = `data:image/${ext === '.jpg' || ext === '.jpeg' ? 'jpeg' : 'png'};base64,${base64}`;
+    return { ok: true, dataUrl, name: path.basename(imgPath) };
+  });
+
   ipcMain.handle('pdf-editor-save-as', async (event, { pdfBase64 }) => {
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePath } = await dialog.showSaveDialog(senderWin, {

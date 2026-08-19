@@ -28,16 +28,17 @@
 
   .toolbar {
     background: var(--bg2); border-bottom: 1px solid var(--border);
-    padding: 8px 16px; display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+    padding: 8px 12px; display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+    flex-wrap: wrap;
   }
   .toolbar h1 { font-size: 14px; font-weight: 700; margin-right: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
   .toolbar .sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
 
   .tool-btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-    padding: 6px 10px; border-radius: 6px; border: 1px solid transparent;
-    cursor: pointer; font-size: 12px; font-weight: 500; background: transparent;
-    color: var(--text2); transition: all .15s; font-family: inherit;
+    display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+    padding: 5px 8px; border-radius: 6px; border: 1px solid transparent;
+    cursor: pointer; font-size: 11px; font-weight: 500; background: transparent;
+    color: var(--text2); transition: all .15s; font-family: inherit; white-space: nowrap;
   }
   .tool-btn:hover { background: var(--bg3); color: var(--text); }
   .tool-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -129,6 +130,24 @@
   }
   .selected > .delete-handle { display: block; }
 
+  .text-overlay.tool-draw { pointer-events: auto; cursor: crosshair; }
+  .text-overlay.tool-draw .text-block,
+  .text-overlay.tool-draw .stamp-block { pointer-events: none; }
+  .text-overlay.tool-highlight { pointer-events: auto; cursor: crosshair; }
+  .text-overlay.tool-highlight .text-block,
+  .text-overlay.tool-highlight .stamp-block { pointer-events: none; }
+
+  .draw-canvas {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  .text-overlay.tool-draw .draw-canvas { pointer-events: auto; }
+
+  .highlight-rect {
+    position: absolute; background: rgba(255,235,59,0.35);
+    pointer-events: none; border-radius: 2px;
+  }
+
   .erase-rect {
     position: absolute; border: 2px dashed var(--red); background: rgba(220,38,38,0.08);
     pointer-events: none;
@@ -175,6 +194,30 @@
   <button class="tool-btn" id="toolErase" onclick="setTool('erase')">
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M20 5H9l-7 7 7 7h11a2 2 0 002-2V7a2 2 0 00-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
     Стереть
+  </button>
+  <button class="tool-btn" id="toolDraw" onclick="setTool('draw')">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/></svg>
+    Перо
+  </button>
+  <button class="tool-btn" id="toolHighlight" onclick="setTool('highlight')">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 11l-6 6v3h9l3-3"/><path d="M22 12l-4.6 4.6a2 2 0 01-2.8 0l-5.2-5.2a2 2 0 010-2.8L14 4"/></svg>
+    Маркер
+  </button>
+  <div class="sep"></div>
+  <button class="tool-btn" onclick="insertImageFromFile()" title="Вставить изображение (подпись, печать)">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+    Картинка
+  </button>
+  <button class="tool-btn" onclick="rotatePage(90)" title="Повернуть страницу на 90° вправо">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    ↻
+  </button>
+  <button class="tool-btn" onclick="deleteCurrentPage()" title="Удалить текущую страницу">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+  </button>
+  <button class="tool-btn" onclick="mergePdfFiles()" title="Добавить страницы из другого PDF">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+    + PDF
   </button>
   <div class="sep"></div>
   <button class="btn-save" onclick="savePdf()">Сохранить</button>
@@ -229,6 +272,12 @@ let stampRect = null;
 let sealrmStart = null;
 let sealrmRect = null;
 let sealrmOrigData = null;
+let isDrawing = false;
+let drawCtx = null;
+let drawPaths = {};
+let highlightStart = null;
+let highlightRect = null;
+let pageRotations = {};
 
 function status(msg) { document.getElementById('statusBar').textContent = msg; }
 
@@ -255,8 +304,12 @@ function changeZoom(delta) {
 }
 
 function getEdits(p) {
-  if (!pageEdits[p]) pageEdits[p] = { textBlocks: null, eraseAreas: [], stampBlocks: [] };
+  if (!pageEdits[p]) pageEdits[p] = { textBlocks: null, eraseAreas: [], stampBlocks: [], highlights: [] };
   return pageEdits[p];
+}
+function getDrawPaths(p) {
+  if (!drawPaths[p]) drawPaths[p] = [];
+  return drawPaths[p];
 }
 
 async function init() {
@@ -305,7 +358,8 @@ function goToPage(n) {
 
 async function renderPage(pn) {
   const page = await pdfDoc.getPage(pn);
-  const vp = page.getViewport({ scale: zoom });
+  const rotation = pageRotations[pn] || 0;
+  const vp = page.getViewport({ scale: zoom, rotation });
   const canvas = document.getElementById('pdfCanvas');
   canvas.width = vp.width; canvas.height = vp.height;
   const ctx = canvas.getContext('2d');
@@ -378,6 +432,64 @@ async function renderPage(pn) {
     overlay.appendChild(div);
   });
 
+  // Highlights
+  edits.highlights.forEach(hl => {
+    const div = document.createElement('div');
+    div.className = 'highlight-rect';
+    div.style.left = (hl.x * zoom) + 'px';
+    div.style.top = (hl.y * zoom) + 'px';
+    div.style.width = (hl.w * zoom) + 'px';
+    div.style.height = (hl.h * zoom) + 'px';
+    overlay.appendChild(div);
+  });
+
+  // Draw canvas for freehand
+  const drawC = document.createElement('canvas');
+  drawC.className = 'draw-canvas';
+  drawC.width = vp.width; drawC.height = vp.height;
+  drawC.id = 'drawCanvas';
+  overlay.appendChild(drawC);
+  drawCtx = drawC.getContext('2d');
+  drawCtx.lineCap = 'round'; drawCtx.lineJoin = 'round';
+  drawCtx.strokeStyle = '#1a1a1a'; drawCtx.lineWidth = 2 * zoom;
+
+  // Replay saved paths
+  const paths = getDrawPaths(pn);
+  paths.forEach(p => {
+    if (p.pts.length < 2) return;
+    drawCtx.beginPath();
+    drawCtx.strokeStyle = p.color || '#1a1a1a';
+    drawCtx.lineWidth = (p.width || 2) * zoom;
+    drawCtx.moveTo(p.pts[0].x * zoom, p.pts[0].y * zoom);
+    for (let i = 1; i < p.pts.length; i++) drawCtx.lineTo(p.pts[i].x * zoom, p.pts[i].y * zoom);
+    drawCtx.stroke();
+  });
+
+  // Draw canvas events
+  drawC.addEventListener('mousedown', (e) => {
+    if (currentTool !== 'draw') return;
+    isDrawing = true;
+    const cr = drawC.getBoundingClientRect();
+    const x = e.clientX - cr.left, y = e.clientY - cr.top;
+    drawCtx.beginPath();
+    drawCtx.strokeStyle = '#1a1a1a';
+    drawCtx.lineWidth = 2 * zoom;
+    drawCtx.moveTo(x, y);
+    const newPath = { color: '#1a1a1a', width: 2, pts: [{ x: x / zoom, y: y / zoom }] };
+    getDrawPaths(currentPage).push(newPath);
+  });
+  drawC.addEventListener('mousemove', (e) => {
+    if (!isDrawing || currentTool !== 'draw') return;
+    const cr = drawC.getBoundingClientRect();
+    const x = e.clientX - cr.left, y = e.clientY - cr.top;
+    drawCtx.lineTo(x, y);
+    drawCtx.stroke();
+    const paths = getDrawPaths(currentPage);
+    if (paths.length) paths[paths.length - 1].pts.push({ x: x / zoom, y: y / zoom });
+  });
+  drawC.addEventListener('mouseup', () => { isDrawing = false; });
+  drawC.addEventListener('mouseleave', () => { isDrawing = false; });
+
   status('Страница ' + pn + ' из ' + totalPages);
 }
 
@@ -446,7 +558,6 @@ document.addEventListener('mousemove', (e) => {
     const y = e.clientY - cr.top - dragOff.y;
     selectedEl.style.left = x + 'px';
     selectedEl.style.top = y + 'px';
-    console.log('drag move', x.toFixed(0), y.toFixed(0));
     if (selectedEl._stamp) {
       selectedEl._stamp.x = x / zoom;
       selectedEl._stamp.y = y / zoom;
@@ -486,6 +597,14 @@ document.addEventListener('mousemove', (e) => {
     eraseRect.style.left = x + 'px'; eraseRect.style.top = y + 'px';
     eraseRect.style.width = w + 'px'; eraseRect.style.height = h + 'px';
   }
+  if (highlightStart && highlightRect) {
+    const cr = document.getElementById('pageContainer').getBoundingClientRect();
+    const ex = e.clientX - cr.left, ey = e.clientY - cr.top;
+    const x = Math.min(highlightStart.x, ex), y = Math.min(highlightStart.y, ey);
+    const w = Math.abs(ex - highlightStart.x), h = Math.abs(ey - highlightStart.y);
+    highlightRect.style.left = x + 'px'; highlightRect.style.top = y + 'px';
+    highlightRect.style.width = w + 'px'; highlightRect.style.height = h + 'px';
+  }
 });
 
 document.addEventListener('mouseup', async (e) => {
@@ -509,6 +628,17 @@ document.addEventListener('mouseup', async (e) => {
     sealrmRect.remove(); sealrmRect = null; sealrmStart = null;
     if (pw2 > 5 && ph2 > 5) {
       removeSealFromArea(px2, py2, pw2, ph2);
+    }
+  }
+  if (highlightStart && highlightRect) {
+    const cr3 = document.getElementById('pageContainer').getBoundingClientRect();
+    const ex3 = e.clientX - cr3.left, ey3 = e.clientY - cr3.top;
+    const hx = Math.min(highlightStart.x, ex3) / zoom, hy = Math.min(highlightStart.y, ey3) / zoom;
+    const hw = Math.abs(ex3 - highlightStart.x) / zoom, hh = Math.abs(ey3 - highlightStart.y) / zoom;
+    highlightRect.remove(); highlightRect = null; highlightStart = null;
+    if (hw > 3 && hh > 3) {
+      getEdits(currentPage).highlights.push({ x: hx, y: hy, w: hw, h: hh });
+      renderPage(currentPage);
     }
   }
   if (stampStart && stampRect) {
@@ -596,6 +726,15 @@ document.getElementById('textOverlay').addEventListener('mousedown', (e) => {
     sealrmRect.className = 'sealrm-rect';
     sealrmRect.style.left = sealrmStart.x + 'px'; sealrmRect.style.top = sealrmStart.y + 'px';
     document.getElementById('textOverlay').appendChild(sealrmRect);
+  }
+  if (currentTool === 'highlight') {
+    e.preventDefault();
+    const cr = document.getElementById('pageContainer').getBoundingClientRect();
+    highlightStart = { x: e.clientX - cr.left, y: e.clientY - cr.top };
+    highlightRect = document.createElement('div');
+    highlightRect.className = 'highlight-rect';
+    highlightRect.style.left = highlightStart.x + 'px'; highlightRect.style.top = highlightStart.y + 'px';
+    document.getElementById('textOverlay').appendChild(highlightRect);
   }
 });
 
@@ -744,7 +883,6 @@ function removeSealFromArea(px, py, pw, ph) {
   for (let r = 20; r < smoothR.length; r++) {
     if (smoothR[r] > bestRv) { bestRv = smoothR[r]; circleR = r; }
   }
-  console.log('Seal circle:', circleCx.toFixed(0), circleCy.toFixed(0), 'R=' + circleR);
 
   // --- Distance transform for stroke thickness ---
   const dt = new Float32Array(W * H);
@@ -813,8 +951,6 @@ function removeSealFromArea(px, py, pw, ph) {
     stampR = s2r; stampG = s2g; stampB = s2b;
     signR = s1r; signG = s1g; signB = s1b;
   }
-  console.log('Stamp color:', stampR.toFixed(0), stampG.toFixed(0), stampB.toFixed(0));
-  console.log('Signature color:', signR.toFixed(0), signG.toFixed(0), signB.toFixed(0));
 
   // --- Multi-factor classification ---
   const isSeal = new Uint8Array(W * H);
@@ -893,6 +1029,88 @@ function removeSealFromArea(px, py, pw, ph) {
   status('Печать удалена. Ctrl+Z — отмена. Порог = толщина штриха подписи.');
 }
 
+async function rotatePage(degrees) {
+  if (!pageRotations[currentPage]) pageRotations[currentPage] = 0;
+  pageRotations[currentPage] = (pageRotations[currentPage] + degrees) % 360;
+  status('Страница ' + currentPage + ' повёрнута на ' + pageRotations[currentPage] + '°');
+  renderPage(currentPage);
+}
+
+async function deleteCurrentPage() {
+  if (totalPages <= 1) { status('Нельзя удалить единственную страницу'); return; }
+  if (!confirm('Удалить страницу ' + currentPage + '?')) return;
+  const { PDFDocument } = PDFLib;
+  const doc = await PDFDocument.load(pdfBytes);
+  doc.removePage(currentPage - 1);
+  const saved = await doc.save();
+  pdfBytes = new Uint8Array(saved);
+  delete pageEdits[currentPage];
+  delete drawPaths[currentPage];
+  delete pageRotations[currentPage];
+  // Shift edits for pages after deleted one
+  const newEdits = {}, newDraw = {}, newRot = {};
+  for (let p = 1; p <= totalPages; p++) {
+    if (p < currentPage) {
+      if (pageEdits[p]) newEdits[p] = pageEdits[p];
+      if (drawPaths[p]) newDraw[p] = drawPaths[p];
+      if (pageRotations[p]) newRot[p] = pageRotations[p];
+    } else if (p > currentPage) {
+      if (pageEdits[p]) newEdits[p - 1] = pageEdits[p];
+      if (drawPaths[p]) newDraw[p - 1] = drawPaths[p];
+      if (pageRotations[p]) newRot[p - 1] = pageRotations[p];
+    }
+  }
+  pageEdits = newEdits; drawPaths = newDraw; pageRotations = newRot;
+  pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
+  totalPages = pdfDoc.numPages;
+  if (currentPage > totalPages) currentPage = totalPages;
+  renderThumbs();
+  renderPage(currentPage);
+  status('Страница удалена. Осталось: ' + totalPages);
+}
+
+async function mergePdfFiles() {
+  if (!window.pdfEditor.mergePdf) { status('Функция недоступна'); return; }
+  const result = await window.pdfEditor.mergePdf();
+  if (!result.ok) return;
+  const { PDFDocument } = PDFLib;
+  const mainDoc = await PDFDocument.load(pdfBytes);
+  for (const file of result.files) {
+    const bytes = Uint8Array.from(atob(file.base64), c => c.charCodeAt(0));
+    const srcDoc = await PDFDocument.load(bytes);
+    const indices = srcDoc.getPageIndices();
+    const copied = await mainDoc.copyPages(srcDoc, indices);
+    copied.forEach(p => mainDoc.addPage(p));
+  }
+  const saved = await mainDoc.save();
+  pdfBytes = new Uint8Array(saved);
+  pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
+  totalPages = pdfDoc.numPages;
+  renderThumbs();
+  renderPage(currentPage);
+  status('Добавлено ' + result.files.length + ' файл(ов). Всего страниц: ' + totalPages);
+}
+
+async function insertImageFromFile() {
+  if (!window.pdfEditor.insertImage) { status('Функция недоступна'); return; }
+  const result = await window.pdfEditor.insertImage();
+  if (!result.ok) return;
+  const edits = getEdits(currentPage);
+  edits.stampBlocks.push({
+    dataUrl: result.dataUrl, origX: 50, origY: 50, x: 50, y: 50,
+    w: 150, h: 100, deleted: false, moved: false,
+  });
+  renderPage(currentPage);
+  const stampIdx = edits.stampBlocks.length - 1;
+  const stampDiv = document.querySelector('[data-stamp-idx="' + stampIdx + '"]');
+  if (stampDiv) {
+    selectedEl = stampDiv;
+    stampDiv.classList.add('selected');
+    selectedEl._stamp = edits.stampBlocks[stampIdx];
+  }
+  status('Изображение вставлено — перетащите на нужное место');
+}
+
 async function buildEditedPdf() {
   const { PDFDocument, rgb, StandardFonts } = PDFLib;
   const doc = await PDFDocument.load(pdfBytes);
@@ -952,13 +1170,43 @@ async function buildEditedPdf() {
       if (stamp.deleted) continue;
       const resp = await fetch(stamp.dataUrl);
       const imgBytes = new Uint8Array(await resp.arrayBuffer());
-      const pngImg = await doc.embedPng(imgBytes);
-      page.drawImage(pngImg, {
+      let embeddedImg;
+      try { embeddedImg = await doc.embedPng(imgBytes); }
+      catch { embeddedImg = await doc.embedJpg(imgBytes); }
+      page.drawImage(embeddedImg, {
         x: stamp.x * sx,
         y: height - (stamp.y + stamp.h) * sy,
         width: stamp.w * sx,
         height: stamp.h * sy,
       });
+    }
+
+    // Highlights
+    (edits.highlights || []).forEach(hl => {
+      page.drawRectangle({
+        x: hl.x * sx, y: height - (hl.y + hl.h) * sy,
+        width: hl.w * sx, height: hl.h * sy,
+        color: rgb(1, 0.92, 0.23), opacity: 0.35,
+      });
+    });
+
+    // Draw paths
+    const paths = getDrawPaths(p);
+    paths.forEach(dp => {
+      if (dp.pts.length < 2) return;
+      for (let i = 1; i < dp.pts.length; i++) {
+        page.drawLine({
+          start: { x: dp.pts[i-1].x * sx, y: height - dp.pts[i-1].y * sy },
+          end: { x: dp.pts[i].x * sx, y: height - dp.pts[i].y * sy },
+          thickness: (dp.width || 2) * sx,
+          color: rgb(0.1, 0.1, 0.1),
+        });
+      }
+    });
+
+    // Rotation
+    if (pageRotations[p]) {
+      page.setRotation(PDFLib.degrees((page.getRotation().angle + pageRotations[p]) % 360));
     }
   }
 
