@@ -562,6 +562,69 @@ app.whenReady().then(() => {
     return { ok: true, dataUrl, name: path.basename(imgPath) };
   });
 
+  let ocrWorker = null;
+  ipcMain.handle('pdf-editor-ocr', async (event, { imageBase64 }) => {
+    const Tesseract = require('tesseract.js');
+    if (!ocrWorker) {
+      const langDir = (() => {
+        const dirs = [
+          path.join(process.resourcesPath, 'app.asar.unpacked'),
+          path.join(process.resourcesPath, 'app'),
+          path.join(__dirname, '..'),
+        ];
+        for (const d of dirs) {
+          if (fs.existsSync(path.join(d, 'rus.traineddata'))) return d;
+        }
+        return null;
+      })();
+      const opts = langDir ? { langPath: langDir, gzip: false } : {};
+      ocrWorker = await Tesseract.createWorker('rus+eng', undefined, opts);
+    }
+    const buf = Buffer.from(imageBase64, 'base64');
+    const tmpFile = path.join(os.tmpdir(), `ocr_pdf_${Date.now()}.png`);
+    try {
+      fs.writeFileSync(tmpFile, buf);
+      await ocrWorker.setParameters({ tessedit_pageseg_mode: '3' });
+      const result = await Promise.race([
+        ocrWorker.recognize(tmpFile),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('OCR timeout')), 180000)),
+      ]);
+      let lines = [];
+      if (result.data.lines && result.data.lines.length > 0) {
+        lines = result.data.lines.map(line => ({
+          text: line.text.trim(),
+          bbox: { x: line.bbox.x0, y: line.bbox.y0, w: line.bbox.x1 - line.bbox.x0, h: line.bbox.y1 - line.bbox.y0 },
+        })).filter(l => l.text.length > 0);
+      } else if (result.data.blocks && result.data.blocks.length > 0) {
+        for (const block of result.data.blocks) {
+          for (const par of (block.paragraphs || [])) {
+            for (const line of (par.lines || [])) {
+              const text = (line.words || []).map(w => w.text).join(' ').trim();
+              if (!text) continue;
+              const bb = line.bbox;
+              lines.push({
+                text,
+                bbox: { x: bb.x0, y: bb.y0, w: bb.x1 - bb.x0, h: bb.y1 - bb.y0 },
+              });
+            }
+          }
+        }
+      } else if (result.data.text && result.data.text.trim().length > 0) {
+        const textLines = result.data.text.trim().split('\n').filter(l => l.trim().length > 0);
+        const imgH = 1000;
+        const lineH = Math.round(imgH / (textLines.length || 1));
+        textLines.forEach((t, i) => {
+          lines.push({ text: t.trim(), bbox: { x: 50, y: i * lineH + 10, w: 500, h: lineH - 5 } });
+        });
+      }
+      return { ok: true, lines };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    } finally {
+      try { fs.unlinkSync(tmpFile); } catch {}
+    }
+  });
+
   ipcMain.handle('pdf-editor-save-as', async (event, { pdfBase64 }) => {
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePath } = await dialog.showSaveDialog(senderWin, {
