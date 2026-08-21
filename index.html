@@ -60,10 +60,10 @@
 
   /* ─── HEADER ─── */
   header {
-    background: var(--bg2);
-    border-bottom: 1px solid var(--border);
+    background: #0f172a;
+    border-bottom: 1px solid #1e293b;
     padding: 0 24px;
-    height: 56px;
+    height: 48px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -74,12 +74,17 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    font-weight: 700;
-    font-size: 16px;
+    font-weight: 600;
+    font-size: 14px;
     letter-spacing: 0.3px;
+    color: #e2e8f0;
   }
-  .logo svg { color: var(--accent); }
+  .logo svg { color: #60a5fa; }
   .header-right { display: flex; gap: 10px; align-items: center; }
+  header .btn-ghost { background: #1e293b; border-color: #334155; color: #94a3b8; }
+  header .btn-ghost:hover { background: #334155; color: #e2e8f0; }
+  header .icon-btn { color: #94a3b8; }
+  header .icon-btn:hover { color: #e2e8f0; background: #1e293b; }
   .btn {
     display: inline-flex;
     align-items: center;
@@ -225,8 +230,10 @@
   }
   .vehicle-row:hover { background: var(--bg3); }
   .vehicle-row.active {
-    background: rgba(59,130,246,0.10);
-    border-color: rgba(59,130,246,0.35);
+    background: rgba(59,130,246,0.08);
+    border-color: transparent;
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
   }
   .vr-dot {
     width: 7px;
@@ -332,17 +339,22 @@
   .vdh-left { display: flex; flex-direction: column; gap: 6px; }
   .vdh-plate {
     font-family: 'Courier New', monospace;
-    font-size: 22px;
+    font-size: 15px;
     font-weight: 700;
-    letter-spacing: 2px;
-    color: var(--accent);
-    background: var(--bg4);
+    letter-spacing: 1.5px;
+    color: #1e293b;
+    background: #ffffff;
     display: inline-block;
-    padding: 4px 14px;
-    border-radius: 6px;
-    border: 1px solid var(--border2);
+    padding: 5px 12px;
+    border-radius: 4px;
+    border: 2px solid #1e293b;
   }
-  .vdh-make { font-size: 20px; font-weight: 700; margin-top: 4px; }
+  [data-theme="dark"] .vdh-plate {
+    color: #e2e8f0;
+    background: #1e293b;
+    border-color: #475569;
+  }
+  .vdh-make { font-size: 18px; font-weight: 700; margin-top: 4px; }
   .vdh-meta {
     display: flex;
     flex-wrap: wrap;
@@ -905,17 +917,17 @@
   .section-tabs {
     display: flex;
     flex-shrink: 0;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg2);
+    border-bottom: 1px solid #1e293b;
+    background: #0f172a;
   }
   .sec-tab {
     flex: 1;
     padding: 10px 6px;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     border: none;
     background: transparent;
-    color: var(--text3);
+    color: #64748b;
     cursor: pointer;
     border-bottom: 3px solid transparent;
     transition: all .15s;
@@ -927,8 +939,11 @@
     margin-bottom: -1px;
     letter-spacing: 0.2px;
   }
-  .sec-tab:hover { color: var(--text); background: var(--bg3); }
-  .sec-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .sec-tab svg { color: #475569; }
+  .sec-tab:hover { color: #e2e8f0; background: rgba(59,130,246,0.08); }
+  .sec-tab:hover svg { color: #94a3b8; }
+  .sec-tab.active { color: #60a5fa; border-bottom-color: #3b82f6; }
+  .sec-tab.active svg { color: #60a5fa; }
   .sec-tab-settings { flex: 0 0 auto; padding: 10px 10px; }
 
   /* ─── SETTINGS MODAL ─── */
@@ -1157,11 +1172,11 @@
       </button>
     </div>
     <div id="hdrReestr" style="display:none;gap:10px;align-items:center">
-      <button onclick="switchSection('vehicles')" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 12px;cursor:pointer;color:var(--text);font-size:13px;display:flex;align-items:center;gap:4px">
+      <button onclick="switchSection('vehicles')" style="background:#1e293b;border:1px solid #334155;border-radius:6px;padding:4px 12px;cursor:pointer;color:#94a3b8;font-size:13px;display:flex;align-items:center;gap:4px">
         <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
         Назад
       </button>
-      <span style="font-size:13px;color:var(--text2)">Реестр на оплату из архива со счетами и УПД</span>
+      <span style="font-size:13px;color:#94a3b8">Реестр на оплату из архива со счетами и УПД</span>
     </div>
   </div>
 </header>
@@ -2470,6 +2485,7 @@ async function loadData() {
   if (!d.vehicleTo)   d.vehicleTo    = [];
   if (!d.repairs)     d.repairs      = [];
   if (!d.reestrRows)  d.reestrRows   = [];
+  if (!d.savedReestrs) d.savedReestrs = [];
   return d;
 }
 function saveData(d) {
@@ -8005,6 +8021,21 @@ function renderReestrSection() {
         <div id="reestrError" style="display:none;border:1px solid var(--red);background:color-mix(in srgb,var(--red) 8%,transparent);color:var(--red);border-radius:8px;padding:10px 12px;font-size:13px;margin-top:12px"></div>
       </div>
 
+      <!-- Сохранённые реестры -->
+      <div id="reestrSavedCard" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="margin:0;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            Сохранённые реестры
+          </h3>
+          <span id="reestrSavedCount" style="font-size:12px;color:var(--text3)"></span>
+        </div>
+        <div id="reestrSavedList"></div>
+        <div id="reestrSavedEmpty" style="text-align:center;padding:16px 0;color:var(--text3);font-size:13px">
+          Нет сохранённых реестров
+        </div>
+      </div>
+
       <!-- Лог -->
       <div id="reestrLogCard" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;flex-wrap:wrap;gap:6px">
@@ -8025,6 +8056,7 @@ function renderReestrSection() {
               <th style="padding:8px;text-align:left;font-weight:600">Сумма</th>
               <th style="padding:8px;text-align:left;font-weight:600">Описание</th>
               <th style="padding:8px;text-align:left;font-weight:600">Объект</th>
+              <th style="padding:8px;text-align:left;font-weight:600">Номер ТС</th>
               <th style="padding:8px;text-align:left;font-weight:600">Статья БДДС</th>
               <th style="padding:8px;width:36px" title="В журнал ремонта"></th>
               <th style="padding:8px;width:36px"></th>
@@ -8038,6 +8070,7 @@ function renderReestrSection() {
         </div>
         <div style="display:flex;gap:10px;margin-top:14px">
           <button class="btn btn-ghost" id="reestrAddRowBtn" style="flex:1;justify-content:center">+ Добавить строку</button>
+          <button class="btn btn-ghost" id="reestrSaveBtn" style="flex:0;justify-content:center">💾 Сохранить</button>
           <button class="btn btn-ghost" id="reestrAnalyticsBtn" style="flex:0;justify-content:center" onclick="reestrShowAnalytics()">Аналитика</button>
           <button class="btn btn-ghost" id="reestrBackBtn" style="flex:0;justify-content:center">← Назад</button>
           <button class="btn btn-primary" id="reestrBuildBtn" style="flex:1;justify-content:center">
@@ -8085,7 +8118,7 @@ function reestrBindEvents() {
     if (reestrRows.length > 0) {
       await loadReestrStatyi();
       await loadReestrContracts();
-      await window.electronAPI.openReestrWindow({ rows: reestrRows, log: [], statyi: reestrStatyi, contracts: reestrContracts });
+      await window.electronAPI.openReestrWindow({ rows: reestrRows, log: [], statyi: reestrStatyi, contracts: reestrContracts, vehicles: data.vehicles || [] });
     }
   });
   document.getElementById('reestrAddRowBtn').addEventListener('click', () => {
@@ -8100,8 +8133,10 @@ function reestrBindEvents() {
     document.getElementById('reestrLogCard').style.display = 'none';
     reestrRows = [];
   });
+  document.getElementById('reestrSaveBtn').addEventListener('click', reestrSaveCurrent);
   document.getElementById('reestrBuildBtn').addEventListener('click', reestrBuild);
   document.getElementById('reestrDownloadBtn').addEventListener('click', reestrDownload);
+  reestrRenderSavedList();
 }
 
 const REESTR_IMG_EXTS = ['jpg','jpeg','png','tif','tiff','bmp'];
@@ -8207,7 +8242,7 @@ async function reestrParse() {
       await loadReestrStatyi();
       await loadReestrContracts();
       document.getElementById('reestrOpenWindowBtn').style.display = '';
-      await window.electronAPI.openReestrWindow({ rows: reestrRows, log: allLog, statyi: reestrStatyi, contracts: reestrContracts });
+      await window.electronAPI.openReestrWindow({ rows: reestrRows, log: allLog, statyi: reestrStatyi, contracts: reestrContracts, vehicles: data.vehicles || [] });
     } else {
       document.getElementById('reestrOpenWindowBtn').style.display = 'none';
       reestrRenderLog(allLog);
@@ -8313,6 +8348,19 @@ function reestrRenderTable() {
     objInp.addEventListener('change', () => { reestrRows[i].obj = objInp.value; });
     tdO.appendChild(objInp); tr.appendChild(tdO);
 
+    const tdVeh = document.createElement('td'); tdVeh.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    const vehSel = document.createElement('select');
+    vehSel.style.cssText = 'width:100%;min-width:120px;padding:4px 6px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);cursor:pointer;font-family:inherit';
+    const vehEmpty = document.createElement('option'); vehEmpty.value = ''; vehEmpty.textContent = '— не указан —'; vehSel.appendChild(vehEmpty);
+    (data.vehicles || []).slice().sort((a,b) => (a.plate||'').localeCompare(b.plate||'','ru')).forEach(v => {
+      const o = document.createElement('option'); o.value = v.plate; o.textContent = v.plate + ' — ' + v.make;
+      if (row.vehiclePlate && row.vehiclePlate === v.plate) o.selected = true;
+      vehSel.appendChild(o);
+    });
+    if (row.vehiclePlate && !vehSel.value) { const c = document.createElement('option'); c.value = row.vehiclePlate; c.textContent = row.vehiclePlate; c.selected = true; vehSel.insertBefore(c, vehSel.children[1]); }
+    vehSel.addEventListener('change', () => { reestrRows[i].vehiclePlate = vehSel.value; });
+    tdVeh.appendChild(vehSel); tr.appendChild(tdVeh);
+
     const tdSt = document.createElement('td'); tdSt.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
     tdSt.appendChild(reestrBuildStatyaSelect(row, i)); tr.appendChild(tdSt);
 
@@ -8405,6 +8453,86 @@ async function reestrDownload() {
     btn.textContent = '✓ Сохранено';
     setTimeout(() => { btn.textContent = '⬇ Скачать реестр.xlsx'; }, 2000);
   }
+}
+
+function reestrRenderSavedList() {
+  const list = document.getElementById('reestrSavedList');
+  const empty = document.getElementById('reestrSavedEmpty');
+  const countEl = document.getElementById('reestrSavedCount');
+  if (!list) return;
+  const saved = data.savedReestrs || [];
+  if (!saved.length) {
+    list.innerHTML = '';
+    empty.style.display = '';
+    countEl.textContent = '';
+    return;
+  }
+  empty.style.display = 'none';
+  countEl.textContent = saved.length + ' шт.';
+  list.innerHTML = `<div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:var(--accent);color:#fff">
+        <th style="padding:7px 10px;text-align:center;font-weight:600;width:50px">№</th>
+        <th style="padding:7px 10px;text-align:left;font-weight:600">Дата</th>
+        <th style="padding:7px 10px;text-align:center;font-weight:600">Счетов</th>
+        <th style="padding:7px 10px;text-align:right;font-weight:600">Сумма</th>
+        <th style="padding:7px 10px;text-align:center;font-weight:600;width:36px"></th>
+      </tr></thead>
+      <tbody>${saved.map((r, i) => {
+        const bg = i % 2 ? 'var(--bg3)' : 'transparent';
+        return `<tr style="background:${bg};cursor:pointer" onclick="reestrOpenSaved(${i})" title="Открыть реестр №${r.number}">
+          <td style="padding:7px 10px;text-align:center;font-weight:700;color:var(--accent);border-bottom:1px solid var(--border)">${r.number}</td>
+          <td style="padding:7px 10px;border-bottom:1px solid var(--border)">${r.date}</td>
+          <td style="padding:7px 10px;text-align:center;border-bottom:1px solid var(--border)">${r.rowCount}</td>
+          <td style="padding:7px 10px;text-align:right;font-weight:600;border-bottom:1px solid var(--border)">${r.totalSum.toLocaleString('ru-RU', {minimumFractionDigits:2})} руб.</td>
+          <td style="padding:7px 10px;text-align:center;border-bottom:1px solid var(--border)"><button class="reestr-action-btn delete" onclick="event.stopPropagation();reestrDeleteSaved(${i})" title="Удалить реестр">✕</button></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+  </div>`;
+}
+
+function reestrSaveCurrent() {
+  if (!reestrRows.length) return;
+  const saved = data.savedReestrs || [];
+  const nextNum = saved.length > 0 ? Math.max(...saved.map(r => r.number)) + 1 : 1;
+  const totalSum = reestrRows.reduce((s, r) => s + (r.sum || 0), 0);
+  saved.push({
+    number: nextNum,
+    date: new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+    rowCount: reestrRows.length,
+    totalSum: totalSum,
+    rows: JSON.parse(JSON.stringify(reestrRows)),
+  });
+  data.savedReestrs = saved;
+  saveData(data);
+  reestrRenderSavedList();
+  const btn = document.getElementById('reestrSaveBtn');
+  if (btn) { btn.textContent = '✓ Сохранено'; setTimeout(() => { btn.textContent = '💾 Сохранить'; }, 1500); }
+}
+
+function reestrOpenSaved(idx) {
+  const saved = data.savedReestrs || [];
+  const entry = saved[idx];
+  if (!entry) return;
+  reestrRows = JSON.parse(JSON.stringify(entry.rows));
+  data.reestrRows = reestrRows;
+  saveData(data);
+  document.getElementById('reestrReviewCard').style.display = '';
+  document.getElementById('reestrDoneCard').style.display = 'none';
+  document.getElementById('reestrLogCard').style.display = 'none';
+  reestrRenderTable();
+  document.getElementById('reestrReviewCard').scrollIntoView({ behavior: 'smooth' });
+}
+
+function reestrDeleteSaved(idx) {
+  const saved = data.savedReestrs || [];
+  const entry = saved[idx];
+  if (!entry || !confirm('Удалить реестр №' + entry.number + '?')) return;
+  saved.splice(idx, 1);
+  data.savedReestrs = saved;
+  saveData(data);
+  reestrRenderSavedList();
 }
 
 async function reestrShowAnalytics() {

@@ -1817,7 +1817,7 @@ export async function buildXlsxFromRows(rows, config) {
       ws.getCell(r, 6).value = row.dog;
       ws.getCell(r, 7).value = config.initiator;
       ws.getCell(r, 8).value = row.dog || config.contractNumber;
-      ws.getCell(r, 9).value = '';
+      ws.getCell(r, 9).value = row.vehiclePlate || '';
       ws.getCell(r, 10).value = '';
       ws.getCell(r, 11).value = osnValue;
       ws.getCell(r, 12).value = '';

@@ -183,6 +183,7 @@
         <th style="width:120px">Компания</th>
         <th style="min-width:130px">Контрагент</th>
         <th style="width:140px">Объект</th>
+        <th style="width:140px">Номер ТС</th>
         <th style="min-width:180px">Статья БДДС</th>
         <th style="width:140px">Тип оплаты</th>
         <th style="min-width:160px">Договор</th>
@@ -215,6 +216,7 @@ const PAY_TYPES = ['ОПЛАТА ПО ФАКТУ', 'ОПЛАТА 50%', 'ПРЕД
 let rows = [];
 let statyi = [];
 let contracts = [];
+let vehicles = [];
 let lastResult = null;
 let activeDropdown = null;
 
@@ -261,6 +263,7 @@ async function init() {
   rows = d.rows || [];
   statyi = d.statyi || [];
   contracts = d.contracts || [];
+  vehicles = d.vehicles || [];
   rows.forEach(r => {
     if (!r.dog && r.obj) r.dog = matchContract(r.obj);
     if (!r.razdel) r.razdel = '';
@@ -534,6 +537,19 @@ function renderTable() {
       if (val && !rows[i].dog) rows[i].dog = matchContract(val);
     }));
     tr.appendChild(tdO);
+
+    // Номер ТС
+    const tdVeh = document.createElement('td');
+    tdVeh.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    const vehSel = document.createElement('select');
+    vehSel.className = 'razdel-sel';
+    vehSel.innerHTML = '<option value="">— не указан —</option>' +
+      vehicles.slice().sort((a,b) => (a.plate||'').localeCompare(b.plate||'','ru'))
+        .map(v => `<option value="${v.plate}"${row.vehiclePlate === v.plate ? ' selected' : ''}>${v.plate} — ${v.make}</option>`).join('');
+    if (row.vehiclePlate && !vehSel.value) { vehSel.innerHTML += `<option value="${row.vehiclePlate}" selected>${row.vehiclePlate}</option>`; }
+    vehSel.addEventListener('change', () => { rows[i].vehiclePlate = vehSel.value; });
+    tdVeh.appendChild(vehSel);
+    tr.appendChild(tdVeh);
 
     // Статья БДДС
     const tdSt = document.createElement('td');
