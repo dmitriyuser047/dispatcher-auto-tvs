@@ -83,19 +83,25 @@ function createWindow() {
   win.setMenuBarVisibility(false);
   win.loadFile(path.join(__dirname, '../index.html'));
 
-  // Проверка обновлений через 4 сек после запуска
+  // Проверка обновлений через 5 сек после запуска
   win.webContents.once('did-finish-load', () => {
     setTimeout(async () => {
       const info = await updater.checkForUpdate();
       if (info) win.webContents.send('update-available', info);
-    }, 4000);
+    }, 5000);
   });
 
-  // Периодическая проверка каждые 5 минут
+  // Периодическая проверка каждые 3 минуты
   setInterval(async () => {
     const info = await updater.checkForUpdate();
     if (info) win.webContents.send('update-available', info);
-  }, 5 * 60 * 1000);
+  }, 3 * 60 * 1000);
+
+  // Проверка при показе/разворачивании окна
+  win.on('show', async () => {
+    const info = await updater.checkForUpdate();
+    if (info) win.webContents.send('update-available', info);
+  });
 
   return win;
 }

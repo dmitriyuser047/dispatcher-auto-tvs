@@ -42,7 +42,7 @@ function fetchText(url, redirects = 5) {
   return new Promise((resolve, reject) => {
     if (redirects <= 0) return reject(new Error('Too many redirects'));
     const mod = url.startsWith('https') ? https : http;
-    const req = mod.get(url, { timeout: 12000 }, res => {
+    const req = mod.get(url, { timeout: 20000 }, res => {
       if ([301,302,303,307,308].includes(res.statusCode) && res.headers.location) {
         return fetchText(res.headers.location, redirects - 1).then(resolve).catch(reject);
       }
@@ -56,23 +56,30 @@ function fetchText(url, redirects = 5) {
   });
 }
 
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 /** Проверить обновление. Возвращает объект инфо или null */
 async function checkForUpdate() {
   if (!UPDATE_CHECK_URL) return null;
-  try {
-    // Добавляем timestamp чтобы обойти CDN-кэш GitHub
-    const url  = UPDATE_CHECK_URL + '?t=' + Date.now();
-    const text = await fetchText(url);
-    const info = JSON.parse(text);
-    const current = app.getVersion();
-    if (compareVersions(info.version, current) > 0) {
-      return { ...info, currentVersion: current };
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const url  = UPDATE_CHECK_URL + '?t=' + Date.now();
+      const text = await fetchText(url);
+      const info = JSON.parse(text);
+      const current = app.getVersion();
+      console.log(`[updater] проверка OK (попытка ${attempt}): remote=${info.version}, local=${current}`);
+      if (compareVersions(info.version, current) > 0) {
+        return { ...info, currentVersion: current };
+      }
+      return null;
+    } catch (e) {
+      console.log(`[updater] попытка ${attempt}/${maxRetries} не удалась: ${e.message}`);
+      if (attempt < maxRetries) await sleep(3000 * attempt);
     }
-    return null;
-  } catch (e) {
-    console.log('[updater] check failed:', e.message);
-    return null;
   }
+  console.log('[updater] все попытки проверки исчерпаны');
+  return null;
 }
 
 /** Скачать файл по URL в папку temp, с прогресс-коллбэком */
