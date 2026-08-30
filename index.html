@@ -2625,6 +2625,60 @@
   </div>
 </div>
 
+<!-- MODAL: Контрагент -->
+<div class="modal-overlay" id="contragentModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="caModalTitle">Добавить контрагента</div>
+      <button class="icon-btn" onclick="closeModal('contragentModal')">
+        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Название *</label>
+        <input type="text" id="caName" placeholder="ООО «Название»">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>ИНН</label>
+          <input type="text" id="caInn" placeholder="1234567890" maxlength="12">
+        </div>
+        <div class="form-group">
+          <label>Категория</label>
+          <select id="caCategory">
+            <option value="">— не указана —</option>
+            <option value="Поставщик">Поставщик</option>
+            <option value="Подрядчик">Подрядчик</option>
+            <option value="Заказчик">Заказчик</option>
+            <option value="АЗС">АЗС</option>
+            <option value="Автосервис">Автосервис</option>
+            <option value="Прочее">Прочее</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Контактное лицо</label>
+          <input type="text" id="caContact" placeholder="ФИО">
+        </div>
+        <div class="form-group">
+          <label>Телефон</label>
+          <input type="text" id="caPhone" placeholder="+7 (999) 123-45-67">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Примечание</label>
+        <textarea id="caNote" rows="2" placeholder="Дополнительно..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('contragentModal')">Отмена</button>
+      <button class="btn btn-primary" onclick="saveContragent()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: Журнал ремонта (все ТС) -->
 <div class="modal-overlay" id="repairsJournalModal">
   <div class="modal modal-xl">
@@ -3494,6 +3548,7 @@ async function loadData() {
   if (!d.budget)      d.budget       = [];
   if (!d.reestrRows)  d.reestrRows   = [];
   if (!d.savedReestrs) d.savedReestrs = [];
+  if (!d.contragents) d.contragents = [];
   return d;
 }
 function saveData(d) {
@@ -8177,7 +8232,8 @@ function switchSection(section) {
   const sectionTitles = {
     vehicles: 'Транспорт', generators: 'ДЭС', tanks: 'Ёмкости',
     reestr: 'Реестр', toSchedule: 'График ТО', repairs: 'Журнал ремонта',
-    finances: 'Финансы'
+    finances: 'Финансы', contragents: 'Контрагенты', reports: 'Отчёты',
+    printForms: 'Печатные формы'
   };
 
   // Header: back button + section title
@@ -8243,6 +8299,12 @@ function switchSection(section) {
     renderTankList();
   } else if (section === 'finances') {
     renderFinancesSection();
+  } else if (section === 'contragents') {
+    renderContragentsSection();
+  } else if (section === 'reports') {
+    renderReportsSection();
+  } else if (section === 'printForms') {
+    renderPrintFormsSection();
   }
   hideProgress();
   setTimeout(() => animateCounters(), 50);
@@ -8330,6 +8392,33 @@ function renderMainMenu() {
           <div class="aero-shine"></div>
           <div class="menu-tile-title">Финансы</div>
           <div class="menu-tile-sub">${(data.payments||[]).length} записей</div>
+        </div>
+
+        <div class="menu-tile" onclick="switchSection('contragents')">
+          <div class="menu-tile-icon" style="background:#fef9c3">
+            <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#ca8a04" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+          </div>
+          <div class="aero-shine"></div>
+          <div class="menu-tile-title">Контрагенты</div>
+          <div class="menu-tile-sub">${(data.contragents||[]).length} записей</div>
+        </div>
+
+        <div class="menu-tile" onclick="switchSection('reports')">
+          <div class="menu-tile-icon" style="background:#e0e7ff">
+            <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#4f46e5" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+          </div>
+          <div class="aero-shine"></div>
+          <div class="menu-tile-title">Отчёты</div>
+          <div class="menu-tile-sub">Оборотка</div>
+        </div>
+
+        <div class="menu-tile" onclick="switchSection('printForms')">
+          <div class="menu-tile-icon" style="background:#f0fdf4">
+            <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#15803d" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          </div>
+          <div class="aero-shine"></div>
+          <div class="menu-tile-title">Печать</div>
+          <div class="menu-tile-sub">Документы</div>
         </div>
 
       </div>
@@ -11438,6 +11527,530 @@ function importPaymentsFromJournals() {
     alert('Импортировано записей: ' + imported);
   } else {
     alert('Нет новых записей для импорта');
+  }
+}
+
+// ─── КОНТРАГЕНТЫ ──────────────────────────────────────
+let editingContragentId = null;
+let caSearchQuery = '';
+
+function renderContragentsSection() {
+  const list = data.contragents || [];
+  const q = caSearchQuery.toLowerCase().trim();
+  const filtered = q ? list.filter(c => [c.name,c.inn,c.contact,c.phone,c.note].some(f=>(f||'').toLowerCase().includes(q))) : list;
+  filtered.sort((a,b) => (a.name||'').localeCompare(b.name||''));
+
+  const totalPayments = (data.payments||[]);
+  const caStats = {};
+  totalPayments.forEach(p => {
+    const key = (p.contragent||'').trim();
+    if (!key) return;
+    if (!caStats[key]) caStats[key] = {count:0, sum:0};
+    caStats[key].count++;
+    caStats[key].sum += (p.sum||0);
+  });
+
+  const rows = filtered.map(c => {
+    const st = caStats[(c.name||'').trim()] || {count:0, sum:0};
+    return `<tr>
+      <td style="font-weight:600">${c.name||''}</td>
+      <td>${c.inn||'—'}</td>
+      <td>${c.contact||'—'}</td>
+      <td>${c.phone||'—'}</td>
+      <td>${c.category||'—'}</td>
+      <td class="num">${st.count}</td>
+      <td class="num">${st.sum ? st.sum.toLocaleString('ru-RU') + ' ₽' : '—'}</td>
+      <td>${c.note||''}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-icon" title="Редактировать" onclick="openEditContragent('${c.id}')"><svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+        <button class="btn-icon" title="Удалить" onclick="deleteContragent('${c.id}')"><svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m5-3h4a1 1 0 011 1v1H9V4a1 1 0 011-1z"/></svg></button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('mainContent').innerHTML = `
+    <div style="padding:24px 28px;width:100%;box-sizing:border-box">
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
+        <input type="text" placeholder="Поиск по названию, ИНН, контакту..." value="${caSearchQuery}"
+          oninput="caSearchQuery=this.value;renderContragentsSection()"
+          style="flex:1;min-width:200px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text)">
+        <button class="primary-btn" onclick="openAddContragent()">+ Контрагент</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+        <div class="stat-card"><div class="stat-value counter" data-target="${list.length}">0</div><div class="stat-label">Всего</div></div>
+        <div class="stat-card"><div class="stat-value counter" data-target="${Object.keys(caStats).length}">0</div><div class="stat-label">С платежами</div></div>
+        <div class="stat-card"><div class="stat-value counter" data-target="${totalPayments.reduce((s,p)=>s+(p.sum||0),0)}">0</div><div class="stat-label">Общий оборот ₽</div></div>
+      </div>
+      ${filtered.length ? `<div style="overflow-x:auto"><table class="data-table" style="width:100%">
+        <thead><tr><th>Название</th><th>ИНН</th><th>Контакт</th><th>Телефон</th><th>Категория</th><th>Док-тов</th><th>Сумма</th><th>Примечание</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>` : `<div class="welcome"><h2>Нет контрагентов</h2><p>Нажмите «+ Контрагент» для добавления</p></div>`}
+    </div>`;
+}
+
+function openAddContragent() {
+  editingContragentId = null;
+  document.getElementById('caModalTitle').textContent = 'Добавить контрагента';
+  document.getElementById('caName').value = '';
+  document.getElementById('caInn').value = '';
+  document.getElementById('caContact').value = '';
+  document.getElementById('caPhone').value = '';
+  document.getElementById('caCategory').value = '';
+  document.getElementById('caNote').value = '';
+  openModal('contragentModal');
+}
+
+function openEditContragent(id) {
+  const c = (data.contragents||[]).find(x=>x.id===id);
+  if (!c) return;
+  editingContragentId = id;
+  document.getElementById('caModalTitle').textContent = 'Редактировать контрагента';
+  document.getElementById('caName').value = c.name||'';
+  document.getElementById('caInn').value = c.inn||'';
+  document.getElementById('caContact').value = c.contact||'';
+  document.getElementById('caPhone').value = c.phone||'';
+  document.getElementById('caCategory').value = c.category||'';
+  document.getElementById('caNote').value = c.note||'';
+  openModal('contragentModal');
+}
+
+function saveContragent() {
+  const name = document.getElementById('caName').value.trim();
+  if (!name) { showFieldError('caName','Укажите название'); return; }
+  const obj = {
+    id: editingContragentId || ('ca_' + Date.now()),
+    name,
+    inn: document.getElementById('caInn').value.trim(),
+    contact: document.getElementById('caContact').value.trim(),
+    phone: document.getElementById('caPhone').value.trim(),
+    category: document.getElementById('caCategory').value.trim(),
+    note: document.getElementById('caNote').value.trim(),
+  };
+  if (editingContragentId) {
+    const idx = data.contragents.findIndex(c=>c.id===editingContragentId);
+    if (idx>=0) data.contragents[idx] = obj;
+  } else {
+    data.contragents.push(obj);
+  }
+  saveData();
+  closeModal('contragentModal');
+  renderContragentsSection();
+  showToast(editingContragentId ? 'Контрагент обновлён' : 'Контрагент добавлен');
+}
+
+function deleteContragent(id) {
+  if (!confirm('Удалить контрагента?')) return;
+  data.contragents = data.contragents.filter(c=>c.id!==id);
+  saveData();
+  renderContragentsSection();
+  showToast('Контрагент удалён');
+}
+
+// ─── ОТЧЁТЫ (ОБОРОТКА) ──────────────────────────────────
+let reportPeriod = 'all';
+let reportGroupBy = 'category';
+
+function renderReportsSection() {
+  const payments = data.payments || [];
+  const vehicles = data.vehicles || [];
+  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+
+  const months = new Set();
+  payments.forEach(p => {
+    if (p.date) {
+      const d = new Date(p.date);
+      if (!isNaN(d)) months.add(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));
+    }
+  });
+  const sortedMonths = [...months].sort().reverse();
+
+  let filtered = payments;
+  if (reportPeriod !== 'all') {
+    filtered = payments.filter(p => {
+      if (!p.date) return false;
+      const d = new Date(p.date);
+      return (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')) === reportPeriod;
+    });
+  }
+
+  const totalSum = filtered.reduce((s,p)=>s+(p.sum||0),0);
+  const paidSum = filtered.filter(p=>p.paid).reduce((s,p)=>s+(p.sum||0),0);
+  const unpaidSum = totalSum - paidSum;
+
+  const periodTabs = `<button class="mtab ${reportPeriod==='all'?'active':''}" onclick="reportPeriod='all';renderReportsSection()">Все</button>` +
+    sortedMonths.map(m => {
+      const [y,mo] = m.split('-');
+      return `<button class="mtab ${reportPeriod===m?'active':''}" onclick="reportPeriod='${m}';renderReportsSection()">${monthNames[parseInt(mo)-1]} ${y}</button>`;
+    }).join('');
+
+  const groupBtns = [['category','По статьям'],['vehicle','По ТС'],['contragent','По контрагентам'],['month','По месяцам']].map(([k,l]) =>
+    `<button class="mtab ${reportGroupBy===k?'active':''}" onclick="reportGroupBy='${k}';renderReportsSection()">${l}</button>`
+  ).join('');
+
+  const vMap = {};
+  vehicles.forEach(v => vMap[v.id] = v.plate || v.make || v.id);
+
+  const groups = {};
+  filtered.forEach(p => {
+    let key;
+    if (reportGroupBy === 'category') key = p.category || 'Без категории';
+    else if (reportGroupBy === 'vehicle') key = p.vehicleId ? (vMap[p.vehicleId]||p.vehicleId) : 'Без ТС';
+    else if (reportGroupBy === 'contragent') key = p.contragent || 'Без контрагента';
+    else if (reportGroupBy === 'month') {
+      if (!p.date) { key = 'Без даты'; }
+      else { const d = new Date(p.date); key = monthNames[d.getMonth()] + ' ' + d.getFullYear(); }
+    }
+    if (!groups[key]) groups[key] = { count:0, sum:0, paid:0, unpaid:0 };
+    groups[key].count++;
+    groups[key].sum += (p.sum||0);
+    if (p.paid) groups[key].paid += (p.sum||0);
+    else groups[key].unpaid += (p.sum||0);
+  });
+
+  const sorted = Object.entries(groups).sort((a,b)=>b[1].sum-a[1].sum);
+  const pctBar = (val, max) => max > 0 ? `<div style="background:var(--border);border-radius:4px;height:6px;width:100px;display:inline-block;vertical-align:middle;margin-left:8px"><div style="background:#4f46e5;border-radius:4px;height:6px;width:${Math.round(val/max*100)}%"></div></div>` : '';
+
+  const tableRows = sorted.map(([name, g]) => `<tr>
+    <td style="font-weight:600">${name}</td>
+    <td class="num">${g.count}</td>
+    <td class="num">${g.sum.toLocaleString('ru-RU')} ₽ ${pctBar(g.sum, totalSum)}</td>
+    <td class="num" style="color:#16a34a">${g.paid.toLocaleString('ru-RU')} ₽</td>
+    <td class="num" style="color:#dc2626">${g.unpaid.toLocaleString('ru-RU')} ₽</td>
+    <td class="num">${totalSum>0 ? (g.sum/totalSum*100).toFixed(1)+'%' : '—'}</td>
+  </tr>`).join('');
+
+  document.getElementById('mainContent').innerHTML = `
+    <div style="padding:24px 28px;width:100%;box-sizing:border-box">
+      <h3 style="margin:0 0 16px;font-size:18px;font-weight:700">Оборотно-сальдовая ведомость</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+        <div class="stat-card"><div class="stat-value counter" data-target="${totalSum}">0</div><div class="stat-label">Итого расходов ₽</div></div>
+        <div class="stat-card"><div class="stat-value counter" data-target="${paidSum}">0</div><div class="stat-label" style="color:#16a34a">Оплачено ₽</div></div>
+        <div class="stat-card"><div class="stat-value counter" data-target="${unpaidSum}">0</div><div class="stat-label" style="color:#dc2626">Не оплачено ₽</div></div>
+        <div class="stat-card"><div class="stat-value counter" data-target="${filtered.length}">0</div><div class="stat-label">Документов</div></div>
+      </div>
+      <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span style="font-weight:600;font-size:13px;color:var(--text3)">Период:</span>${periodTabs}
+      </div>
+      <div style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span style="font-weight:600;font-size:13px;color:var(--text3)">Группировка:</span>${groupBtns}
+      </div>
+      ${sorted.length ? `<div style="overflow-x:auto"><table class="data-table" style="width:100%">
+        <thead><tr><th>${reportGroupBy==='category'?'Статья':reportGroupBy==='vehicle'?'ТС':reportGroupBy==='contragent'?'Контрагент':'Период'}</th><th>Кол-во</th><th>Сумма</th><th>Оплачено</th><th>Не оплач.</th><th>Доля</th></tr></thead>
+        <tbody>${tableRows}
+          <tr style="font-weight:700;border-top:2px solid var(--border)">
+            <td>ИТОГО</td><td class="num">${filtered.length}</td>
+            <td class="num">${totalSum.toLocaleString('ru-RU')} ₽</td>
+            <td class="num" style="color:#16a34a">${paidSum.toLocaleString('ru-RU')} ₽</td>
+            <td class="num" style="color:#dc2626">${unpaidSum.toLocaleString('ru-RU')} ₽</td>
+            <td class="num">100%</td>
+          </tr>
+        </tbody>
+      </table></div>` : `<div class="welcome"><h2>Нет данных</h2><p>Добавьте платежи в разделе «Финансы»</p></div>`}
+      <div style="margin-top:20px;text-align:right">
+        <button class="primary-btn" onclick="exportReportXlsx()">Экспорт в Excel</button>
+      </div>
+    </div>`;
+}
+
+function exportReportXlsx() {
+  if (typeof XLSX === 'undefined') { alert('Библиотека XLSX не загружена'); return; }
+  const payments = data.payments || [];
+  const vehicles = data.vehicles || [];
+  const vMap = {};
+  vehicles.forEach(v => vMap[v.id] = v.plate || v.make || v.id);
+
+  let filtered = payments;
+  if (reportPeriod !== 'all') {
+    filtered = payments.filter(p => {
+      if (!p.date) return false;
+      const d = new Date(p.date);
+      return (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')) === reportPeriod;
+    });
+  }
+
+  const rows = [['Дата','Сумма','Категория','Описание','Контрагент','ТС','Оплачено']];
+  filtered.sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(p => {
+    rows.push([
+      p.date ? fmtDate(p.date) : '',
+      p.sum||0,
+      p.category||'',
+      p.description||'',
+      p.contragent||'',
+      p.vehicleId ? (vMap[p.vehicleId]||'') : '',
+      p.paid ? 'Да' : 'Нет'
+    ]);
+  });
+  rows.push([]);
+  rows.push(['ИТОГО', filtered.reduce((s,p)=>s+(p.sum||0),0)]);
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:12},{wch:12},{wch:14},{wch:30},{wch:20},{wch:16},{wch:10}];
+  XLSX.utils.book_append_sheet(wb, ws, 'Оборотка');
+  XLSX.writeFile(wb, `Оборотка_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+// ─── ПЕЧАТНЫЕ ФОРМЫ ──────────────────────────────────────
+function renderPrintFormsSection() {
+  const vehicles = data.vehicles || [];
+  const vOptions = vehicles.map(v =>
+    `<option value="${v.id}">${v.plate||''} ${v.make||''}</option>`
+  ).join('');
+
+  document.getElementById('mainContent').innerHTML = `
+    <div style="padding:24px 28px;width:100%;box-sizing:border-box;max-width:900px;margin:0 auto">
+      <h3 style="margin:0 0 24px;font-size:18px;font-weight:700">Печатные формы</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px">
+
+        <div class="card" style="padding:24px;cursor:default">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+            <div style="width:44px;height:44px;border-radius:10px;background:#dbeafe;display:flex;align-items:center;justify-content:center">
+              <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="#2563eb" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div><div style="font-weight:700;font-size:15px">Путевой лист</div><div style="font-size:12px;color:var(--text3)">Форма для выезда ТС</div></div>
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="font-size:12px;color:var(--text3);font-weight:600">Транспортное средство</label>
+            <select id="pfVehicle" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px">
+              <option value="">— Выберите ТС —</option>${vOptions}
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+            <div>
+              <label style="font-size:12px;color:var(--text3);font-weight:600">Дата выезда</label>
+              <input type="date" id="pfDate" value="${new Date().toISOString().slice(0,10)}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text3);font-weight:600">Маршрут</label>
+              <input type="text" id="pfRoute" placeholder="откуда — куда" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
+            </div>
+          </div>
+          <button class="primary-btn" onclick="generateWaybill()" style="width:100%">Сформировать PDF</button>
+        </div>
+
+        <div class="card" style="padding:24px;cursor:default">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+            <div style="width:44px;height:44px;border-radius:10px;background:#fef3c7;display:flex;align-items:center;justify-content:center">
+              <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="#d97706" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div><div style="font-weight:700;font-size:15px">Заявка на ГСМ</div><div style="font-size:12px;color:var(--text3)">Заявка на получение топлива</div></div>
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="font-size:12px;color:var(--text3);font-weight:600">Транспортное средство</label>
+            <select id="pfFuelVehicle" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px">
+              <option value="">— Выберите ТС —</option>${vOptions}
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+            <div>
+              <label style="font-size:12px;color:var(--text3);font-weight:600">Дата</label>
+              <input type="date" id="pfFuelDate" value="${new Date().toISOString().slice(0,10)}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text3);font-weight:600">Объём (л)</label>
+              <input type="number" id="pfFuelAmount" placeholder="100" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
+            </div>
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="font-size:12px;color:var(--text3);font-weight:600">Вид топлива</label>
+            <select id="pfFuelType" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px">
+              <option value="Дизельное топливо">Дизельное топливо</option>
+              <option value="Бензин АИ-92">Бензин АИ-92</option>
+              <option value="Бензин АИ-95">Бензин АИ-95</option>
+              <option value="Газ">Газ</option>
+            </select>
+          </div>
+          <button class="primary-btn" onclick="generateFuelRequest()" style="width:100%">Сформировать PDF</button>
+        </div>
+
+        <div class="card" style="padding:24px;cursor:default">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+            <div style="width:44px;height:44px;border-radius:10px;background:#dcfce7;display:flex;align-items:center;justify-content:center">
+              <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="#16a34a" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            </div>
+            <div><div style="font-weight:700;font-size:15px">Акт выполненных работ</div><div style="font-size:12px;color:var(--text3)">По ремонту / ТО</div></div>
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="font-size:12px;color:var(--text3);font-weight:600">Транспортное средство</label>
+            <select id="pfActVehicle" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px">
+              <option value="">— Выберите ТС —</option>${vOptions}
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+            <div>
+              <label style="font-size:12px;color:var(--text3);font-weight:600">Дата</label>
+              <input type="date" id="pfActDate" value="${new Date().toISOString().slice(0,10)}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text3);font-weight:600">Номер акта</label>
+              <input type="text" id="pfActNumber" placeholder="001" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
+            </div>
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="font-size:12px;color:var(--text3);font-weight:600">Описание работ</label>
+            <textarea id="pfActDesc" rows="2" placeholder="Замена масла, фильтров..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box;resize:vertical"></textarea>
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="font-size:12px;color:var(--text3);font-weight:600">Сумма ₽</label>
+            <input type="number" id="pfActSum" placeholder="0" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
+          </div>
+          <button class="primary-btn" onclick="generateActPdf()" style="width:100%">Сформировать PDF</button>
+        </div>
+
+      </div>
+    </div>`;
+}
+
+function generateWaybill() {
+  const vid = document.getElementById('pfVehicle').value;
+  if (!vid) { alert('Выберите транспортное средство'); return; }
+  const v = data.vehicles.find(x=>x.id===vid);
+  if (!v) return;
+  const date = document.getElementById('pfDate').value || new Date().toISOString().slice(0,10);
+  const route = document.getElementById('pfRoute').value.trim() || '—';
+  const fuelLabel = {diesel:'Дизельное',gasoline:'Бензин',gas:'Газ'}[v.fuel]||v.fuel||'—';
+  const org = v.org || 'ООО «Технрайз Велл Сервис»';
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Путевой лист</title>
+  <style>body{font-family:'Times New Roman',serif;font-size:14px;padding:40px;color:#000}
+  h1{text-align:center;font-size:18px;margin-bottom:24px}
+  table{width:100%;border-collapse:collapse;margin-bottom:20px}
+  td,th{border:1px solid #000;padding:6px 10px;text-align:left}
+  th{background:#f0f0f0;font-weight:700}
+  .sig{margin-top:60px;display:flex;justify-content:space-between}
+  .sig div{width:45%}.sig .line{border-bottom:1px solid #000;margin-top:30px;text-align:center;font-size:12px;color:#666}
+  </style></head><body>
+  <div style="text-align:center;font-size:12px;color:#666;margin-bottom:8px">${org}</div>
+  <h1>ПУТЕВОЙ ЛИСТ № ___</h1>
+  <table>
+    <tr><th style="width:200px">Дата выезда</th><td>${fmtDate(date)}</td></tr>
+    <tr><th>Организация</th><td>${org}</td></tr>
+    <tr><th>Транспортное средство</th><td>${v.make||''} ${v.model||''}</td></tr>
+    <tr><th>Гос. номер</th><td>${v.plate||'—'}</td></tr>
+    <tr><th>Водитель</th><td>${v.driver||'—'}</td></tr>
+    <tr><th>Вид топлива</th><td>${fuelLabel}</td></tr>
+    <tr><th>Маршрут</th><td>${route}</td></tr>
+  </table>
+  <table>
+    <tr><th>Показания одометра</th><th>Выезд</th><th>Возврат</th><th>Пробег</th></tr>
+    <tr><td>км</td><td style="min-width:100px"></td><td style="min-width:100px"></td><td style="min-width:100px"></td></tr>
+  </table>
+  <table>
+    <tr><th>Топливо</th><th>Остаток при выезде (л)</th><th>Выдано (л)</th><th>Остаток при возврате (л)</th><th>Расход (л)</th></tr>
+    <tr><td>${fuelLabel}</td><td></td><td></td><td></td><td></td></tr>
+  </table>
+  <div class="sig">
+    <div>Механик _______________<div class="line">подпись / ФИО</div></div>
+    <div>Водитель _______________<div class="line">подпись / ${v.driver||'ФИО'}</div></div>
+  </div>
+  </body></html>`;
+
+  if (window.electronAPI && window.electronAPI.exportPdf) {
+    window.electronAPI.exportPdf(html, `Путевой_лист_${v.plate||'ТС'}_${date}.pdf`);
+  } else {
+    const w = window.open('','_blank');
+    w.document.write(html);
+    w.document.close();
+    setTimeout(()=>w.print(), 500);
+  }
+}
+
+function generateFuelRequest() {
+  const vid = document.getElementById('pfFuelVehicle').value;
+  if (!vid) { alert('Выберите транспортное средство'); return; }
+  const v = data.vehicles.find(x=>x.id===vid);
+  if (!v) return;
+  const date = document.getElementById('pfFuelDate').value || new Date().toISOString().slice(0,10);
+  const amount = document.getElementById('pfFuelAmount').value || '___';
+  const fuelType = document.getElementById('pfFuelType').value;
+  const org = v.org || 'ООО «Технрайз Велл Сервис»';
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Заявка на ГСМ</title>
+  <style>body{font-family:'Times New Roman',serif;font-size:14px;padding:40px;color:#000}
+  h1{text-align:center;font-size:18px;margin-bottom:24px}
+  table{width:100%;border-collapse:collapse;margin-bottom:20px}
+  td,th{border:1px solid #000;padding:6px 10px;text-align:left}
+  th{background:#f0f0f0;font-weight:700}
+  .sig{margin-top:60px;display:flex;justify-content:space-between}
+  .sig div{width:30%}.sig .line{border-bottom:1px solid #000;margin-top:30px;text-align:center;font-size:12px;color:#666}
+  </style></head><body>
+  <div style="text-align:right;margin-bottom:20px">Утверждаю _______________<br><span style="font-size:11px;color:#666">должность / ФИО</span></div>
+  <div style="text-align:center;font-size:12px;color:#666;margin-bottom:8px">${org}</div>
+  <h1>ЗАЯВКА НА ПОЛУЧЕНИЕ ГСМ</h1>
+  <p>Дата: <b>${fmtDate(date)}</b></p>
+  <table>
+    <tr><th>№</th><th>Наименование ГСМ</th><th>Ед. изм.</th><th>Кол-во</th><th>Назначение</th></tr>
+    <tr><td>1</td><td>${fuelType}</td><td>литр</td><td>${amount}</td><td>${v.make||''} ${v.plate||''}</td></tr>
+  </table>
+  <table>
+    <tr><th style="width:200px">Транспортное средство</th><td>${v.make||''} ${v.model||''}, гос. № ${v.plate||'—'}</td></tr>
+    <tr><th>Водитель</th><td>${v.driver||'—'}</td></tr>
+    <tr><th>Объект</th><td>${v.object||'—'}</td></tr>
+  </table>
+  <div class="sig">
+    <div>Заявитель ___________<div class="line">подпись / ФИО</div></div>
+    <div>Согласовано __________<div class="line">подпись / ФИО</div></div>
+    <div>Получил ______________<div class="line">подпись / ${v.driver||'ФИО'}</div></div>
+  </div>
+  </body></html>`;
+
+  if (window.electronAPI && window.electronAPI.exportPdf) {
+    window.electronAPI.exportPdf(html, `Заявка_ГСМ_${v.plate||'ТС'}_${date}.pdf`);
+  } else {
+    const w = window.open('','_blank');
+    w.document.write(html);
+    w.document.close();
+    setTimeout(()=>w.print(), 500);
+  }
+}
+
+function generateActPdf() {
+  const vid = document.getElementById('pfActVehicle').value;
+  if (!vid) { alert('Выберите транспортное средство'); return; }
+  const v = data.vehicles.find(x=>x.id===vid);
+  if (!v) return;
+  const date = document.getElementById('pfActDate').value || new Date().toISOString().slice(0,10);
+  const actNum = document.getElementById('pfActNumber').value.trim() || '___';
+  const desc = document.getElementById('pfActDesc').value.trim() || '—';
+  const sum = document.getElementById('pfActSum').value || '0';
+  const org = v.org || 'ООО «Технрайз Велл Сервис»';
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Акт выполненных работ</title>
+  <style>body{font-family:'Times New Roman',serif;font-size:14px;padding:40px;color:#000}
+  h1{text-align:center;font-size:18px;margin-bottom:24px}
+  table{width:100%;border-collapse:collapse;margin-bottom:20px}
+  td,th{border:1px solid #000;padding:6px 10px;text-align:left}
+  th{background:#f0f0f0;font-weight:700}
+  .sig{margin-top:60px;display:flex;justify-content:space-between}
+  .sig div{width:45%}.sig .line{border-bottom:1px solid #000;margin-top:30px;text-align:center;font-size:12px;color:#666}
+  </style></head><body>
+  <div style="text-align:center;font-size:12px;color:#666;margin-bottom:8px">${org}</div>
+  <h1>АКТ ВЫПОЛНЕННЫХ РАБОТ № ${actNum}</h1>
+  <p>Дата: <b>${fmtDate(date)}</b></p>
+  <table>
+    <tr><th style="width:200px">Транспортное средство</th><td>${v.make||''} ${v.model||''}, гос. № ${v.plate||'—'}</td></tr>
+    <tr><th>Ответственный</th><td>${v.responsible||v.driver||'—'}</td></tr>
+    <tr><th>Организация</th><td>${org}</td></tr>
+  </table>
+  <table>
+    <tr><th>№</th><th>Наименование работ</th><th>Сумма ₽</th></tr>
+    <tr><td>1</td><td>${desc}</td><td style="text-align:right">${Number(sum).toLocaleString('ru-RU')}</td></tr>
+    <tr style="font-weight:700"><td colspan="2" style="text-align:right">ИТОГО:</td><td style="text-align:right">${Number(sum).toLocaleString('ru-RU')} ₽</td></tr>
+  </table>
+  <p>Работы выполнены в полном объёме. Заказчик претензий по объёму, качеству и срокам оказания услуг не имеет.</p>
+  <div class="sig">
+    <div>Исполнитель _______________<div class="line">подпись / ФИО</div></div>
+    <div>Заказчик _______________<div class="line">подпись / ФИО</div></div>
+  </div>
+  </body></html>`;
+
+  if (window.electronAPI && window.electronAPI.exportPdf) {
+    window.electronAPI.exportPdf(html, `Акт_${actNum}_${v.plate||'ТС'}_${date}.pdf`);
+  } else {
+    const w = window.open('','_blank');
+    w.document.write(html);
+    w.document.close();
+    setTimeout(()=>w.print(), 500);
   }
 }
 
