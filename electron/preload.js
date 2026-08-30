@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateAvailable: (cb)   => ipcRenderer.on('update-available',  (_e, info) => cb(info)),
   onDownloadProgress: (cb)  => ipcRenderer.on('download-progress', (_e, pct)  => cb(pct)),
   onReestrRowsSaved: (cb)   => ipcRenderer.on('reestr-rows-saved', (_e, rows) => cb(rows)),
+  importSvodkaPdf:   ()     => ipcRenderer.invoke('import-svodka-pdf'),
 });
 
 contextBridge.exposeInMainWorld('reestrAPI', {

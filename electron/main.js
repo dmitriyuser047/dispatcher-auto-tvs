@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog, session } = require('electro
 const path    = require('path');
 const fs      = require('fs');
 const os      = require('os');
+const http    = require('http');
 const updater = require('./updater');
 const server  = require('./server');
 const { createExtractorFromData } = require('node-unrar-js');
@@ -81,7 +82,30 @@ function createWindow() {
     },
   });
   win.setMenuBarVisibility(false);
-  win.loadFile(path.join(__dirname, '../index.html'));
+
+  // Serve index.html via local HTTP to avoid file:// rendering bugs
+  const rootDir = path.join(__dirname, '..');
+  const mime = { '.html':'text/html', '.js':'application/javascript', '.css':'text/css', '.json':'application/json', '.png':'image/png', '.ico':'image/x-icon', '.svg':'image/svg+xml' };
+  if (!app._localServer) {
+    app._localServer = http.createServer((req, res) => {
+      const url = req.url === '/' ? '/index.html' : req.url.split('?')[0];
+      const filePath = path.join(rootDir, decodeURIComponent(url));
+      if (!filePath.startsWith(rootDir)) { res.writeHead(403); res.end(); return; }
+      fs.readFile(filePath, (err, data) => {
+        if (err) { res.writeHead(404); res.end(); return; }
+        const ext = path.extname(filePath).toLowerCase();
+        res.writeHead(200, { 'Content-Type': mime[ext] || 'application/octet-stream' });
+        res.end(data);
+      });
+    });
+    app._localServer.listen(0, '127.0.0.1', () => {
+      const port = app._localServer.address().port;
+      app._localServerPort = port;
+      win.loadURL(`http://127.0.0.1:${port}/index.html`);
+    });
+  } else {
+    win.loadURL(`http://127.0.0.1:${app._localServerPort}/index.html`);
+  }
 
   // Проверка обновлений через 5 сек после запуска
   win.webContents.once('did-finish-load', () => {
@@ -628,6 +652,42 @@ app.whenReady().then(() => {
       return { ok: false, error: e.message };
     } finally {
       try { fs.unlinkSync(tmpFile); } catch {}
+    }
+  });
+
+  // ─── Импорт Сводки из PDF ───
+  ipcMain.handle('import-svodka-pdf', async (event) => {
+    const senderWin = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
+      title: 'Выберите PDF-файл сводки',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      properties: ['openFile'],
+    });
+    if (canceled || !filePaths || !filePaths[0]) return { ok: false };
+    try {
+      const pdfData = new Uint8Array(fs.readFileSync(filePaths[0]));
+      const pdfjsPkg = require('pdfjs-dist/build/pdf.js');
+      const { getDocument } = pdfjsPkg;
+      const doc = await getDocument({ data: pdfData, useSystemFonts: true }).promise;
+      const allItems = [];
+      for (let i = 1; i <= doc.numPages; i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        for (const item of content.items) {
+          if (!item.str || !item.str.trim()) continue;
+          allItems.push({
+            str: item.str,
+            x: Math.round(item.transform[4] * 10) / 10,
+            y: Math.round(item.transform[5] * 10) / 10,
+            w: Math.round((item.width || 0) * 10) / 10,
+            h: Math.round((item.height || 0) * 10) / 10,
+            page: i,
+          });
+        }
+      }
+      return { ok: true, items: allItems, fileName: path.basename(filePaths[0]) };
+    } catch (e) {
+      return { ok: false, error: e.message };
     }
   });
 
