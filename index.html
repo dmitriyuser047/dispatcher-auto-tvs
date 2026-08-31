@@ -1997,6 +1997,22 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="settingsPromptModal" onclick="if(event.target===this){closeModal('settingsPromptModal')}" style="z-index:10001">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-header">
+      <h2 class="modal-title" id="settingsPromptTitle">Ввод</h2>
+      <button class="modal-close" onclick="closeModal('settingsPromptModal')">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px">
+      <input type="text" id="settingsPromptInput" style="width:100%;padding:8px 12px;font-size:14px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font-family:inherit;box-sizing:border-box" onkeydown="if(event.key==='Enter')settingsPromptOk()">
+      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+        <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsPromptModal')" style="font-size:13px;padding:6px 16px">Отмена</button>
+        <button class="btn btn-primary btn-sm" onclick="settingsPromptOk()" style="font-size:13px;padding:6px 16px">ОК</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- UPDATE BANNER -->
 <div id="updateBanner" style="display:none;background:#1e3a5f;border-bottom:1px solid #2d5a8e;padding:10px 24px;align-items:center;gap:14px;flex-wrap:wrap">
   <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#60a5fa" stroke-width="2" style="flex-shrink:0">
@@ -7294,6 +7310,21 @@ async function renderSettingsBody() {
   `;
 }
 
+let _settingsPromptCallback = null;
+function showSettingsPrompt(title, defaultValue) {
+  document.getElementById('settingsPromptTitle').textContent = title;
+  const inp = document.getElementById('settingsPromptInput');
+  inp.value = defaultValue || '';
+  openModal('settingsPromptModal');
+  setTimeout(() => inp.focus(), 100);
+}
+function settingsPromptOk() {
+  const val = document.getElementById('settingsPromptInput').value;
+  closeModal('settingsPromptModal');
+  if (_settingsPromptCallback) _settingsPromptCallback(val);
+  _settingsPromptCallback = null;
+}
+
 async function settingsSwitchUser(idx) {
   if (!_appSettings || idx === _appSettings.activeUser) return;
   await window.electronAPI.switchUser(idx);
@@ -7308,25 +7339,29 @@ async function settingsSwitchUser(idx) {
   showToast('Пользователь: ' + (_appSettings.users[idx].name || 'Без имени'));
 }
 
-async function settingsAddUser() {
-  const name = prompt('Имя нового пользователя:');
-  if (!name || !name.trim()) return;
-  const folderResult = await window.electronAPI.chooseDataFolder();
-  if (!folderResult.ok) return;
-  _appSettings.users.push({ name: name.trim(), dataDir: folderResult.path });
-  await window.electronAPI.saveSettings(_appSettings);
-  renderSettingsBody();
+function settingsAddUser() {
+  _settingsPromptCallback = async (name) => {
+    if (!name || !name.trim()) return;
+    const folderResult = await window.electronAPI.chooseDataFolder();
+    if (!folderResult.ok) return;
+    _appSettings.users.push({ name: name.trim(), dataDir: folderResult.path });
+    await window.electronAPI.saveSettings(_appSettings);
+    renderSettingsBody();
+  };
+  showSettingsPrompt('Имя нового пользователя:', '');
 }
 
-async function settingsEditUser(idx) {
+function settingsEditUser(idx) {
   const u = _appSettings.users[idx];
   if (!u) return;
-  const name = prompt('Имя пользователя:', u.name || '');
-  if (name === null) return;
-  u.name = name.trim() || 'Пользователь';
-  await window.electronAPI.saveSettings(_appSettings);
-  renderSettingsBody();
-  updateSidebarDataPath();
+  _settingsPromptCallback = async (name) => {
+    if (name === null) return;
+    u.name = name.trim() || 'Пользователь';
+    await window.electronAPI.saveSettings(_appSettings);
+    renderSettingsBody();
+    updateSidebarDataPath();
+  };
+  showSettingsPrompt('Имя пользователя:', u.name || '');
 }
 
 async function settingsDeleteUser(idx) {
