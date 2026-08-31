@@ -7383,6 +7383,12 @@ async function settingsSetMode(mode) {
 }
 
 async function settingsStartServer() {
+  const st = await window.electronAPI.serverStatus();
+  if (st.running) {
+    showToast('Сервер уже запущен на порту ' + st.port);
+    renderSettingsBody();
+    return;
+  }
   const result = await window.electronAPI.serverStart();
   if (result.ok) {
     showToast('Сервер запущен на порту ' + (result.port) + '\nIP: ' + (result.ips.join(', ')));
