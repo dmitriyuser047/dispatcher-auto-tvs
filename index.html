@@ -3526,12 +3526,15 @@ async function loadData() {
   if (!d.contragents) d.contragents = [];
   return d;
 }
-function saveData(d) {
+async function saveData(d) {
   showProgress();
   rebuildIndex();
   const json = JSON.stringify(d);
   if (window.electronAPI) {
-    window.electronAPI.writeData(json);
+    const ok = await window.electronAPI.writeData(json);
+    if (ok === false) {
+      showToast('Ошибка сохранения на сервер. Проверьте соединение.');
+    }
   }
   localStorage.setItem(STORAGE_KEY, json);
   setTimeout(hideProgress, 300);
