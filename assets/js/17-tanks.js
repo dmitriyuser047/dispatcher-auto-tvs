@@ -101,16 +101,26 @@ function renderTankDetail(t) {
   const boundGens = (data.generators || []).filter(g => g.tankId === t.id);
   const fmtL = x => (x||0).toLocaleString('ru',{maximumFractionDigits:1});
 
-  let incRows = incomes.length ? incomes.map(r => `<tr>
-      <td>${fmtDate(r.date)}</td>
-      <td style="text-align:right;font-weight:600;color:var(--green)">+${fmtL(r.amount)} л</td>
-      <td>${r.source || '—'}</td>
+  const fmtR = x => (x||0).toLocaleString('ru',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const tankName = id => { const q = tanksAll().find(x => x.id === id); return q ? (q.object || q.name) : '—'; };
+  let incRows = incomes.length ? incomes.map(r => {
+    const isMove = r.kind === 'in' || r.kind === 'out';
+    const neg = (r.amount || 0) < 0;
+    const col = neg ? 'var(--red)' : 'var(--green)';
+    const label = isMove
+      ? (r.kind === 'out' ? 'Перемещение на ' : 'Перемещение с ') + tankName(r.counterTankId)
+      : (r.source || '—');
+    return `<tr>
+      <td>${fmtDate(r.date)}${isMove ? ' <span style="font-size:10px;color:var(--text3);border:1px solid var(--border);border-radius:4px;padding:1px 4px">перемещение</span>' : ''}</td>
+      <td style="text-align:right;font-weight:600;color:${col}">${neg ? '−' : '+'}${fmtL(Math.abs(r.amount))} л</td>
+      <td style="text-align:right;white-space:nowrap">${r.sum ? fmtR(Math.abs(r.sum)) + ' ₽' : ''}</td>
+      <td>${label}</td>
       <td>${r.note || ''}</td>
       <td style="text-align:right;white-space:nowrap">
         <button class="icon-btn" onclick="openEditTankIncome('${r.id}')" title="Изменить"><svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg></button>
         <button class="icon-btn" onclick="deleteTankIncome('${r.id}')" title="Удалить"><svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>
       </td>
-    </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:14px">Нет записей прихода</td></tr>`;
+    </tr>`; }).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:14px">Нет записей прихода</td></tr>`;
 
   const boundHtml = boundGens.length ? boundGens.map(g => {
     const issued = (data.genRecords || []).filter(r => r.generatorId === g.id).reduce((s,r) => s + (r.fuelIssued || 0), 0);
@@ -129,6 +139,7 @@ function renderTankDetail(t) {
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary" onclick="openAddTankIncome()"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Приход</button>
+        <button class="btn btn-ghost" onclick="openTankTransfer()"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg> Перемещение</button>
         <button class="btn btn-ghost" onclick="openEditTank('${t.id}')"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg> Изменить</button>
       </div>
     </div>
@@ -153,7 +164,7 @@ function renderTankDetail(t) {
     </div>
     <div class="ss-title" style="margin:18px 0 8px">Журнал прихода топлива</div>
     <table class="data-table" style="width:100%">
-      <thead><tr><th>Дата</th><th style="text-align:right">Количество</th><th>Источник</th><th>Примечание</th><th></th></tr></thead>
+      <thead><tr><th>Дата</th><th style="text-align:right">Количество</th><th style="text-align:right">Сумма</th><th>Источник</th><th>Примечание</th><th></th></tr></thead>
       <tbody>${incRows}</tbody>
     </table>
     <div class="ss-title" style="margin:22px 0 4px">Привязанные ДЭС (выдача из ёмкости)</div>
@@ -267,19 +278,24 @@ function openAddTankIncome() {
   editingTankIncomeId = null;
   document.getElementById('tankIncomeModalTitle').textContent = 'Приход топлива';
   document.getElementById('ti_date').value = fmtDate(new Date().toISOString().split('T')[0]);
-  ['ti_amount','ti_source','ti_note'].forEach(id => document.getElementById(id).value = '');
+  ['ti_amount','ti_source','ti_note','ti_sum'].forEach(id => document.getElementById(id).value = '');
   openModal('tankIncomeModal');
 }
 
 function openEditTankIncome(id) {
   const r = (data.tankIncomes || []).find(x => x.id === id);
   if (!r) return;
+  if (r.kind === 'in' || r.kind === 'out') {
+    alert('Это половина перемещения между ёмкостями. Удалите его и создайте заново — иначе вторая сторона останется несогласованной.');
+    return;
+  }
   editingTankIncomeId = id;
   document.getElementById('tankIncomeModalTitle').textContent = 'Изменить приход';
   document.getElementById('ti_date').value   = fmtDate(r.date);
   document.getElementById('ti_amount').value = r.amount ?? '';
   document.getElementById('ti_source').value = r.source || '';
   document.getElementById('ti_note').value   = r.note || '';
+  document.getElementById('ti_sum').value    = r.sum ?? '';
   openModal('tankIncomeModal');
 }
 
@@ -293,6 +309,7 @@ function saveTankIncome() {
     tankId: selectedTankId, date, amount,
     source: document.getElementById('ti_source').value.trim(),
     note:   document.getElementById('ti_note').value.trim(),
+    sum:    parseFloat(document.getElementById('ti_sum').value) || 0,
   };
   if (editingTankIncomeId) {
     Object.assign(data.tankIncomes.find(x => x.id === editingTankIncomeId), obj);
@@ -308,11 +325,94 @@ function saveTankIncome() {
 }
 
 function deleteTankIncome(id) {
-  if (!confirm('Удалить запись прихода?')) return;
-  data.tankIncomes = (data.tankIncomes || []).filter(r => r.id !== id);
+  const r = (data.tankIncomes || []).find(x => x.id === id);
+  // У перемещения две половины: минус на ёмкости-источнике и плюс на приёмнике.
+  // Удаляем обе разом, иначе топливо появится или исчезнет из ниоткуда.
+  if (r && r.linkId) {
+    if (!confirm('Это перемещение между ёмкостями. Удалить его целиком — обе стороны?')) return;
+    data.tankIncomes = (data.tankIncomes || []).filter(x => x.linkId !== r.linkId);
+  } else {
+    if (!confirm('Удалить запись прихода?')) return;
+    data.tankIncomes = (data.tankIncomes || []).filter(x => x.id !== id);
+  }
   saveData(data);
   const t = tanksAll().find(x => x.id === selectedTankId);
   if (t) renderTankDetail(t);
   renderTankList();
 }
 
+// ─── ПЕРЕМЕЩЕНИЕ ТОПЛИВА МЕЖДУ ЁМКОСТЯМИ ─────────────────
+// Хранится двумя связанными записями в tankIncomes: минус на ёмкости-источнике
+// и плюс на приёмнике. Тогда остаток обеих считается существующей формулой
+// «начальный + сумма приходов − выдано в ДЭС», пересчитывать ничего не нужно.
+// Половины связаны полем linkId и удаляются только вместе.
+
+function openTankTransfer() {
+  if (!selectedTankId) return;
+  const others = tanksAll().filter(t => t.id !== selectedTankId);
+  if (!others.length) { alert('Нужна хотя бы ещё одна ёмкость, чтобы переместить топливо.'); return; }
+  document.getElementById('tt_date').value = fmtDate(new Date().toISOString().split('T')[0]);
+  ['tt_amount','tt_sum','tt_note'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('tt_dir').value = 'out';
+  document.getElementById('tt_counter').innerHTML = others.map(t =>
+    `<option value="${t.id}">${t.object || t.name} — ${t.name}</option>`).join('');
+  document.getElementById('tt_counter').onchange = renderTransferHint;
+  renderTransferHint();
+  openModal('tankTransferModal');
+}
+
+function renderTransferHint() {
+  const dir = document.getElementById('tt_dir').value;
+  const here = tanksAll().find(t => t.id === selectedTankId);
+  const other = tanksAll().find(t => t.id === document.getElementById('tt_counter').value);
+  document.getElementById('tt_counterLabel').textContent =
+    dir === 'out' ? 'Ёмкость-получатель *' : 'Ёмкость-источник *';
+  if (!here || !other) { document.getElementById('tt_hint').textContent = ''; return; }
+  const from = dir === 'out' ? here : other, to = dir === 'out' ? other : here;
+  document.getElementById('tt_hint').innerHTML =
+    `Спишется с <b>${from.object || from.name}</b> (остаток ${computeTankBalance(from.id).balance.toLocaleString('ru')} л), ` +
+    `поступит на <b>${to.object || to.name}</b> (остаток ${computeTankBalance(to.id).balance.toLocaleString('ru')} л). ` +
+    `Создадутся две связанные записи.`;
+}
+
+function saveTankTransfer() {
+  const date = parseDate(document.getElementById('tt_date').value.trim());
+  const amount = parseFloat(document.getElementById('tt_amount').value);
+  const sum = parseFloat(document.getElementById('tt_sum').value) || 0;
+  const note = document.getElementById('tt_note').value.trim();
+  const dir = document.getElementById('tt_dir').value;
+  const otherId = document.getElementById('tt_counter').value;
+  if (!date) { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'tt_date'); return; }
+  if (!amount || amount <= 0) { showFieldError('Укажите количество (л)', 'tt_amount'); return; }
+  if (!otherId || otherId === selectedTankId) { showFieldError('Выберите другую ёмкость', 'tt_counter'); return; }
+  const fromId = dir === 'out' ? selectedTankId : otherId;
+  const toId   = dir === 'out' ? otherId : selectedTankId;
+  const fromT = tanksAll().find(t => t.id === fromId);
+  const bal = computeTankBalance(fromId).balance;
+  if (amount > bal && !confirm(`На «${fromT.object || fromT.name}» остаток ${bal.toLocaleString('ru')} л, а перемещается ${amount.toLocaleString('ru')} л. Остаток уйдёт в минус. Продолжить?`)) return;
+  addTankTransfer({ fromId, toId, date, amount, sum, note });
+  saveData(data);
+  closeModal('tankTransferModal');
+  const t = tanksAll().find(x => x.id === selectedTankId);
+  if (t) renderTankDetail(t);
+  renderTankList();
+  showToast('Перемещено ' + amount.toLocaleString('ru') + ' л');
+}
+
+// Создаёт пару записей. Вынесено отдельно, чтобы можно было переносить перемещения и из импорта.
+function addTankTransfer({ fromId, toId, date, amount, sum, note }) {
+  if (!data.tankIncomes) data.tankIncomes = [];
+  const link = 'tr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  const nameOf = id => { const q = tanksAll().find(x => x.id === id); return q ? (q.object || q.name) : ''; };
+  data.tankIncomes.push({
+    id: link + '_out', linkId: link, kind: 'out', tankId: fromId, counterTankId: toId,
+    date, amount: -Math.abs(amount), sum: -Math.abs(sum || 0),
+    source: 'Перемещение на ' + nameOf(toId), note: note || '',
+  });
+  data.tankIncomes.push({
+    id: link + '_in', linkId: link, kind: 'in', tankId: toId, counterTankId: fromId,
+    date, amount: Math.abs(amount), sum: Math.abs(sum || 0),
+    source: 'Перемещение с ' + nameOf(fromId), note: note || '',
+  });
+  return link;
+}
