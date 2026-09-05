@@ -5,3 +5,7 @@ dist/
 Thumbs.db
 .claude/
 *.traineddata
+# Словари Tesseract нужны в сборке: без них распознавание по-русски
+# докачивается из интернета при первом запуске и не работает без сети.
+!rus.traineddata
+!eng.traineddata

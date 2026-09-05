@@ -1136,21 +1136,62 @@ async function runOcr() {
   btn.textContent = 'OCR…';
   status('Распознавание текста — подождите…');
   try {
-    const canvas = document.getElementById('pdfCanvas');
-    const dataUrl = canvas.toDataURL('image/png');
-    const base64 = dataUrl.split(',')[1];
+    // Распознаём не то, что видно на экране, а отдельный рендер страницы в 300 DPI.
+    // Раньше сюда уходил экранный холст с текущим масштабом (по умолчанию 1.5).
+    // Страница PDF измеряется в пунктах — 72 на дюйм, поэтому масштаб 1.5 давал
+    // всего ~108 DPI, а при отдалении до 0.5 — 36 DPI. Tesseract рассчитан на 300,
+    // на таком разрешении он выдаёт бессмысленный набор символов.
+    const page = await pdfDoc.getPage(currentPage);
+    const rotation = pageRotations[currentPage] || 0;
+    let ocrScale = 300 / 72;
+    // Ограничение на случай очень больших страниц (A0, плакаты): холст сверх
+    // 5000 точек по стороне съедает сотни мегабайт и может не создаться.
+    const probe = page.getViewport({ scale: ocrScale, rotation });
+    const maxSide = Math.max(probe.width, probe.height);
+    if (maxSide > 5000) ocrScale = ocrScale * (5000 / maxSide);
+    const vp = page.getViewport({ scale: ocrScale, rotation });
+    const oc = document.createElement('canvas');
+    oc.width = Math.round(vp.width); oc.height = Math.round(vp.height);
+    const octx = oc.getContext('2d', { willReadFrequently: true });
+    // Белая подложка: у страниц с прозрачностью иначе получается чёрный фон.
+    octx.fillStyle = '#ffffff'; octx.fillRect(0, 0, oc.width, oc.height);
+    await page.render({ canvasContext: octx, viewport: vp }).promise;
+
+    // Перевод в градации серого с растяжением контраста. Сканы часто серые
+    // и блёклые; Tesseract заметно увереннее работает с чётким чёрным на белом.
+    const img = octx.getImageData(0, 0, oc.width, oc.height);
+    const d = img.data;
+    let lo = 255, hi = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const g = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) | 0;
+      d[i] = g;
+      if (g < lo) lo = g;
+      if (g > hi) hi = g;
+    }
+    const span = hi - lo;
+    if (span > 10) {
+      for (let i = 0; i < d.length; i += 4) {
+        const g = ((d[i] - lo) * 255 / span) | 0;
+        d[i] = d[i + 1] = d[i + 2] = g < 0 ? 0 : g > 255 ? 255 : g;
+      }
+    } else {
+      for (let i = 0; i < d.length; i += 4) d[i + 1] = d[i + 2] = d[i];
+    }
+    octx.putImageData(img, 0, 0);
+
+    const base64 = oc.toDataURL('image/png').split(',')[1];
     const result = await window.pdfEditor.ocr(base64);
     if (!result.ok) { status('Ошибка OCR: ' + (result.error || 'неизвестно')); return; }
     const edits = getEdits(currentPage);
-    const canvasW = canvas.width;
-    const canvasH = canvas.height;
     let added = 0;
     for (const line of result.lines) {
       if (line.text.length < 2) continue;
-      const x = line.bbox.x / zoom;
-      const y = line.bbox.y / zoom;
+      // Координаты приходят в точках холста распознавания, а блоки текста
+      // хранятся в пунктах страницы — поэтому делим на масштаб распознавания.
+      const x = line.bbox.x / ocrScale;
+      const y = line.bbox.y / ocrScale;
       const h = line.bbox.h;
-      const fontSize = Math.max(6, Math.min(24, Math.round(h / zoom * 0.85)));
+      const fontSize = Math.max(6, Math.min(24, Math.round(h / ocrScale * 0.85)));
       edits.textBlocks.push({
         text: line.text, x, y, fontSize,
         deleted: false, moved: false, edited: true, isNew: true,

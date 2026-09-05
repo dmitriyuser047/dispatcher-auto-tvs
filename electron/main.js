@@ -614,7 +614,14 @@ app.whenReady().then(() => {
     const tmpFile = path.join(os.tmpdir(), `ocr_pdf_${Date.now()}.png`);
     try {
       fs.writeFileSync(tmpFile, buf);
-      await ocrWorker.setParameters({ tessedit_pageseg_mode: '3' });
+      await ocrWorker.setParameters({
+        tessedit_pageseg_mode: '3',
+        // Страница приходит из редактора отрисованной в 300 DPI. Без явного
+        // указания Tesseract пытается угадать разрешение по картинке и при
+        // ошибке неверно оценивает размер шрифта, что портит распознавание.
+        user_defined_dpi: '300',
+        preserve_interword_spaces: '1',
+      });
       const result = await Promise.race([
         ocrWorker.recognize(tmpFile),
         new Promise((_, rej) => setTimeout(() => rej(new Error('OCR timeout')), 180000)),
