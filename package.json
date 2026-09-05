@@ -1,6 +1,6 @@
 {
   "name": "dispetcherizaciya-avto",
-  "version": "2.0.43",
+  "version": "2.0.44",
   "description": "Диспетчеризация авто группы компаний ООО Технрайз Велл Сервис",
   "main": "electron/main.js",
   "scripts": {
@@ -26,6 +26,7 @@
       "ReestrBuilder/statyi.json",
       "rus.traineddata",
       "eng.traineddata",
+      "assets/**",
       "index.html",
       "reestr-window.html",
       "pdf-editor.html",
