@@ -135,7 +135,7 @@ function renderDetail(v) {
   const monthRecs = recs.filter(r => {
     const d = new Date(r.date);
     return d.getFullYear() === selectedYear && (d.getMonth() + 1) === selectedMonth;
-  }).sort((a, b) => new Date(a.date) - new Date(b.date));
+  }).sort((a, b) => cmpDateAsc(a.date, b.date));
 
   const monthKm = monthRecs.reduce((s, r) => s + (r.km || 0), 0);
   const monthFuel = monthRecs.reduce((s, r) => s + (r.fuelActual || 0), 0);
@@ -169,7 +169,7 @@ function renderDetail(v) {
   const balMap = computeFuelBalances(v.id);
 
   // current fuel balance = balance after last record (or initial if no records)
-  const allRecsSorted = recs.slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+  const allRecsSorted = recs.slice().sort((a, b) => cmpDateAsc(a.date, b.date));
   const lastRec = allRecsSorted[allRecsSorted.length - 1];
   const currentFuelBalance = lastRec != null
     ? (balMap[lastRec.id] ?? (v.fuelBalance || 0))
@@ -310,7 +310,7 @@ function renderDetail(v) {
     const currentOdo = (v.odometer || 0) + totalKm;
 
     // TO status
-    const lastTo = toRecs.slice().sort((a, b) => new Date(a.date) - new Date(b.date)).pop();
+    const lastTo = toRecs.slice().sort((a, b) => cmpDateAsc(a.date, b.date)).pop();
     let toBadge = '';
     if (lastTo) {
       if (lastTo.nextOdometerAbs != null) {

@@ -353,8 +353,11 @@
   /* Main menu tiles */
   .menu-tile {
     background: var(--glass-bg);
-    backdrop-filter: blur(var(--glass-blur));
-    -webkit-backdrop-filter: blur(var(--glass-blur));
+    /* backdrop-filter здесь убран намеренно: эти карточки повторяются десятками,
+       и каждая создаёт отдельный слой размытия. Под ними плавный градиент, а сами
+       они почти непрозрачны (--glass-bg), поэтому видимой разницы нет — проверено
+       сравнением скриншотов. Размытие оставлено там, где элемент один на экран:
+       шапка, боковая панель, выпадающее меню, модальные окна, уведомления. */
     border: 1px solid var(--glass-border);
     border-radius: 12px;
     padding: 20px 16px;
@@ -390,8 +393,11 @@
   }
   .vd-journal-card {
     background: var(--glass-bg);
-    backdrop-filter: blur(var(--glass-blur));
-    -webkit-backdrop-filter: blur(var(--glass-blur));
+    /* backdrop-filter здесь убран намеренно: эти карточки повторяются десятками,
+       и каждая создаёт отдельный слой размытия. Под ними плавный градиент, а сами
+       они почти непрозрачны (--glass-bg), поэтому видимой разницы нет — проверено
+       сравнением скриншотов. Размытие оставлено там, где элемент один на экран:
+       шапка, боковая панель, выпадающее меню, модальные окна, уведомления. */
     border: 1px solid var(--glass-border);
     border-radius: 14px;
     padding: 24px 20px;
@@ -463,8 +469,11 @@
   }
   .vehicle-card {
     background: var(--glass-bg);
-    backdrop-filter: blur(var(--glass-blur));
-    -webkit-backdrop-filter: blur(var(--glass-blur));
+    /* backdrop-filter здесь убран намеренно: эти карточки повторяются десятками,
+       и каждая создаёт отдельный слой размытия. Под ними плавный градиент, а сами
+       они почти непрозрачны (--glass-bg), поэтому видимой разницы нет — проверено
+       сравнением скриншотов. Размытие оставлено там, где элемент один на экран:
+       шапка, боковая панель, выпадающее меню, модальные окна, уведомления. */
     border: 1px solid var(--glass-border);
     border-radius: 10px;
     padding: 14px 16px;
@@ -891,8 +900,11 @@
   .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
   .stat-card {
     background: var(--glass-bg);
-    backdrop-filter: blur(var(--glass-blur));
-    -webkit-backdrop-filter: blur(var(--glass-blur));
+    /* backdrop-filter здесь убран намеренно: эти карточки повторяются десятками,
+       и каждая создаёт отдельный слой размытия. Под ними плавный градиент, а сами
+       они почти непрозрачны (--glass-bg), поэтому видимой разницы нет — проверено
+       сравнением скриншотов. Размытие оставлено там, где элемент один на экран:
+       шапка, боковая панель, выпадающее меню, модальные окна, уведомления. */
     border: 1px solid var(--glass-border);
     border-radius: 10px;
     padding: 14px 16px;

@@ -97,7 +97,7 @@ function selectTank(id) {
 function renderTankDetail(t) {
   const b = computeTankBalance(t.id);
   const balColor = b.balance < 0 ? 'var(--red)' : b.balance < (b.capacity*0.1||50) ? 'var(--yellow)' : 'var(--green)';
-  const incomes = (data.tankIncomes || []).filter(r => r.tankId === t.id).sort((a,b2) => new Date(b2.date) - new Date(a.date));
+  const incomes = (data.tankIncomes || []).filter(r => r.tankId === t.id).sort((a, b2) => cmpDateDesc(a.date, b2.date));
   const boundGens = (data.generators || []).filter(g => g.tankId === t.id);
   const fmtL = x => (x||0).toLocaleString('ru',{maximumFractionDigits:1});
 

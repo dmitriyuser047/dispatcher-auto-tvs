@@ -27,7 +27,7 @@ function renderSidebarSummary() {
     });
     // end balance for this vehicle
     const bMap = computeFuelBalances(v.id);
-    const sorted = vRecs.slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+    const sorted = vRecs.slice().sort((a, b) => cmpDateAsc(a.date, b.date));
     if (sorted.length) {
       const last = sorted[sorted.length - 1];
       balance[ft] += bMap[last.id] || 0;
@@ -190,7 +190,7 @@ function computeFuelBalances(vehicleId, dateFrom, dateTo) {
       if (dateTo   && r.date > dateTo)   return false;
       return true;
     })
-    .sort((a, b) => new Date(a.date) - new Date(b.date));
+    .sort((a, b) => cmpDateAsc(a.date, b.date));
   let balance = (vehicle && !dateFrom) ? (vehicle.fuelBalance || 0) : 0;
   const balMap = {};
   recs.forEach(r => {

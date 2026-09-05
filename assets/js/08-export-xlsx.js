@@ -18,7 +18,7 @@ function exportToXlsx() {
     if (rec.vehicleId !== v.id) return false;
     const d = new Date(rec.date);
     return d.getFullYear() === selectedYear && (d.getMonth() + 1) === selectedMonth;
-  }).sort((a, b) => new Date(a.date) - new Date(b.date));
+  }).sort((a, b) => cmpDateAsc(a.date, b.date));
 
   const allRecs  = recsFor(v.id);
   const totalKm  = allRecs.reduce((s, rec) => s + (rec.km || 0), 0);
@@ -352,28 +352,56 @@ function openExportPeriodModal(fmt) {
   openModal('exportPeriodModal');
 }
 
-document.addEventListener('mousemove', (e) => {
-  const card = e.target.closest('.menu-tile, .vehicle-card, .vd-journal-card');
-  if (!card) return;
-  const r = card.getBoundingClientRect();
-  const px = (e.clientX - r.left) / r.width;
-  const py = (e.clientY - r.top) / r.height;
-  card.style.setProperty('--mouse-x', (px * 100) + '%');
-  card.style.setProperty('--mouse-y', (py * 100) + '%');
-  const tiltX = (py - 0.5) * -6;
-  const tiltY = (px - 0.5) * 6;
-  card.style.transform = `perspective(600px) rotateX(${tiltX}deg) rotateY(${tiltY}deg) translateY(-2px)`;
-});
-document.addEventListener('mouseleave', (e) => {
-  const card = e.target.closest('.menu-tile, .vehicle-card, .vd-journal-card');
-  if (card) card.style.transform = '';
-}, true);
-document.addEventListener('mouseout', (e) => {
-  const card = e.target;
-  if (card && (card.classList.contains('menu-tile') || card.classList.contains('vehicle-card') || card.classList.contains('vd-journal-card'))) {
-    if (!card.contains(e.relatedTarget)) card.style.transform = '';
-  }
-});
+// Наклон карточки под курсором.
+// Раньше на каждое событие mousemove (их до 120 в секунду) вызывался
+// getBoundingClientRect и сразу записывался transform — браузер был вынужден
+// пересчитывать раскладку по нескольку раз за кадр. Теперь размеры карточки
+// берутся один раз при наведении, а запись стилей происходит не чаще одного
+// раза за кадр через requestAnimationFrame.
+const CARD_SEL = '.menu-tile, .vehicle-card, .vd-journal-card';
+const _reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let _tiltCard = null, _tiltRect = null, _tiltX = 0, _tiltY = 0, _tiltPending = false;
+
+function _tiltApply() {
+  _tiltPending = false;
+  if (!_tiltCard || !_tiltRect) return;
+  const px = (_tiltX - _tiltRect.left) / _tiltRect.width;
+  const py = (_tiltY - _tiltRect.top) / _tiltRect.height;
+  _tiltCard.style.setProperty('--mouse-x', (px * 100) + '%');
+  _tiltCard.style.setProperty('--mouse-y', (py * 100) + '%');
+  _tiltCard.style.transform =
+    `perspective(600px) rotateX(${(py - 0.5) * -6}deg) rotateY(${(px - 0.5) * 6}deg) translateY(-2px)`;
+}
+
+function _tiltReset() {
+  if (_tiltCard) _tiltCard.style.transform = '';
+  _tiltCard = null; _tiltRect = null;
+}
+
+if (!_reduceMotion) {
+  // Смена карточки под курсором — единственный момент, когда нужны её размеры.
+  document.addEventListener('mouseover', (e) => {
+    const card = e.target.closest(CARD_SEL);
+    if (card === _tiltCard) return;
+    _tiltReset();
+    if (card) { _tiltCard = card; _tiltRect = card.getBoundingClientRect(); }
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!_tiltCard) return;
+    _tiltX = e.clientX; _tiltY = e.clientY;
+    if (_tiltPending) return;
+    _tiltPending = true;
+    requestAnimationFrame(_tiltApply);
+  }, { passive: true });
+
+  document.addEventListener('mouseout', (e) => {
+    if (_tiltCard && !_tiltCard.contains(e.relatedTarget)) _tiltReset();
+  });
+
+  // При прокрутке запомненные размеры устаревают — проще сбросить наклон.
+  document.addEventListener('scroll', () => { if (_tiltCard) _tiltReset(); }, true);
+}
 
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('.btn');

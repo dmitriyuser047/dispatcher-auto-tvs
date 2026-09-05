@@ -60,7 +60,7 @@ function renderToScheduleSection() {
   const monthRecs = all.filter(r => {
     const d = new Date(r.date);
     return d.getFullYear() === tssYear && (d.getMonth()+1) === tssMonth;
-  }).sort((a,b) => new Date(a.date) - new Date(b.date));
+  }).sort((a, b) => cmpDateAsc(a.date, b.date));
 
   const months = tssGetMonths();
   let monthTabsHtml = '';
@@ -292,7 +292,7 @@ function tssExportExcel() {
   const monthRecs = all.filter(r => {
     const d = new Date(r.date);
     return d.getFullYear() === tssYear && (d.getMonth()+1) === tssMonth;
-  }).sort((a,b) => new Date(a.date) - new Date(b.date));
+  }).sort((a, b) => cmpDateAsc(a.date, b.date));
 
   const header = ['Дата', 'Тип', 'Объект', 'Вид ТО', 'Пробег/Моточасы', 'Ед.', 'Стоимость, руб.', 'Исполнитель', 'Примечание'];
   const rows = monthRecs.map(r => [

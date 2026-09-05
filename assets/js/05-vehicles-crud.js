@@ -111,7 +111,7 @@ function openAddRecord() {
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   document.getElementById('rec_driver').value = v ? (v.driver || '') : '';
   const vRecs = recsFor(selectedVehicleId)
-    .slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+    .slice().sort((a, b) => cmpDateAsc(a.date, b.date));
   if (vRecs.length) {
     const last = vRecs[vRecs.length - 1];
     if (last.odoEnd) document.getElementById('rec_odo_start').value = last.odoEnd;

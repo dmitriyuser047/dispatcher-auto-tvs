@@ -229,7 +229,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
       const vRecs=filterRecs(recsFor(v.id));
       vRecs.forEach(r=>{grandKm+=r.km||0;grandKmGlonass+=r.kmGlonass||0;gIss[ft]+=r.fuelIssued||0;gUsd[ft]+=r.fuelUsed||0;});
       const bm=computeFuelBalances(v.id, dateFrom, dateTo);
-      const sorted=vRecs.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+      const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
       if(sorted.length) gBal[ft]+=bm[sorted[sorted.length-1].id]||0;
       else if(!dateFrom) gBal[ft]+=v.fuelBalance||0;
     });
@@ -340,7 +340,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
       const vUsd=vRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
       const vAct=vRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
       const bm=computeFuelBalances(v.id, dateFrom, dateTo);
-      const sorted=vRecs.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+      const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
       const vBal=sorted.length?(bm[sorted[sorted.length-1].id]||0):0;
       const avg=vKm>0&&vAct>0?+(vAct/vKm*100).toFixed(2):null;
       const bal=+vBal.toFixed(2);

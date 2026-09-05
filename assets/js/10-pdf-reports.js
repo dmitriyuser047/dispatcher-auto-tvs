@@ -104,7 +104,7 @@ function exportAllToPdf(dateFrom, dateTo){
     const vRecs=filterRecs(recsFor(v.id));
     vRecs.forEach(r=>{ gIss[ft]+=r.fuelIssued||0; gUsd[ft]+=r.fuelUsed||0; });
     const bm=computeFuelBalances(v.id, dateFrom, dateTo);
-    const sorted=vRecs.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     if(sorted.length) gBal[ft]+=bm[sorted[sorted.length-1].id]||0;
     else if(!dateFrom) gBal[ft]+=v.fuelBalance||0;
   });
@@ -149,7 +149,7 @@ function exportAllToPdf(dateFrom, dateTo){
     const vUsd=vRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
     const vAct=vRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
     const bm=computeFuelBalances(v.id, dateFrom, dateTo);
-    const sorted=vRecs.slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     const vBal=+(sorted.length?(bm[sorted[sorted.length-1].id]||0):0).toFixed(2);
     const avg=vKm>0&&vAct>0?+(vAct/vKm*100).toFixed(2):null;
     aKm+=vKm; aIss+=vIss; aUsd+=vUsd; aAct+=vAct;
@@ -203,7 +203,7 @@ function exportAllGensToPdf(dateFrom, dateTo){
     const ft=g.fuel||'diesel';
     filterGenRecs(g.id).forEach(r=>{ gIss[ft]+=r.fuelIssued||0; gAct[ft]+=r.fuelActual||0; });
     const bm=computeGenFuelBalances(g.id);
-    const sorted=genRecsFor(g.id).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     gBal[ft]+=sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
   });
   const usedFuels=new Set(gens.map(g=>g.fuel||'diesel'));
@@ -246,7 +246,7 @@ function exportAllGensToPdf(dateFrom, dateTo){
     const issued=recs.reduce((s,r)=>s+(r.fuelIssued||0),0);
     const actual=recs.reduce((s,r)=>s+(r.fuelActual||0),0);
     const bm=computeGenFuelBalances(g.id);
-    const sorted=genRecsFor(g.id).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     const bal=+(sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0)).toFixed(2);
     totH+=hours; totIss+=issued; totAct+=actual; totBal+=bal; if(g.cost!=null) totCost+=g.cost;
     rows+='<tr>'
@@ -273,7 +273,7 @@ function exportAllGensToPdf(dateFrom, dateTo){
     +'</tr></thead><tbody>'+rows+'</tbody></table>';
 
   // ── История ТО ──
-  const allToRecs=(data.toRecords||[]).filter(r=>gens.some(g=>g.id===r.generatorId)).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const allToRecs=(data.toRecords||[]).filter(r=>gens.some(g=>g.id===r.generatorId)).sort((a,b)=>cmpDateAsc(a.date, b.date));
   let toBody='';
   if(!allToRecs.length){
     toBody='<tr><td colspan="9" class="c zero" style="font-style:italic">Нет записей ТО</td></tr>';
@@ -455,7 +455,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     const tSup=[0,0,0,0,0];
     orgVehicles.forEach(v=>{
       const ft=v.fuel||'diesel';
-      const allRecs = recsFor(v.id).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+      const allRecs = recsFor(v.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
       const per = allRecs.filter(inPeriod);
       const km=per.reduce((s,r)=>s+(r.km||0),0);
       const glon=per.reduce((s,r)=>s+(r.kmGlonass||0),0);

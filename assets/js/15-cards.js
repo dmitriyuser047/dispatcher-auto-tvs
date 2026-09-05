@@ -34,7 +34,7 @@ function renderVehicleCards() {
   const cards = filtered.map(v => {
     const recs = recsFor(v.id);
     const totalKm = recs.reduce((s, r) => s + (r.km || 0), 0);
-    const lastRec = recs.length ? recs.sort((a,b) => new Date(b.date) - new Date(a.date))[0] : null;
+    const lastRec = recs.length ? recs.sort((a,b) => cmpDateDesc(a.date, b.date))[0] : null;
     const accentColor = v.status === 'На ходу' ? '#16a34a' : (v.status === 'В ремонте' || v.status === 'После ДТП') ? '#dc2626' : v.status === 'В резерве' ? '#2563eb' : v.status ? '#d97706' : 'transparent';
     return `<div class="vehicle-card" onclick="selectVehicle('${v.id}')">
       <div class="vc-accent-bar" style="background:${accentColor}"></div>
@@ -103,7 +103,7 @@ function renderGeneratorCards() {
       fuelBal = computeTankBalance(g.tankId).balance;
     } else {
       const balMap = computeGenFuelBalances(g.id);
-      const sorted = gRecs.slice().sort((a,b) => new Date(a.date) - new Date(b.date));
+      const sorted = gRecs.slice().sort((a,b) => cmpDateAsc(a.date, b.date));
       const lastRec = sorted[sorted.length - 1];
       fuelBal = lastRec ? (balMap[lastRec.id] ?? (g.fuelBalance || 0)) : (g.fuelBalance || 0);
     }
@@ -229,7 +229,7 @@ function renderGeneratorList() {
       fuelBal = computeTankBalance(g.tankId).balance;
     } else {
       const balMap  = computeGenFuelBalances(g.id);
-      const sorted  = gRecs.slice().sort((a,b) => new Date(a.date) - new Date(b.date));
+      const sorted  = gRecs.slice().sort((a,b) => cmpDateAsc(a.date, b.date));
       const lastRec = sorted[sorted.length - 1];
       fuelBal = lastRec ? (balMap[lastRec.id] ?? (g.fuelBalance || 0)) : (g.fuelBalance || 0);
     }

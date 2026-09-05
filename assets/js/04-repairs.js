@@ -5,7 +5,7 @@
 // ЖУРНАЛ РЕМОНТА (ТРАНСПОРТ)
 // ═══════════════════════════════════════════════════════
 function renderRepairSection(vid) {
-  const recs = repairsFor(vid).slice().sort((a, b) => new Date(b.invoiceDate) - new Date(a.invoiceDate));
+  const recs = repairsFor(vid).slice().sort((a, b) => cmpDateDesc(a.invoiceDate, b.invoiceDate));
   const totalCost   = recs.reduce((s, r) => s + (r.cost || 0), 0);
   const unpaidCost  = recs.filter(r => !r.paid).reduce((s, r) => s + (r.cost || 0), 0);
 
@@ -198,7 +198,7 @@ function renderRepairsJournal() {
   let recs = (data.repairs || []).slice();
   if (vidFilter)    recs = recs.filter(r => r.vehicleId === vidFilter);
   if (statusFilter) recs = recs.filter(r => statusFilter === 'paid' ? r.paid : !r.paid);
-  recs.sort((a, b) => new Date(b.invoiceDate) - new Date(a.invoiceDate));
+  recs.sort((a, b) => cmpDateDesc(a.invoiceDate, b.invoiceDate));
 
   const totalCost  = recs.reduce((s, r) => s + (r.cost || 0), 0);
   const unpaidCost = recs.filter(r => !r.paid).reduce((s, r) => s + (r.cost || 0), 0);

@@ -124,7 +124,7 @@ function exportReportXlsx() {
   }
 
   const rows = [['Дата','Сумма','Категория','Описание','Контрагент','ТС','Оплачено']];
-  filtered.sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(p => {
+  filtered.sort((a, b) => cmpDateAsc(a.date, b.date)).forEach(p => {
     rows.push([
       p.date ? fmtDate(p.date) : '',
       p.sum||0,

@@ -31,7 +31,7 @@ function renderFinancesSection() {
     if (finPaidFilter === 'unpaid' && p.paid) return false;
     return true;
   });
-  filtered.sort((a,b) => new Date(b.date) - new Date(a.date));
+  filtered.sort((a, b) => cmpDateDesc(a.date, b.date));
 
   const totalSum = filtered.reduce((s,p) => s + (p.sum||0), 0);
   const paidSum = filtered.filter(p=>p.paid).reduce((s,p) => s + (p.sum||0), 0);

@@ -14,7 +14,7 @@ function renderGenDetail(g) {
   const monthRecs = recs.filter(r => {
     const d = new Date(r.date);
     return d.getFullYear() === selectedGenYear && (d.getMonth()+1) === selectedGenMonth;
-  }).sort((a,b) => new Date(a.date) - new Date(b.date));
+  }).sort((a,b) => cmpDateAsc(a.date, b.date));
 
   const monthHours = monthRecs.reduce((s, r) => s + (r.hours || 0), 0);
   const monthFuel  = monthRecs.reduce((s, r) => s + (r.fuelActual || 0), 0);
@@ -41,7 +41,7 @@ function renderGenDetail(g) {
 
   // Fuel balance
   const balMap      = computeGenFuelBalances(g.id);
-  const allSorted   = recs.slice().sort((a,b) => new Date(a.date) - new Date(b.date));
+  const allSorted   = recs.slice().sort((a,b) => cmpDateAsc(a.date, b.date));
   const lastRec     = allSorted[allSorted.length - 1];
   const currentBal  = lastRec != null ? (balMap[lastRec.id] ?? (g.fuelBalance||0)) : (g.fuelBalance||0);
 
@@ -184,7 +184,7 @@ let editingToId = null;
 
 function toRecsFor(gid) {
   return (data.toRecords || []).filter(r => r.generatorId === gid)
-    .sort((a, b) => new Date(a.date) - new Date(b.date));
+    .sort((a, b) => cmpDateAsc(a.date, b.date));
 }
 
 function renderToSection(gid, currentHours) {
@@ -282,7 +282,7 @@ function openAddToRecord(gid) {
   const g = (data.generators || []).find(x => x.id === gid);
   if (g) {
     const last = toRecsFor(gid).pop();
-    const recs = genRecsFor(gid).slice().sort((a,b) => new Date(a.date)-new Date(b.date));
+    const recs = genRecsFor(gid).slice().sort((a,b) => cmpDateAsc(a.date, b.date));
     const lastRec = recs[recs.length-1];
     const curH = (g.hoursInit||0) + recs.reduce((s,r)=>s+(r.hours||0),0);
     document.getElementById('to_hours').value = curH > 0 ? curH.toFixed(1) : '';
@@ -355,7 +355,7 @@ function deleteToRecord(id) {
 function computeGenFuelBalances(gid) {
   if (_genBalCache[gid]) return _genBalCache[gid];
   const gen  = (data.generators || []).find(g => g.id === gid);
-  const recs = genRecsFor(gid).slice().sort((a,b) => new Date(a.date) - new Date(b.date));
+  const recs = genRecsFor(gid).slice().sort((a,b) => cmpDateAsc(a.date, b.date));
   let balance = gen ? (gen.fuelBalance || 0) : 0;
   const balMap = {};
   recs.forEach(r => {
@@ -447,7 +447,7 @@ function computeGenBalanceAt(gid, boundary, inclusive) {
   if (!g) return 0;
   const okDate = d => !boundary || (inclusive ? d <= boundary : d < boundary);
   const recs = (data.genRecords || []).filter(r => r.generatorId === gid && okDate(r.date))
-    .slice().sort((a,b) => new Date(a.date) - new Date(b.date));
+    .slice().sort((a,b) => cmpDateAsc(a.date, b.date));
   let bal = g.fuelBalance || 0;
   recs.forEach(r => { const spent = r.fuelActual != null ? r.fuelActual : (r.fuelUsed || 0); bal += (r.fuelIssued || 0) - spent; });
   return +bal.toFixed(2);
@@ -534,7 +534,7 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
 
     let tHours=0, tNorm=0, tAct=0, tOstNoTank=0, i=0;
     gens.forEach(g => {
-      const recs = genRecsFor(g.id).filter(inPeriod).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+      const recs = genRecsFor(g.id).filter(inPeriod).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
       const hours = recs.reduce((s,r)=>s+(r.hours||0),0);
       const meterStart = recs.length ? (recs[0].meterStart!=null?recs[0].meterStart:(g.hoursInit!=null?g.hoursInit:'')) : (g.hoursInit!=null?g.hoursInit:'');
       const meterEnd = recs.length ? (recs[recs.length-1].meterEnd!=null?recs[recs.length-1].meterEnd:'') : '';
@@ -570,7 +570,7 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
     put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,6); n++;
 
     // Приход топлива за период (из привязанных ёмкостей)
-    const incomes = (data.tankIncomes || []).filter(r => linkedTanks.includes(r.tankId) && inPeriod(r)).sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const incomes = (data.tankIncomes || []).filter(r => linkedTanks.includes(r.tankId) && inPeriod(r)).sort((a,b)=>cmpDateAsc(a.date, b.date));
     put(n,0,'Приход топлива за отчётный период',ST.totL); merge(n,0,n,3); fillRow(n,ST.totL); rowH(n,18); n++;
     put(n,0,'Дата привоза',ST.head); merge(n,0,n,1); put(n,2,'Объём, л',ST.head); merge(n,2,n,3); rowH(n,16); n++;
     if (incomes.length) {

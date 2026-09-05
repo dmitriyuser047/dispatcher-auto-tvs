@@ -95,7 +95,7 @@ function openAddGenRecord() {
   ['gen_rec_hours','gen_rec_meter_start','gen_rec_meter_end','gen_rec_fuel_issued','gen_rec_fuel_used','gen_rec_fuel_actual','gen_rec_load','gen_rec_note']
     .forEach(id => document.getElementById(id).value = '');
   const g    = (data.generators || []).find(x => x.id === selectedGeneratorId);
-  const last = genRecsFor(selectedGeneratorId).slice().sort((a,b)=>new Date(a.date)-new Date(b.date)).pop();
+  const last = genRecsFor(selectedGeneratorId).slice().sort((a, b) => cmpDateAsc(a.date, b.date)).pop();
   if (last?.meterEnd != null) {
     document.getElementById('gen_rec_meter_start').value = last.meterEnd;
   } else if (g?.hoursInit) {
@@ -216,7 +216,7 @@ function renderGenSidebarSummary() {
   let issued = 0, used = 0, balance = 0;
   const countedTanks = new Set();
   gens.forEach(g => {
-    const gRecs = genRecsFor(g.id).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+    const gRecs = genRecsFor(g.id).slice().sort((a, b) => cmpDateAsc(a.date, b.date));
     gRecs.forEach(r => {
       totalHours += r.hours || 0;
       issued     += r.fuelIssued || 0;

@@ -134,7 +134,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     gEcon[ft]+=Math.max(0,gn-ga);
     gOver[ft]+=Math.max(0,ga-gn);
     const bm=computeGenFuelBalances(g.id);
-    const sorted=genRecsFor(g.id).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     gBal[ft]+=sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
   });
   const usedFuels=new Set(gens.map(g=>g.fuel||'diesel'));
@@ -256,7 +256,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     const economy=Math.max(0,norm-actual);
     const overrun=Math.max(0,actual-norm);
     const bm=computeGenFuelBalances(g.id);
-    const sorted=genRecsFor(g.id).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     const bal=sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
     totH+=hours;totIss+=issued;totNorm+=norm;totAct+=actual;totEcon+=economy;totOver+=overrun;totBal+=bal;
     if(g.cost!=null) totCost+=g.cost;
@@ -298,7 +298,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
   toHdrs.forEach((h,c)=>put(R(),c,h,ST.tHead));
   merge(R(),8,R(),NC);fill(R(),ST.tHead);rowH(R(),28);next();
   const allToRecs=(data.toRecords||[]).filter(r=>(data.generators||[]).some(g=>g.id===r.generatorId))
-    .sort((a,b)=>new Date(a.date)-new Date(b.date));
+    .sort((a,b)=>cmpDateAsc(a.date, b.date));
   if(!allToRecs.length){
     const sE=cs({sz:10,italic:true,color:{rgb:P.gray4}},P.white,{horizontal:'center',vertical:'center'},bAll('thin',P.gray3));
     put(R(),0,'Нет записей ТО',sE);merge(R(),0,R(),NC);rowH(R(),20);next();
@@ -335,7 +335,7 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
   const g=(data.generators||[]).find(x=>x.id===gid);
   if(!g) return;
   const NC=10;
-  const allRecs=genRecsFor(gid).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const allRecs=genRecsFor(gid).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
   const filtRecs=(!dateFrom&&!dateTo)?allRecs:allRecs.filter(r=>{
     if(dateFrom&&r.date<dateFrom) return false;
     if(dateTo&&r.date>dateTo)     return false;
@@ -480,7 +480,7 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
   // ─── ИСТОРИЯ ТО ───────────────────────────────────────────
   hdr('  ИСТОРИЯ ТЕХНИЧЕСКОГО ОБСЛУЖИВАНИЯ', ST.secT);
   const toRecs=(data.toRecords||[]).filter(r=>r.generatorId===gid)
-    .sort((a,b)=>new Date(a.date)-new Date(b.date));
+    .sort((a,b)=>cmpDateAsc(a.date, b.date));
   ['Дата','Вид ТО','Счётчик, мтч','След. ТО, мтч','Дата след. ТО','Стоимость ТО, руб.','Исполнитель','Примечание','','','']
     .forEach((h,c)=>put(R(),c,h,ST.tHead));
   merge(R(),7,R(),NC);fill(R(),ST.tHead);rowH(R(),28);next();

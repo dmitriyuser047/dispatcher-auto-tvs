@@ -5,7 +5,7 @@
 // ГРАФИК ТО (ТРАНСПОРТ)
 // ═══════════════════════════════════════════════════════
 function renderVehicleToSection(vid, currentOdometer) {
-  const recs = vehicleToFor(vid).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+  const recs = vehicleToFor(vid).slice().sort((a, b) => cmpDateAsc(a.date, b.date));
   const last = recs[recs.length - 1];
 
   let statusHtml = '';
@@ -116,7 +116,7 @@ function openAddVehicleTo(vid) {
     const totalKm = recsFor(vid).reduce((s, r) => s + (r.km || 0), 0);
     const curOdo = (v.odometer || 0) + totalKm;
     if (curOdo > 0) document.getElementById('vto_odometer').value = Math.round(curOdo);
-    const last = vehicleToFor(vid).slice().sort((a,b) => new Date(a.date)-new Date(b.date)).pop();
+    const last = vehicleToFor(vid).slice().sort((a,b) => cmpDateAsc(a.date, b.date)).pop();
     if (last && last.nextKm) document.getElementById('vto_next_km').value = last.nextKm;
   }
   document.getElementById('vehicleToModal').dataset.vid = vid;

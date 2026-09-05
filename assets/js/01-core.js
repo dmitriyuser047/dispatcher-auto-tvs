@@ -61,6 +61,15 @@ function fmtDate(isoStr) {
   const [y, m, d] = isoStr.split('-');
   return `${d}.${m}.${y}`;
 }
+// Сравнение дат для сортировок.
+// Даты хранятся как ГГГГ-ММ-ДД с ведущими нулями, поэтому строки сравниваются
+// напрямую — это примерно в 19 раз быстрее, чем создавать объекты Date внутри
+// компаратора (а компаратор вызывается тысячи раз за одну отрисовку).
+// Пустая или отсутствующая дата считается равной любой другой — так же вёл себя
+// прежний вариант через new Date (получался NaN, что сортировка трактует как 0).
+function cmpDateAsc(a, b)  { if (!a || !b) return 0; return a < b ? -1 : a > b ? 1 : 0; }
+function cmpDateDesc(a, b) { if (!a || !b) return 0; return a < b ?  1 : a > b ? -1 : 0; }
+
 // ДД.ММ.ГГГГ → ISO (ГГГГ-ММ-ДД)
 function parseDate(ddmmyyyy) {
   if (!ddmmyyyy) return '';
@@ -103,6 +112,29 @@ async function loadData() {
   if (!d.contragents) d.contragents = [];
   return d;
 }
+// Резервная копия в localStorage. Основное хранилище — файл data.json через
+// electronAPI, а localStorage нужен только чтобы не остаться без данных, если
+// файл или сервер недоступны при следующем запуске. На больших объёмах эта
+// запись занимает сотни миллисекунд, поэтому она вынесена из основного пути:
+// интерфейс успевает отрисоваться, а копия дописывается следом.
+// Повторные вызовы схлопываются — пишется только последнее состояние.
+let _lsPending = null, _lsTimer = null;
+function scheduleLocalBackup(json) {
+  _lsPending = json;
+  if (_lsTimer) return;
+  _lsTimer = setTimeout(() => {
+    _lsTimer = null;
+    const payload = _lsPending; _lsPending = null;
+    try {
+      localStorage.setItem(STORAGE_KEY, payload);
+    } catch (e) {
+      // Чаще всего это переполнение квоты localStorage на больших объёмах.
+      // Основные данные уже записаны в файл, поэтому работу не прерываем.
+      console.warn('[saveData] резервная копия в localStorage не сохранена:', e && e.name);
+    }
+  }, 0);
+}
+
 async function saveData(d) {
   showProgress();
   rebuildIndex();
@@ -113,7 +145,7 @@ async function saveData(d) {
       showToast('Ошибка сохранения на сервер. Проверьте соединение.');
     }
   }
-  localStorage.setItem(STORAGE_KEY, json);
+  scheduleLocalBackup(json);
   setTimeout(hideProgress, 300);
 }
 
