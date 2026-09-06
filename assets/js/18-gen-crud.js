@@ -167,8 +167,12 @@ function calcGenFuelAuto() {
   const g   = (data.generators || []).find(x => x.id === selectedGeneratorId);
   const inp = document.getElementById('gen_rec_fuel_used');
   if (!inp) return;
-  if (!g || !g.norm || isNaN(hours) || hours <= 0) { inp.value = ''; return; }
-  inp.value = Math.round(g.norm * hours * 10) / 10;
+  // Раньше здесь бралось поле norm — плоская норма, которой нет ни у одного ДЭС,
+  // поэтому «по норме» всегда оставалось пустым. Считаем через genNormSpent:
+  // норма при номинальной мощности × моточасы.
+  if (!g || isNaN(hours) || hours <= 0) { inp.value = ''; return; }
+  const v = genNormSpent(g, { hours });
+  inp.value = v ? Math.round(v * 10) / 10 : '';
 }
 
 // Фактический расход = норма@100% × (факт. нагрузка / номинальная мощность) × моточасы
@@ -213,14 +217,15 @@ function renderGenSidebarSummary() {
 
   // ─── Агрегированная сводка (по подобию транспорта) ───
   let totalHours = 0;
-  let issued = 0, used = 0, balance = 0;
+  let issued = 0, used = 0, byNorm = 0, balance = 0;
   const countedTanks = new Set();
   gens.forEach(g => {
     const gRecs = genRecsFor(g.id).slice().sort((a, b) => cmpDateAsc(a.date, b.date));
     gRecs.forEach(r => {
       totalHours += r.hours || 0;
       issued     += r.fuelIssued || 0;
-      used       += r.fuelActual != null ? r.fuelActual : (r.fuelUsed || 0);
+      used       += genActualSpent(g, r);
+      byNorm     += genNormSpent(g, r);
     });
     if (g.tankId) {
       if (!countedTanks.has(g.tankId)) { countedTanks.add(g.tankId); balance += computeTankBalance(g.tankId).balance; }
@@ -231,6 +236,10 @@ function renderGenSidebarSummary() {
     }
   });
   const balColor = balance < 0 ? 'var(--red)' : balance === 0 ? 'var(--text3)' : 'var(--green)';
+  // Отклонение факта от нормы: перерасход красный, экономия зелёная
+  const dev = +(used - byNorm).toFixed(1);
+  const devPct = byNorm ? Math.round(dev / byNorm * 1000) / 10 : null;
+  const devColor = !byNorm ? 'var(--text3)' : dev > 0 ? 'var(--red)' : dev < 0 ? 'var(--green)' : 'var(--text3)';
 
   const div = document.createElement('div');
   div.className = 'gen-sidebar-summary';
@@ -269,7 +278,10 @@ function renderGenSidebarSummary() {
     <div class="ss-fuel-block">
       <div class="ss-fuel-title" style="color:var(--yellow)">Дизельное топливо</div>
       <div class="ss-row"><span class="ss-label">Выдано</span><span class="ss-value">${issued.toLocaleString('ru',{maximumFractionDigits:1})} л</span></div>
-      <div class="ss-row"><span class="ss-label">Израсходовано</span><span class="ss-value">${used.toLocaleString('ru',{maximumFractionDigits:1})} л</span></div>
+      <div class="ss-row"><span class="ss-label">Расход по норме</span><span class="ss-value">${byNorm ? byNorm.toLocaleString('ru',{maximumFractionDigits:1}) + ' л' : '—'}</span></div>
+      <div class="ss-row"><span class="ss-label">Расход по факту</span><span class="ss-value">${used.toLocaleString('ru',{maximumFractionDigits:1})} л</span></div>
+      <div class="ss-row"><span class="ss-label">Отклонение</span><span class="ss-value" style="color:${devColor}" title="Факт минус норма. Плюс — перерасход, минус — экономия.">${byNorm ? (dev > 0 ? '+' : '') + dev.toLocaleString('ru',{maximumFractionDigits:1}) + ' л' + (devPct !== null ? ' · ' + (dev > 0 ? '+' : '') + devPct + '%' : '') : '—'}</span></div>
+      <div class="ss-divider"></div>
       <div class="ss-row"><span class="ss-label">Остаток</span><span class="ss-value" style="color:${balColor}">${balance.toLocaleString('ru',{maximumFractionDigits:1})} л</span></div>
     </div>
   </div>`;

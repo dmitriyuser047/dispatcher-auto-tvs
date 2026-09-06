@@ -442,6 +442,36 @@ function genFuelRate(g, load) {
   return g.norm100 * (loadPct / 100);
 }
 
+// ─── ЕДИНЫЙ РАСЧЁТ РАСХОДА ДЭС ──────────────────────────
+// Раньше расход считался в трёх местах по-разному: остаток ёмкости брал
+// «выдано», остаток генератора — «факт», а акт на списание пересчитывал норму
+// заново и при отсутствии norm100 подставлял «по норме», которое всегда пустое.
+// Теперь все места зовут эти две функции.
+//
+// По норме  — норма при номинальной мощности × моточасы. Сколько ДЭС должен был
+//             израсходовать, работая под полной нагрузкой.
+// По факту  — норма, пересчитанная под реальную нагрузку, × моточасы. Если в
+//             записи проставлен фактический расход вручную, берётся он.
+function genNormSpent(g, r) {
+  if (!g || !r) return 0;
+  const hours = +r.hours || 0;
+  if (!hours) return 0;
+  // Историческое поле norm (плоская норма) поддерживаем, но у ДЭС его обычно нет
+  const rate = (g.norm != null && g.norm !== '') ? +g.norm : (g.norm100 != null ? +g.norm100 : null);
+  if (rate == null) return 0;
+  return +(rate * hours).toFixed(2);
+}
+
+function genActualSpent(g, r) {
+  if (!r) return 0;
+  if (r.fuelActual != null && r.fuelActual !== '') return +r.fuelActual || 0;
+  if (r.fuelUsed  != null && r.fuelUsed  !== '') return +r.fuelUsed || 0;
+  const hours = +r.hours || 0;
+  if (!g || !hours || r.load == null) return 0;
+  const rate = genFuelRate(g, +r.load);
+  return rate == null ? 0 : +(Math.max(0, rate) * hours).toFixed(2);
+}
+
 function computeGenBalanceAt(gid, boundary, inclusive) {
   const g = (data.generators || []).find(x => x.id === gid);
   if (!g) return 0;
@@ -449,7 +479,7 @@ function computeGenBalanceAt(gid, boundary, inclusive) {
   const recs = (data.genRecords || []).filter(r => r.generatorId === gid && okDate(r.date))
     .slice().sort((a,b) => cmpDateAsc(a.date, b.date));
   let bal = g.fuelBalance || 0;
-  recs.forEach(r => { const spent = r.fuelActual != null ? r.fuelActual : (r.fuelUsed || 0); bal += (r.fuelIssued || 0) - spent; });
+  recs.forEach(r => { bal += (r.fuelIssued || 0) - genActualSpent(g, r); });
   return +bal.toFixed(2);
 }
 
@@ -540,7 +570,7 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
       const meterEnd = recs.length ? (recs[recs.length-1].meterEnd!=null?recs[recs.length-1].meterEnd:'') : '';
       const loadHours = recs.reduce((s,r)=>s+((r.load!=null?r.load:0)*(r.hours||0)),0);
       const loadAvg = hours>0 && loadHours>0 ? loadHours/hours : null;
-      const normSpent = recs.reduce((s,r)=>{ if (g.norm100 && g.power && r.load!=null) { const rate=genFuelRate(g,r.load); return s+Math.max(0,rate||0)*(r.hours||0); } return s+(r.fuelUsed||0); },0);
+      const normSpent = recs.reduce((s,r)=> s + genActualSpent(g,r), 0);
       const actSpent = recs.reduce((s,r)=>s+(r.fuelActual!=null?r.fuelActual:(r.fuelUsed||0)),0);
       const ostKon = g.tankId ? computeTankBalanceAt(g.tankId, dateTo, true) : computeGenBalanceAt(g.id, dateTo, true);
       if (!g.tankId) tOstNoTank += ostKon; // ёмкости считаются один раз ниже (linkedTanks), без ёмкости — суммируем по генератору
