@@ -196,30 +196,94 @@ function renderFuelReport() {
 
 // В Excel уходят все показатели вкладки — отдельным блоком каждый,
 // чтобы не выгружать отчёт по нескольку раз.
+// Оформление сдержанное: тёмная шапка, серые линии, зебра по строкам.
+// Цветом выделяется только отклонение — там знак и есть смысл показателя.
 function exportFuelReportXlsx() {
   const { grid, objs, months, rowTot, colTot, grand } = frBuild();
   if (!objs.length) { alert('Нет данных за ' + fuelRepYear); return; }
-  const aoa = [];
-  const title = fuelRepTab === 'in' ? 'Приход топлива' : 'Расход топлива';
-  aoa.push([title + ' за ' + fuelRepYear + ' г.']);
-  aoa.push([]);
-  FR_METRICS[fuelRepTab].forEach(M => {
-    aoa.push([M.label]);
-    aoa.push(['Объект'].concat(months.map(m => FR_MONTHS[m])).concat(['Итого']));
-    objs.forEach(o => {
-      aoa.push([o].concat(months.map(m => {
-        const v = M.get(grid[o][m]);
-        return v == null ? '' : +v.toFixed(M.dec);
-      })).concat([(() => { const v = M.get(rowTot[o]); return v == null ? '' : +v.toFixed(M.dec); })()]));
-    });
-    aoa.push(['ИТОГО'].concat(months.map(m => {
-      const v = M.get(colTot[m]);
-      return v == null ? '' : +v.toFixed(M.dec);
-    })).concat([(() => { const v = M.get(grand); return v == null ? '' : +v.toFixed(M.dec); })()]));
-    aoa.push([]);
+
+  const P = { dark:'0F1117', navy:'1B3A6B', white:'FFFFFF', gray1:'F8FAFC',
+              gray3:'E2E8F0', gray4:'94A3B8', text:'1E293B',
+              red:'B91C1C', green:'15803D' };
+  const bd = (style, rgb) => ({ style, color:{ rgb } });
+  const bAll = (style, rgb) => { const b = bd(style, rgb); return { top:b, bottom:b, left:b, right:b }; };
+  const st = (font, fill, align, border) => ({
+    font: font || {},
+    fill: fill ? { patternType:'solid', fgColor:{ rgb: fill } } : { patternType:'none' },
+    alignment: align || { vertical:'center' },
+    border: border || {},
   });
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const num = dec => (dec === 0 ? '#,##0' : dec === 1 ? '#,##0.0' : '#,##0.00');
+
+  const S = {
+    title:   st({ bold:true, sz:14, color:{ rgb:P.white } }, P.dark,
+                { horizontal:'center', vertical:'center' }, bAll('medium', P.dark)),
+    caption: st({ bold:true, sz:11, color:{ rgb:P.text } }, null,
+                { horizontal:'left', vertical:'center' }),
+    head:    st({ bold:true, sz:10, color:{ rgb:P.white } }, P.navy,
+                { horizontal:'center', vertical:'center', wrapText:true }, bAll('thin', P.navy)),
+    headL:   st({ bold:true, sz:10, color:{ rgb:P.white } }, P.navy,
+                { horizontal:'left', vertical:'center', indent:1 }, bAll('thin', P.navy)),
+    objCell: bg => st({ sz:10, color:{ rgb:P.text } }, bg,
+                { horizontal:'left', vertical:'center', indent:1 }, bAll('thin', P.gray3)),
+    valCell: (bg, rgb) => st({ sz:10, color:{ rgb: rgb || P.text } }, bg,
+                { horizontal:'right', vertical:'center' }, bAll('thin', P.gray3)),
+    totRow:  st({ bold:true, sz:10, color:{ rgb:P.text } }, P.gray3,
+                { horizontal:'right', vertical:'center' }, bAll('thin', P.gray4)),
+    totRowL: st({ bold:true, sz:10, color:{ rgb:P.text } }, P.gray3,
+                { horizontal:'left', vertical:'center', indent:1 }, bAll('thin', P.gray4)),
+  };
+
+  const NC = months.length + 1;   // последний столбец: объект + месяцы + итого
+  const ws = { '!merges': [], '!rows': [] };
+  let row = 0;
+  const put = (r, c, v, s, z) => {
+    const cell = { v: v == null ? '' : v, t: typeof v === 'number' ? 'n' : 's', s };
+    if (z && typeof v === 'number') cell.z = z;
+    ws[XLSX.utils.encode_cell({ r, c })] = cell;
+    ws['!ref'] = XLSX.utils.encode_range({ s:{ r:0, c:0 }, e:{ r, c:NC } });
+  };
+  const fill = (r, s) => { for (let c = 0; c <= NC; c++) if (!ws[XLSX.utils.encode_cell({ r, c })]) put(r, c, '', s); };
+  const rowH = (r, hpt) => { ws['!rows'][r] = { hpt }; };
+
+  const title = (fuelRepTab === 'in' ? 'ПРИХОД ТОПЛИВА' : 'РАСХОД ТОПЛИВА') + ' — ' + fuelRepYear + ' Г.';
+  put(row, 0, title, S.title);
+  ws['!merges'].push({ s:{ r:row, c:0 }, e:{ r:row, c:NC } });
+  fill(row, S.title); rowH(row, 30); row += 2;
+
+  FR_METRICS[fuelRepTab].forEach(M => {
+    put(row, 0, M.label, S.caption); rowH(row, 18); row++;
+
+    put(row, 0, 'Объект', S.headL);
+    months.forEach((m, i) => put(row, i + 1, FR_MONTHS[m], S.head));
+    put(row, NC, 'Итого', S.head);
+    rowH(row, 22); row++;
+
+    objs.forEach((o, i) => {
+      const bg = i % 2 ? P.gray1 : P.white;
+      put(row, 0, o, S.objCell(bg));
+      const cells = months.map(m => grid[o][m]).concat([rowTot[o]]);
+      cells.forEach((c, k) => {
+        const v = M.get(c);
+        const show = v == null || (M.id === 'price' && !c.l) || (M.id === 'devpct' && !c.norm) ? null : v;
+        const rgb = M.sign && show ? (show > 0 ? P.red : P.green) : null;
+        put(row, k + 1, show == null ? '—' : +show.toFixed(M.dec), S.valCell(bg, rgb), num(M.dec));
+      });
+      row++;
+    });
+
+    put(row, 0, 'ИТОГО', S.totRowL);
+    const tCells = months.map(m => colTot[m]).concat([grand]);
+    tCells.forEach((c, k) => {
+      const v = M.get(c);
+      const show = v == null || (M.id === 'price' && !c.l) || (M.id === 'devpct' && !c.norm) ? null : v;
+      put(row, k + 1, show == null ? '—' : +show.toFixed(M.dec), S.totRow, num(M.dec));
+    });
+    rowH(row, 20); row += 2;
+  });
+
   ws['!cols'] = [{ wch: 24 }].concat(months.map(() => ({ wch: 13 }))).concat([{ wch: 15 }]);
+  ws['!freeze'] = { xSplit: 1, ySplit: 0 };
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, (fuelRepTab === 'in' ? 'Приход ' : 'Расход ') + fuelRepYear);
   XLSX.writeFile(wb, 'Топливо_' + (fuelRepTab === 'in' ? 'Приход' : 'Расход') + '_' + fuelRepYear + '.xlsx');
