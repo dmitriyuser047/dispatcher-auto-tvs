@@ -570,8 +570,12 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
       const meterEnd = recs.length ? (recs[recs.length-1].meterEnd!=null?recs[recs.length-1].meterEnd:'') : '';
       const loadHours = recs.reduce((s,r)=>s+((r.load!=null?r.load:0)*(r.hours||0)),0);
       const loadAvg = hours>0 && loadHours>0 ? loadHours/hours : null;
-      const normSpent = recs.reduce((s,r)=> s + genActualSpent(g,r), 0);
-      const actSpent = recs.reduce((s,r)=>s+(r.fuelActual!=null?r.fuelActual:(r.fuelUsed||0)),0);
+      // «По норме» — паспортная норма при номинальной мощности × моточасы.
+      // Раньше здесь норма пересчитывалась под фактическую нагрузку: у ДЭС,
+      // работающих на 10% мощности, «норма» падала ниже реального расхода,
+      // и в акте везде получался перерасход, хотя на деле экономия.
+      const normSpent = recs.reduce((s,r)=> s + genNormSpent(g,r), 0);
+      const actSpent  = recs.reduce((s,r)=> s + genActualSpent(g,r), 0);
       const ostKon = g.tankId ? computeTankBalanceAt(g.tankId, dateTo, true) : computeGenBalanceAt(g.id, dateTo, true);
       if (!g.tankId) tOstNoTank += ostKon; // ёмкости считаются один раз ниже (linkedTanks), без ёмкости — суммируем по генератору
       const bg = i%2===0?P.white:P.gray1; i++;
