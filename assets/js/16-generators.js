@@ -456,10 +456,18 @@ function genNormSpent(g, r) {
   if (!g || !r) return 0;
   const hours = +r.hours || 0;
   if (!hours) return 0;
-  // Историческое поле norm (плоская норма) поддерживаем, но у ДЭС его обычно нет
-  const rate = (g.norm != null && g.norm !== '') ? +g.norm : (g.norm100 != null ? +g.norm100 : null);
-  if (rate == null) return 0;
-  return +(rate * hours).toFixed(2);
+  // Норма для фактического режима: расход при указанной нагрузке × моточасы.
+  // Кривая опирается на три точки — холостой ход, 50 % и 100 %. Без normIdle
+  // участок ниже 50 % считался экстраполяцией по прямой и при нагрузке 10-12 %
+  // давал почти нулевую «норму», отчего в акте выходил ложный перерасход.
+  if (r.load != null && r.load !== '' && g.power && g.norm100 != null) {
+    const rate = genFuelRate(g, +r.load);
+    if (rate != null) return +(Math.max(0, rate) * hours).toFixed(2);
+  }
+  // Нагрузка не указана — берём паспортную норму при номинальной мощности
+  const flat = (g.norm != null && g.norm !== '') ? +g.norm : (g.norm100 != null ? +g.norm100 : null);
+  if (flat == null) return 0;
+  return +(flat * hours).toFixed(2);
 }
 
 function genActualSpent(g, r) {
