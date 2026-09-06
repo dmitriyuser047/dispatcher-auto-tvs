@@ -11,7 +11,7 @@ function switchSection(section) {
     vehicles: 'Транспорт', generators: 'ДЭС', tanks: 'Ёмкости',
     reestr: 'Реестр', toSchedule: 'График ТО', repairs: 'Журнал ремонта',
     finances: 'Финансы', contragents: 'Контрагенты', reports: 'Отчёты',
-    printForms: 'Печатные формы'
+    printForms: 'Печатные формы', fuelReport: 'Отчёт по топливу'
   };
 
   // Header: menu button (always in sections), back button (detail views only)
@@ -85,6 +85,8 @@ function switchSection(section) {
     renderReportsSection();
   } else if (section === 'printForms') {
     renderPrintFormsSection();
+  } else if (section === 'fuelReport') {
+    renderFuelReport();
   }
   hideProgress();
   setTimeout(() => animateCounters(), 50);
@@ -190,6 +192,15 @@ function renderMainMenu() {
           <div class="aero-shine"></div>
           <div class="menu-tile-title">Отчёты</div>
           <div class="menu-tile-sub">Оборотка</div>
+        </div>
+
+        <div class="menu-tile" onclick="switchSection('fuelReport')">
+          <div class="menu-tile-icon" style="background:#fff7ed">
+            <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#c2410c" stroke-width="2"><path d="M3 3v18h18"/><rect x="6" y="11" width="3" height="7"/><rect x="11" y="7" width="3" height="11"/><rect x="16" y="13" width="3" height="5"/></svg>
+          </div>
+          <div class="aero-shine"></div>
+          <div class="menu-tile-title">Топливо</div>
+          <div class="menu-tile-sub">Приход и расход</div>
         </div>
 
         <div class="menu-tile" onclick="switchSection('printForms')">
