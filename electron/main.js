@@ -6,6 +6,7 @@ const http    = require('http');
 const updater = require('./updater');
 const server  = require('./server');
 const { createExtractorFromData } = require('node-unrar-js');
+const storage = require('./storage');
 
 const DEFAULT_DATA_DIR = path.join(os.homedir(), 'Documents', 'ДиспетчеризацияАвто_ТВС');
 const SETTINGS_FILE   = path.join(app.getPath('userData'), 'settings.json');
@@ -48,22 +49,11 @@ function ensureDirs() {
   if (!fs.existsSync(bd)) fs.mkdirSync(bd, { recursive: true });
 }
 
+// Копия собирается из разделов обратно в один файл — так её удобно
+// открыть, переслать и при необходимости загрузить обратно целиком.
 function createDailyBackup() {
-  const dataFile  = getDataFile();
-  const backupDir = getBackupDir();
-  if (!fs.existsSync(dataFile)) return;
-  const today = new Date().toISOString().slice(0, 10);
-  const dest  = path.join(backupDir, `data_${today}.json`);
-  if (!fs.existsSync(dest)) {
-    fs.copyFileSync(dataFile, dest);
-    const list = fs.readdirSync(backupDir)
-      .filter(f => f.startsWith('data_') && f.endsWith('.json'))
-      .sort();
-    if (list.length > 30) {
-      list.slice(0, list.length - 30)
-        .forEach(f => fs.unlinkSync(path.join(backupDir, f)));
-    }
-  }
+  try { storage.makeDailyBackup(getDataDir(), getBackupDir(), 30); }
+  catch (e) { console.error('[backup] ' + e.message); }
 }
 
 function createWindow() {
@@ -151,9 +141,12 @@ app.whenReady().then(() => {
         return null;
       }
     }
-    const f = getDataFile();
-    if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8');
-    return null;
+    try {
+      return JSON.stringify(storage.readAll(getDataDir()));
+    } catch (e) {
+      console.error('[read-data] ' + e.message);
+      return null;
+    }
   });
 
   ipcMain.handle('write-data', async (_event, jsonStr) => {
@@ -167,8 +160,14 @@ app.whenReady().then(() => {
     }
     ensureDirs();
     createDailyBackup();
-    fs.writeFileSync(getDataFile(), jsonStr, 'utf8');
-    return true;
+    try {
+      const res = storage.writeAll(getDataDir(), JSON.parse(jsonStr));
+      if (res.changed.length) console.log('[write-data] разделы: ' + res.changed.join(', '));
+      return true;
+    } catch (e) {
+      console.error('[write-data] ' + e.message);
+      return false;
+    }
   });
 
   ipcMain.handle('get-data-path', () => getDataDir());
@@ -206,7 +205,7 @@ app.whenReady().then(() => {
     const user = getActiveUser();
     return await server.start({
       port,
-      dataFile: getDataFile(),
+      dataDir: getDataDir(),
       backupFn: () => { ensureDirs(); createDailyBackup(); },
       serverName: user.name || os.hostname(),
     });
@@ -233,7 +232,7 @@ app.whenReady().then(() => {
   if (settings.networkMode === 'server') {
     server.start({
       port: settings.serverPort || 3377,
-      dataFile: getDataFile(),
+      dataDir: getDataDir(),
       backupFn: () => { ensureDirs(); createDailyBackup(); },
       serverName: getActiveUser().name || os.hostname(),
     });

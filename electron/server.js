@@ -1,9 +1,10 @@
 const http = require('http');
 const fs   = require('fs');
 const os   = require('os');
+const storage = require('./storage');
 
 let _server    = null;
-let _dataFile  = null;
+let _dataDir   = null;
 let _backupFn  = null;
 let _writeLock = false;
 
@@ -18,9 +19,9 @@ function getLocalIPs() {
   return ips;
 }
 
-function start({ port, dataFile, backupFn, serverName }) {
+function start({ port, dataDir, backupFn, serverName }) {
   if (_server) return { ok: false, error: 'Сервер уже запущен' };
-  _dataFile = dataFile;
+  _dataDir  = dataDir;
   _backupFn = backupFn;
 
   _server = http.createServer((req, res) => {
@@ -31,20 +32,47 @@ function start({ port, dataFile, backupFn, serverName }) {
 
     if (req.method === 'GET' && req.url === '/api/ping') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, name: serverName || os.hostname(), version: '1.0' }));
+      res.end(JSON.stringify({ ok: true, name: serverName || os.hostname(), version: '2.0', sections: true }));
+      return;
+    }
+
+    // Номера версий разделов — несколько сотен байт. По ним клиент понимает,
+    // что менялось, и не тянет весь массив данных ради проверки.
+    if (req.method === 'GET' && req.url === '/api/revisions') {
+      try {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(storage.readRevisions(_dataDir)));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+      return;
+    }
+
+    // Один раздел целиком
+    const secMatch = req.method === 'GET' && /^\/api\/section\/([A-Za-z]+)$/.exec(req.url);
+    if (secMatch) {
+      const name = secMatch[1];
+      if (!storage.SECTIONS.includes(name)) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: 'Неизвестный раздел' }));
+        return;
+      }
+      try {
+        const all = storage.readAll(_dataDir);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ name, rev: storage.readRevisions(_dataDir)[name] || 0, rows: all[name] || [] }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
       return;
     }
 
     if (req.method === 'GET' && req.url === '/api/data') {
       try {
-        if (fs.existsSync(_dataFile)) {
-          const content = fs.readFileSync(_dataFile, 'utf8');
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(content);
-        } else {
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ vehicles: [], records: [] }));
-        }
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(storage.readAll(_dataDir)));
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ error: e.message }));
@@ -63,11 +91,11 @@ function start({ port, dataFile, backupFn, serverName }) {
       req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
         try {
-          JSON.parse(body);
+          const data = JSON.parse(body);
           if (_backupFn) _backupFn();
-          fs.writeFileSync(_dataFile, body, 'utf8');
+          const r = storage.writeAll(_dataDir, data);
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ ok: true }));
+          res.end(JSON.stringify({ ok: true, changed: r.changed, revisions: r.revisions }));
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify({ error: e.message }));
