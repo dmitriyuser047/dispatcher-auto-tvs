@@ -511,7 +511,7 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
     gray1:'F8FAFC', gray2:'F1F5F9', gray3:'E2E8F0', gray4:'94A3B8', text:'1E293B', green:'16A34A', red:'DC2626' };
   const bAll = (st, rgb) => { const b = { style:st, color:{rgb} }; return { top:b, bottom:b, left:b, right:b }; };
   const cs = (font, fill, align, border) => ({ font:font||{}, fill:fill?{patternType:'solid',fgColor:{rgb:fill}}:{patternType:'none'}, alignment:align||{vertical:'center'}, border:border||{} });
-  const NC = 11;
+  const NC = 12;   // добавлена колонка «Остаток в баке ДЭС»
   const ST = {
     appr:  cs({sz:10,color:{rgb:P.text}}, null, {horizontal:'left',vertical:'center',wrapText:true}, {}),
     org:   cs({bold:true,sz:11,color:{rgb:P.text}}, null, {horizontal:'left',vertical:'center'}, {}),
@@ -567,10 +567,11 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
     vh(4,'Показания мтч на начало'); vh(5,'Показания мтч на конец'); vh(6,'Факт. нагрузка, кВт');
     put(h1,7,'Норма л/час',ST.head); merge(h1,7,h1,8); put(h2,7,'при 100%',ST.head); put(h2,8,'при 50%',ST.head);
     put(h1,9,'Расход ГСМ, л',ST.head); merge(h1,9,h1,10); put(h2,9,'по норме',ST.head); put(h2,10,'факт',ST.head);
-    vh(11,'Остаток на конец мес., л');
+    vh(11,'Остаток в баке ДЭС, л');
+    vh(12,'Остаток на конец мес., л');
     rowH(h1,16); rowH(h2,26); n += 2;
 
-    let tHours=0, tNorm=0, tAct=0, tOstNoTank=0, i=0;
+    let tHours=0, tNorm=0, tAct=0, tOstNoTank=0, tBak=0, i=0;
     gens.forEach(g => {
       const recs = genRecsFor(g.id).filter(inPeriod).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
       const hours = recs.reduce((s,r)=>s+(r.hours||0),0);
@@ -584,8 +585,14 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
       // и в акте везде получался перерасход, хотя на деле экономия.
       const normSpent = recs.reduce((s,r)=> s + genNormSpent(g,r), 0);
       const actSpent  = recs.reduce((s,r)=> s + genActualSpent(g,r), 0);
-      const ostKon = g.tankId ? computeTankBalanceAt(g.tankId, dateTo, true) : computeGenBalanceAt(g.id, dateTo, true);
-      if (!g.tankId) tOstNoTank += ostKon; // ёмкости считаются один раз ниже (linkedTanks), без ёмкости — суммируем по генератору
+      // Остаток в баке самого ДЭС: начальный + выдано − израсходовано.
+      const bakKon = computeGenBalanceAt(g.id, dateTo, true);
+      tBak += bakKon;
+      // Остаток по строке: то, что в ёмкости, плюс то, что уже залито в бак этой машины.
+      // У ДЭС без привязанной ёмкости весь остаток и так лежит в баке.
+      const ostTank = g.tankId ? computeTankBalanceAt(g.tankId, dateTo, true) : 0;
+      const ostKon = ostTank + bakKon;
+      if (!g.tankId) tOstNoTank += bakKon; // ёмкости суммируются один раз ниже, по linkedTanks
       const bg = i%2===0?P.white:P.gray1; i++;
       tHours+=hours; tNorm+=normSpent; tAct+=actSpent;
       const nameCell = g.name + (g.serial ? ', ' + g.serial : '');
@@ -600,14 +607,17 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
       put(n,8,g.norm50!=null?+g.norm50:'—',ST.tdC(bg));
       put(n,9,num(normSpent),ST.tdR(bg));
       put(n,10,num(actSpent),ST.tdR(bg));
-      put(n,11,num(ostKon),ST.tdR(bg));
+      put(n,11,num(bakKon),ST.tdR(bg));
+      put(n,12,num(ostKon),ST.tdR(bg));
       rowH(n,18); n++;
     });
     // ИТОГО
     put(n,0,'ИТОГО',ST.totL); merge(n,0,n,2); fillRow(n,ST.totL);
     put(n,3,num(tHours,1),ST.tot); put(n,4,'',ST.tot); put(n,5,'',ST.tot); put(n,6,'',ST.tot); put(n,7,'',ST.tot); put(n,8,'',ST.tot);
     put(n,9,num(tNorm),ST.tot); put(n,10,num(tAct),ST.tot);
-    put(n,11, num(tOstNoTank + linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id,dateTo,true),0)), ST.tot);
+    put(n,11, num(tBak), ST.tot);
+    // Итог: ёмкости считаем по разу, баки — по всем машинам
+    put(n,12, num(linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id,dateTo,true),0) + tBak), ST.tot);
     rowH(n,20); n++;
     put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,6); n++;
 
@@ -619,11 +629,13 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
       incomes.forEach((r,k)=>{ const bg=k%2===0?P.white:P.gray1; put(n,0,fmtDate(r.date),ST.tdC(bg)); merge(n,0,n,1); put(n,2,num(r.amount),ST.tdR(bg)); merge(n,2,n,3); rowH(n,16); n++; });
     } else { put(n,0,'Нет прихода за период',ST.tdC(P.white)); merge(n,0,n,3); rowH(n,16); n++; }
     // Остаток ДТ
-    const noTankGenIds = gens.filter(g => !g.tankId).map(g => g.id);
+    // Остаток = топливо в ёмкостях плюс топливо в баках самих ДЭС.
+    // Баки берём по всем машинам, а не только по тем, что без ёмкости.
+    const allGenIds = gens.map(g => g.id);
     const ostNach = linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id, dateFrom, false), 0)
-      + noTankGenIds.reduce((s,id)=>s+computeGenBalanceAt(id, dateFrom, false), 0);
+      + allGenIds.reduce((s,id)=>s+computeGenBalanceAt(id, dateFrom, false), 0);
     const ostKonAll = linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id, dateTo, true), 0)
-      + noTankGenIds.reduce((s,id)=>s+computeGenBalanceAt(id, dateTo, true), 0);
+      + allGenIds.reduce((s,id)=>s+computeGenBalanceAt(id, dateTo, true), 0);
     put(n,0,'Остаток ДТ, л:',ST.totL); merge(n,0,n,1); put(n,2,'на начало',ST.head); put(n,3,'на конец',ST.head); rowH(n,16); n++;
     put(n,0,'',ST.tdC(P.white)); merge(n,0,n,1); put(n,2,num(ostNach),ST.tdR(P.white)); put(n,3,num(ostKonAll),ST.tdR(P.white)); rowH(n,16); n++;
     put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,8); n++;
@@ -640,7 +652,7 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
 
   if (!rendered) { alert('Нет ДЭС для выбранного местонахождения.'); return; }
 
-  ws['!cols'] = [{wch:30},{wch:16},{wch:7},{wch:11},{wch:12},{wch:12},{wch:11},{wch:9},{wch:9},{wch:11},{wch:11},{wch:14}];
+  ws['!cols'] = [{wch:30},{wch:16},{wch:7},{wch:11},{wch:12},{wch:12},{wch:11},{wch:9},{wch:9},{wch:11},{wch:11},{wch:13},{wch:14}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Акт списания ГСМ ДЭС');
   const d = new Date();
