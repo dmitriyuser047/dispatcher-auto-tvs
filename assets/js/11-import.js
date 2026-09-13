@@ -105,10 +105,12 @@ function importVehiclesFromXls(input) {
 // ─── ИМПОРТ ЗАПРАВОК ИЗ ОТЧЁТА ПО ТОПЛИВНЫМ КАРТАМ ──────
 let _fuelImportLastReport = null;
 
-function importFuelFromXls(input) {
+function importFuelFromXls(input, mode = 'fuel') {
   const file = input.files[0];
   if (!file) return;
   input.value = '';
+  const isOfficeFuelImport = mode === 'office';
+  const importTitle = isOfficeFuelImport ? 'Машины офис' : 'Импорт заправок';
 
   const reader = new FileReader();
   reader.onload = async function(e) {
@@ -120,13 +122,20 @@ function importFuelFromXls(input) {
       let headerRow = -1;
       for (let i = 0; i < Math.min(rows.length, 15); i++) {
         const row = rows[i].map(c => String(c).toLowerCase());
-        if (row.some(c => c.includes('количество')) && row.some(c => c.includes('транзакци'))) {
+        const hasQty = row.some(c => c.includes('количество'));
+        const hasTransactionHeader = row.some(c => c.includes('транзакци'));
+        const hasOfficeHeader = row.some(c => c.trim() === 'дата' || c.includes('дата ')) &&
+          row.some(c => c.includes('тип операции') || c.includes('закреплена'));
+        if (hasQty && (hasTransactionHeader || (isOfficeFuelImport && hasOfficeHeader))) {
           headerRow = i;
           break;
         }
       }
       if (headerRow === -1) {
-        alert('Не удалось найти заголовки отчёта по топливным картам.\nОжидаются столбцы: Дата транзакции, Количество, Тип транзакции, Комментарий.');
+        const expected = isOfficeFuelImport
+          ? 'Ожидаются столбцы: Дата, Номер карты, Закреплена, Тип операции, Количество.'
+          : 'Ожидаются столбцы: Дата транзакции, Количество, Тип транзакции, Комментарий.';
+        alert('Не удалось найти заголовки отчёта «' + importTitle + '».\n' + expected);
         return;
       }
 
@@ -134,16 +143,16 @@ function importFuelFromXls(input) {
       function col(keywords) {
         return headers.findIndex(h => keywords.some(k => h.includes(k)));
       }
-      const cDate    = col(['дата транзакц']);
-      const cType    = col(['тип транзакц']);
+      const cDate    = col(['дата транзакц', 'дата']);
+      const cType    = col(['тип транзакц', 'тип операции']);
       const cQty     = col(['количество']);
       const cFuel    = col(['товар']);
-      const cComment = col(['комментар']);
+      const cComment = col(['комментар', 'местонахождение']);
       const cCard    = col(['номер карт']);
-      const cVehicle = col(['тс', 'транспорт', 'авто']);
+      const cVehicle = col(['закреплена', 'тс', 'транспорт', 'авто']);
 
       if (cDate === -1 || cQty === -1) {
-        alert('Не найдены обязательные столбцы: Дата транзакции, Количество.');
+        alert('Не найдены обязательные столбцы: Дата, Количество.');
         return;
       }
 
@@ -199,6 +208,7 @@ function importFuelFromXls(input) {
       for (let i = headerRow + 1; i < rows.length; i++) {
         const row = rows[i];
         const typeVal = cType !== -1 ? String(row[cType] || '').trim() : '';
+        if (cType !== -1 && !typeVal) continue;
         if (typeVal && !typeVal.toLowerCase().includes('покуп')) continue;
 
         const qty = parseFloat(String(row[cQty] || '0').replace(',', '.'));
@@ -229,7 +239,17 @@ function importFuelFromXls(input) {
         }
         if (!parsedDate) continue;
 
-        const comment = cComment !== -1 ? String(row[cComment] || '').trim() : '';
+        const commentParts = [];
+        if (cComment !== -1) commentParts.push(String(row[cComment] || '').trim());
+        if (isOfficeFuelImport) {
+          const cSupplier = col(['поставщик']);
+          const cAzs = col(['№ азс', 'азс']);
+          const supplier = cSupplier !== -1 ? String(row[cSupplier] || '').trim() : '';
+          const azs = cAzs !== -1 ? String(row[cAzs] || '').trim() : '';
+          if (supplier) commentParts.push(supplier);
+          if (azs) commentParts.push('АЗС ' + azs);
+        }
+        const comment = commentParts.filter(Boolean).join('; ');
         const cardNo  = cCard !== -1 ? String(row[cCard] || '').trim() : '';
         const vehicleText = cVehicle !== -1 ? String(row[cVehicle] || '').trim() : '';
         const fuel    = cFuel !== -1 ? String(row[cFuel] || '').trim() : '';
@@ -242,7 +262,7 @@ function importFuelFromXls(input) {
       }
 
       if (!transactions.length) {
-        alert('В файле не найдено транзакций типа «Покупка» с ненулевым количеством.');
+        alert('В файле «' + importTitle + '» не найдено операций типа «Покупка» с ненулевым количеством.');
         return;
       }
 
@@ -405,7 +425,7 @@ function importFuelFromXls(input) {
       if (v) renderDetail(v);
 
       showFuelImportReport({
-        fileName: file.name,
+        fileName: importTitle + ': ' + file.name,
         transactionsCount: transactions.length,
         sourceLitres: transactions.reduce((s, tx) => s + tx.qty, 0),
         groupedCount: groupedValues.length,
