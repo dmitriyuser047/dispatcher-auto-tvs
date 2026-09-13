@@ -108,7 +108,6 @@ function renderMainMenu() {
           <div class="menu-tile-icon" style="background:#dbeafe">
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#2563eb" stroke-width="2"><path d="M1 17l2-6h18l2 6M5 11l1-4h12l1 4"/><circle cx="7" cy="18.5" r="1.5" fill="#2563eb" stroke="none"/><circle cx="17" cy="18.5" r="1.5" fill="#2563eb" stroke="none"/></svg>
           </div>
-          <div class="aero-shine"></div>
           <div class="menu-tile-title">Транспорт</div>
           <div class="menu-tile-sub">${vCount} ТС</div>
         </div>
@@ -117,7 +116,6 @@ function renderMainMenu() {
           <div class="menu-tile-icon" style="background:#fef3c7">
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#d97706" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2"/><path d="M12 12v4m-2-2h4"/></svg>
           </div>
-          <div class="aero-shine"></div>
           <div class="menu-tile-title">ДЭС</div>
           <div class="menu-tile-sub">${gCount} генераторов</div>
         </div>
@@ -126,7 +124,6 @@ function renderMainMenu() {
           <div class="menu-tile-icon" style="background:#e0f2fe">
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#0284c7" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
           </div>
-          <div class="aero-shine"></div>
           <div class="menu-tile-title">Ёмкости</div>
           <div class="menu-tile-sub">${tCount} ёмкостей</div>
         </div>
@@ -135,7 +132,6 @@ function renderMainMenu() {
           <div class="menu-tile-icon" style="background:#dcfce7">
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#16a34a" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
           </div>
-          <div class="aero-shine"></div>
           <div class="menu-tile-title">Реестр</div>
           <div class="menu-tile-sub">Счета</div>
         </div>
@@ -144,7 +140,6 @@ function renderMainMenu() {
           <div class="menu-tile-icon" style="background:#ede9fe">
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#7c3aed" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
           </div>
-          <div class="aero-shine"></div>
           <div class="menu-tile-title">График ТО</div>
           <div class="menu-tile-sub">Обслуживание</div>
         </div>
@@ -153,7 +148,6 @@ function renderMainMenu() {
           <div class="menu-tile-icon" style="background:#fce7f3">
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#db2777" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </div>
-          <div class="aero-shine"></div>
           <div class="menu-tile-title">PDF</div>
           <div class="menu-tile-sub">Документы</div>
         </div>
@@ -162,7 +156,6 @@ function renderMainMenu() {
           <div class="menu-tile-icon" style="background:#fee2e2">
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#dc2626" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
           </div>
-          <div class="aero-shine"></div>
           <div class="menu-tile-title">Ремонт</div>
           <div class="menu-tile-sub">Журнал</div>
         </div>
@@ -171,7 +164,6 @@ function renderMainMenu() {
           <div class="menu-tile-icon" style="background:#d1fae5">
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 10h20"/><path d="M6 16h2m4 0h6"/></svg>
           </div>
-          <div class="aero-shine"></div>
           <div class="menu-tile-title">Финансы</div>
           <div class="menu-tile-sub">${(data.payments||[]).length} записей</div>
         </div>
@@ -180,7 +172,6 @@ function renderMainMenu() {
           <div class="menu-tile-icon" style="background:#fef9c3">
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#ca8a04" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
           </div>
-          <div class="aero-shine"></div>
           <div class="menu-tile-title">Контрагенты</div>
           <div class="menu-tile-sub">${(data.contragents||[]).length} записей</div>
         </div>
@@ -189,7 +180,6 @@ function renderMainMenu() {
           <div class="menu-tile-icon" style="background:#e0e7ff">
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#4f46e5" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
           </div>
-          <div class="aero-shine"></div>
           <div class="menu-tile-title">Отчёты</div>
           <div class="menu-tile-sub">Оборотка</div>
         </div>
@@ -198,7 +188,6 @@ function renderMainMenu() {
           <div class="menu-tile-icon" style="background:#fff7ed">
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#c2410c" stroke-width="2"><path d="M3 3v18h18"/><rect x="6" y="11" width="3" height="7"/><rect x="11" y="7" width="3" height="11"/><rect x="16" y="13" width="3" height="5"/></svg>
           </div>
-          <div class="aero-shine"></div>
           <div class="menu-tile-title">Топливо</div>
           <div class="menu-tile-sub">Приход и расход</div>
         </div>
@@ -207,7 +196,6 @@ function renderMainMenu() {
           <div class="menu-tile-icon" style="background:#f0fdf4">
             <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#15803d" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
           </div>
-          <div class="aero-shine"></div>
           <div class="menu-tile-title">Печать</div>
           <div class="menu-tile-sub">Документы</div>
         </div>

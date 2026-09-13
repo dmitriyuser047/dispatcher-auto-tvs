@@ -1875,3 +1875,60 @@
   }
   .toggle-btn:hover { border-color: var(--accent); color: var(--accent); }
   .toggle-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* Performance mode: Aero/glass effects are intentionally disabled.
+     The app holds large local datasets, so blur, shine, ripple, tilt and
+     animated shadows cost more than they add. */
+  :root,
+  [data-theme="dark"] {
+    --glass-blur: 0px;
+    --glass-shadow: none;
+    --shadow: none;
+    --mica-bg: var(--bg);
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    text-shadow: none !important;
+    will-change: auto !important;
+  }
+
+  .menu-tile::before,
+  .menu-tile::after,
+  .vehicle-card::before,
+  .vehicle-card::after,
+  .vd-journal-card::before,
+  .vd-journal-card::after,
+  .stat-card::after,
+  .btn::after,
+  .btn .ripple,
+  .aero-shine,
+  header::after {
+    content: none !important;
+    display: none !important;
+    opacity: 0 !important;
+  }
+
+  .main,
+  .sidebar,
+  header,
+  .modal,
+  .toast,
+  .menu-tile,
+  .vehicle-card,
+  .vd-journal-card,
+  .stat-card,
+  .btn,
+  input,
+  textarea,
+  select {
+    background-image: none !important;
+    box-shadow: none !important;
+    transform: none !important;
+    transform-style: flat !important;
+  }

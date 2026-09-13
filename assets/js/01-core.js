@@ -139,14 +139,17 @@ async function saveData(d) {
   showProgress();
   rebuildIndex();
   const json = JSON.stringify(d);
+  let saved = true;
   if (window.electronAPI) {
     const ok = await window.electronAPI.writeData(json);
     if (ok === false) {
+      saved = false;
       showToast('Ошибка сохранения на сервер. Проверьте соединение.');
     }
   }
   scheduleLocalBackup(json);
   setTimeout(hideProgress, 300);
+  return saved;
 }
 
 let data = { vehicles: [], records: [], generators: [], genRecords: [] };

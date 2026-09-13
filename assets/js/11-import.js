@@ -109,7 +109,7 @@ function importFuelFromXls(input) {
   input.value = '';
 
   const reader = new FileReader();
-  reader.onload = function(e) {
+  reader.onload = async function(e) {
     try {
       const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
@@ -144,11 +144,34 @@ function importFuelFromXls(input) {
         return;
       }
 
+      const plateChars = {
+        A: 'А', B: 'В', E: 'Е', K: 'К', M: 'М', H: 'Н',
+        O: 'О', P: 'Р', C: 'С', T: 'Т', Y: 'У', X: 'Х',
+      };
+      const normalizePlate = (s) => String(s || '')
+        .toUpperCase()
+        .replace(/[ABEKMHOPCTYX]/g, ch => plateChars[ch] || ch)
+        .replace(/[^АВЕКМНОРСТУХ0-9]/g, '');
+      const normalizeCard = (s) => String(s || '').replace(/\D/g, '');
+      const normalizeText = (s) => String(s || '').trim().replace(/\s+/g, ' ');
+      const extractPlate = (text) => {
+        const src = String(text || '').toUpperCase().replace(/[ABEKMHOPCTYX]/g, ch => plateChars[ch] || ch);
+        const m = src.match(/[АВЕКМНОРСТУХ]\s*\d{3}\s*[АВЕКМНОРСТУХ]{2}\s*\d{0,3}/);
+        return m ? normalizePlate(m[0]) : '';
+      };
+      const importKeyFor = (tx) => [
+        tx.date,
+        Math.round(tx.qty * 100) / 100,
+        normalizeCard(tx.cardNo),
+        normalizePlate(tx.plate),
+        normalizeText(tx.comment).toLowerCase(),
+      ].join('|');
+
       const transactions = [];
       for (let i = headerRow + 1; i < rows.length; i++) {
         const row = rows[i];
         const typeVal = cType !== -1 ? String(row[cType] || '').trim() : '';
-        if (typeVal && typeVal.toLowerCase() !== 'покупка') continue;
+        if (typeVal && !typeVal.toLowerCase().includes('покуп')) continue;
 
         const qty = parseFloat(String(row[cQty] || '0').replace(',', '.'));
         if (!qty || qty <= 0) continue;
@@ -182,13 +205,11 @@ function importFuelFromXls(input) {
         const cardNo  = cCard !== -1 ? String(row[cCard] || '').trim() : '';
         const fuel    = cFuel !== -1 ? String(row[cFuel] || '').trim() : '';
 
-        let plate = '';
-        if (comment) {
-          const pm = comment.match(/^([А-ЯЁа-яё]\d{3}[А-ЯЁа-яё]{2})/);
-          if (pm) plate = pm[1].toUpperCase();
-        }
+        const plate = extractPlate(comment);
 
-        transactions.push({ date: parsedDate, qty, plate, cardNo, fuel, comment });
+        const tx = { date: parsedDate, qty, plate, cardNo, fuel, comment };
+        tx.importKey = importKeyFor(tx);
+        transactions.push(tx);
       }
 
       if (!transactions.length) {
@@ -198,19 +219,30 @@ function importFuelFromXls(input) {
 
       function matchVehicle(tx) {
         if (tx.plate) {
-          const p = tx.plate.toLowerCase();
-          const v = data.vehicles.find(v => (v.plate || '').toLowerCase().replace(/\s/g, '').includes(p));
+          const p = normalizePlate(tx.plate);
+          const v = data.vehicles.find(v => {
+            const vp = normalizePlate(v.plate);
+            return vp && (vp === p || vp.startsWith(p) || p.startsWith(vp));
+          });
           if (v) return v;
         }
         if (tx.cardNo) {
-          const cn = tx.cardNo.replace(/\s/g, '');
-          const v = data.vehicles.find(v => (v.fuelcard || '').replace(/\s/g, '') === cn);
+          const cn = normalizeCard(tx.cardNo);
+          const v = data.vehicles.find(v => normalizeCard(v.fuelcard) === cn);
           if (v) return v;
         }
         if (tx.comment) {
-          const cLow = tx.comment.toLowerCase();
+          const cPlate = extractPlate(tx.comment);
+          if (cPlate) {
+            const v = data.vehicles.find(v => {
+              const vp = normalizePlate(v.plate);
+              return vp && (vp === cPlate || vp.startsWith(cPlate) || cPlate.startsWith(vp));
+            });
+            if (v) return v;
+          }
+          const cLow = normalizeText(tx.comment).toLowerCase();
           const v = data.vehicles.find(v => {
-            const p = (v.plate || '').toLowerCase().replace(/\s/g, '');
+            const p = normalizePlate(v.plate).toLowerCase();
             return p && cLow.includes(p);
           });
           if (v) return v;
@@ -230,18 +262,30 @@ function importFuelFromXls(input) {
           return;
         }
         const key = v.id + '|' + tx.date;
-        if (!groupedByVehicleDate[key]) groupedByVehicleDate[key] = { v, date: tx.date, totalQty: 0, fuels: [] };
+        if (!groupedByVehicleDate[key]) {
+          groupedByVehicleDate[key] = { v, date: tx.date, totalQty: 0, fuels: [], importKeys: [] };
+        }
         groupedByVehicleDate[key].totalQty += tx.qty;
-        groupedByVehicleDate[key].fuels.push(tx.fuel + ' ' + tx.qty + 'л');
+        groupedByVehicleDate[key].fuels.push((tx.fuel || 'топливо') + ' ' + tx.qty + 'л');
+        groupedByVehicleDate[key].importKeys.push(tx.importKey);
       });
 
       Object.values(groupedByVehicleDate).forEach(grp => {
         const existing = (data.records || []).find(r =>
           r.vehicleId === grp.v.id && r.date === grp.date
         );
+        const noteText = String(existing?.note || '');
+        const hasImportedKey = grp.importKeys.some(k => noteText.includes(k));
+        const importMarker = 'импорт заправок: ' + grp.importKeys.join(' | ');
+        const fuelNote = 'заправка: ' + grp.fuels.join(', ');
 
         if (existing) {
+          if (hasImportedKey) {
+            duplicates++;
+            return;
+          }
           if (existing.fuelIssued && Math.abs(existing.fuelIssued - grp.totalQty) < 0.01) {
+            if (!existing.note) existing.note = fuelNote + '; ' + importMarker;
             duplicates++;
             return;
           }
@@ -251,9 +295,7 @@ function importFuelFromXls(input) {
           }
           existing.fuelIssued = (existing.fuelIssued || 0) + grp.totalQty;
           if (!existing.note) existing.note = '';
-          if (!existing.note.includes('заправка')) {
-            existing.note = (existing.note ? existing.note + '; ' : '') + grp.fuels.join(', ');
-          }
+          existing.note = (existing.note ? existing.note + '; ' : '') + fuelNote + '; ' + importMarker;
           updated++;
         } else {
           if (!data.records) data.records = [];
@@ -263,13 +305,17 @@ function importFuelFromXls(input) {
             date: grp.date,
             km: 0,
             fuelIssued: grp.totalQty,
-            note: 'заправка: ' + grp.fuels.join(', '),
+            note: fuelNote + '; ' + importMarker,
           });
           added++;
         }
       });
 
-      saveData(data);
+      const saved = await saveData(data);
+      if (!saved) {
+        alert('Заправки обработаны, но сохранить изменения не удалось. Проверьте соединение с сервером и повторите импорт.');
+        return;
+      }
       const v = data.vehicles.find(x => x.id === selectedVehicleId);
       if (v) renderDetail(v);
 

@@ -14,31 +14,7 @@
 
 // ─── ANIMATED COUNTER for stat values ───
 function animateCounters(container) {
-  const els = (container || document).querySelectorAll('.stat-value');
-  els.forEach(el => {
-    const text = el.textContent.trim();
-    const match = text.match(/^([\d\s,.]+)/);
-    if (!match) return;
-    const raw = match[1].replace(/\s/g, '').replace(',', '.');
-    const target = parseFloat(raw);
-    if (isNaN(target) || target === 0) return;
-    const suffix = text.slice(match[1].length);
-    const isFloat = raw.includes('.');
-    const decimals = isFloat ? (raw.split('.')[1] || '').length : 0;
-    const duration = 600;
-    const start = performance.now();
-    function tick(now) {
-      const p = Math.min((now - start) / duration, 1);
-      const eased = 1 - Math.pow(1 - p, 3);
-      const val = target * eased;
-      const formatted = isFloat
-        ? val.toLocaleString('ru', {minimumFractionDigits: decimals, maximumFractionDigits: decimals})
-        : Math.round(val).toLocaleString('ru');
-      el.childNodes[0].textContent = formatted + ' ';
-      if (p < 1) requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
-  });
+  // Intentionally static for performance on large local databases.
 }
 
 // ─── PROGRESS BAR helper ───
@@ -46,8 +22,7 @@ function showProgress() {
   const bar = document.getElementById('topProgress');
   if (!bar) return;
   bar.className = 'top-progress active';
-  bar.style.width = '0';
-  requestAnimationFrame(() => { bar.style.width = '70%'; });
+  bar.style.width = '70%';
 }
 function hideProgress() {
   const bar = document.getElementById('topProgress');
