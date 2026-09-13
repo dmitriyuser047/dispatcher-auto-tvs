@@ -103,6 +103,8 @@ function importVehiclesFromXls(input) {
 }
 
 // ─── ИМПОРТ ЗАПРАВОК ИЗ ОТЧЁТА ПО ТОПЛИВНЫМ КАРТАМ ──────
+let _fuelImportLastReport = null;
+
 function importFuelFromXls(input) {
   const file = input.files[0];
   if (!file) return;
@@ -299,6 +301,8 @@ function importFuelFromXls(input) {
             sourceRow: tx.sourceRow,
             date: tx.date,
             qty: tx.qty,
+            fuel: tx.fuel,
+            importKey: tx.importKey,
             cardNo: tx.cardNo,
             vehicleText: tx.vehicleText,
             comment: tx.comment,
@@ -341,7 +345,7 @@ function importFuelFromXls(input) {
           if (hasImportedKey) {
             duplicates++;
             duplicateLitres += grp.totalQty;
-            reportRows.push(fuelImportReportRow(grp, 'duplicate', existingIssued, existingIssued, 'Уже загружено ранее'));
+            reportRows.push(fuelImportReportRow(grp, 'duplicate', existingIssued, existingIssued, 'Уже загружено ранее', existing.id));
             return;
           }
           if (sameRoundedIssue) {
@@ -359,13 +363,13 @@ function importFuelFromXls(input) {
             }
             if (!existing.note) existing.note = fuelNote + '; ' + importMarker;
             else if (!existing.note.includes(importMarker)) existing.note += '; ' + fuelNote + '; ' + importMarker;
-            reportRows.push(fuelImportReportRow(grp, action, existingIssued, existing.fuelIssued, statusText));
+            reportRows.push(fuelImportReportRow(grp, action, existingIssued, existing.fuelIssued, statusText, existing.id));
             return;
           }
           if (hasExistingIssued && existing.note && existing.note.includes('заправка')) {
             duplicates++;
             duplicateLitres += grp.totalQty;
-            reportRows.push(fuelImportReportRow(grp, 'duplicate', existingIssued, existingIssued, 'Пропущено: в записи уже есть заправка'));
+            reportRows.push(fuelImportReportRow(grp, 'duplicate', existingIssued, existingIssued, 'Пропущено: в записи уже есть заправка', existing.id));
             return;
           }
           const beforeIssued = existingIssued;
@@ -374,20 +378,21 @@ function importFuelFromXls(input) {
           existing.note = (existing.note ? existing.note + '; ' : '') + fuelNote + '; ' + importMarker;
           updated++;
           updatedLitres += grp.totalQty;
-          reportRows.push(fuelImportReportRow(grp, 'updated', beforeIssued, existing.fuelIssued, 'Добавлено к существующей дате'));
+          reportRows.push(fuelImportReportRow(grp, 'updated', beforeIssued, existing.fuelIssued, 'Добавлено к существующей дате', existing.id));
         } else {
           if (!data.records) data.records = [];
-          data.records.push({
+          const newRecord = {
             id: 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
             vehicleId: grp.v.id,
             date: grp.date,
             km: 0,
             fuelIssued: grp.totalQty,
             note: fuelNote + '; ' + importMarker,
-          });
+          };
+          data.records.push(newRecord);
           added++;
           addedLitres += grp.totalQty;
-          reportRows.push(fuelImportReportRow(grp, 'added', null, grp.totalQty, 'Создана новая дневная запись'));
+          reportRows.push(fuelImportReportRow(grp, 'added', null, grp.totalQty, 'Создана новая дневная запись', newRecord.id));
         }
       });
 
@@ -418,13 +423,15 @@ function importFuelFromXls(input) {
   reader.readAsArrayBuffer(file);
 }
 
-function fuelImportReportRow(grp, action, beforeIssued, afterIssued, statusText) {
+function fuelImportReportRow(grp, action, beforeIssued, afterIssued, statusText, recordId) {
   const vehicleTitle = [grp.v.plate, grp.v.make].filter(Boolean).join(' — ') || grp.v.id;
   const cards = [...new Set(grp.transactions.map(tx => tx.cardNo).filter(Boolean))];
   const comments = [...new Set(grp.transactions.map(tx => tx.comment).filter(Boolean))];
   return {
     action,
     statusText,
+    recordId,
+    vehicleId: grp.v.id,
     date: grp.date,
     vehicle: vehicleTitle,
     qty: grp.totalQty,
@@ -438,6 +445,7 @@ function fuelImportReportRow(grp, action, beforeIssued, afterIssued, statusText)
       sourceRow: tx.sourceRow,
       qty: tx.qty,
       fuel: tx.fuel,
+      importKey: tx.importKey,
       cardNo: tx.cardNo,
       vehicleText: tx.vehicleText,
       comment: tx.comment,
@@ -445,7 +453,209 @@ function fuelImportReportRow(grp, action, beforeIssued, afterIssued, statusText)
   };
 }
 
+function fuelImportVehicleTitle(vehicleIdOrVehicle) {
+  const v = typeof vehicleIdOrVehicle === 'object'
+    ? vehicleIdOrVehicle
+    : (data.vehicles || []).find(x => x.id === vehicleIdOrVehicle);
+  if (!v) return '—';
+  return [v.plate, v.make].filter(Boolean).join(' — ') || v.id;
+}
+
+function fuelImportVehicleOptions(selectedId, includeBlank = false) {
+  const blank = includeBlank ? '<option value="">— выберите ТС —</option>' : '';
+  return blank + (data.vehicles || [])
+    .slice()
+    .sort((a, b) => fuelImportVehicleTitle(a).localeCompare(fuelImportVehicleTitle(b), 'ru'))
+    .map(v => `<option value="${String(v.id).replace(/"/g, '&quot;')}"${v.id === selectedId ? ' selected' : ''}>${fuelImportVehicleTitle(v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')}</option>`)
+    .join('');
+}
+
+function fuelImportAppendNote(record, note) {
+  if (!record || !note) return;
+  const current = String(record.note || '');
+  if (current.includes(note)) return;
+  record.note = current ? current + '; ' + note : note;
+}
+
+function fuelImportRoundLitres(v) {
+  return Math.round((+v || 0) * 100) / 100;
+}
+
+function fuelImportTransactionNote(transactions, fallbackQty) {
+  const txs = Array.isArray(transactions) ? transactions : [];
+  const fuels = txs
+    .map(tx => (tx.fuel || 'топливо') + ' ' + fuelImportRoundLitres(tx.qty || fallbackQty) + 'л')
+    .filter(Boolean);
+  const importKeys = txs.map(tx => tx.importKey).filter(Boolean);
+  const fuelNote = 'заправка: ' + (fuels.length ? fuels.join(', ') : fuelImportRoundLitres(fallbackQty) + 'л');
+  const importMarker = importKeys.length ? 'импорт заправок: ' + importKeys.join(' | ') : 'импорт заправок: ручное сопоставление из отчёта';
+  return fuelNote + '; ' + importMarker;
+}
+
+function fuelImportApplyFuelToVehicle(vehicleId, date, qty, transactions, extraNote) {
+  if (!data.records) data.records = [];
+  let record = data.records.find(r => r.vehicleId === vehicleId && r.date === date);
+  const created = !record;
+  if (!record) {
+    record = {
+      id: 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+      vehicleId,
+      date,
+      km: 0,
+      fuelIssued: 0,
+      note: '',
+    };
+    data.records.push(record);
+  }
+
+  const before = +record.fuelIssued || 0;
+  record.fuelIssued = fuelImportRoundLitres(before + (+qty || 0));
+  fuelImportAppendNote(record, fuelImportTransactionNote(transactions, qty));
+  fuelImportAppendNote(record, extraNote);
+
+  return { record, created, beforeIssued: created ? null : before, afterIssued: record.fuelIssued };
+}
+
+function fuelImportSubtractFromRecord(row) {
+  const qty = +row.qty || 0;
+  if (!qty || !data.records) return null;
+  const record = data.records.find(r => r.id === row.recordId) ||
+    data.records.find(r => r.vehicleId === row.vehicleId && r.date === row.date);
+  if (!record) return null;
+
+  const before = +record.fuelIssued || 0;
+  const after = fuelImportRoundLitres(Math.max(0, before - qty));
+  record.fuelIssued = after > 0 ? after : null;
+  fuelImportAppendNote(record, 'перенос заправки из отчёта импорта: -' + fuelImportRoundLitres(qty) + ' л');
+  return { record, beforeIssued: before, afterIssued: record.fuelIssued };
+}
+
+function fuelImportRefreshVisibleVehicle() {
+  if (typeof renderVehicleList === 'function') renderVehicleList();
+  if (selectedVehicleId && typeof renderDetail === 'function') {
+    const v = (data.vehicles || []).find(x => x.id === selectedVehicleId);
+    if (v) renderDetail(v);
+  }
+}
+
+async function changeFuelImportReportVehicle(reportIndex) {
+  const report = _fuelImportLastReport;
+  const row = report?.reportRows?.[reportIndex];
+  const select = document.getElementById('fuelImportVehicle_' + reportIndex);
+  const targetVehicleId = select?.value;
+  const target = (data.vehicles || []).find(v => v.id === targetVehicleId);
+  if (!row) return;
+  if (!target) {
+    alert('Выберите ТС для этой строки.');
+    return;
+  }
+  if (row.vehicleId === targetVehicleId) {
+    alert('Это ТС уже выбрано для этой строки.');
+    return;
+  }
+
+  const fromTitle = row.vehicle || fuelImportVehicleTitle(row.vehicleId);
+  fuelImportSubtractFromRecord(row);
+  const applied = fuelImportApplyFuelToVehicle(
+    targetVehicleId,
+    row.date,
+    row.qty,
+    row.transactions,
+    'ТС изменено в отчёте импорта: было ' + fromTitle
+  );
+
+  const saved = await saveData(data);
+  if (!saved) {
+    alert('Не удалось сохранить перенос заправки. Проверьте соединение с сервером и повторите действие.');
+    return;
+  }
+
+  row.action = applied.created ? 'added' : 'updated';
+  row.statusText = 'ТС изменено';
+  row.recordId = applied.record.id;
+  row.vehicleId = targetVehicleId;
+  row.vehicle = fuelImportVehicleTitle(target);
+  row.beforeIssued = applied.beforeIssued;
+  row.afterIssued = applied.afterIssued;
+  fuelImportRefreshVisibleVehicle();
+  showFuelImportReport(report);
+}
+
+async function assignFuelImportUnmatchedVehicle(unmatchedIndex) {
+  const report = _fuelImportLastReport;
+  const row = report?.unmatchedRows?.[unmatchedIndex];
+  const select = document.getElementById('fuelImportUnmatchedVehicle_' + unmatchedIndex);
+  const targetVehicleId = select?.value;
+  const target = (data.vehicles || []).find(v => v.id === targetVehicleId);
+  if (!row) return;
+  if (!target) {
+    alert('Выберите ТС для этой строки.');
+    return;
+  }
+
+  const tx = {
+    sourceRow: row.sourceRow,
+    qty: row.qty,
+    fuel: row.fuel,
+    importKey: row.importKey,
+    cardNo: row.cardNo,
+    vehicleText: row.vehicleText,
+    comment: row.comment,
+  };
+  const applied = fuelImportApplyFuelToVehicle(
+    targetVehicleId,
+    row.date,
+    row.qty,
+    [tx],
+    'ТС выбрано вручную в отчёте импорта'
+  );
+
+  const saved = await saveData(data);
+  if (!saved) {
+    alert('Не удалось сохранить строку отчёта. Проверьте соединение с сервером и повторите действие.');
+    return;
+  }
+
+  report.unmatchedRows.splice(unmatchedIndex, 1);
+  report.skipped = Math.max(0, (report.skipped || 0) - 1);
+  report.skippedLitres = fuelImportRoundLitres(Math.max(0, (report.skippedLitres || 0) - (+row.qty || 0)));
+  if (applied.created) {
+    report.added = (report.added || 0) + 1;
+    report.addedLitres = fuelImportRoundLitres((report.addedLitres || 0) + (+row.qty || 0));
+    report.groupedCount = (report.groupedCount || 0) + 1;
+  } else {
+    report.updated = (report.updated || 0) + 1;
+    report.updatedLitres = fuelImportRoundLitres((report.updatedLitres || 0) + (+row.qty || 0));
+  }
+  report.reportRows.push({
+    action: applied.created ? 'added' : 'updated',
+    statusText: applied.created ? 'Загружено вручную' : 'Добавлено вручную',
+    recordId: applied.record.id,
+    vehicleId: targetVehicleId,
+    date: row.date,
+    vehicle: fuelImportVehicleTitle(target),
+    qty: row.qty,
+    beforeIssued: applied.beforeIssued,
+    afterIssued: applied.afterIssued,
+    sourceRows: [row.sourceRow],
+    transactionCount: 1,
+    cardNo: row.cardNo || '',
+    comment: row.comment || '',
+    transactions: [tx],
+  });
+
+  fuelImportRefreshVisibleVehicle();
+  showFuelImportReport(report);
+}
+
 function showFuelImportReport(report) {
+  _fuelImportLastReport = report;
+  (report.reportRows || []).forEach((r, i) => { r._reportIndex = i; });
+  (report.unmatchedRows || []).forEach((r, i) => { r._unmatchedIndex = i; });
   const body = document.getElementById('fuelImportReportBody');
   const modal = document.getElementById('fuelImportReportModal');
   const esc = (v) => String(v ?? '')
@@ -496,6 +706,12 @@ function showFuelImportReport(report) {
       <td>${esc(r.sourceRows.join(', '))}</td>
       <td>${esc(r.cardNo || '—')}</td>
       <td style="max-width:300px;white-space:normal">${esc(r.comment || '—')}</td>
+      <td style="min-width:260px">
+        <div style="display:flex;gap:6px;align-items:center">
+          <select id="fuelImportVehicle_${r._reportIndex}" class="fsel" style="min-width:185px;max-width:210px">${fuelImportVehicleOptions(r.vehicleId)}</select>
+          <button class="btn btn-primary btn-sm" onclick="changeFuelImportReportVehicle(${r._reportIndex})" style="padding:4px 10px;font-size:12px">Применить</button>
+        </div>
+      </td>
     </tr>
   `).join('');
 
@@ -506,7 +722,7 @@ function showFuelImportReport(report) {
       </div>
       <div class="table-scroll" style="max-height:220px;overflow:auto">
         <table class="data-table" style="width:100%">
-          <thead><tr><th>Строка Excel</th><th>Дата</th><th style="text-align:right">Литры</th><th>Карта</th><th>ТС</th><th>Комментарий</th></tr></thead>
+          <thead><tr><th>Строка Excel</th><th>Дата</th><th style="text-align:right">Литры</th><th>Карта</th><th>ТС</th><th>Комментарий</th><th>Загрузить на ТС</th></tr></thead>
           <tbody>${sortedUnmatched.map(r => `
             <tr>
               <td>${esc(r.sourceRow)}</td>
@@ -515,6 +731,12 @@ function showFuelImportReport(report) {
               <td>${esc(r.cardNo || '—')}</td>
               <td>${esc(r.vehicleText || '—')}</td>
               <td style="max-width:360px;white-space:normal">${esc(r.comment || '—')}</td>
+              <td style="min-width:260px">
+                <div style="display:flex;gap:6px;align-items:center">
+                  <select id="fuelImportUnmatchedVehicle_${r._unmatchedIndex}" class="fsel" style="min-width:185px;max-width:210px">${fuelImportVehicleOptions('', true)}</select>
+                  <button class="btn btn-primary btn-sm" onclick="assignFuelImportUnmatchedVehicle(${r._unmatchedIndex})" style="padding:4px 10px;font-size:12px">Загрузить</button>
+                </div>
+              </td>
             </tr>
           `).join('')}</tbody>
         </table>
@@ -587,10 +809,10 @@ function showFuelImportReport(report) {
             <tr>
               <th>Дата</th><th>Статус</th><th>ТС</th><th style="text-align:right">Литры из Excel</th>
               <th style="text-align:right">Было</th><th style="text-align:right">Стало</th>
-              <th style="text-align:center">Покупок</th><th>Строки Excel</th><th>Карта</th><th>Комментарий</th>
+              <th style="text-align:center">Покупок</th><th>Строки Excel</th><th>Карта</th><th>Комментарий</th><th>Изменить ТС</th>
             </tr>
           </thead>
-          <tbody>${rowHtml || '<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:16px">Нет обработанных строк</td></tr>'}</tbody>
+          <tbody>${rowHtml || '<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:16px">Нет обработанных строк</td></tr>'}</tbody>
         </table>
       </div>
     </div>
