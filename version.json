@@ -1,6 +1,6 @@
 {
-  "version": "2.0.57",
+  "version": "2.0.58",
   "date": "2026-09-13",
-  "notes": "Доступна версия 2.0.57. Улучшен импорт заправок, добавлен подробный отчёт после загрузки, раскрытие объединённых строк и одноразовое обновление базы вместе с программой.",
-  "url": "https://github.com/dmitriyuser047/dispatcher-auto-tvs/releases/download/v2.0.57/Dispatcher-Setup-2.0.57.exe"
+  "notes": "Доступна версия 2.0.58. Нажмите «Скачать обновление».",
+  "url": "https://github.com/dmitriyuser047/dispatcher-auto-tvs/releases/download/v2.0.58/Dispatcher-Setup-2.0.58.exe"
 }
