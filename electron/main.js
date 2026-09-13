@@ -56,6 +56,43 @@ function createDailyBackup() {
   catch (e) { console.error('[backup] ' + e.message); }
 }
 
+function applyBundledDataSeedOnce() {
+  if (settings.networkMode === 'client') return;
+
+  const seedVersion = '2.0.57';
+  const seedFile = path.join(__dirname, '..', 'bundled-data', 'data-' + seedVersion + '.json');
+  if (!fs.existsSync(seedFile)) return;
+
+  const dataDir = getDataDir();
+  const markerFile = path.join(dataDir, '.bundled-db-' + seedVersion + '.applied.json');
+  if (fs.existsSync(markerFile)) return;
+
+  try {
+    ensureDirs();
+    fs.mkdirSync(getBackupDir(), { recursive: true });
+
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupFile = path.join(getBackupDir(), 'data_before_bundled_' + seedVersion + '_' + stamp + '.json');
+    try {
+      fs.writeFileSync(backupFile, JSON.stringify(storage.readAll(dataDir), null, 2), 'utf8');
+    } catch (e) {
+      console.error('[bundled-db] backup failed: ' + e.message);
+    }
+
+    const seed = JSON.parse(fs.readFileSync(seedFile, 'utf8'));
+    const res = storage.writeAll(dataDir, seed);
+    fs.writeFileSync(markerFile, JSON.stringify({
+      version: seedVersion,
+      appliedAt: new Date().toISOString(),
+      backupFile,
+      changed: res.changed,
+    }, null, 2), 'utf8');
+    console.log('[bundled-db] applied ' + seedVersion + ', changed: ' + res.changed.join(', '));
+  } catch (e) {
+    console.error('[bundled-db] ' + e.message);
+  }
+}
+
 function createWindow() {
   const iconPath = path.join(__dirname, '../build/icon.ico');
   const win = new BrowserWindow({
@@ -122,6 +159,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   ensureDirs();
+  applyBundledDataSeedOnce();
 
   // Экспорт сводок/актов (XLSX) идёт через обычную загрузку браузера —
   // открываем файл сразу после сохранения, чтобы не искать его в "Загрузках".

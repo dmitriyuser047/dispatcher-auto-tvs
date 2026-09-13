@@ -138,6 +138,7 @@ function importFuelFromXls(input) {
       const cFuel    = col(['товар']);
       const cComment = col(['комментар']);
       const cCard    = col(['номер карт']);
+      const cVehicle = col(['тс', 'транспорт', 'авто']);
 
       if (cDate === -1 || cQty === -1) {
         alert('Не найдены обязательные столбцы: Дата транзакции, Количество.');
@@ -154,10 +155,35 @@ function importFuelFromXls(input) {
         .replace(/[^АВЕКМНОРСТУХ0-9]/g, '');
       const normalizeCard = (s) => String(s || '').replace(/\D/g, '');
       const normalizeText = (s) => String(s || '').trim().replace(/\s+/g, ' ');
+      const normalizeLooseText = (s) => normalizeText(s)
+        .toLowerCase()
+        .replace(/ё/g, 'е')
+        .replace(/э/g, 'е');
       const extractPlate = (text) => {
         const src = String(text || '').toUpperCase().replace(/[ABEKMHOPCTYX]/g, ch => plateChars[ch] || ch);
-        const m = src.match(/[АВЕКМНОРСТУХ]\s*\d{3}\s*[АВЕКМНОРСТУХ]{2}\s*\d{0,3}/);
+        const m = src.match(/[АВЕКМНОРСТУХ]\s*\d{3}\s*[АВЕКМНОРСТУХ]{2}\s*\d{0,3}|\d{3,5}\s*[АВЕКМНОРСТУХ]{1,3}\s*\d{0,3}/);
         return m ? normalizePlate(m[0]) : '';
+      };
+      const matchVehicleByLooseText = (text) => {
+        const raw = normalizeText(text);
+        if (!raw) return null;
+        const low = normalizeLooseText(raw);
+        const compact = normalizePlate(raw);
+        const digitChunks = raw.match(/\d{3,6}/g) || [];
+
+        return data.vehicles.find(v => {
+          const vp = normalizePlate(v.plate);
+          if (vp && compact.includes(vp)) return true;
+
+          const vDigits = (vp.match(/\d+/g) || []).join('');
+          const hasVehicleDigits = vDigits && digitChunks.includes(vDigits);
+          if (!hasVehicleDigits) return false;
+
+          const makeWords = normalizeLooseText(v.make)
+            .split(/[^a-zа-я0-9]+/i)
+            .filter(w => w.length >= 4);
+          return vp.startsWith(vDigits) || makeWords.some(w => low.includes(w));
+        }) || null;
       };
       const importKeyFor = (tx) => [
         tx.date,
@@ -203,11 +229,12 @@ function importFuelFromXls(input) {
 
         const comment = cComment !== -1 ? String(row[cComment] || '').trim() : '';
         const cardNo  = cCard !== -1 ? String(row[cCard] || '').trim() : '';
+        const vehicleText = cVehicle !== -1 ? String(row[cVehicle] || '').trim() : '';
         const fuel    = cFuel !== -1 ? String(row[cFuel] || '').trim() : '';
 
-        const plate = extractPlate(comment);
+        const plate = extractPlate(comment + ' ' + vehicleText);
 
-        const tx = { date: parsedDate, qty, plate, cardNo, fuel, comment };
+        const tx = { sourceRow: i + 1, date: parsedDate, qty, plate, cardNo, fuel, comment, vehicleText };
         tx.importKey = importKeyFor(tx);
         transactions.push(tx);
       }
@@ -231,6 +258,10 @@ function importFuelFromXls(input) {
           const v = data.vehicles.find(v => normalizeCard(v.fuelcard) === cn);
           if (v) return v;
         }
+        if (tx.vehicleText) {
+          const v = matchVehicleByLooseText(tx.vehicleText);
+          if (v) return v;
+        }
         if (tx.comment) {
           const cPlate = extractPlate(tx.comment);
           if (cPlate) {
@@ -246,31 +277,50 @@ function importFuelFromXls(input) {
             return p && cLow.includes(p);
           });
           if (v) return v;
+
+          const looseMatch = matchVehicleByLooseText(tx.comment);
+          if (looseMatch) return looseMatch;
         }
         return null;
       }
 
-      let added = 0, updated = 0, skipped = 0, duplicates = 0;
+      let added = 0, updated = 0, skipped = 0, duplicates = 0, adjusted = 0;
+      let addedLitres = 0, updatedLitres = 0, skippedLitres = 0, duplicateLitres = 0, adjustedLitres = 0;
       const unmatched = new Set();
+      const reportRows = [];
+      const unmatchedRows = [];
 
       const groupedByVehicleDate = {};
       transactions.forEach(tx => {
         const v = matchVehicle(tx);
         if (!v) {
           unmatched.add(tx.comment || tx.cardNo || 'неизвестно');
+          unmatchedRows.push({
+            sourceRow: tx.sourceRow,
+            date: tx.date,
+            qty: tx.qty,
+            cardNo: tx.cardNo,
+            vehicleText: tx.vehicleText,
+            comment: tx.comment,
+          });
+          skippedLitres += tx.qty;
           skipped++;
           return;
         }
         const key = v.id + '|' + tx.date;
         if (!groupedByVehicleDate[key]) {
-          groupedByVehicleDate[key] = { v, date: tx.date, totalQty: 0, fuels: [], importKeys: [] };
+          groupedByVehicleDate[key] = { v, date: tx.date, totalQty: 0, fuels: [], importKeys: [], transactions: [] };
         }
         groupedByVehicleDate[key].totalQty += tx.qty;
         groupedByVehicleDate[key].fuels.push((tx.fuel || 'топливо') + ' ' + tx.qty + 'л');
         groupedByVehicleDate[key].importKeys.push(tx.importKey);
+        groupedByVehicleDate[key].transactions.push(tx);
       });
 
-      Object.values(groupedByVehicleDate).forEach(grp => {
+      const groupedValues = Object.values(groupedByVehicleDate);
+      const mergedTransactions = groupedValues.reduce((s, grp) => s + Math.max(0, grp.importKeys.length - 1), 0);
+
+      groupedValues.forEach(grp => {
         const existing = (data.records || []).find(r =>
           r.vehicleId === grp.v.id && r.date === grp.date
         );
@@ -280,23 +330,51 @@ function importFuelFromXls(input) {
         const fuelNote = 'заправка: ' + grp.fuels.join(', ');
 
         if (existing) {
+          const existingIssued = +existing.fuelIssued || 0;
+          const hasExistingIssued = existing.fuelIssued != null && existing.fuelIssued !== '' && existingIssued > 0;
+          const sameRoundedIssue = hasExistingIssued && (
+            Math.abs(existingIssued - grp.totalQty) < 0.01 ||
+            Math.abs(existingIssued - grp.totalQty) <= 1 ||
+            Math.round(existingIssued) === Math.round(grp.totalQty)
+          );
+
           if (hasImportedKey) {
             duplicates++;
+            duplicateLitres += grp.totalQty;
+            reportRows.push(fuelImportReportRow(grp, 'duplicate', existingIssued, existingIssued, 'Уже загружено ранее'));
             return;
           }
-          if (existing.fuelIssued && Math.abs(existing.fuelIssued - grp.totalQty) < 0.01) {
+          if (sameRoundedIssue) {
+            let action = 'duplicate';
+            let statusText = 'Уже было';
+            if (Math.abs(existingIssued - grp.totalQty) >= 0.01) {
+              existing.fuelIssued = grp.totalQty;
+              adjusted++;
+              adjustedLitres += grp.totalQty;
+              action = 'adjusted';
+              statusText = 'Уточнено округление';
+            } else {
+              duplicates++;
+              duplicateLitres += grp.totalQty;
+            }
             if (!existing.note) existing.note = fuelNote + '; ' + importMarker;
-            duplicates++;
+            else if (!existing.note.includes(importMarker)) existing.note += '; ' + fuelNote + '; ' + importMarker;
+            reportRows.push(fuelImportReportRow(grp, action, existingIssued, existing.fuelIssued, statusText));
             return;
           }
-          if (existing.fuelIssued && existing.note && existing.note.includes('заправка')) {
+          if (hasExistingIssued && existing.note && existing.note.includes('заправка')) {
             duplicates++;
+            duplicateLitres += grp.totalQty;
+            reportRows.push(fuelImportReportRow(grp, 'duplicate', existingIssued, existingIssued, 'Пропущено: в записи уже есть заправка'));
             return;
           }
-          existing.fuelIssued = (existing.fuelIssued || 0) + grp.totalQty;
+          const beforeIssued = existingIssued;
+          existing.fuelIssued = beforeIssued + grp.totalQty;
           if (!existing.note) existing.note = '';
           existing.note = (existing.note ? existing.note + '; ' : '') + fuelNote + '; ' + importMarker;
           updated++;
+          updatedLitres += grp.totalQty;
+          reportRows.push(fuelImportReportRow(grp, 'updated', beforeIssued, existing.fuelIssued, 'Добавлено к существующей дате'));
         } else {
           if (!data.records) data.records = [];
           data.records.push({
@@ -308,6 +386,8 @@ function importFuelFromXls(input) {
             note: fuelNote + '; ' + importMarker,
           });
           added++;
+          addedLitres += grp.totalQty;
+          reportRows.push(fuelImportReportRow(grp, 'added', null, grp.totalQty, 'Создана новая дневная запись'));
         }
       });
 
@@ -319,20 +399,213 @@ function importFuelFromXls(input) {
       const v = data.vehicles.find(x => x.id === selectedVehicleId);
       if (v) renderDetail(v);
 
-      let msg = `Импорт заправок завершён.\n\nДобавлено записей: ${added}\nОбновлено записей: ${updated}`;
-      if (duplicates > 0) msg += `\nУже загружено (пропущено): ${duplicates}`;
-      if (skipped > 0) {
-        msg += `\nНе найдено ТС: ${skipped}`;
-        const unmArr = [...unmatched].slice(0, 5);
-        msg += '\n\nНе удалось сопоставить:\n' + unmArr.join('\n');
-        if (unmatched.size > 5) msg += '\n...и ещё ' + (unmatched.size - 5);
-      }
-      alert(msg);
+      showFuelImportReport({
+        fileName: file.name,
+        transactionsCount: transactions.length,
+        sourceLitres: transactions.reduce((s, tx) => s + tx.qty, 0),
+        groupedCount: groupedValues.length,
+        mergedTransactions,
+        added, updated, adjusted, duplicates, skipped,
+        addedLitres, updatedLitres, adjustedLitres, duplicateLitres, skippedLitres,
+        reportRows,
+        unmatchedRows,
+        unmatched: [...unmatched],
+      });
     } catch(err) {
       alert('Ошибка при чтении файла: ' + err.message);
     }
   };
   reader.readAsArrayBuffer(file);
+}
+
+function fuelImportReportRow(grp, action, beforeIssued, afterIssued, statusText) {
+  const vehicleTitle = [grp.v.plate, grp.v.make].filter(Boolean).join(' — ') || grp.v.id;
+  const cards = [...new Set(grp.transactions.map(tx => tx.cardNo).filter(Boolean))];
+  const comments = [...new Set(grp.transactions.map(tx => tx.comment).filter(Boolean))];
+  return {
+    action,
+    statusText,
+    date: grp.date,
+    vehicle: vehicleTitle,
+    qty: grp.totalQty,
+    beforeIssued,
+    afterIssued,
+    sourceRows: grp.transactions.map(tx => tx.sourceRow),
+    transactionCount: grp.transactions.length,
+    cardNo: cards.join(', '),
+    comment: comments.join('; '),
+    transactions: grp.transactions.map(tx => ({
+      sourceRow: tx.sourceRow,
+      qty: tx.qty,
+      fuel: tx.fuel,
+      cardNo: tx.cardNo,
+      vehicleText: tx.vehicleText,
+      comment: tx.comment,
+    })),
+  };
+}
+
+function showFuelImportReport(report) {
+  const body = document.getElementById('fuelImportReportBody');
+  const modal = document.getElementById('fuelImportReportModal');
+  const esc = (v) => String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  const num = (v, dec = 2) => (+v || 0).toLocaleString('ru', {
+    minimumFractionDigits: dec,
+    maximumFractionDigits: dec,
+  });
+  const signedNum = (v) => v == null ? '—' : num(v);
+  const actionStyle = {
+    added: 'background:#dcfce7;color:#15803d',
+    updated: 'background:#dbeafe;color:#1d4ed8',
+    adjusted: 'background:#fef3c7;color:#b45309',
+    duplicate: 'background:var(--bg3);color:var(--text3)',
+  };
+  const actionOrder = { added: 1, adjusted: 2, updated: 3, duplicate: 4 };
+  const changedRows = report.reportRows.filter(r => r.action !== 'duplicate');
+  const loadedLitres = report.addedLitres + report.updatedLitres + report.adjustedLitres;
+  const sortedRows = report.reportRows.slice().sort((a, b) =>
+    (a.date || '').localeCompare(b.date || '') ||
+    (a.vehicle || '').localeCompare(b.vehicle || '') ||
+    (actionOrder[a.action] || 9) - (actionOrder[b.action] || 9)
+  );
+  const sortedUnmatched = report.unmatchedRows.slice().sort((a, b) =>
+    (a.date || '').localeCompare(b.date || '') || (a.sourceRow || 0) - (b.sourceRow || 0)
+  );
+  const mergedRows = sortedRows.filter(r => r.transactionCount > 1);
+
+  const card = (title, value, sub, color) => `
+    <div style="flex:1;min-width:140px;background:var(--bg2);border:1px solid var(--border);border-left:4px solid ${color};border-radius:8px;padding:12px 14px">
+      <div style="font-size:12px;color:var(--text3);margin-bottom:4px">${esc(title)}</div>
+      <div style="font-size:20px;font-weight:800;color:var(--text1)">${esc(value)}</div>
+      ${sub ? `<div style="font-size:12px;color:var(--text3);margin-top:3px">${esc(sub)}</div>` : ''}
+    </div>`;
+
+  const rowHtml = sortedRows.map(r => `
+    <tr>
+      <td>${esc(r.date)}</td>
+      <td><span style="display:inline-block;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:700;${actionStyle[r.action] || actionStyle.duplicate}">${esc(r.statusText)}</span></td>
+      <td>${esc(r.vehicle)}</td>
+      <td style="text-align:right;font-weight:700">${num(r.qty)}</td>
+      <td style="text-align:right">${signedNum(r.beforeIssued)}</td>
+      <td style="text-align:right">${signedNum(r.afterIssued)}</td>
+      <td style="text-align:center">${r.transactionCount}</td>
+      <td>${esc(r.sourceRows.join(', '))}</td>
+      <td>${esc(r.cardNo || '—')}</td>
+      <td style="max-width:300px;white-space:normal">${esc(r.comment || '—')}</td>
+    </tr>
+  `).join('');
+
+  const unmatchedHtml = sortedUnmatched.length ? `
+    <div class="table-wrap" style="margin-top:14px">
+      <div class="table-toolbar">
+        <div class="table-toolbar-left">Не загрузилось: не найдено ТС</div>
+      </div>
+      <div class="table-scroll" style="max-height:220px;overflow:auto">
+        <table class="data-table" style="width:100%">
+          <thead><tr><th>Строка Excel</th><th>Дата</th><th style="text-align:right">Литры</th><th>Карта</th><th>ТС</th><th>Комментарий</th></tr></thead>
+          <tbody>${sortedUnmatched.map(r => `
+            <tr>
+              <td>${esc(r.sourceRow)}</td>
+              <td>${esc(r.date)}</td>
+              <td style="text-align:right;font-weight:700">${num(r.qty)}</td>
+              <td>${esc(r.cardNo || '—')}</td>
+              <td>${esc(r.vehicleText || '—')}</td>
+              <td style="max-width:360px;white-space:normal">${esc(r.comment || '—')}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    </div>
+  ` : `
+    <div style="margin-top:14px;background:#dcfce7;color:#166534;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;font-size:13px">
+      Все строки сопоставлены с техникой. Ничего не вылетело по причине «ТС не найдено».
+    </div>
+  `;
+
+  const mergedHtml = mergedRows.length ? `
+    <div class="table-wrap" style="margin-top:14px">
+      <div class="table-toolbar">
+        <div class="table-toolbar-left">Объединённые покупки</div>
+      </div>
+      <div class="table-scroll" style="max-height:280px;overflow:auto">
+        <table class="data-table" style="width:100%">
+          <thead>
+            <tr>
+              <th>Дата</th><th>ТС</th><th>Строка Excel</th><th style="text-align:right">Литры</th><th>Товар</th><th>Карта</th><th>ТС из отчёта</th><th>Комментарий</th>
+            </tr>
+          </thead>
+          <tbody>${mergedRows.map(group => {
+            const rows = group.transactions.map((tx, idx) => `
+              <tr>
+                ${idx === 0 ? `<td rowspan="${group.transactions.length}">${esc(group.date)}</td><td rowspan="${group.transactions.length}">${esc(group.vehicle)}<div style="font-size:11px;color:var(--text3);margin-top:3px">Итого: ${num(group.qty)} л</div></td>` : ''}
+                <td>${esc(tx.sourceRow)}</td>
+                <td style="text-align:right;font-weight:700">${num(tx.qty)}</td>
+                <td>${esc(tx.fuel || '—')}</td>
+                <td>${esc(tx.cardNo || '—')}</td>
+                <td>${esc(tx.vehicleText || '—')}</td>
+                <td style="max-width:320px;white-space:normal">${esc(tx.comment || '—')}</td>
+              </tr>
+            `).join('');
+            return rows;
+          }).join('')}</tbody>
+        </table>
+      </div>
+    </div>
+  ` : `
+    <div style="margin-top:14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;color:var(--text3)">
+      Объединённых покупок нет: каждая строка Excel попала в отдельную дневную запись.
+    </div>
+  `;
+
+  const html = `
+    <div style="font-size:13px;color:var(--text3);margin-bottom:12px">
+      Файл: <b style="color:var(--text1)">${esc(report.fileName || '—')}</b>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+      ${card('Транзакций в Excel', String(report.transactionsCount), num(report.sourceLitres) + ' л всего', '#64748b')}
+      ${card('Дневных записей', String(report.groupedCount), report.mergedTransactions ? 'объединено покупок: ' + report.mergedTransactions : 'без объединений', '#2563eb')}
+      ${card('Загружено/изменено', String(changedRows.length), num(loadedLitres) + ' л', '#16a34a')}
+      ${card('Уже было', String(report.duplicates), num(report.duplicateLitres) + ' л', '#94a3b8')}
+      ${card('Не загрузилось', String(report.skipped), num(report.skippedLitres) + ' л', report.skipped ? '#dc2626' : '#16a34a')}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;font-size:12px;color:var(--text3)">
+      <span>Добавлено: <b style="color:var(--text1)">${report.added}</b> (${num(report.addedLitres)} л)</span>
+      <span>Обновлено: <b style="color:var(--text1)">${report.updated}</b> (${num(report.updatedLitres)} л)</span>
+      <span>Уточнено округлений: <b style="color:var(--text1)">${report.adjusted}</b> (${num(report.adjustedLitres)} л)</span>
+    </div>
+    <div class="table-wrap">
+      <div class="table-toolbar">
+        <div class="table-toolbar-left">Что произошло по датам</div>
+      </div>
+      <div class="table-scroll" style="max-height:360px;overflow:auto">
+        <table class="data-table" style="width:100%">
+          <thead>
+            <tr>
+              <th>Дата</th><th>Статус</th><th>ТС</th><th style="text-align:right">Литры из Excel</th>
+              <th style="text-align:right">Было</th><th style="text-align:right">Стало</th>
+              <th style="text-align:center">Покупок</th><th>Строки Excel</th><th>Карта</th><th>Комментарий</th>
+            </tr>
+          </thead>
+          <tbody>${rowHtml || '<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:16px">Нет обработанных строк</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+    ${mergedHtml}
+    ${unmatchedHtml}
+  `;
+
+  if (!body || !modal || typeof openModal !== 'function') {
+    alert('Импорт заправок завершён.\nТранзакций: ' + report.transactionsCount +
+      '\nДневных записей: ' + report.groupedCount +
+      '\nНе найдено ТС: ' + report.skipped);
+    return;
+  }
+  body.innerHTML = html;
+  openModal('fuelImportReportModal');
 }
 
 // ─── ИМПОРТ ИЗ RAR (пополнение данных) ───────────────────

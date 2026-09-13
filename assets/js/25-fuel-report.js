@@ -42,10 +42,16 @@ function frTankObject(tankId) {
   return t ? (t.object || t.name) : '—';
 }
 
+function frVehicleObject(v) {
+  const title = [v.plate, v.make].filter(Boolean).join(' — ') || 'ТС без номера';
+  return v.object ? title + ' / ' + v.object : title;
+}
+
 function frYears() {
   const s = new Set();
   (data.tankIncomes || []).forEach(r => { if (r.date) s.add(r.date.slice(0, 4)); });
   (data.genRecords  || []).forEach(r => { if (r.date) s.add(r.date.slice(0, 4)); });
+  (data.records     || []).forEach(r => { if (r.date) s.add(r.date.slice(0, 4)); });
   if (!s.size) s.add(String(new Date().getFullYear()));
   return [...s].sort().reverse();
 }
@@ -70,16 +76,44 @@ function frGridSpend(year) {
   const linked = {};
   (data.generators || []).forEach(x => { if (x.tankId) linked[x.id] = x; });
   const g = {};
+  const ensure = (o, m) => {
+    g[o] = g[o] || Array.from({ length: 12 }, () => ({ iss:0, norm:0, act:0, h:0, n:0 }));
+    return g[o][m];
+  };
+
   (data.genRecords || []).forEach(r => {
     const gen = linked[r.generatorId];
     if (!gen || (r.date || '').slice(0, 4) !== year) return;
     const o = frTankObject(gen.tankId), m = +r.date.slice(5, 7) - 1;
-    g[o] = g[o] || Array.from({ length: 12 }, () => ({ iss:0, norm:0, act:0, h:0, n:0 }));
-    g[o][m].iss  += +r.fuelIssued || 0;
-    g[o][m].norm += genNormSpent(gen, r);
-    g[o][m].act  += genActualSpent(gen, r);
-    g[o][m].h    += +r.hours || 0;
-    g[o][m].n++;
+    const cell = ensure(o, m);
+    cell.iss  += +r.fuelIssued || 0;
+    cell.norm += genNormSpent(gen, r);
+    cell.act  += genActualSpent(gen, r);
+    cell.h    += +r.hours || 0;
+    cell.n++;
+  });
+
+  const vehicleById = {};
+  (data.vehicles || []).forEach(v => { if (v.id) vehicleById[v.id] = v; });
+  (data.records || []).forEach(r => {
+    const v = vehicleById[r.vehicleId];
+    if (!v || (r.date || '').slice(0, 4) !== year) return;
+
+    const issued = +r.fuelIssued || 0;
+    const norm = r.fuelUsed != null && r.fuelUsed !== ''
+      ? (+r.fuelUsed || 0)
+      : ((+v.norm || 0) && (+r.km || 0) ? (+r.km || 0) * (+v.norm || 0) / 100 : 0);
+    const actual = r.fuelActual != null && r.fuelActual !== ''
+      ? (+r.fuelActual || 0)
+      : norm;
+    if (!issued && !norm && !actual) return;
+
+    const m = +r.date.slice(5, 7) - 1;
+    const cell = ensure(frVehicleObject(v), m);
+    cell.iss  += issued;
+    cell.norm += norm;
+    cell.act  += actual;
+    cell.n++;
   });
   return g;
 }
@@ -146,7 +180,7 @@ function renderFuelReport() {
   const metricBtns = FR_METRICS[fuelRepTab].map(m =>
     '<button class="mtab ' + (fuelRepMetric === m.id ? 'active' : '') + '" onclick="fuelRepMetric=\'' + m.id + '\';renderFuelReport()">' + m.label + '</button>').join('');
 
-  let head = '<tr><th style="position:sticky;left:0;background:var(--bg2);z-index:2;min-width:170px">Объект</th>';
+  let head = '<tr><th style="position:sticky;left:0;background:var(--bg2);z-index:2;min-width:220px">Объект / техника</th>';
   months.forEach(m => { head += '<th style="text-align:right;min-width:88px">' + FR_MONTHS[m] + '</th>'; });
   head += '<th style="text-align:right;min-width:105px;border-left:2px solid var(--border)">Итого</th></tr>';
 
@@ -176,7 +210,7 @@ function renderFuelReport() {
     ? 'Суммы хранятся без НДС — как в карточке счёта 10.03.1, где налог идёт отдельно на счёте 19. ' +
       'Цена за литр считается от суммы без НДС. Перемещения между объектами в приход не входят: это не закупка.'
     : '«По норме» — расход при фактической нагрузке, умноженный на моточасы. «По факту» — реально израсходовано. ' +
-      'Перерасход красным, экономия зелёной. Прочерк значит, что у ДЭС не заполнена норма или в записи нет моточасов.';
+      'Перерасход красным, экономия зелёной. По автомобилям берутся записи журнала ТС, по ДЭС — записи генераторов.';
 
   document.getElementById('mainContent').innerHTML =
     '<div style="padding:4px 0 14px">' +
@@ -254,7 +288,7 @@ function exportFuelReportXlsx() {
   FR_METRICS[fuelRepTab].forEach(M => {
     put(row, 0, M.label, S.caption); rowH(row, 18); row++;
 
-    put(row, 0, 'Объект', S.headL);
+    put(row, 0, 'Объект / техника', S.headL);
     months.forEach((m, i) => put(row, i + 1, FR_MONTHS[m], S.head));
     put(row, NC, 'Итого', S.head);
     rowH(row, 22); row++;
@@ -282,7 +316,7 @@ function exportFuelReportXlsx() {
     rowH(row, 20); row += 2;
   });
 
-  ws['!cols'] = [{ wch: 24 }].concat(months.map(() => ({ wch: 13 }))).concat([{ wch: 15 }]);
+  ws['!cols'] = [{ wch: 42 }].concat(months.map(() => ({ wch: 13 }))).concat([{ wch: 15 }]);
   ws['!freeze'] = { xSplit: 1, ySplit: 0 };
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, (fuelRepTab === 'in' ? 'Приход ' : 'Расход ') + fuelRepYear);
