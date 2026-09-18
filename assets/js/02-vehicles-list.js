@@ -236,9 +236,9 @@ function renderDetail(v) {
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
             ${v.object}
           </div>` : ''}
-          ${v.fuel ? `<div class="vdh-meta-item">
-            <span class="fuel-tag ${fuelClasses[v.fuel]}">${fuelLabels[v.fuel]}</span>
-          </div>` : ''}
+          <div class="vdh-meta-item">
+            <span class="fuel-tag ${fuelTypeFromGrade(vehicleFuelGrade(v))}">${vehicleFuelGrade(v)}</span>
+          </div>
           ${v.norm ? `<div class="vdh-meta-item" style="color:var(--text3);font-size:12px">Норма: ${v.norm} л/100км</div>` : ''}
           ${v.odometer != null ? `<div class="vdh-meta-item" style="color:var(--text3);font-size:12px">
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l2 2"/></svg>

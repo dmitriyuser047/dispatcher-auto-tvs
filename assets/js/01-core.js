@@ -213,6 +213,21 @@ let editingRepairId = null;
 
 // ─── FILTERS ─────────────────────────────────────────────
 let filterStatus = '';   // '' = все
+// Вид топлива машины. Марка (ДТ, АИ-92…) — главное поле, общий признак
+// fuel (diesel/gasoline/gas) выводится из неё: по нему работают фильтры и сводки.
+function vehicleFuelGrade(v) {
+  const g = String((v && v.fuelGrade) || '').toUpperCase().replace(/\s+/g, '');
+  if (/^ДТ|ДИЗ/.test(g)) return 'ДТ';
+  const ai = g.match(/АИ-?(\d{2,3})/);
+  if (ai) return 'АИ-' + ai[1];
+  if (/ГАЗ|ГБО|ПРОПАН|МЕТАН/.test(g)) return 'Газ';
+  const f = v && v.fuel;
+  return f === 'gasoline' ? 'Бензин' : f === 'gas' ? 'Газ' : 'ДТ';
+}
+function fuelTypeFromGrade(grade) {
+  return grade === 'ДТ' ? 'diesel' : grade === 'Газ' ? 'gas' : 'gasoline';
+}
+
 let filterFuel = '';     // '' = все
 let filterOrg = '';      // '' = все
 let historyFullscreen = false;

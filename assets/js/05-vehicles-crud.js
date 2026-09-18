@@ -5,8 +5,8 @@
 function openAddVehicle() {
   editingVehicleId = null;
   document.getElementById('vehicleModalTitle').textContent = 'Добавить транспортное средство';
-  ['vm_make','vm_plate','vm_driver','vm_org','vm_object','vm_responsible','vm_fuelcard','vm_status','vm_justification','vm_note','vm_fuel_grade'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('vm_fuel').value = 'diesel';
+  ['vm_make','vm_plate','vm_driver','vm_org','vm_object','vm_responsible','vm_fuelcard','vm_status','vm_justification','vm_note'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('vm_fuel_grade').value = 'ДТ';
   document.getElementById('vm_supplier').value = '';
   document.getElementById('vm_norm').value = '';
   document.getElementById('vm_norm_city').value = '';
@@ -27,8 +27,7 @@ function openEditVehicle(id) {
   document.getElementById('vm_driver').value = v.driver || '';
   document.getElementById('vm_org').value = v.org || '';
   document.getElementById('vm_object').value = v.object || '';
-  document.getElementById('vm_fuel').value = v.fuel || 'diesel';
-  document.getElementById('vm_fuel_grade').value = v.fuelGrade || '';
+  document.getElementById('vm_fuel_grade').value = vehicleFuelGrade(v);
   document.getElementById('vm_supplier').value = v.supplier || '';
   document.getElementById('vm_norm').value = v.norm || '';
   document.getElementById('vm_norm_city').value = v.normCity ?? '';
@@ -57,8 +56,8 @@ function saveVehicle() {
     make, plate, driver,
     org: document.getElementById('vm_org').value.trim(),
     object: document.getElementById('vm_object').value.trim(),
-    fuel: document.getElementById('vm_fuel').value,
-    fuelGrade: document.getElementById('vm_fuel_grade').value.trim(),
+    fuelGrade: document.getElementById('vm_fuel_grade').value === 'Бензин' ? '' : document.getElementById('vm_fuel_grade').value,
+    fuel: fuelTypeFromGrade(document.getElementById('vm_fuel_grade').value),
     supplier: document.getElementById('vm_supplier').value,
     norm: parseFloat(document.getElementById('vm_norm').value) || null,
     normCity: parseFloat(document.getElementById('vm_norm_city').value) || null,

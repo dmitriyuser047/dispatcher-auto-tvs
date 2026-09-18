@@ -43,7 +43,7 @@ function renderVehicleCards() {
       <div class="vc-driver">${v.driver ? '<svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ' + v.driver : ''}</div>
       ${v.status ? `<span class="vc-status" style="${statusStyle(v.status)}"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0"></span>${v.status}</span>` : ''}
       <div class="vc-meta">
-        ${v.fuel ? '<span>' + (fuelLabels[v.fuel] || v.fuel) + '</span>' : ''}
+        <span class="fuel-tag ${fuelTypeFromGrade(vehicleFuelGrade(v))}" style="font-size:10px;padding:1px 6px">${vehicleFuelGrade(v)}</span>
         ${totalKm > 0 ? '<span><svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg> ' + totalKm.toLocaleString('ru') + ' км</span>' : ''}
         ${v.org ? '<span>' + v.org + '</span>' : ''}
       </div>

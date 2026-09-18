@@ -337,10 +337,14 @@
       <div class="form-row">
         <div class="form-group">
           <label>Вид топлива</label>
-          <select id="vm_fuel">
-            <option value="diesel">Дизельное</option>
-            <option value="gasoline">Бензин</option>
-            <option value="gas">Газ (ГБО)</option>
+          <select id="vm_fuel_grade">
+            <option value="ДТ">ДТ — дизельное</option>
+            <option value="АИ-92">АИ-92</option>
+            <option value="АИ-95">АИ-95</option>
+            <option value="АИ-98">АИ-98</option>
+            <option value="АИ-100">АИ-100</option>
+            <option value="Газ">Газ (ГБО)</option>
+            <option value="Бензин">Бензин — марка не указана</option>
           </select>
         </div>
         <div class="form-group">
@@ -349,13 +353,6 @@
         </div>
       </div>
       <div class="form-row">
-        <div class="form-group">
-          <label>Марка топлива (грейд)</label>
-          <input type="text" id="vm_fuel_grade" list="vm_grade_list" placeholder="ДТ, АИ-92, АИ-95...">
-          <datalist id="vm_grade_list">
-            <option value="ДТ"><option value="АИ-92"><option value="АИ-95"><option value="АИ-98"><option value="АИ-100"><option value="Газ">
-          </datalist>
-        </div>
         <div class="form-group">
           <label>Поставщик топлива</label>
           <select id="vm_supplier">
