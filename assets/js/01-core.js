@@ -213,19 +213,44 @@ let editingRepairId = null;
 
 // ─── FILTERS ─────────────────────────────────────────────
 let filterStatus = '';   // '' = все
+// Марка из произвольной строки: «ДТ-Л-К5», «Аи 95 Евро», «Дизельное топливо»…
+// Пустая строка — марку распознать не удалось.
+function parseFuelGrade(text) {
+  const g = String(text || '').toUpperCase().replace(/Ё/g, 'Е').replace(/[\s_]+/g, '')
+    .replace(/A/g, 'А').replace(/I/g, 'И');
+  if (/(^|[^А-Я])ДТ|ДИЗ|^DT/.test(g)) return 'ДТ';
+  const ai = g.match(/АИ-?(\d{2,3})/);
+  if (ai) return 'АИ-' + ai[1];
+  if (/ГАЗ|ГБО|ПРОПАН|МЕТАН|СУГ/.test(g)) return 'Газ';
+  // Фирменные бензины: «G-Drive 95», «Бензин 92», «Ultimate 98»
+  const oct = g.match(/(?:^|\D)(92|95|98|100)(?:\D|$)/);
+  if (oct) return 'АИ-' + oct[1];
+  return '';
+}
 // Вид топлива машины. Марка (ДТ, АИ-92…) — главное поле, общий признак
 // fuel (diesel/gasoline/gas) выводится из неё: по нему работают фильтры и сводки.
 function vehicleFuelGrade(v) {
-  const g = String((v && v.fuelGrade) || '').toUpperCase().replace(/\s+/g, '');
-  if (/^ДТ|ДИЗ/.test(g)) return 'ДТ';
-  const ai = g.match(/АИ-?(\d{2,3})/);
-  if (ai) return 'АИ-' + ai[1];
-  if (/ГАЗ|ГБО|ПРОПАН|МЕТАН/.test(g)) return 'Газ';
+  const g = parseFuelGrade(v && v.fuelGrade);
+  if (g) return g;
   const f = v && v.fuel;
   return f === 'gasoline' ? 'Бензин' : f === 'gas' ? 'Газ' : 'ДТ';
 }
 function fuelTypeFromGrade(grade) {
   return grade === 'ДТ' ? 'diesel' : grade === 'Газ' ? 'gas' : 'gasoline';
+}
+// Вид топлива записи пробега: своя марка из записи, иначе — марка машины
+function recordFuelGrade(r, v) {
+  return parseFuelGrade(r && r.fuelGrade) || vehicleFuelGrade(v || (data.vehicles || []).find(x => x.id === (r && r.vehicleId)));
+}
+// Марка по строкам выписки: берём ту, что залита в наибольшем объёме
+function fuelGradeFromTransactions(transactions, v) {
+  const byGrade = {};
+  (transactions || []).forEach(tx => {
+    const g = parseFuelGrade(tx && tx.fuel);
+    if (g) byGrade[g] = (byGrade[g] || 0) + (+tx.qty || 0);
+  });
+  const best = Object.keys(byGrade).sort((a, b) => byGrade[b] - byGrade[a])[0];
+  return best || vehicleFuelGrade(v);
 }
 
 let filterFuel = '';     // '' = все

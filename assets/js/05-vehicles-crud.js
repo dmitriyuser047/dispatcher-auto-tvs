@@ -109,6 +109,7 @@ function openAddRecord() {
   // Подставляем водителя и одометр начала из последней записи / данных ТС
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   document.getElementById('rec_driver').value = v ? (v.driver || '') : '';
+  document.getElementById('rec_fuel_grade').value = vehicleFuelGrade(v);
   const vRecs = recsFor(selectedVehicleId)
     .slice().sort((a, b) => cmpDateAsc(a.date, b.date));
   if (vRecs.length) {
@@ -132,6 +133,7 @@ function openEditRecord(id) {
   document.getElementById('rec_odo_start').value = r.odoStart || '';
   document.getElementById('rec_odo_end').value = r.odoEnd || '';
   document.getElementById('rec_driver').value = r.driver || '';
+  document.getElementById('rec_fuel_grade').value = recordFuelGrade(r);
   document.getElementById('rec_fuel_issued').value = r.fuelIssued || '';
   document.getElementById('rec_fuel_actual').value = r.fuelActual || '';
   document.getElementById('rec_fuel_idle').value = r.fuelIdle || '';

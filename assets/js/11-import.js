@@ -381,6 +381,7 @@ function importFuelFromXls(input, mode = 'fuel') {
               duplicates++;
               duplicateLitres += grp.totalQty;
             }
+            if (!existing.fuelGrade) existing.fuelGrade = fuelGradeFromTransactions(grp.transactions, grp.v);
             if (!existing.note) existing.note = fuelNote + '; ' + importMarker;
             else if (!existing.note.includes(importMarker)) existing.note += '; ' + fuelNote + '; ' + importMarker;
             reportRows.push(fuelImportReportRow(grp, action, existingIssued, existing.fuelIssued, statusText, existing.id));
@@ -394,6 +395,7 @@ function importFuelFromXls(input, mode = 'fuel') {
           }
           const beforeIssued = existingIssued;
           existing.fuelIssued = beforeIssued + grp.totalQty;
+          existing.fuelGrade = fuelGradeFromTransactions(grp.transactions, grp.v);
           if (!existing.note) existing.note = '';
           existing.note = (existing.note ? existing.note + '; ' : '') + fuelNote + '; ' + importMarker;
           updated++;
@@ -407,6 +409,7 @@ function importFuelFromXls(input, mode = 'fuel') {
             date: grp.date,
             km: 0,
             fuelIssued: grp.totalQty,
+            fuelGrade: fuelGradeFromTransactions(grp.transactions, grp.v),
             note: fuelNote + '; ' + importMarker,
           };
           data.records.push(newRecord);
@@ -534,6 +537,7 @@ function fuelImportApplyFuelToVehicle(vehicleId, date, qty, transactions, extraN
 
   const before = +record.fuelIssued || 0;
   record.fuelIssued = fuelImportRoundLitres(before + (+qty || 0));
+  record.fuelGrade = fuelGradeFromTransactions(transactions, (data.vehicles || []).find(x => x.id === vehicleId));
   fuelImportAppendNote(record, fuelImportTransactionNote(transactions, qty));
   fuelImportAppendNote(record, extraNote);
 
@@ -1160,6 +1164,7 @@ function doSvodkaImport() {
           date: r.date,
           km: r.km,
           fuelIssued: r.fuelIssued || null,
+          fuelGrade: vehicleFuelGrade(v),
           fuelUsed: r.fuelUsed || null,
           fuelActual: r.fuelActual || null,
           route: routes.length ? routes : null,

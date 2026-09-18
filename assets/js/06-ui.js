@@ -41,6 +41,7 @@ function saveRecord() {
     odoStart: parseFloat(document.getElementById('rec_odo_start').value) || null,
     odoEnd: parseFloat(document.getElementById('rec_odo_end').value) || null,
     driver: document.getElementById('rec_driver').value.trim() || null,
+    fuelGrade: document.getElementById('rec_fuel_grade').value === 'Бензин' ? '' : document.getElementById('rec_fuel_grade').value,
     fuelIssued: parseFloat(document.getElementById('rec_fuel_issued').value) || null,
     fuelUsed:   parseFloat(document.getElementById('rec_fuel_used').value)   || null,
     fuelActual: parseFloat(document.getElementById('rec_fuel_actual').value) || null,

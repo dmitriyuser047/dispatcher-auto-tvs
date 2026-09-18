@@ -122,8 +122,11 @@ function frRows(tab, year) {
         : ((+v.norm || 0) && km ? km * (+v.norm) / 100 : 0);
       const act = r.fuelActual != null && r.fuelActual !== '' ? (+r.fuelActual || 0) : norm;
       if (!issued && !norm && !act && !km) return;
+      // Вид топлива — из записи: если машину заправляли разным топливом,
+      // у неё будет строка на каждый вид
+      const fuel = recordFuelGrade(r, v);
       const label = [v.plate, v.make].filter(Boolean).join(' — ') || 'ТС без номера';
-      const c = row('v:' + v.id, label, frFuelLabel(v.fuel, v.fuelGrade)).cells[+r.date.slice(5, 7) - 1];
+      const c = row('v:' + v.id + '|' + fuel, label, fuel).cells[+r.date.slice(5, 7) - 1];
       c.iss += issued; c.norm += norm; c.act += act; c.km += km; c.n++;
     });
   } else {
