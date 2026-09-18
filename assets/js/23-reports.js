@@ -4,8 +4,10 @@
 // ─── ОТЧЁТЫ (ОБОРОТКА) ──────────────────────────────────
 let reportPeriod = 'all';
 let reportGroupBy = 'category';
+let reportKind = 'fuel';   // 'fuel' — отчёт по топливу, 'payments' — оборотка
 
 function renderReportsSection() {
+  if (reportKind === 'fuel') { renderFuelReport(); return; }
   const payments = data.payments || [];
   const vehicles = data.vehicles || [];
   const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
@@ -76,6 +78,7 @@ function renderReportsSection() {
 
   document.getElementById('mainContent').innerHTML = `
     <div style="padding:24px 28px;width:100%;box-sizing:border-box">
+      ${reportsKindSwitchHtml('payments')}
       <h3 style="margin:0 0 16px;font-size:18px;font-weight:700">Оборотно-сальдовая ведомость</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">
         <div class="stat-card"><div class="stat-value counter" data-target="${totalSum}">0</div><div class="stat-label">Итого расходов ₽</div></div>
