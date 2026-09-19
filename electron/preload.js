@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onDownloadProgress: (cb)  => ipcRenderer.on('download-progress', (_e, pct)  => cb(pct)),
   onReestrRowsSaved: (cb)   => ipcRenderer.on('reestr-rows-saved', (_e, rows) => cb(rows)),
   importSvodkaPdf:   ()     => ipcRenderer.invoke('import-svodka-pdf'),
+  importGlonassFile: ()     => ipcRenderer.invoke('import-glonass-file'),
 });
 
 contextBridge.exposeInMainWorld('reestrAPI', {

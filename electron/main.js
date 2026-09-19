@@ -786,6 +786,37 @@ app.whenReady().then(() => {
     }
   });
 
+  // Отчёт ГЛОНАСС: PDF отдаём текстом с координатами, Excel — как есть
+  ipcMain.handle('import-glonass-file', async (event) => {
+    const senderWin = BrowserWindow.fromWebContents(event.sender);
+    const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
+      title: 'Выберите отчёт ГЛОНАСС «Рейсы»',
+      filters: [{ name: 'Отчёт ГЛОНАСС', extensions: ['pdf', 'xlsx', 'xls'] }],
+      properties: ['openFile'],
+    });
+    if (canceled || !filePaths || !filePaths[0]) return { ok: false };
+    const file = filePaths[0];
+    try {
+      if (!/\.pdf$/i.test(file)) {
+        return { ok: true, kind: 'xlsx', base64: fs.readFileSync(file).toString('base64'), fileName: path.basename(file) };
+      }
+      const { getDocument } = require('pdfjs-dist/build/pdf.js');
+      const doc = await getDocument({ data: new Uint8Array(fs.readFileSync(file)), useSystemFonts: true }).promise;
+      const items = [];
+      for (let i = 1; i <= doc.numPages; i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        for (const it of content.items) {
+          if (!it.str || !it.str.trim()) continue;
+          items.push({ str: it.str, x: Math.round(it.transform[4] * 10) / 10, y: Math.round(it.transform[5] * 10) / 10, page: i });
+        }
+      }
+      return { ok: true, kind: 'pdf', items, fileName: path.basename(file) };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
   ipcMain.handle('pdf-editor-save-as', async (event, { pdfBase64 }) => {
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePath } = await dialog.showSaveDialog(senderWin, {

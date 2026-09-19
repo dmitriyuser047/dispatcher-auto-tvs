@@ -29,7 +29,14 @@ function fgRows(month) {
       const d = (+r.km || 0) - (+r.kmGlonass || 0);
       return Math.abs(d) >= FG_DIFF_KM && (!+r.kmGlonass || Math.abs(d) / +r.kmGlonass * 100 >= FG_DIFF_PCT);
     }).sort((a, b) => cmpDateAsc(a.date, b.date));
-    return { v, days: withKm.length, both: both.length, noGl: withKm.length - both.filter(r => +r.km > 0).length,
+    // Расход по датчику ГЛОНАСС — только дни, где датчик дал данные
+    const sens = recs.filter(r => r.glonassFuel != null && r.glonassFuel !== '' && +r.kmGlonass > 0);
+    const sensL = sens.reduce((s, r) => s + (+r.glonassFuel || 0), 0);
+    const sensKm = sens.reduce((s, r) => s + (+r.kmGlonass || 0), 0);
+    const sens100 = sensKm >= 50 ? sensL / sensKm * 100 : null;
+    const sensDev = sens100 != null && v.norm ? (sens100 - v.norm) / v.norm * 100 : null;
+    return { v, sensL, sensKm, sens100, sensDev, sensDays: sens.length,
+             days: withKm.length, both: both.length, noGl: withKm.length - both.filter(r => +r.km > 0).length,
              km, gl, diff: km - gl, pct: gl ? (km - gl) / gl * 100 : null, bad,
              totalKm: withKm.reduce((s, r) => s + (+r.km || 0), 0) };
   }).filter(Boolean).sort((a, b) => b.diff - a.diff);
@@ -53,8 +60,11 @@ function fgHtml() {
       <td style="text-align:right;${cls}">${r.both ? (r.diff > 0 ? '+' : '') + fpNum(r.diff, 0) : '—'}</td>
       <td style="text-align:right;${cls}">${r.pct == null ? '—' : (r.pct > 0 ? '+' : '') + fpNum(r.pct, 1) + '%'}</td>
       <td style="text-align:right">${r.bad.length || '—'}</td>
+      <td style="text-align:right">${r.sensDays ? fpNum(r.sensL, 1) + '<div style="font-size:11px;color:var(--text3)">' + r.sensDays + ' дн.</div>' : '—'}</td>
+      <td style="text-align:right;font-weight:700;${r.sensDev != null && r.sensDev >= 10 ? 'color:var(--red)' : ''}">${r.sens100 != null ? fpNum(r.sens100, 1) : '—'}${r.v.norm ? '<div style="font-size:11px;color:var(--text3);font-weight:400">норма ' + fpNum(r.v.norm, 1) + '</div>' : ''}</td>
+      <td style="text-align:right;${r.sensDev != null && r.sensDev >= 10 ? 'color:var(--red);font-weight:700' : r.sensDev != null && r.sensDev <= -10 ? 'color:#d97706' : ''}">${r.sensDev == null ? '—' : (r.sensDev > 0 ? '+' : '') + fpNum(r.sensDev, 1) + '%'}</td>
       <td style="font-size:12px;color:var(--text3)">${open ? '▲' : r.bad.length ? '▼ дни' : ''}</td>
-    </tr>${open && r.bad.length ? `<tr><td colspan="9" style="background:var(--bg2)">
+    </tr>${open && r.bad.length ? `<tr><td colspan="12" style="background:var(--bg2)">
       <table class="data-table" style="width:100%;margin:4px 0"><thead><tr><th>Дата</th><th style="text-align:right">Журнал, км</th><th style="text-align:right">ГЛОНАСС, км</th><th style="text-align:right">Разница, км</th><th>Водитель</th><th></th></tr></thead>
       <tbody>${r.bad.map(x => `<tr><td>${fmtDate(x.date)}</td><td style="text-align:right">${fpNum(x.km, 0)}</td><td style="text-align:right">${fpNum(x.kmGlonass, 0)}</td>
         <td style="text-align:right;font-weight:700">${(x.km - x.kmGlonass > 0 ? '+' : '') + fpNum(x.km - x.kmGlonass, 0)}</td><td>${fpEsc(x.driver || r.v.driver || '')}</td>
@@ -66,6 +76,7 @@ function fgHtml() {
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
       <label style="font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer">
         <input type="checkbox" ${fgNoOffice ? 'checked' : ''} onchange="fgNoOffice=this.checked;renderFuelPurchases()"> без офисных машин</label>
+      <button class="btn btn-primary" style="margin-left:auto" onclick="importGlonassTrips()">Загрузить отчёт ГЛОНАСС «Рейсы»</button>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
       ${fkCard('Пробег в журнале больше ГЛОНАСС', over.length + ' машин', 'от ' + FG_DIFF_PCT + '% и ' + FG_DIFF_KM + ' км', over.length ? '#dc2626' : '#16a34a')}
@@ -76,13 +87,15 @@ function fgHtml() {
       <table class="data-table" style="width:100%">
         <thead><tr><th>Машина</th><th style="text-align:right">Дней с пробегом</th><th style="text-align:right">С ГЛОНАСС</th>
           <th style="text-align:right">Журнал, км</th><th style="text-align:right">ГЛОНАСС, км</th><th style="text-align:right">Разница, км</th>
-          <th style="text-align:right">%</th><th style="text-align:right">Дней с расхождением</th><th></th></tr></thead>
-        <tbody>${body || '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:16px">Нет данных</td></tr>'}</tbody>
+          <th style="text-align:right">%</th><th style="text-align:right">Дней с расхождением</th>
+          <th style="text-align:right">Датчик ГЛОНАСС, л</th><th style="text-align:right">Датчик, л/100 км</th><th style="text-align:right">К норме</th><th></th></tr></thead>
+        <tbody>${body || '<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:16px">Нет данных</td></tr>'}</tbody>
       </table></div></div>
     <div style="font-size:12px;color:var(--text3);margin-top:10px">
       Сравниваются дни, где в журнале заполнены и пробег, и «Пробег по Глонассу». Пробег в журнале больше ГЛОНАСС — красным:
       по норме за такой пробег списывается лишнее топливо. Меньше — оранжевым. День считается расхождением от ${FG_DIFF_KM} км и ${FG_DIFF_PCT}%.
-      Нажмите на машину, чтобы увидеть дни.
+      Нажмите на машину, чтобы увидеть дни. «Датчик ГЛОНАСС» — расход по датчику уровня топлива из отчёта «Рейсы» за дни, где датчик дал данные;
+      сравнивается с нормой из карточки машины, превышение от 10% — красным.
     </div>`;
 }
 
