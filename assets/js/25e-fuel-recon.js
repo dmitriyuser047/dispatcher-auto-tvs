@@ -76,7 +76,7 @@ function fgHtml() {
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
       <label style="font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer">
         <input type="checkbox" ${fgNoOffice ? 'checked' : ''} onchange="fgNoOffice=this.checked;renderFuelPurchases()"> без офисных машин</label>
-      <button class="btn btn-primary" style="margin-left:auto" onclick="importGlonassTrips()">Загрузить отчёт ГЛОНАСС «Рейсы»</button>
+      <button class="btn btn-primary" style="margin-left:auto" onclick="importGlonassTrips()">Загрузить отчёт ГЛОНАСС</button>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
       ${fkCard('Пробег в журнале больше ГЛОНАСС', over.length + ' машин', 'от ' + FG_DIFF_PCT + '% и ' + FG_DIFF_KM + ' км', over.length ? '#dc2626' : '#16a34a')}

@@ -1,4 +1,7 @@
-// Загрузка отчёта ГЛОНАСС «Рейсы» (PDF или Excel) в журнал пробега.
+// Загрузка отчётов ГЛОНАСС в журнал пробега. Поддерживаются:
+//  • «Рейсы» (PDF или Excel) — выезды с одометром, моточасами и расходом по датчику;
+//  • суточный отчёт «Пройденный путь» (report.xls — это HTML-таблица) — пробег
+//    и время холостого хода по дням, без датчика топлива.
 //
 // В отчёте по каждой машине за каждый выезд: начало и конец, пробег,
 // одометр на начало и конец, моточасы, холостой ход и расход топлива
@@ -13,7 +16,8 @@
 const FG_COLS = [
   ['n', /^№/], ['object', /^Объект/i], ['start', /^Начало/i], ['end', /^Конец/i],
   ['km', /^Пробег,?км/i], ['odoStart', /^Нач\.?пробег/i], ['odoEnd', /^Кон\.?пробег/i],
-  ['engine', /^Моточасы$/i], ['idle', /^Холостойход,?время/i],
+  ['engine', /^Моточасы$/i], ['idle', /^(Холостойход,?время|Времяхолостогохода)/i],
+  ['date', /^Дата$/i], ['path', /^Пройденныйпуть/i], ['total', /^Общеерасстояние/i],
   ['fuel', /^РасходГСМ,?л$/i], ['fuelIdle', /^РасходГСМприхолостом/i],
 ];
 
@@ -21,6 +25,8 @@ function fgNum(s) { const n = parseFloat(String(s ?? '').replace(/\s/g, '').repl
 // «4 ч.56мин.», «11ч.22мин.», «43мин.», «1 ч.» → часы
 function fgHours(s) {
   s = String(s || '').replace(/\s/g, '');
+  const hms = /^(?:(\d+):)?(\d+):(\d{2}):(\d{2})$/.exec(s);
+  if (hms) return (+(hms[1] || 0)) * 24 + +hms[2] + +hms[3] / 60 + +hms[4] / 3600;
   const d = /(\d+)д/.exec(s), h = /(\d+)ч/.exec(s), m = /(\d+)мин/.exec(s);
   if (!d && !h && !m) return null;
   return (d ? +d[1] * 24 : 0) + (h ? +h[1] : 0) + (m ? +m[1] / 60 : 0);
@@ -64,22 +70,43 @@ function fgTableFromPdf(items) {
 }
 
 function fgTableFromXlsx(base64) {
-  const wb = XLSX.read(base64, { type: 'base64', cellDates: false });
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: false });
-  const h = rows.findIndex(r => r.some(c => /^Объект/i.test(String(c).trim())) && r.some(c => /Пробег/i.test(String(c))));
+  let rows = null;
+  // Многие системы мониторинга отдают «xls», который на деле HTML-таблица.
+  // Её читаем сами: при разборе как Excel запятая в «62,87» теряется и выходит 6287.
+  const head = atob(base64.slice(0, 200));
+  if (/^\s*</.test(head)) {
+    const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+    const html = new TextDecoder(/charset=windows-1251/i.test(head) ? 'windows-1251' : 'utf-8').decode(bytes);
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    // Берём таблицу, где есть заголовок «Объект»
+    const table = [...doc.querySelectorAll('table')].find(t => /Объект/.test(t.textContent) && /(Пробег|Пройденный путь)/i.test(t.textContent));
+    if (!table) return null;
+    rows = [...table.querySelectorAll('tr')].map(tr => [...tr.children].map(td => td.textContent.trim()));
+  } else {
+    const wb = XLSX.read(base64, { type: 'base64', cellDates: false });
+    for (const sn of wb.SheetNames) {
+      const r = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '', raw: false });
+      if (r.some(x => x.some(c => /^Объект/i.test(String(c).trim())) && x.some(c => /(Пробег|Пройденный)/i.test(String(c))))) { rows = r; break; }
+    }
+    if (!rows) return null;
+  }
+  const h = rows.findIndex(r => r.some(c => /^Объект/i.test(String(c).trim())) && r.some(c => /(Пробег|Пройденный)/i.test(String(c))));
   if (h < 0) return null;
-  return { header: rows[h].map(c => String(c).replace(/\s/g, '')), rows: rows.slice(h + 1).filter(r => fgDate(r[rows[h].findIndex(c => /^Начало/i.test(String(c).trim()))])) };
+  const header = rows[h].map(c => String(c).replace(/\s/g, ''));
+  const dc = header.findIndex(c => /^(Начало|Дата)$/i.test(c));
+  return { header, rows: rows.slice(h + 1).filter(r => dc >= 0 && fgDate(r[dc])) };
 }
 
 function fgTrips(table) {
   const idx = {};
   FG_COLS.forEach(([k, re]) => { idx[k] = table.header.findIndex(h => re.test(h)); });
-  if (idx.object < 0 || idx.start < 0 || idx.km < 0) return null;
+  if (idx.object < 0 || (idx.start < 0 && idx.date < 0) || (idx.km < 0 && idx.total < 0 && idx.path < 0)) return null;
   const val = (r, k) => idx[k] >= 0 ? r[idx[k]] : '';
   return table.rows.map(r => ({
     object: String(val(r, 'object')).trim(),
-    date: fgDate(val(r, 'start')),
-    km: fgNum(val(r, 'km')) || 0,
+    date: fgDate(val(r, 'start')) || fgDate(val(r, 'date')),
+    // «Общее расстояние» включает участки без связи с трекером — берём его
+    km: fgNum(val(r, 'km')) ?? fgNum(val(r, 'total')) ?? fgNum(val(r, 'path')) ?? 0,
     odoStart: fgNum(val(r, 'odoStart')),
     odoEnd: fgNum(val(r, 'odoEnd')),
     engine: fgHours(val(r, 'engine')),
@@ -94,8 +121,15 @@ function fgMatchVehicle(text) {
   const lat = { A: 'А', B: 'В', E: 'Е', K: 'К', M: 'М', H: 'Н', O: 'О', P: 'Р', C: 'С', T: 'Т', Y: 'У', X: 'Х' };
   const norm = s => String(s || '').toUpperCase().replace(/[ABEKMHOPCTYX]/g, ch => lat[ch]).replace(/[^А-ЯЁ0-9]/g, '');
   const t = norm(text);
-  const hits = (data.vehicles || []).filter(v => { const p = norm(v.plate); return p.length >= 5 && t.includes(p); });
-  return hits.length === 1 ? hits[0] : hits.sort((a, b) => norm(b.plate).length - norm(a.plate).length)[0] || null;
+  // Номер в отчёте бывает без региона («НИВА М800ВХ»): сравниваем по основе номера
+  const cores = t.match(/[АВЕКМНОРСТУХ]\d{3}[АВЕКМНОРСТУХ]{2}|\d{4}[АВЕКМНОРСТУХ]{2}/g) || [];
+  const vs = (data.vehicles || []).filter(v => norm(v.plate).length >= 5);
+  // Полный номер с регионом в тексте — точное совпадение, самый длинный номер
+  const exact = vs.filter(v => t.includes(norm(v.plate))).sort((a, b) => norm(b.plate).length - norm(a.plate).length);
+  if (exact.length) return exact[0];
+  // Только основа номера: берём, если подходит ровно одна машина, иначе — неоднозначно
+  const byCore = vs.filter(v => cores.some(c => norm(v.plate).startsWith(c)));
+  return byCore.length === 1 ? byCore[0] : null;
 }
 
 async function importGlonassTrips() {
@@ -104,7 +138,7 @@ async function importGlonassTrips() {
   if (!res || !res.ok) { if (res && res.error) alert('Не удалось прочитать файл: ' + res.error); return; }
   const table = res.kind === 'pdf' ? fgTableFromPdf(res.items) : fgTableFromXlsx(res.base64);
   const trips = table && fgTrips(table);
-  if (!trips || !trips.length) { alert('В файле не найдена таблица «Рейсы»: нужны колонки «Объект», «Начало», «Пробег, км».'); return; }
+  if (!trips || !trips.length) { alert('В файле не найдена таблица ГЛОНАСС: нужны колонки «Объект», «Начало» или «Дата» и «Пробег, км» или «Пройденный путь, км».'); return; }
 
   // Выезды → машина × день
   const days = new Map(), unknown = new Map();

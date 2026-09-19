@@ -790,7 +790,7 @@ app.whenReady().then(() => {
   ipcMain.handle('import-glonass-file', async (event) => {
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
-      title: 'Выберите отчёт ГЛОНАСС «Рейсы»',
+      title: 'Выберите отчёт ГЛОНАСС («Рейсы» или суточный пробег)',
       filters: [{ name: 'Отчёт ГЛОНАСС', extensions: ['pdf', 'xlsx', 'xls'] }],
       properties: ['openFile'],
     });
