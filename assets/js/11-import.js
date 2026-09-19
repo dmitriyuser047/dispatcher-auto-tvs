@@ -334,9 +334,12 @@ function importFuelFromXls(input, mode = 'fuel') {
           skipped++;
           return;
         }
-        const key = v.id + '|' + tx.date;
+        // Разные виды топлива за один день — разные записи: АИ-95 и ДТ
+        // в одной строке журнала смешались бы в отчётах по видам топлива.
+        const grade = parseFuelGrade(tx.fuel) || vehicleFuelGrade(v);
+        const key = v.id + '|' + tx.date + '|' + grade;
         if (!groupedByVehicleDate[key]) {
-          groupedByVehicleDate[key] = { v, date: tx.date, totalQty: 0, fuels: [], importKeys: [], transactions: [] };
+          groupedByVehicleDate[key] = { v, date: tx.date, grade, totalQty: 0, fuels: [], importKeys: [], transactions: [] };
         }
         groupedByVehicleDate[key].totalQty += tx.qty;
         groupedByVehicleDate[key].fuels.push((tx.fuel || 'топливо') + ' ' + tx.qty + 'л');
@@ -348,9 +351,12 @@ function importFuelFromXls(input, mode = 'fuel') {
       const mergedTransactions = groupedValues.reduce((s, grp) => s + Math.max(0, grp.importKeys.length - 1), 0);
 
       groupedValues.forEach(grp => {
-        const existing = (data.records || []).find(r =>
-          r.vehicleId === grp.v.id && r.date === grp.date
-        );
+        // Уже загруженное узнаём по ключу в любой записи этого дня — в том числе
+        // в старых, где разные виды топлива были сложены вместе. Дописываем
+        // только в запись того же вида топлива.
+        const sameDay = (data.records || []).filter(r => r.vehicleId === grp.v.id && r.date === grp.date);
+        const existing = sameDay.find(r => grp.importKeys.some(k => String(r.note || '').includes(k))) ||
+          sameDay.find(r => recordFuelGrade(r, grp.v) === grp.grade);
         const noteText = String(existing?.note || '');
         const hasImportedKey = grp.importKeys.some(k => noteText.includes(k));
         const importMarker = 'импорт заправок: ' + grp.importKeys.join(' | ');
@@ -384,7 +390,7 @@ function importFuelFromXls(input, mode = 'fuel') {
               duplicates++;
               duplicateLitres += grp.totalQty;
             }
-            if (!existing.fuelGrade) existing.fuelGrade = fuelGradeFromTransactions(grp.transactions, grp.v);
+            if (!existing.fuelGrade) existing.fuelGrade = grp.grade;
             if (!existing.note) existing.note = fuelNote + '; ' + importMarker;
             else if (!existing.note.includes(importMarker)) existing.note += '; ' + fuelNote + '; ' + importMarker;
             reportRows.push(fuelImportReportRow(grp, action, existingIssued, existing.fuelIssued, statusText, existing.id));
@@ -398,7 +404,7 @@ function importFuelFromXls(input, mode = 'fuel') {
           }
           const beforeIssued = existingIssued;
           existing.fuelIssued = beforeIssued + grp.totalQty;
-          existing.fuelGrade = fuelGradeFromTransactions(grp.transactions, grp.v);
+          existing.fuelGrade = grp.grade;
           if (!existing.note) existing.note = '';
           existing.note = (existing.note ? existing.note + '; ' : '') + fuelNote + '; ' + importMarker;
           updated++;
@@ -412,7 +418,7 @@ function importFuelFromXls(input, mode = 'fuel') {
             date: grp.date,
             km: 0,
             fuelIssued: grp.totalQty,
-            fuelGrade: fuelGradeFromTransactions(grp.transactions, grp.v),
+            fuelGrade: grp.grade,
             note: fuelNote + '; ' + importMarker,
           };
           data.records.push(newRecord);
@@ -459,6 +465,7 @@ function fuelImportReportRow(grp, action, beforeIssued, afterIssued, statusText,
     recordId,
     vehicleId: grp.v.id,
     date: grp.date,
+    grade: grp.grade,
     vehicle: vehicleTitle,
     qty: grp.totalQty,
     beforeIssued,
@@ -524,7 +531,9 @@ function fuelImportTransactionNote(transactions, fallbackQty) {
 
 function fuelImportApplyFuelToVehicle(vehicleId, date, qty, transactions, extraNote) {
   if (!data.records) data.records = [];
-  let record = data.records.find(r => r.vehicleId === vehicleId && r.date === date);
+  const vehicle = (data.vehicles || []).find(x => x.id === vehicleId);
+  const grade = fuelGradeFromTransactions(transactions, vehicle);
+  let record = data.records.find(r => r.vehicleId === vehicleId && r.date === date && recordFuelGrade(r, vehicle) === grade);
   const created = !record;
   if (!record) {
     record = {
@@ -540,7 +549,7 @@ function fuelImportApplyFuelToVehicle(vehicleId, date, qty, transactions, extraN
 
   const before = +record.fuelIssued || 0;
   record.fuelIssued = fuelImportRoundLitres(before + (+qty || 0));
-  record.fuelGrade = fuelGradeFromTransactions(transactions, (data.vehicles || []).find(x => x.id === vehicleId));
+  record.fuelGrade = grade;
   fuelImportAppendNote(record, fuelImportTransactionNote(transactions, qty));
   fuelImportAppendNote(record, extraNote);
 
@@ -714,6 +723,34 @@ function showFuelImportReport(report) {
   );
   const mergedRows = sortedRows.filter(r => r.transactionCount > 1);
 
+  // Итоги по видам топлива: сколько загружено и сколько уже было
+  const byGrade = {};
+  report.reportRows.forEach(r => {
+    const g = byGrade[r.grade || '—'] || (byGrade[r.grade || '—'] = { loaded: 0, dup: 0, n: 0 });
+    if (r.action === 'duplicate') g.dup += +r.qty || 0; else g.loaded += +r.qty || 0;
+    g.n++;
+  });
+  (report.unmatchedRows || []).forEach(r => {
+    const k = parseFuelGrade(r.fuel) || '—';
+    const g = byGrade[k] || (byGrade[k] = { loaded: 0, dup: 0, n: 0 });
+    g.skip = (g.skip || 0) + (+r.qty || 0);
+  });
+  const gradeKeys = Object.keys(byGrade).sort((a, b) =>
+    (typeof frFuelSort === 'function' ? frFuelSort(a, b) : a.localeCompare(b, 'ru')));
+  const gradeHtml = gradeKeys.length ? `
+    <div class="table-wrap" style="margin-bottom:14px">
+      <div class="table-toolbar"><div class="table-toolbar-left">По видам топлива</div></div>
+      <table class="data-table" style="width:100%">
+        <thead><tr><th>Вид топлива</th><th style="text-align:right">Загружено, л</th><th style="text-align:right">Уже было, л</th><th style="text-align:right">Не загрузилось, л</th><th style="text-align:right">Всего, л</th></tr></thead>
+        <tbody>${gradeKeys.map(k => { const g = byGrade[k]; return `
+          <tr><td style="font-weight:700">${esc(k)}</td>
+            <td style="text-align:right">${num(g.loaded)}</td>
+            <td style="text-align:right">${num(g.dup)}</td>
+            <td style="text-align:right;${g.skip ? 'color:var(--red)' : ''}">${num(g.skip || 0)}</td>
+            <td style="text-align:right;font-weight:700">${num(g.loaded + g.dup + (g.skip || 0))}</td></tr>`; }).join('')}</tbody>
+      </table>
+    </div>` : '';
+
   const card = (title, value, sub, color) => `
     <div style="flex:1;min-width:140px;background:var(--bg2);border:1px solid var(--border);border-left:4px solid ${color};border-radius:8px;padding:12px 14px">
       <div style="font-size:12px;color:var(--text3);margin-bottom:4px">${esc(title)}</div>
@@ -726,6 +763,7 @@ function showFuelImportReport(report) {
       <td>${esc(r.date)}</td>
       <td><span style="display:inline-block;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:700;${actionStyle[r.action] || actionStyle.duplicate}">${esc(r.statusText)}</span></td>
       <td>${esc(r.vehicle)}</td>
+      <td>${esc(r.grade || '—')}</td>
       <td style="text-align:right;font-weight:700">${num(r.qty)}</td>
       <td style="text-align:right">${signedNum(r.beforeIssued)}</td>
       <td style="text-align:right">${signedNum(r.afterIssued)}</td>
@@ -826,6 +864,7 @@ function showFuelImportReport(report) {
       <span>Обновлено: <b style="color:var(--text1)">${report.updated}</b> (${num(report.updatedLitres)} л)</span>
       <span>Уточнено округлений: <b style="color:var(--text1)">${report.adjusted}</b> (${num(report.adjustedLitres)} л)</span>
     </div>
+    ${gradeHtml}
     <div class="table-wrap">
       <div class="table-toolbar">
         <div class="table-toolbar-left">Что произошло по датам</div>
@@ -834,12 +873,12 @@ function showFuelImportReport(report) {
         <table class="data-table" style="width:100%">
           <thead>
             <tr>
-              <th>Дата</th><th>Статус</th><th>ТС</th><th style="text-align:right">Литры из Excel</th>
+              <th>Дата</th><th>Статус</th><th>ТС</th><th>Топливо</th><th style="text-align:right">Литры из Excel</th>
               <th style="text-align:right">Было</th><th style="text-align:right">Стало</th>
               <th style="text-align:center">Покупок</th><th>Строки Excel</th><th>Карта</th><th>Комментарий</th><th>Изменить ТС</th>
             </tr>
           </thead>
-          <tbody>${rowHtml || '<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:16px">Нет обработанных строк</td></tr>'}</tbody>
+          <tbody>${rowHtml || '<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:16px">Нет обработанных строк</td></tr>'}</tbody>
         </table>
       </div>
     </div>
