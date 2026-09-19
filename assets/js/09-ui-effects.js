@@ -117,7 +117,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
   const DAYS_RU_EXP = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
   const fuelLabels  = { diesel:'Дизельное', gasoline:'Бензин', gas:'Газ (ГБО)' };
   const fuelTypes   = ['diesel','gasoline','gas'];
-  const NC = 15;
+  const NC = 17;
 
   const P = {
     dark:'0F1117', navy:'1B3A6B', navyMid:'2D5A8E', navyLight:'D6E4F7',
@@ -289,7 +289,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
 
     hdr('  СВОДКА ПО ТРАНСПОРТНЫМ СРЕДСТВАМ (по объектам)', ST.secN);
     ['№','Госномер','Марка / Модель','Водитель','Организация','Объект','Вид топлива','Состояние',
-     'Пробег, км','Выдано, л','Расход по норме, л','Факт. расход, л','Остаток, л','Ср.расход л/100км','Маршруты','Примечание']
+     'Пробег, км','Выдано, л','Расход по норме, л','Факт. расход, л','Остаток, л','Ср.расход л/100км','Пробег ГЛОНАСС, км','Датчик ГЛОНАСС, л','Маршруты','Примечание']
       .forEach((h,c)=>put(R(),c,h,ST.tHead));
     rowH(R(),24);next();
 
@@ -314,6 +314,9 @@ function exportAllToXlsx(dateFrom, dateTo) {
       const vIss=vRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
       const vUsd=vRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
       const vAct=vRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
+      // ГЛОНАСС: пробег и расход по датчику уровня (из отчётов «Рейсы» / «Пройденный путь»)
+      const vGl=vRecs.reduce((s,r)=>s+(+r.kmGlonass||0),0);
+      const vSens=vRecs.reduce((s,r)=>s+(+r.glonassFuel||0),0);
       const bm=computeFuelBalances(v.id, dateFrom, dateTo);
       const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
       const vBal=sorted.length?(bm[sorted[sorted.length-1].id]||0):0;
@@ -349,8 +352,9 @@ function exportAllToXlsx(dateFrom, dateTo) {
       put(R(),8,+vKm.toFixed(1)||0,ST.tdR(bg));put(R(),9,+vIss.toFixed(2)||0,ST.tdR(bg));
       put(R(),10,+vUsd.toFixed(2)||0,ST.tdR(bg));put(R(),11,+vAct.toFixed(2)||0,ST.tdR(bg));
       put(R(),12,bal,sB);put(R(),13,avg??'',ST.tdR(bg));
-      put(R(),14,vRoutes||'—',routeStyle);
-      put(R(),15,v.note||'—',noteStyle);
+      put(R(),14,vGl?+vGl.toFixed(1):'—',ST.tdR(bg));put(R(),15,vSens?+vSens.toFixed(2):'—',ST.tdR(bg));
+      put(R(),16,vRoutes||'—',routeStyle);
+      put(R(),17,v.note||'—',noteStyle);
       const noteLines=v.note?Math.ceil(v.note.length/30):1;
       const routeLines=vRoutes?vRoutes.split('\n').length:1;
       rowH(R(),Math.max(19,Math.min(Math.max(routeLines,noteLines)*16,80)));next();
@@ -361,13 +365,16 @@ function exportAllToXlsx(dateFrom, dateTo) {
     const aIss=filteredAll.reduce((s,r)=>s+(r.fuelIssued||0),0);
     const aUsd=filteredAll.reduce((s,r)=>s+(r.fuelUsed||0),0);
     const aAct=filteredAll.reduce((s,r)=>s+(r.fuelActual||0),0);
+    const aGl=filteredAll.reduce((s,r)=>s+(+r.kmGlonass||0),0);
+    const aSens=filteredAll.reduce((s,r)=>s+(+r.glonassFuel||0),0);
     for(let c=0;c<=NC;c++) put(R(),c,'',ST.tot);
     put(R(),1,'ИТОГО',ST.totL);
     put(R(),8,+aKm.toFixed(1),ST.tot);put(R(),9,+aIss.toFixed(2),ST.tot);
-    put(R(),10,+aUsd.toFixed(2),ST.tot);put(R(),11,+aAct.toFixed(2),ST.tot);rowH(R(),22);next();
+    put(R(),10,+aUsd.toFixed(2),ST.tot);put(R(),11,+aAct.toFixed(2),ST.tot);
+    put(R(),14,+aGl.toFixed(1),ST.tot);put(R(),15,+aSens.toFixed(2),ST.tot);rowH(R(),22);next();
 
     ws['!cols']=[{wch:4},{wch:13},{wch:22},{wch:22},{wch:18},{wch:16},{wch:14},{wch:18},
-                 {wch:13},{wch:13},{wch:16},{wch:15},{wch:13},{wch:16},{wch:40},{wch:30}];
+                 {wch:13},{wch:13},{wch:16},{wch:15},{wch:13},{wch:16},{wch:14},{wch:14},{wch:40},{wch:30}];
     XLSX.utils.book_append_sheet(wb,ws,'Общая сводка');
   }
 

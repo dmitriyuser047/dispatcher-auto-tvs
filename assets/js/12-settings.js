@@ -322,6 +322,7 @@ function showUpdateBanner(info) {
   title.textContent = `Доступно обновление v${info.version}` +
     (info.currentVersion ? ` (у вас v${info.currentVersion})` : '');
   notes.textContent = info.notes || '';
+  notes.style.whiteSpace = 'pre-line';
   banner.style.display = 'flex';
 }
 
@@ -351,7 +352,12 @@ if (window.electronAPI && window.electronAPI.onUpdateAvailable) {
 if (window.electronAPI && window.electronAPI.getAppVersion) {
   window.electronAPI.getAppVersion().then(v => {
     const el = document.getElementById('sidebarVersionLabel');
-    if (el) el.textContent = 'Версия ' + v;
+    if (el) {
+      el.textContent = 'Версия ' + v + ' · что нового';
+      el.style.cursor = 'pointer';
+      el.title = 'Список изменений';
+      el.onclick = () => clShowAll();
+    }
   });
 }
 

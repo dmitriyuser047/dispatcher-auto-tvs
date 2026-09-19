@@ -426,6 +426,11 @@ app.whenReady().then(() => {
   ipcMain.handle('open-data-folder', () => shell.openPath(getDataDir()));
 
   ipcMain.handle('get-app-version', () => app.getVersion());
+  // Список изменений — assets/CHANGELOG.md внутри программы
+  ipcMain.handle('get-changelog', () => {
+    try { return fs.readFileSync(path.join(__dirname, '..', 'assets', 'CHANGELOG.md'), 'utf8'); }
+    catch (e) { return ''; }
+  });
 
   // Экспорт HTML-сводки в PDF (рендер через printToPDF — корректная кириллица)
   ipcMain.handle('export-pdf', async (event, payload) => {

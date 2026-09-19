@@ -35,14 +35,22 @@ jobs:
           $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
           echo "version=$v" >> $env:GITHUB_OUTPUT
 
+      - name: Release notes from CHANGELOG
+        shell: pwsh
+        run: |
+          $v  = "${{ steps.pkg.outputs.version }}"
+          $md = Get-Content assets/CHANGELOG.md -Raw -Encoding UTF8
+          $m  = [regex]::Match($md, "(?ms)^## " + [regex]::Escape($v) + "\b[^\n]*\n(.*?)(?=^## |\z)")
+          $notes = $m.Groups[1].Value.Trim()
+          if (-not $notes) { $notes = "Доступна версия $v." }
+          [System.IO.File]::WriteAllText("release-notes.md", "## Версия $v`n`n$notes`n`nСкачайте и запустите установщик ниже.", [System.Text.UTF8Encoding]::new($false))
+          [System.IO.File]::WriteAllText("release-notes.txt", $notes, [System.Text.UTF8Encoding]::new($false))
+
       - name: Create GitHub Release & upload installer
         uses: softprops/action-gh-release@v2
         with:
           name: "v${{ steps.pkg.outputs.version }}"
-          body: |
-            ## Версия ${{ steps.pkg.outputs.version }}
-
-            Скачайте и запустите установщик ниже.
+          body_path: release-notes.md
           files: dist/Dispatcher-Setup-${{ steps.pkg.outputs.version }}.exe
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -62,7 +70,7 @@ jobs:
           $json = [ordered]@{
             version = $v
             date    = $date
-            notes   = "Доступна версия $v. Нажмите «Скачать обновление»."
+            notes   = "Что нового:`n" + [System.IO.File]::ReadAllText("release-notes.txt") + "`n`nНажмите «Скачать обновление»."
             url     = $url
           } | ConvertTo-Json
           [System.IO.File]::WriteAllText("version.json", $json, [System.Text.UTF8Encoding]::new($false))

@@ -138,10 +138,10 @@ function exportAllToPdf(dateFrom, dateTo){
     const oa=(a.object||'￿').toLowerCase(), ob=(b.object||'￿').toLowerCase();
     return oa<ob?-1:oa>ob?1:0;
   });
-  let curObj=null, globalNum=0, rows='', aKm=0,aIss=0,aUsd=0,aAct=0;
+  let curObj=null, globalNum=0, rows='', aKm=0,aIss=0,aUsd=0,aAct=0,aGl=0,aSens=0;
   sortedVehicles.forEach(v=>{
     const objGroup=v.object||'— Без объекта —';
-    if(objGroup!==curObj){ curObj=objGroup; rows+='<tr class="grp"><td colspan="14" class="l">Объект: '+_pdfEsc(objGroup)+'</td></tr>'; }
+    if(objGroup!==curObj){ curObj=objGroup; rows+='<tr class="grp"><td colspan="16" class="l">Объект: '+_pdfEsc(objGroup)+'</td></tr>'; }
     globalNum++;
     const vRecs=filterRecs(recsFor(v.id));
     const vKm=vRecs.reduce((s,r)=>s+(r.km||0),0);
@@ -152,7 +152,9 @@ function exportAllToPdf(dateFrom, dateTo){
     const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     const vBal=+(sorted.length?(bm[sorted[sorted.length-1].id]||0):0).toFixed(2);
     const avg=vKm>0&&vAct>0?+(vAct/vKm*100).toFixed(2):null;
-    aKm+=vKm; aIss+=vIss; aUsd+=vUsd; aAct+=vAct;
+    const vGl=vRecs.reduce((s,r)=>s+(+r.kmGlonass||0),0);
+    const vSens=vRecs.reduce((s,r)=>s+(+r.glonassFuel||0),0);
+    aKm+=vKm; aIss+=vIss; aUsd+=vUsd; aAct+=vAct; aGl+=vGl; aSens+=vSens;
     rows+='<tr>'
       +'<td class="c">'+globalNum+'</td>'
       +'<td class="c">'+_pdfEsc(v.plate)+'</td>'
@@ -168,13 +170,15 @@ function exportAllToPdf(dateFrom, dateTo){
       +'<td class="r">'+_pdfNum(vAct)+'</td>'
       +'<td class="r '+_balCls(vBal)+'">'+_pdfNum(vBal)+'</td>'
       +'<td class="r">'+(avg==null?'—':_pdfNum(avg))+'</td>'
+      +'<td class="r">'+(vGl?_pdfNum(vGl,1):'—')+'</td>'
+      +'<td class="r">'+(vSens?_pdfNum(vSens):'—')+'</td>'
       +'</tr>';
   });
-  rows+='<tr class="tot"><td colspan="8" class="l">ИТОГО</td><td class="r">'+_pdfNum(aKm,1)+'</td><td class="r">'+_pdfNum(aIss)+'</td><td class="r">'+_pdfNum(aUsd)+'</td><td class="r">'+_pdfNum(aAct)+'</td><td></td><td></td></tr>';
+  rows+='<tr class="tot"><td colspan="8" class="l">ИТОГО</td><td class="r">'+_pdfNum(aKm,1)+'</td><td class="r">'+_pdfNum(aIss)+'</td><td class="r">'+_pdfNum(aUsd)+'</td><td class="r">'+_pdfNum(aAct)+'</td><td></td><td></td><td class="r">'+_pdfNum(aGl,1)+'</td><td class="r">'+_pdfNum(aSens)+'</td></tr>';
   const mainTable='<div class="sec navy">Сводка по транспортным средствам (по объектам)</div>'
     +'<table><thead><tr>'
     +'<th style="width:24px">№</th><th>Госномер</th><th>Марка / Модель</th><th>Водитель</th><th>Организация</th><th>Объект</th><th>Вид топлива</th><th>Состояние</th>'
-    +'<th>Пробег, км</th><th>Выдано, л</th><th>Расход по норме, л</th><th>Факт. расход, л</th><th>Остаток, л</th><th>Ср.расход л/100км</th>'
+    +'<th>Пробег, км</th><th>Выдано, л</th><th>Расход по норме, л</th><th>Факт. расход, л</th><th>Остаток, л</th><th>Ср.расход л/100км</th><th>Пробег ГЛОНАСС, км</th><th>Датчик ГЛОНАСС, л</th>'
     +'</tr></thead><tbody>'+rows+'</tbody></table>';
 
   const sub='Дата выгрузки: '+today+'   ·   Период: '+periodLabel+'   ·   Всего ТС: '+data.vehicles.length;
