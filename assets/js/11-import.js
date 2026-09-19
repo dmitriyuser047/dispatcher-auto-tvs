@@ -298,6 +298,11 @@ function importFuelFromXls(input, mode = 'fuel') {
       }
 
       function matchVehicle(tx) {
+        // Карта из справочника, закреплённая за машиной на дату покупки, — самый надёжный признак
+        if (typeof fcVehicleAt === 'function') {
+          const byCard = fcVehicleAt(tx.cardNo, tx.date);
+          if (byCard) return byCard;
+        }
         if (tx.plate) {
           const p = normalizePlate(tx.plate);
           const v = data.vehicles.find(v => platesMatch(normalizePlate(v.plate), p));
@@ -346,7 +351,9 @@ function importFuelFromXls(input, mode = 'fuel') {
         knownByKey.get(p.importKey).push(p);
       });
       const knownTx = [];
-      const freshTx = transactions.filter(tx => {
+      // Строки закрытых месяцев не трогаем вовсе
+      const closedTx = transactions.filter(tx => typeof fuelMonthClosed === 'function' && fuelMonthClosed(tx.date));
+      const freshTx = transactions.filter(tx => !closedTx.includes(tx)).filter(tx => {
         const p = (knownByKey.get(tx.importKey) || []).shift();
         if (!p) return true;
         fpRefreshFromTx(p, tx);
@@ -540,6 +547,9 @@ function importFuelFromXls(input, mode = 'fuel') {
         sourceSum: transactions.reduce((s, tx) => s + (tx.sum || 0), 0),
         backfilledSums,
         groupedCount: groupedValues.length,
+        closedCount: closedTx.length,
+        closedLitres: closedTx.reduce((s, tx) => s + tx.qty, 0),
+        closedMonths: [...new Set(closedTx.map(tx => tx.date.slice(0, 7)))],
         knownCount: knownTx.length,
         mergedTransactions,
         added, updated, adjusted, duplicates, skipped,
@@ -730,6 +740,7 @@ async function changeFuelImportReportVehicle(reportIndex) {
   const targetVehicleId = select?.value;
   const target = (data.vehicles || []).find(v => v.id === targetVehicleId);
   if (!row) return;
+  if (typeof fuelEditAllowed === 'function' && !fuelEditAllowed(row.date)) return;
   if (!target) {
     alert('Выберите ТС для этой строки.');
     return;
@@ -775,6 +786,7 @@ async function assignFuelImportUnmatchedVehicle(unmatchedIndex) {
   const targetVehicleId = select?.value;
   const target = (data.vehicles || []).find(v => v.id === targetVehicleId);
   if (!row) return;
+  if (typeof fuelEditAllowed === 'function' && !fuelEditAllowed(row.date)) return;
   if (!target) {
     alert('Выберите ТС для этой строки.');
     return;
@@ -1020,6 +1032,7 @@ function showFuelImportReport(report) {
       ${card('Уже было', String(report.duplicates), num(report.duplicateLitres) + ' л', '#94a3b8')}
       ${card('Не загрузилось', String(report.skipped), num(report.skippedLitres) + ' л', report.skipped ? '#dc2626' : '#16a34a')}
     </div>
+    ${report.closedCount ? `<div style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px">Пропущено строк закрытых месяцев (${report.closedMonths.map(m => fpMonthLabel(m)).join(", ")}): ${report.closedCount}, ${num(report.closedLitres)} л. Чтобы загрузить их, откройте месяц: Заправки → Закрытие месяца.</div>` : ""}
     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;font-size:12px;color:var(--text3)">
       <span>Добавлено: <b style="color:var(--text1)">${report.added}</b> (${num(report.addedLitres)} л)</span>
       <span>Обновлено: <b style="color:var(--text1)">${report.updated}</b> (${num(report.updatedLitres)} л)</span>

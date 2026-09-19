@@ -71,6 +71,11 @@ function saveVehicle() {
     justification: document.getElementById('vm_justification').value.trim(),
     note: document.getElementById('vm_note').value.trim(),
   };
+  // Госномер должен быть уникальным: по нему опознаются заправки из выписок
+  const plateKey = s => String(s || '').replace(/\s/g, '').toUpperCase();
+  const twin = data.vehicles.find(x => x.id !== editingVehicleId && plateKey(x.plate) === plateKey(plate));
+  if (twin && !confirm('Госномер «' + plate + '» уже есть у машины ' + (twin.make || '') + (twin.org ? ' (' + twin.org + ')' : '') +
+      '.\nОдинаковые номера путают загрузку заправок. Всё равно сохранить?')) return;
   if (editingVehicleId) {
     const v = data.vehicles.find(x => x.id === editingVehicleId);
     Object.assign(v, obj);

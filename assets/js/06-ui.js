@@ -33,6 +33,8 @@ function saveRecord() {
   const km = parseFloat(document.getElementById('rec_km').value);
   if (!date) { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'rec_date'); return; }
   if (!km && km !== 0) { showFieldError('Укажите пробег за день', 'rec_km'); return; }
+  const _old = editingRecordId && data.records.find(x => x.id === editingRecordId);
+  if (typeof fuelEditAllowed === 'function' && !fuelEditAllowed(date, _old && _old.date)) return;
   const obj = {
     vehicleId: selectedVehicleId,
     date,
@@ -68,6 +70,8 @@ function saveRecord() {
 }
 
 function deleteRecord(id) {
+  const _r = data.records.find(x => x.id === id);
+  if (_r && typeof fuelEditAllowed === 'function' && !fuelEditAllowed(_r.date)) return;
   if (!confirm('Удалить эту запись?')) return;
   data.records = data.records.filter(r => r.id !== id);
   saveData(data);

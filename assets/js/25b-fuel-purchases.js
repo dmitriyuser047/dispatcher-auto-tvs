@@ -258,7 +258,10 @@ function fpMonthLabel(m) {
 function fpInMonth(p) { return fpMonth === 'all' || (p.date || '').startsWith(fpMonth); }
 
 async function renderFuelPurchases() {
-  if (fpRestoreFromJournal()) await saveData(data);
+  const restored = fpRestoreFromJournal();
+  // Справочник карт заполняется сам при первом открытии раздела
+  const seeded = !fcList().length && typeof fcSeed === 'function' ? fcSeed() : 0;
+  if (restored || seeded) await saveData(data);
   const months = fpMonthsList();
   if (!fpMonth || (fpMonth !== 'all' && !months.includes(fpMonth))) fpMonth = months[0] || 'all';
   if (fpView === 'vehicle' && fpVehicle) return fpRenderVehicle();
@@ -269,6 +272,8 @@ async function renderFuelPurchases() {
   const tabs = [['cards', 'По машинам'], ['doubles', 'Сдвоенные заправки' + (doubles.length ? ' (' + doubles.length + ')' : '')],
                 ['compare', 'Сравнение месяцев'],
                 ['negative', 'Отрицательный остаток'],
+                ['fcards', 'Карты'],
+                ['close', 'Закрытие месяца'],
                 ['unmatched', 'Без машины' + (unmatched.length ? ' (' + unmatched.length + ')' : '')],
                 ['history', 'История загрузок']]
     .map(([id, label]) => `<button class="sec-tab ${fpView === id ? 'active' : ''}" onclick="fpView='${id}';renderFuelPurchases()">${label}</button>`).join('');
@@ -284,6 +289,8 @@ async function renderFuelPurchases() {
   else if (fpView === 'doubles') body = fpDoublesHtml(doubles);
   else if (fpView === 'compare') body = fpCompareHtml();
   else if (fpView === 'negative') body = fpNegativeHtml();
+  else if (fpView === 'fcards') body = fcCardsHtml();
+  else if (fpView === 'close') body = fcCloseHtml();
   else if (fpView === 'history') body = fpHistoryHtml();
   else body = fpCardsHtml();
 
@@ -298,7 +305,7 @@ async function renderFuelPurchases() {
           ${[...new Set((data.vehicles || []).map(v => v.org).filter(Boolean))].sort()
             .map(o => `<option${o === fpOrg ? ' selected' : ''}>${fpEsc(o)}</option>`).join('')}
         </select>` : ''}
-        ${!['history', 'compare', 'negative'].includes(fpView) ? monthSel : ''}
+        ${!['history', 'compare', 'negative', 'close'].includes(fpView) ? monthSel : ''}
         ${loadBtns}
       </div>
       <div id="fpBody">${body}</div>
@@ -514,7 +521,7 @@ async function fpSaveAndRender() {
 
 function fpEdit(id) {
   const p = fpById(id);
-  if (!p) return;
+  if (!p || !fuelEditAllowed(p.date)) return;
   const grades = FP_GRADES.includes(p.grade) ? FP_GRADES : FP_GRADES.concat([p.grade]);
   openGenericModal('Заправка ' + fmtDate(p.date), `
     <div class="form-row">
@@ -550,6 +557,7 @@ async function fpEditSave(id) {
   const p = fpById(id);
   if (!p) return;
   const date = parseDate(document.getElementById('fpe_date').value.trim());
+  if (!fuelEditAllowed(p.date, date)) return;
   const qty = parseFloat(document.getElementById('fpe_qty').value);
   if (!date) { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'fpe_date'); return; }
   if (!(qty > 0)) { showFieldError('Укажите литры', 'fpe_qty'); return; }
@@ -570,7 +578,7 @@ async function fpEditSave(id) {
 
 async function fpDelete(id) {
   const p = fpById(id);
-  if (!p) return;
+  if (!p || !fuelEditAllowed(p.date)) return;
   if (!confirm('Удалить заправку ' + fmtDate(p.date) + ' на ' + fpNum(p.qty) + ' л?' + (p.vehicleId ? '\nЛитры и сумма будут сняты с журнала пробега.' : ''))) return;
   fpApply(p, -1);
   p.deleted = true;
@@ -582,6 +590,7 @@ async function fpAssign(id) {
   const p = fpById(id);
   const vid = document.getElementById('fpAssign_' + id)?.value;
   if (!p || !vid) { alert('Выберите машину'); return; }
+  if (!fuelEditAllowed(p.date)) return;
   const v = (data.vehicles || []).find(x => x.id === vid);
   fpUpdate(p, { vehicleId: vid, grade: parseFuelGrade(p.product) || p.grade || vehicleFuelGrade(v) });
   fpSaveAndRender();
@@ -589,7 +598,7 @@ async function fpAssign(id) {
 
 async function fpReturnToJournal(id) {
   const p = fpById(id);
-  if (!p) return;
+  if (!p || !fuelEditAllowed(p.date)) return;
   fpApply(p, +1);
   fpSaveAndRender();
 }
@@ -597,7 +606,7 @@ async function fpReturnToJournal(id) {
 // Запись журнала поправили руками — вернуть литры и сумму как в выписках
 async function fpSyncRecord(recordId) {
   const rec = (data.records || []).find(r => r.id === recordId);
-  if (!rec) return;
+  if (!rec || !fuelEditAllowed(rec.date)) return;
   const list = fpLive().filter(p => p.recordId === recordId);
   const qty = fpRound(list.reduce((s, p) => s + (+p.qty || 0), 0));
   const sum = fpRound(list.reduce((s, p) => s + (+p.sum || 0), 0));

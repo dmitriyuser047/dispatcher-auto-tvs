@@ -24,7 +24,7 @@ const SECTIONS = [
   'vehicles', 'records', 'generators', 'genRecords', 'toRecords',
   'tanks', 'tankIncomes', 'vehicleTo', 'repairs',
   'reestrRows', 'savedReestrs', 'payments', 'budget', 'contragents',
-  'fuelPurchases', 'fuelImports',
+  'fuelPurchases', 'fuelImports', 'fuelCards', 'fuelPeriods',
 ];
 
 const REVISIONS_FILE = 'revisions.json';
