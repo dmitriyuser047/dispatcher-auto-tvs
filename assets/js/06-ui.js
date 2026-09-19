@@ -49,6 +49,7 @@ function saveRecord() {
     fuelUsed:   parseFloat(document.getElementById('rec_fuel_used').value)   || null,
     fuelActual: parseFloat(document.getElementById('rec_fuel_actual').value) || null,
     fuelIdle:   parseFloat(document.getElementById('rec_fuel_idle').value)   || null,
+    tankMeasured: document.getElementById('rec_tank_measured').value.trim() === '' ? null : parseFloat(document.getElementById('rec_tank_measured').value),
     route: routeGet(),
     note: document.getElementById('rec_note').value.trim(),
   };

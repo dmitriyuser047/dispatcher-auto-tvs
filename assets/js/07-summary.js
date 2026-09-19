@@ -197,6 +197,8 @@ function computeFuelBalances(vehicleId, dateFrom, dateTo) {
     // Остаток считается по фактическому расходу; если не введён — по норме
     const spent = r.fuelActual != null ? r.fuelActual : (r.fuelUsed || 0);
     balance += (r.fuelIssued || 0) - spent - (r.fuelIdle || 0);
+    // Замер остатка в баке — фактическое значение: расчёт с него начинается заново
+    if (r.tankMeasured != null && r.tankMeasured !== '' && !isNaN(+r.tankMeasured)) balance = +r.tankMeasured;
     balMap[r.id] = +balance.toFixed(2);
   });
   if (cacheable) _fuelBalCache[vehicleId] = balMap;

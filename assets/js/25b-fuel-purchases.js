@@ -125,6 +125,7 @@ function fpCreate(tx, opts) {
     cardNo: tx.cardNo || '',
     vehicleText: tx.vehicleText || '',
     azs: tx.azs || '',
+    region: tx.region || '',
     comment: tx.comment || '',
     sourceRow: tx.sourceRow || null,
   };
@@ -137,6 +138,7 @@ function fpCreate(tx, opts) {
 function fpRefreshFromTx(p, tx) {
   if (tx.time && !p.time) p.time = tx.time;
   if (tx.azs && !p.azs) p.azs = tx.azs;
+  if (tx.region && !p.region) p.region = tx.region;
   if (tx.fuel && !p.product) p.product = tx.fuel;
   if (tx.sum && (p.restored || !p.sum) && Math.abs((+p.sum || 0) - tx.sum) >= 0.01) {
     const delta = fpRound(tx.sum - (+p.sum || 0));
@@ -272,6 +274,8 @@ async function renderFuelPurchases() {
   const tabs = [['cards', 'По машинам'], ['doubles', 'Сдвоенные заправки' + (doubles.length ? ' (' + doubles.length + ')' : '')],
                 ['compare', 'Сравнение месяцев'],
                 ['negative', 'Отрицательный остаток'],
+                ['checks', 'Проверки'],
+                ['measures', 'Замеры'],
                 ['fcards', 'Карты'],
                 ['close', 'Закрытие месяца'],
                 ['unmatched', 'Без машины' + (unmatched.length ? ' (' + unmatched.length + ')' : '')],
@@ -290,6 +294,8 @@ async function renderFuelPurchases() {
   else if (fpView === 'compare') body = fpCompareHtml();
   else if (fpView === 'negative') body = fpNegativeHtml();
   else if (fpView === 'fcards') body = fcCardsHtml();
+  else if (fpView === 'checks') body = fkChecksHtml();
+  else if (fpView === 'measures') body = fkMeasuresHtml();
   else if (fpView === 'close') body = fcCloseHtml();
   else if (fpView === 'history') body = fpHistoryHtml();
   else body = fpCardsHtml();

@@ -287,7 +287,13 @@ function importFuelFromXls(input, mode = 'fuel') {
         const price = num(cPrice);
         const sum = Math.abs(num(cSum)) || fuelImportRoundMoney(qty * price);
 
-        const tx = { sourceRow: i + 1, date: parsedDate, time: parsedTime, qty, plate, cardNo, fuel, comment, vehicleText, price, sum, azs };
+        // Регион АЗС — для проверки заправок вне своего региона
+        const cRegion = col(['регион азс', 'регион']);
+        const cCity = col(['город азс']);
+        const region = [cRegion !== -1 ? String(row[cRegion] || '').trim() : '', cCity !== -1 ? String(row[cCity] || '').trim() : '']
+          .filter(x => x && x.toLowerCase() !== 'null').join(', ');
+
+        const tx = { sourceRow: i + 1, date: parsedDate, time: parsedTime, qty, plate, cardNo, fuel, comment, vehicleText, price, sum, azs, region };
         tx.importKey = importKeyFor({ ...tx, plate: extractPlate(comment + ' ' + vehicleText) });
         transactions.push(tx);
       }
@@ -377,6 +383,7 @@ function importFuelFromXls(input, mode = 'fuel') {
             date: tx.date,
             time: tx.time,
             azs: tx.azs,
+            region: tx.region,
             qty: tx.qty,
             sum: tx.sum,
             price: tx.price,
@@ -590,6 +597,7 @@ function fuelImportReportRow(grp, action, beforeIssued, afterIssued, statusText,
       date: tx.date,
       time: tx.time,
       azs: tx.azs,
+      region: tx.region,
       qty: tx.qty,
       sum: tx.sum,
       price: tx.price,

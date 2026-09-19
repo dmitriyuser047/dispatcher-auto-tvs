@@ -390,6 +390,10 @@
           <label>Остаток топлива (л)</label>
           <input type="number" id="vm_fuel_balance" placeholder="0" min="0" step="0.1">
         </div>
+        <div class="form-group">
+          <label>Объём бака (л)</label>
+          <input type="number" id="vm_tank_volume" placeholder="например 60" min="0" step="1">
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group">
@@ -502,9 +506,15 @@
           <input type="number" id="rec_fuel_sum" placeholder="0" min="0" step="0.01">
         </div>
       </div>
-      <div class="form-group">
-        <label>Расход на холостом ходу (л)</label>
-        <input type="number" id="rec_fuel_idle" placeholder="0" min="0" step="0.1">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Расход на холостом ходу (л)</label>
+          <input type="number" id="rec_fuel_idle" placeholder="0" min="0" step="0.1">
+        </div>
+        <div class="form-group">
+          <label>Остаток в баке по замеру (л)</label>
+          <input type="number" id="rec_tank_measured" placeholder="на конец дня" min="0" step="0.1" title="Фактический остаток по датчику или замеру. Расчётный остаток с этой записи начинается с него, а фактический расход между замерами считается сам.">
+        </div>
       </div>
       <div class="form-group">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
@@ -1677,6 +1687,7 @@
 <script src="assets/js/25-fuel-report.js"></script>
 <script src="assets/js/25b-fuel-purchases.js"></script>
 <script src="assets/js/25c-fuel-control.js"></script>
+<script src="assets/js/25d-fuel-checks.js"></script>
 <script src="assets/js/26-boot.js"></script>
 </body>
 </html>

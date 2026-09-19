@@ -294,6 +294,13 @@ function fcChecklist(month) {
   items.push({ title: 'Сдвоенные заправки с отметками проверены', bad: dbl.length,
     detail: dbl.length ? dbl.map(d => d.v.plate + ' ' + fmtDate(d.date).slice(0, 5)).join(', ') : '', tab: 'doubles' });
 
+  // 4а. Проверки заправок: бак, цена, регион
+  if (typeof fkChecks === 'function') {
+    const chk = fkChecks(month).filter(x => !x.p.checkOk);
+    items.push({ title: 'Проверки заправок разобраны (бак, цена, регион)', bad: chk.length,
+      detail: chk.length ? chk.slice(0, 12).map(x => x.v.plate + ' ' + fmtDate(x.p.date).slice(0, 5)).join(', ') + (chk.length > 12 ? '…' : '') : '', tab: 'checks' });
+  }
+
   // 5. Нет отрицательного остатка на конец месяца
   const neg = (data.vehicles || []).map(v => ({ v, b: fcMonthEndBalance(v.id, month) }))
     .filter(x => x.b != null && x.b < -0.05 && recsFor(x.v.id).some(r => r.date.startsWith(month)));
