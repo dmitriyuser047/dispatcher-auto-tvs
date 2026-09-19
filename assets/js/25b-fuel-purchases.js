@@ -267,6 +267,7 @@ async function renderFuelPurchases() {
   const unmatched = fpLive().filter(p => !p.vehicleId);
   const doubles = fpDoubles();
   const tabs = [['cards', 'По машинам'], ['doubles', 'Сдвоенные заправки' + (doubles.length ? ' (' + doubles.length + ')' : '')],
+                ['compare', 'Сравнение месяцев'],
                 ['unmatched', 'Без машины' + (unmatched.length ? ' (' + unmatched.length + ')' : '')],
                 ['history', 'История загрузок']]
     .map(([id, label]) => `<button class="sec-tab ${fpView === id ? 'active' : ''}" onclick="fpView='${id}';renderFuelPurchases()">${label}</button>`).join('');
@@ -280,6 +281,7 @@ async function renderFuelPurchases() {
   let body = '';
   if (fpView === 'unmatched') body = fpUnmatchedHtml(unmatched);
   else if (fpView === 'doubles') body = fpDoublesHtml(doubles);
+  else if (fpView === 'compare') body = fpCompareHtml();
   else if (fpView === 'history') body = fpHistoryHtml();
   else body = fpCardsHtml();
 
@@ -294,7 +296,7 @@ async function renderFuelPurchases() {
           ${[...new Set((data.vehicles || []).map(v => v.org).filter(Boolean))].sort()
             .map(o => `<option${o === fpOrg ? ' selected' : ''}>${fpEsc(o)}</option>`).join('')}
         </select>` : ''}
-        ${fpView !== 'history' ? monthSel : ''}
+        ${fpView !== 'history' && fpView !== 'compare' ? monthSel : ''}
         ${loadBtns}
       </div>
       <div id="fpBody">${body}</div>
@@ -802,4 +804,210 @@ function fpSaveChecked(vehicleId, date) {
     .forEach(p => { p.doubleChecked = true; p.doubleCheckNote = note; });
   closeModal('genericModal');
   fpSaveAndRender();
+}
+
+// ─── Сравнение месяцев ────────────────────────────────────
+// Выбранный месяц против предыдущего по каждой машине. Считается по журналу
+// пробега — в нём и выписки, и ручные заправки, и фактический расход.
+// Главный показатель — фактический расход на 100 км: литры сами по себе
+// растут вместе с пробегом, а рост на 100 км значит, что машина стала есть больше.
+
+let fpCmpMonth = '';
+let fpCmpMetric = 'per100';      // per100 | act | issued | sum
+let fpCmpNoOffice = true;
+let fpCmpOnlyUp = false;
+let fpCmpOrg = '';
+const FP_CMP_ALERT = 10;         // рост на столько процентов и больше — красным
+const FP_CMP_MIN_KM = 100;       // меньше — л/100 км слишком неустойчив для сравнения
+
+const FP_CMP_METRICS = {
+  per100: { label: 'Факт. расход, л/100 км', dec: 2 },
+  iss100: { label: 'Выдано на 100 км, л',    dec: 2 },
+  act:    { label: 'Факт. расход, л',        dec: 1 },
+  issued: { label: 'Выдано, л',              dec: 1 },
+  sum:    { label: 'Сумма заправок, ₽',      dec: 2 },
+};
+
+// «против июля 2026» — месяц в родительном падеже
+function fpMonthGen(m) {
+  const [y, mo] = m.split('-');
+  return ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'][+mo - 1] + ' ' + y;
+}
+
+function fpPrevMonth(m) {
+  let [y, mo] = m.split('-').map(Number);
+  mo--; if (!mo) { mo = 12; y--; }
+  return y + '-' + String(mo).padStart(2, '0');
+}
+
+function fpCmpMonths() {
+  const s = new Set((data.records || []).map(r => (r.date || '').slice(0, 7)).filter(Boolean));
+  return [...s].sort().reverse();
+}
+
+function fpCmpAgg(vehicleId, month) {
+  const a = { km: 0, act: 0, issued: 0, sum: 0, n: 0 };
+  recsFor(vehicleId).forEach(r => {
+    if (!(r.date || '').startsWith(month)) return;
+    a.km += +r.km || 0;
+    // фактический расход: если не заполнен — расход по норме, как в карточке машины
+    a.act += +r.fuelActual || +r.fuelUsed || 0;
+    a.issued += +r.fuelIssued || 0;
+    a.sum += +r.fuelSum || 0;
+    a.n++;
+  });
+  a.per100 = a.km >= FP_CMP_MIN_KM ? a.act / a.km * 100 : null;
+  // Выдано на 100 км: сколько топлива ушло в машину на единицу пробега.
+  // За месяц заправки и пробег могут не совпасть (залили в конце месяца),
+  // поэтому показатель шумнее, зато не зависит от того, как заполнен факт. расход.
+  a.iss100 = a.km >= FP_CMP_MIN_KM && a.issued ? a.issued / a.km * 100 : null;
+  return a;
+}
+
+function fpCmpRows() {
+  const cur = fpCmpMonth, prev = fpPrevMonth(cur);
+  const key = fpCmpMetric;
+  return (data.vehicles || []).map(v => {
+    if (fpCmpNoOffice && fpIsOffice(v)) return null;
+    if (fpCmpOrg && (v.org || '') !== fpCmpOrg) return null;
+    const a = fpCmpAgg(v.id, prev), b = fpCmpAgg(v.id, cur);
+    if (!a.n && !b.n) return null;
+    const pv = a[key], cv = b[key];
+    const delta = pv != null && cv != null ? cv - pv : null;
+    const pct = delta != null && pv ? delta / pv * 100 : null;
+    const norm = +v.norm || null;
+    return { v, a, b, pv, cv, delta, pct, norm };
+  }).filter(Boolean);
+}
+
+function fpCompareHtml() {
+  const months = fpCmpMonths();
+  if (!fpCmpMonth || !months.includes(fpCmpMonth)) fpCmpMonth = months[0] || '';
+  if (!fpCmpMonth) return '<div class="welcome" style="padding:60px 0"><p>В журнале пробега нет записей</p></div>';
+  const prev = fpPrevMonth(fpCmpMonth);
+  const M = FP_CMP_METRICS[fpCmpMetric];
+  const all = fpCmpRows();
+  const up = all.filter(r => r.pct != null && r.pct >= FP_CMP_ALERT);
+  const list = (fpCmpOnlyUp ? up : all).slice().sort((x, y) =>
+    (y.pct ?? -Infinity) - (x.pct ?? -Infinity) || (x.v.plate || '').localeCompare(y.v.plate || '', 'ru'));
+
+  const tot = (k, side) => all.reduce((s, r) => s + (r[side][k] || 0), 0);
+  const totKmA = tot('km', 'a'), totKmB = tot('km', 'b'), totActA = tot('act', 'a'), totActB = tot('act', 'b');
+  const fleetA = totKmA ? totActA / totKmA * 100 : null, fleetB = totKmB ? totActB / totKmB * 100 : null;
+
+  const f = (v, dec) => v == null ? '—' : fpNum(v, dec);
+  const pctHtml = p => p == null ? '<span style="color:var(--text3)">—</span>'
+    : `<span style="font-weight:700;color:${p >= FP_CMP_ALERT ? 'var(--red)' : p <= -FP_CMP_ALERT ? 'var(--green)' : 'var(--text2)'}">${p > 0 ? '+' : ''}${fpNum(p, 1)}%</span>`;
+  const card = (t, val, sub, color) => `<div style="flex:1;min-width:170px;background:var(--bg2);border:1px solid var(--border);border-left:4px solid ${color};border-radius:8px;padding:10px 14px">
+      <div style="font-size:12px;color:var(--text3)">${t}</div><div style="font-size:19px;font-weight:800">${val}</div>
+      ${sub ? `<div style="font-size:12px;color:var(--text3)">${sub}</div>` : ''}</div>`;
+  const fleetPct = fleetA && fleetB ? (fleetB - fleetA) / fleetA * 100 : null;
+
+  const rows = list.map(r => {
+    const overNorm = r.norm && r.b.per100 != null && r.b.per100 > r.norm * 1.1;
+    return `<tr style="cursor:pointer" onclick="fpOpenVehicle('${r.v.id}')">
+      <td><b>${fpEsc(r.v.plate)}</b><div style="font-size:12px;color:var(--text3)">${fpEsc(r.v.make || '')}</div></td>
+      <td style="font-size:12px;color:var(--text3);max-width:170px;white-space:normal">${fpEsc(r.v.object || '')}</td>
+      <td style="text-align:right">${fpNum(r.a.km, 0)}</td>
+      <td style="text-align:right">${fpNum(r.b.km, 0)}</td>
+      <td style="text-align:right">${f(r.pv, M.dec)}</td>
+      <td style="text-align:right;font-weight:700">${f(r.cv, M.dec)}</td>
+      <td style="text-align:right">${r.delta == null ? '—' : (r.delta > 0 ? '+' : '') + fpNum(r.delta, M.dec)}</td>
+      <td style="text-align:right">${pctHtml(r.pct)}</td>
+      <td style="text-align:right;font-size:12px">${r.norm ? fpNum(r.norm, 1) : '—'}${overNorm ? '<div style="color:var(--red)">выше нормы</div>' : ''}</td>
+    </tr>`;
+  }).join('');
+
+  const metricBtns = Object.entries(FP_CMP_METRICS).map(([id, m]) =>
+    `<button class="mtab ${fpCmpMetric === id ? 'active' : ''}" onclick="fpCmpMetric='${id}';renderFuelPurchases()">${m.label}</button>`).join('');
+  const orgs = [...new Set((data.vehicles || []).map(v => v.org).filter(Boolean))].sort();
+
+  return `
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <select class="fsel" onchange="fpCmpMonth=this.value;renderFuelPurchases()">
+        ${months.map(m => `<option value="${m}"${m === fpCmpMonth ? ' selected' : ''}>${fpMonthLabel(m)}</option>`).join('')}
+      </select>
+      <span style="color:var(--text3)">против ${fpMonthGen(prev)}</span>
+      <select class="fsel" onchange="fpCmpOrg=this.value;renderFuelPurchases()">
+        <option value="">Все организации</option>
+        ${orgs.map(o => `<option${o === fpCmpOrg ? ' selected' : ''}>${fpEsc(o)}</option>`).join('')}
+      </select>
+      <label style="font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" ${fpCmpNoOffice ? 'checked' : ''} onchange="fpCmpNoOffice=this.checked;renderFuelPurchases()"> без офисных машин</label>
+      <label style="font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" ${fpCmpOnlyUp ? 'checked' : ''} onchange="fpCmpOnlyUp=this.checked;renderFuelPurchases()"> только рост от ${FP_CMP_ALERT}%</label>
+    </div>
+    <div class="month-tabs" style="margin-bottom:14px">${metricBtns}</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      ${card('Машин с ростом от ' + FP_CMP_ALERT + '%', up.length, 'из ' + all.filter(r => r.pct != null).length + ' сравнимых', up.length ? '#dc2626' : '#16a34a')}
+      ${card('Расход по парку, л/100 км', f(fleetB, 2), 'было ' + f(fleetA, 2) + (fleetPct != null ? ' · ' + (fleetPct > 0 ? '+' : '') + fpNum(fleetPct, 1) + '%' : ''), '#2563eb')}
+      ${card('Факт. расход по парку', fpNum(totActB, 0) + ' л', 'было ' + fpNum(totActA, 0) + ' л', '#64748b')}
+      ${card('Пробег по парку', fpNum(totKmB, 0) + ' км', 'было ' + fpNum(totKmA, 0) + ' км', '#64748b')}
+    </div>
+    <div class="table-wrap">
+      <div class="table-toolbar">
+        <div class="table-toolbar-left">${M.label}: ${fpMonthLabel(fpCmpMonth)} против ${fpMonthGen(prev)}</div>
+        <button class="btn btn-ghost btn-sm" onclick="fpExportCompare()">Выгрузить в Excel</button>
+      </div>
+      <div class="table-scroll" style="overflow-x:auto">
+        <table class="data-table" style="width:100%">
+          <thead><tr>
+            <th>Машина</th><th>Объект</th>
+            <th style="text-align:right">Пробег, км<br><span style="font-weight:400">${fpMonthLabel(prev)}</span></th>
+            <th style="text-align:right">Пробег, км<br><span style="font-weight:400">${fpMonthLabel(fpCmpMonth)}</span></th>
+            <th style="text-align:right">${M.label}<br><span style="font-weight:400">${fpMonthLabel(prev)}</span></th>
+            <th style="text-align:right">${M.label}<br><span style="font-weight:400">${fpMonthLabel(fpCmpMonth)}</span></th>
+            <th style="text-align:right">Изменение</th><th style="text-align:right">%</th>
+            <th style="text-align:right">Норма, л/100 км</th>
+          </tr></thead>
+          <tbody>${rows || '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:16px">Машин с ростом нет</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--text3);margin-top:10px">
+      По журналу пробега. Фактический расход — поле «Факт. расход», а где оно пустое — расход по норме.
+      Л/100 км считается при пробеге от ${FP_CMP_MIN_KM} км за месяц, иначе «—». Рост от ${FP_CMP_ALERT}% — красным, снижение — зелёным.
+      «Выше нормы» — фактический расход за месяц больше нормы из карточки машины более чем на 10%. Нажмите на строку, чтобы открыть заправки машины.
+    </div>`;
+}
+
+function fpExportCompare() {
+  const prev = fpPrevMonth(fpCmpMonth);
+  const rows = fpCmpRows().filter(r => !fpCmpOnlyUp || (r.pct != null && r.pct >= FP_CMP_ALERT))
+    .sort((x, y) => (y.pct ?? -Infinity) - (x.pct ?? -Infinity));
+  if (!rows.length) { alert('Нет данных для выгрузки'); return; }
+  const P = { navy: '1B3A6B', white: 'FFFFFF', gray1: 'F8FAFC', gray3: 'E2E8F0', text: '1E293B', red: 'B91C1C', green: '15803D' };
+  const b = { style: 'thin', color: { rgb: P.gray3 } };
+  const border = { top: b, bottom: b, left: b, right: b };
+  const st = (o) => Object.assign({ font: { sz: 10, color: { rgb: P.text } }, border, alignment: { vertical: 'center' } }, o);
+  const head = st({ font: { bold: true, sz: 10, color: { rgb: P.white } }, fill: { patternType: 'solid', fgColor: { rgb: P.navy } },
+                    alignment: { horizontal: 'center', vertical: 'center', wrapText: true } });
+  const A = fpMonthLabel(prev), B = fpMonthLabel(fpCmpMonth);
+  const cols = ['Госномер', 'Марка', 'Объект', 'Пробег ' + A, 'Пробег ' + B,
+    'л/100 км ' + A, 'л/100 км ' + B, 'Изм. л/100, %',
+    'Факт. расход, л ' + A, 'Факт. расход, л ' + B, 'Выдано, л ' + A, 'Выдано, л ' + B,
+    'Сумма, ₽ ' + A, 'Сумма, ₽ ' + B, 'Норма, л/100 км'];
+  const ws = {};
+  const put = (r, c, v, s, z) => { const cell = { v: v == null ? '' : v, t: typeof v === 'number' ? 'n' : 's', s }; if (z && typeof v === 'number') cell.z = z; ws[XLSX.utils.encode_cell({ r, c })] = cell; };
+  put(0, 0, 'Сравнение расхода: ' + B + ' против ' + fpMonthGen(prev) + (fpCmpNoOffice ? ' (без офисных машин)' : ''), { font: { bold: true, sz: 13 } });
+  cols.forEach((c, i) => put(2, i, c, head));
+  rows.forEach((r, i) => {
+    const R = i + 3, fill = i % 2 ? { fill: { patternType: 'solid', fgColor: { rgb: P.gray1 } } } : {};
+    const s = st(fill), n = st(Object.assign({ alignment: { horizontal: 'right' } }, fill));
+    const pct = r.a.per100 && r.b.per100 != null ? (r.b.per100 - r.a.per100) / r.a.per100 * 100 : null;
+    const pc = st(Object.assign({ alignment: { horizontal: 'right' },
+      font: { sz: 10, bold: true, color: { rgb: pct >= FP_CMP_ALERT ? P.red : pct <= -FP_CMP_ALERT ? P.green : P.text } } }, fill));
+    const vals = [r.v.plate, r.v.make, r.v.object, r.a.km, r.b.km,
+      r.a.per100 != null ? fpRound(r.a.per100) : null, r.b.per100 != null ? fpRound(r.b.per100) : null,
+      pct != null ? Math.round(pct * 10) / 10 : null,
+      fpRound(r.a.act), fpRound(r.b.act), fpRound(r.a.issued), fpRound(r.b.issued), fpRound(r.a.sum), fpRound(r.b.sum), r.norm];
+    vals.forEach((v, c) => put(R, c, v, c < 3 ? s : c === 7 ? pc : n, c === 7 ? '+0.0;-0.0;0' : c >= 12 && c <= 13 ? '#,##0.00' : '#,##0.##'));
+  });
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length + 2, c: cols.length - 1 } });
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: cols.length - 1 } }];
+  ws['!cols'] = [14, 18, 28, 10, 10, 10, 10, 10, 11, 11, 11, 11, 13, 13, 10].map(wch => ({ wch }));
+  ws['!rows'] = [{ hpt: 22 }, {}, { hpt: 42 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Сравнение');
+  XLSX.writeFile(wb, 'Сравнение_расхода_' + fpCmpMonth + '_к_' + prev + '.xlsx');
 }
