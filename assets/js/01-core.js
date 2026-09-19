@@ -91,7 +91,11 @@ const STORAGE_KEY = 'fuel_tracker_v1';
 
 async function loadData() {
   let d = null;
-  if (window.electronAPI) {
+  // Снимок с версиями разделов — для синхронизации нескольких пользователей
+  if (typeof syncLoad === 'function') {
+    try { d = await syncLoad(); } catch (e) { console.warn('[loadData] снимок: ' + e.message); }
+  }
+  if (!d && window.electronAPI) {
     try { const raw = await window.electronAPI.readData(); if (raw) d = JSON.parse(raw); } catch {}
   }
   if (!d) {
@@ -145,7 +149,10 @@ async function saveData(d) {
   const json = JSON.stringify(d);
   let saved = true;
   if (window.electronAPI) {
-    const ok = await window.electronAPI.writeData(json);
+    // По разделам с проверкой версии; на старом сервере — целиком, как раньше
+    const ok = typeof _sync !== 'undefined' && _sync.enabled
+      ? await syncSave(d)
+      : await window.electronAPI.writeData(json);
     if (ok === false) {
       saved = false;
       showToast('Ошибка сохранения на сервер. Проверьте соединение.');

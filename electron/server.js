@@ -59,13 +59,52 @@ function start({ port, dataDir, backupFn, serverName }) {
         return;
       }
       try {
-        const all = storage.readAll(_dataDir);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ name, rev: storage.readRevisions(_dataDir)[name] || 0, rows: all[name] || [] }));
+        res.end(JSON.stringify(storage.readSection(_dataDir, name)));
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ error: e.message }));
       }
+      return;
+    }
+
+    // Все данные вместе с версиями разделов — одним ответом, чтобы версии
+    // точно соответствовали данным
+    if (req.method === 'GET' && req.url === '/api/snapshot') {
+      try {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ data: storage.readAll(_dataDir), revisions: storage.readRevisions(_dataDir) }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+      return;
+    }
+
+    // Запись только изменившихся разделов с проверкой версии
+    if (req.method === 'POST' && req.url === '/api/sections') {
+      if (_writeLock) {
+        res.writeHead(423, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: 'Запись заблокирована, попробуйте снова' }));
+        return;
+      }
+      _writeLock = true;
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body);
+          if (_backupFn) _backupFn();
+          const r = storage.writeSections(_dataDir, payload);
+          res.writeHead(r.ok ? 200 : 409, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify(r));
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: e.message }));
+        } finally {
+          _writeLock = false;
+        }
+      });
       return;
     }
 
@@ -134,6 +173,7 @@ function fetchData(host, port) {
   return new Promise((resolve, reject) => {
     const req = http.get({ hostname: host, port, path: '/api/data', timeout: 5000 }, (res) => {
       let body = '';
+      res.setEncoding('utf8');
       res.on('data', chunk => { body += chunk; });
       res.on('end', () => {
         try { resolve(body); } catch (e) { reject(e); }
@@ -153,8 +193,47 @@ function postData(host, port, jsonStr) {
     };
     const req = http.request(opts, (res) => {
       let body = '';
+      res.setEncoding('utf8');
       res.on('data', chunk => { body += chunk; });
       res.on('end', () => {
+        try { resolve(JSON.parse(body)); } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Таймаут соединения')); });
+    req.write(jsonStr);
+    req.end();
+  });
+}
+
+function getJson(host, port, path, timeout) {
+  return new Promise((resolve, reject) => {
+    const req = http.get({ hostname: host, port, path, timeout: timeout || 8000 }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { body += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(body)); } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Таймаут соединения')); });
+  });
+}
+
+function postSections(host, port, jsonStr) {
+  return new Promise((resolve, reject) => {
+    const opts = {
+      hostname: host, port, path: '/api/sections', method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(jsonStr) },
+      timeout: 15000,
+    };
+    const req = http.request(opts, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { body += chunk; });
+      res.on('end', () => {
+        if (res.statusCode === 404) { resolve({ ok: false, unsupported: true }); return; }
         try { resolve(JSON.parse(body)); } catch (e) { reject(e); }
       });
     });
@@ -169,6 +248,7 @@ function ping(host, port) {
   return new Promise((resolve) => {
     const req = http.get({ hostname: host, port, path: '/api/ping', timeout: 3000 }, (res) => {
       let body = '';
+      res.setEncoding('utf8');
       res.on('data', chunk => { body += chunk; });
       res.on('end', () => {
         try { resolve(JSON.parse(body)); } catch { resolve(null); }
@@ -179,4 +259,4 @@ function ping(host, port) {
   });
 }
 
-module.exports = { start, stop, isRunning, fetchData, postData, ping, getLocalIPs };
+module.exports = { start, stop, isRunning, fetchData, postData, ping, getLocalIPs, getJson, postSections };

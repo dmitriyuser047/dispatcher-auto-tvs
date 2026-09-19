@@ -125,6 +125,43 @@ function writeAll(dataDir, data) {
   return { changed, revisions };
 }
 
+/** Один раздел и его версия */
+function readSection(dataDir, name) {
+  if (!isSplit(dataDir)) migrate(dataDir);
+  return { name, rev: readRevisions(dataDir)[name] || 0, rows: readJson(sectionFile(dataDir, name), []) };
+}
+
+/**
+ * Записать только переданные разделы — с проверкой версии.
+ * base: { раздел: версия, от которой клиент вносил правки }. Если на диске
+ * версия другая, значит раздел успел поменять кто-то ещё: ничего не пишем
+ * и возвращаем список конфликтов — клиент сольёт правки и повторит.
+ * Так правки двух людей не затирают друг друга молча.
+ */
+function writeSections(dataDir, payload) {
+  if (!isSplit(dataDir)) migrate(dataDir);
+  const base = (payload && payload.base) || {};
+  const sections = (payload && payload.sections) || {};
+  const names = Object.keys(sections).filter(n => SECTIONS.includes(n));
+  const revisions = readRevisions(dataDir);
+  const conflicts = names.filter(n => (revisions[n] || 0) !== (base[n] || 0));
+  if (conflicts.length) return { ok: false, conflicts, revisions };
+  const changed = [];
+  names.forEach(name => {
+    const next = Array.isArray(sections[name]) ? sections[name] : [];
+    const file = sectionFile(dataDir, name);
+    const nextRaw = JSON.stringify(next);
+    let prevRaw = null;
+    try { prevRaw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null; } catch {}
+    if (prevRaw === nextRaw) return;
+    writeJsonAtomic(file, next);
+    revisions[name] = (revisions[name] || 0) + 1;
+    changed.push(name);
+  });
+  if (changed.length) writeJsonAtomic(revisionsFile(dataDir), revisions);
+  return { ok: true, changed, revisions };
+}
+
 /** Ежедневная резервная копия: складываем разделы обратно в один файл */
 function makeDailyBackup(dataDir, backupDir, keepDays) {
   if (!isSplit(dataDir)) return null;
@@ -147,4 +184,5 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
 module.exports = {
   SECTIONS, sectionsDir, sectionFile, revisionsFile,
   isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup,
+  readSection, writeSections,
 };

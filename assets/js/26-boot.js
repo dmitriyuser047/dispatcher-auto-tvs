@@ -9,6 +9,7 @@
   populateOrgSelect();
   updateFilterUI();
   switchSection('home');
+  if (typeof syncStartPolling === 'function') syncStartPolling();
   if (window.electronAPI && window.electronAPI.getSettings) {
     _appSettings = await window.electronAPI.getSettings();
     updateSidebarDataPath();

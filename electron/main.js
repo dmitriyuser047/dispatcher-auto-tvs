@@ -208,6 +208,57 @@ app.whenReady().then(() => {
     }
   });
 
+  // ── Синхронизация по разделам ──
+  // Снимок: данные + версии разделов. На старом сервере (без /api/snapshot)
+  // версии неизвестны — клиент работает по-старому, целиком.
+  ipcMain.handle('read-snapshot', async () => {
+    if (isClientMode()) {
+      const host = settings.remoteHost, port = settings.remotePort || 3377;
+      try { return JSON.stringify(await server.getJson(host, port, '/api/snapshot', 15000)); }
+      catch (e) {
+        try { return JSON.stringify({ data: JSON.parse(await server.fetchData(host, port)), revisions: null }); }
+        catch { return null; }
+      }
+    }
+    try {
+      return JSON.stringify({ data: storage.readAll(getDataDir()), revisions: storage.readRevisions(getDataDir()) });
+    } catch (e) {
+      console.error('[read-snapshot] ' + e.message);
+      return null;
+    }
+  });
+
+  ipcMain.handle('get-revisions', async () => {
+    try {
+      if (isClientMode()) return await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/revisions', 5000);
+      return storage.readRevisions(getDataDir());
+    } catch (e) { return null; }
+  });
+
+  ipcMain.handle('read-section', async (_event, name) => {
+    try {
+      if (isClientMode()) return await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/section/' + encodeURIComponent(name), 15000);
+      return storage.readSection(getDataDir(), name);
+    } catch (e) { return null; }
+  });
+
+  ipcMain.handle('write-sections', async (_event, jsonStr) => {
+    if (isClientMode()) {
+      try { return await server.postSections(settings.remoteHost, settings.remotePort || 3377, jsonStr); }
+      catch (e) { return { ok: false, error: e.message }; }
+    }
+    ensureDirs();
+    createDailyBackup();
+    try {
+      const res = storage.writeSections(getDataDir(), JSON.parse(jsonStr));
+      if (res.ok && res.changed.length) console.log('[write-sections] ' + res.changed.join(', '));
+      return res;
+    } catch (e) {
+      console.error('[write-sections] ' + e.message);
+      return { ok: false, error: e.message };
+    }
+  });
+
   ipcMain.handle('get-data-path', () => getDataDir());
 
   ipcMain.handle('get-settings', () => settings);

@@ -3,6 +3,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   readData:       ()        => ipcRenderer.invoke('read-data'),
   writeData:      (json)    => ipcRenderer.invoke('write-data', json),
+  readSnapshot:   ()        => ipcRenderer.invoke('read-snapshot'),
+  getRevisions:   ()        => ipcRenderer.invoke('get-revisions'),
+  readSection:    (name)    => ipcRenderer.invoke('read-section', name),
+  writeSections:  (json)    => ipcRenderer.invoke('write-sections', json),
   getDataPath:    ()        => ipcRenderer.invoke('get-data-path'),
   openDataFolder: ()        => ipcRenderer.invoke('open-data-folder'),
   exportPdf:      (html, defaultFileName) => ipcRenderer.invoke('export-pdf', { html, defaultFileName }),
