@@ -81,23 +81,28 @@ function closeModal(id) {
   document.getElementById(id).classList.remove('open');
   if (id === 'paymentModal' && typeof closePayCategoryDrop === 'function') closePayCategoryDrop();
 }
+// Окно для разовых форм. Разметка как у остальных окон: подложка
+// .modal-overlay, внутри .modal — иначе класс open ничего не показывает
+// и не скрывает.
 function openGenericModal(title, bodyHtml, width) {
   let el = document.getElementById('genericModal');
   if (!el) {
     el = document.createElement('div');
     el.id = 'genericModal';
-    el.className = 'modal';
-    el.innerHTML = `<div class="modal-overlay" onclick="closeModal('genericModal')"></div>
-      <div class="modal-content" style="max-width:${width||600}px;max-height:85vh;overflow-y:auto">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-          <h3 id="genericModalTitle" style="margin:0;font-size:18px;font-weight:700"></h3>
-          <button onclick="closeModal('genericModal')" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text3)">✕</button>
+    el.className = 'modal-overlay';
+    el.innerHTML = `<div class="modal" style="max-height:85vh;overflow-y:auto">
+        <div class="modal-header">
+          <div class="modal-title" id="genericModalTitle"></div>
+          <button class="icon-btn" onclick="closeModal('genericModal')">
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
-        <div id="genericModalBody"></div>
+        <div class="modal-body" id="genericModalBody"></div>
       </div>`;
+    el.addEventListener('click', e => { if (e.target === el) closeModal('genericModal'); });
     document.body.appendChild(el);
   }
-  el.querySelector('.modal-content').style.maxWidth = (width||600) + 'px';
+  el.querySelector('.modal').style.maxWidth = (width || 600) + 'px';
   document.getElementById('genericModalTitle').textContent = title;
   document.getElementById('genericModalBody').innerHTML = bodyHtml;
   openModal('genericModal');

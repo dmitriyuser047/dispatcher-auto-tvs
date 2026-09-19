@@ -11,7 +11,7 @@ function switchSection(section) {
     vehicles: 'Транспорт', generators: 'ДЭС', tanks: 'Ёмкости',
     reestr: 'Реестр', toSchedule: 'График ТО', repairs: 'Журнал ремонта',
     finances: 'Финансы', contragents: 'Контрагенты', reports: 'Отчёты',
-    printForms: 'Печатные формы', fuelReport: 'Отчёт по топливу'
+    printForms: 'Печатные формы', fuelReport: 'Отчёт по топливу', fuelPurchases: 'Заправки по выпискам'
   };
 
   // Header: menu button (always in sections), back button (detail views only)
@@ -87,6 +87,9 @@ function switchSection(section) {
     renderPrintFormsSection();
   } else if (section === 'fuelReport') {
     renderFuelReport();
+  } else if (section === 'fuelPurchases') {
+    fpView = 'cards'; fpVehicle = null;
+    renderFuelPurchases();
   }
   hideProgress();
   setTimeout(() => animateCounters(), 50);
@@ -182,6 +185,14 @@ function renderMainMenu() {
           </div>
           <div class="menu-tile-title">Отчёты</div>
           <div class="menu-tile-sub">Оборотка</div>
+        </div>
+
+        <div class="menu-tile" onclick="switchSection('fuelPurchases')">
+          <div class="menu-tile-icon" style="background:#ecfeff">
+            <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#0e7490" stroke-width="2"><path d="M3 22V5a2 2 0 012-2h8a2 2 0 012 2v17"/><path d="M3 22h12M6 8h6"/><path d="M15 11h2a2 2 0 012 2v4a1.5 1.5 0 003 0V9l-3-3"/></svg>
+          </div>
+          <div class="menu-tile-title">Заправки</div>
+          <div class="menu-tile-sub">По выпискам карт</div>
         </div>
 
         <div class="menu-tile" onclick="switchSection('fuelReport')">
