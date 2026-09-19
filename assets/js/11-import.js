@@ -184,7 +184,7 @@ function importFuelFromXls(input, mode = 'fuel') {
 
         return data.vehicles.find(v => {
           const vp = normalizePlate(v.plate);
-          if (vp && compact.includes(vp)) return true;
+          if (vp.length >= 5 && compact.includes(vp)) return true;
 
           const vDigits = (vp.match(/\d+/g) || []).join('');
           const hasVehicleDigits = vDigits && digitChunks.includes(vDigits);
@@ -196,6 +196,11 @@ function importFuelFromXls(input, mode = 'fuel') {
           return vp.startsWith(vDigits) || makeWords.some(w => low.includes(w));
         }) || null;
       };
+      // Номера сравниваются, только если оба похожи на госномер (от 5 знаков):
+      // иначе машина с условным номером «1» совпадает с любой строкой,
+      // где встречается единица.
+      const platesMatch = (a, b) => a.length >= 5 && b.length >= 5 &&
+        (a === b || a.startsWith(b) || b.startsWith(a));
       const importKeyFor = (tx) => [
         tx.date,
         Math.round(tx.qty * 100) / 100,
@@ -254,10 +259,14 @@ function importFuelFromXls(input, mode = 'fuel') {
         const vehicleText = cVehicle !== -1 ? String(row[cVehicle] || '').trim() : '';
         const fuel    = cFuel !== -1 ? String(row[cFuel] || '').trim() : '';
 
-        const plate = extractPlate(comment + ' ' + vehicleText);
+        // Номер ищется отдельно в столбце ТС и в комментарии. Раньше их склеивали
+        // с адресом АЗС, и на стыке получался мусор: «…лукойл 16088» + «Танк» → «16088ТАН».
+        // В ключе импорта оставлен прежний способ, чтобы уже загруженные строки
+        // по-прежнему узнавались при повторной загрузке.
+        const plate = extractPlate(vehicleText) || extractPlate(cComment !== -1 ? row[cComment] : '');
 
         const tx = { sourceRow: i + 1, date: parsedDate, qty, plate, cardNo, fuel, comment, vehicleText };
-        tx.importKey = importKeyFor(tx);
+        tx.importKey = importKeyFor({ ...tx, plate: extractPlate(comment + ' ' + vehicleText) });
         transactions.push(tx);
       }
 
@@ -269,10 +278,7 @@ function importFuelFromXls(input, mode = 'fuel') {
       function matchVehicle(tx) {
         if (tx.plate) {
           const p = normalizePlate(tx.plate);
-          const v = data.vehicles.find(v => {
-            const vp = normalizePlate(v.plate);
-            return vp && (vp === p || vp.startsWith(p) || p.startsWith(vp));
-          });
+          const v = data.vehicles.find(v => platesMatch(normalizePlate(v.plate), p));
           if (v) return v;
         }
         if (tx.cardNo) {
@@ -287,16 +293,13 @@ function importFuelFromXls(input, mode = 'fuel') {
         if (tx.comment) {
           const cPlate = extractPlate(tx.comment);
           if (cPlate) {
-            const v = data.vehicles.find(v => {
-              const vp = normalizePlate(v.plate);
-              return vp && (vp === cPlate || vp.startsWith(cPlate) || cPlate.startsWith(vp));
-            });
+            const v = data.vehicles.find(v => platesMatch(normalizePlate(v.plate), cPlate));
             if (v) return v;
           }
           const cLow = normalizeText(tx.comment).toLowerCase();
           const v = data.vehicles.find(v => {
             const p = normalizePlate(v.plate).toLowerCase();
-            return p && cLow.includes(p);
+            return p.length >= 5 && cLow.includes(p);
           });
           if (v) return v;
 
