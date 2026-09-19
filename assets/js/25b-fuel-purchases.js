@@ -265,7 +265,9 @@ async function renderFuelPurchases() {
   const main = document.getElementById('mainContent');
 
   const unmatched = fpLive().filter(p => !p.vehicleId);
-  const tabs = [['cards', 'По машинам'], ['unmatched', 'Без машины' + (unmatched.length ? ' (' + unmatched.length + ')' : '')],
+  const doubles = fpDoubles();
+  const tabs = [['cards', 'По машинам'], ['doubles', 'Сдвоенные заправки' + (doubles.length ? ' (' + doubles.length + ')' : '')],
+                ['unmatched', 'Без машины' + (unmatched.length ? ' (' + unmatched.length + ')' : '')],
                 ['history', 'История загрузок']]
     .map(([id, label]) => `<button class="sec-tab ${fpView === id ? 'active' : ''}" onclick="fpView='${id}';renderFuelPurchases()">${label}</button>`).join('');
   const monthSel = `<select class="fsel" onchange="fpMonth=this.value;renderFuelPurchases()">
@@ -277,6 +279,7 @@ async function renderFuelPurchases() {
 
   let body = '';
   if (fpView === 'unmatched') body = fpUnmatchedHtml(unmatched);
+  else if (fpView === 'doubles') body = fpDoublesHtml(doubles);
   else if (fpView === 'history') body = fpHistoryHtml();
   else body = fpCardsHtml();
 
@@ -597,5 +600,206 @@ async function fpSyncRecord(recordId) {
   if (!confirm(`Поставить в журнал за ${fmtDate(rec.date)}: ${fpNum(qty)} л вместо ${fpNum(rec.fuelIssued)} л?`)) return;
   rec.fuelIssued = qty || null;
   if (sum) rec.fuelSum = sum;
+  fpSaveAndRender();
+}
+
+// ─── Сдвоенные заправки ───────────────────────────────────
+// Дни, когда машина заправлялась два раза и больше. Офисные машины (объект
+// «… (офис)») не входят: там несколько заправок в день — обычное дело.
+// Отметки — поводы присмотреться, а не приговор.
+
+const FP_DAY_LIMIT = 100;   // литров за день, после которых день отмечается
+
+function fpIsOffice(v) { return /офис/i.test((v && v.object) || ''); }
+
+// Бензин и дизель — разные «семьи»: АИ-92 и АИ-95 в одной машине допустимы,
+// ДТ в бензиновой — нет
+function fpFuelFamily(g) { return g === 'ДТ' ? 'diesel' : g === 'Газ' ? 'gas' : g ? 'gasoline' : ''; }
+
+function fpDoubles() {
+  const groups = new Map();
+  fpLive().filter(p => p.vehicleId && fpInMonth(p)).forEach(p => {
+    const k = p.vehicleId + '|' + p.date;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(p);
+  });
+  const out = [];
+  groups.forEach(list => {
+    if (list.length < 2) return;
+    const v = (data.vehicles || []).find(x => x.id === list[0].vehicleId);
+    if (!v || fpIsOffice(v)) return;
+    list.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    const litres = fpRound(list.reduce((s, p) => s + (+p.qty || 0), 0));
+    const sum = fpRound(list.reduce((s, p) => s + (+p.sum || 0), 0));
+    const journal = fpRound(recsFor(v.id).filter(r => r.date === list[0].date).reduce((s, r) => s + (+r.fuelIssued || 0), 0));
+    const own = fpFuelFamily(vehicleFuelGrade(v));
+    const grades = [...new Set(list.map(p => p.grade).filter(Boolean))];
+    const flags = [];
+    if (litres > FP_DAY_LIMIT) flags.push('больше ' + FP_DAY_LIMIT + ' л за день');
+    if (grades.some(g => own && fpFuelFamily(g) !== own)) flags.push('топливо не той марки, что у машины');
+    else if (grades.length > 1) flags.push('разные марки в один день');
+    if (/ремонт|дтп/i.test(v.status || '')) flags.push('статус «' + v.status + '»');
+    if (new Set(list.map(p => p.cardNo).filter(Boolean)).size > 1) flags.push('разные карты');
+    const times = list.map(p => p.time).filter(Boolean);
+    if (times.length === list.length) {
+      const mins = times.map(t => +t.slice(0, 2) * 60 + +t.slice(3, 5));
+      for (let i = 1; i < mins.length; i++) if (mins[i] - mins[i - 1] <= 30) { flags.push('заправки с разницей до 30 мин'); break; }
+    }
+    if (Math.abs(journal - litres) > 0.05) flags.push('журнал ' + fpNum(journal, 2) + ' л');
+    const checked = list.every(p => p.doubleChecked);
+    out.push({ v, date: list[0].date, list, litres, sum, journal, flags, checked,
+               checkNote: (list.find(p => p.doubleCheckNote) || {}).doubleCheckNote || '' });
+  });
+  return out.sort((a, b) => a.date.localeCompare(b.date) || (a.v.plate || '').localeCompare(b.v.plate || '', 'ru'));
+}
+
+let fpDoublesOnlyFlagged = false;
+
+function fpDoublesHtml(all) {
+  const open = d => d.flags.length && !d.checked;
+  const list = fpDoublesOnlyFlagged ? all.filter(open) : all;
+  if (!all.length) return `<div style="background:#dcfce7;color:#166534;border:1px solid #bbf7d0;border-radius:8px;padding:12px 14px">
+    ${fpMonth === 'all' ? 'Сдвоенных заправок нет' : 'За ' + fpMonthLabel(fpMonth).toLowerCase() + ' сдвоенных заправок нет'} (офисные машины не учитываются).</div>`;
+
+  const litres = all.reduce((s, d) => s + d.litres, 0);
+  const sum = all.reduce((s, d) => s + d.sum, 0);
+  const cars = new Set(all.map(d => d.v.id)).size;
+  const flagged = all.filter(open).length;
+  const card = (t, val, sub, color) => `<div style="flex:1;min-width:150px;background:var(--bg2);border:1px solid var(--border);border-left:4px solid ${color};border-radius:8px;padding:10px 14px">
+      <div style="font-size:12px;color:var(--text3)">${t}</div><div style="font-size:19px;font-weight:800">${val}</div>
+      ${sub ? `<div style="font-size:12px;color:var(--text3)">${sub}</div>` : ''}</div>`;
+
+  // По машинам: сколько дней со сдвоенными заправками
+  const byCar = new Map();
+  all.forEach(d => {
+    const c = byCar.get(d.v.id) || { v: d.v, days: 0, litres: 0, flagged: 0 };
+    c.days++; c.litres += d.litres; if (open(d)) c.flagged++;
+    byCar.set(d.v.id, c);
+  });
+  const carRows = [...byCar.values()].sort((a, b) => b.days - a.days || b.litres - a.litres).map(c => `
+    <tr style="cursor:pointer" onclick="fpOpenVehicle('${c.v.id}')">
+      <td style="font-weight:700">${fpEsc(c.v.plate)}</td><td>${fpEsc(c.v.make || '')}</td>
+      <td style="font-size:12px;color:var(--text3)">${fpEsc(c.v.object || '')}</td>
+      <td style="text-align:right">${c.days}</td><td style="text-align:right">${fpNum(c.litres, 1)}</td>
+      <td style="text-align:right;${c.flagged ? 'color:#d97706;font-weight:700' : ''}">${c.flagged || '—'}</td>
+    </tr>`).join('');
+
+  const rows = list.map(d => `
+    <tr>
+      <td>${fmtDate(d.date)}</td>
+      <td style="cursor:pointer" onclick="fpOpenVehicle('${d.v.id}')"><b>${fpEsc(d.v.plate)}</b><div style="font-size:12px;color:var(--text3)">${fpEsc(d.v.make || '')} · ${fpEsc(vehicleFuelGrade(d.v))}</div></td>
+      <td style="font-size:12px;color:var(--text3);max-width:180px;white-space:normal">${fpEsc(d.v.object || '')}</td>
+      <td style="text-align:center">${d.list.length}</td>
+      <td style="font-size:12px">${d.list.map(p => `<div>${fpEsc(p.time || '—:—')} · <span class="fuel-tag ${fuelTypeFromGrade(p.grade)}" style="font-size:10px;padding:0 5px">${fpEsc(p.grade || '—')}</span> ${fpNum(p.qty)} л${p.sum ? ' · ' + fpNum(p.sum) + ' ₽' + (p.restored ? '≈' : '') : ''}
+        <a href="#" style="margin-left:6px;font-size:11px" onclick="event.preventDefault();fpEdit('${p.id}')">изменить</a>
+        <a href="#" style="margin-left:4px;font-size:11px;color:var(--red)" title="Удалить заправку и снять её с журнала" onclick="event.preventDefault();fpDelete('${p.id}')">✕</a></div>`).join('')}</td>
+      <td style="text-align:right;font-weight:700;${d.litres > FP_DAY_LIMIT ? 'color:var(--red)' : ''}">${fpNum(d.litres)}</td>
+      <td style="text-align:right">${d.sum ? fpNum(d.sum) : '—'}</td>
+      <td style="font-size:12px;color:#b45309;max-width:220px;white-space:normal">${d.flags.map(fpEsc).join('<br>') || '<span style="color:var(--text3)">—</span>'}
+        ${d.checked ? `<div style="color:var(--green);margin-top:4px">✓ проверено${d.checkNote ? ': ' + fpEsc(d.checkNote) : ''}</div>` : ''}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px" onclick="fpToggleChecked('${d.v.id}','${d.date}')">${d.checked ? 'Снять отметку' : 'Проверено'}</button>
+      </td>
+    </tr>`).join('');
+
+  return `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      ${card('Случаев', all.length, cars + ' машин', '#2563eb')}
+      ${card('Литров в эти дни', fpNum(litres, 1) + ' л', sum ? fpNum(sum) + ' ₽' : '', '#16a34a')}
+      ${card('С отметками', flagged, flagged ? 'стоит проверить' : 'вопросов нет', flagged ? '#d97706' : '#94a3b8')}
+    </div>
+    <div class="table-wrap" style="margin-bottom:14px">
+      <div class="table-toolbar"><div class="table-toolbar-left">По машинам</div></div>
+      <table class="data-table" style="width:100%">
+        <thead><tr><th>Госномер</th><th>Марка</th><th>Объект</th><th style="text-align:right">Дней</th><th style="text-align:right">Литров</th><th style="text-align:right">С отметками</th></tr></thead>
+        <tbody>${carRows}</tbody>
+      </table>
+    </div>
+    <div class="table-wrap">
+      <div class="table-toolbar">
+        <div class="table-toolbar-left">Сдвоенные заправки · ${fpMonthLabel(fpMonth)} · без офисных машин</div>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" ${fpDoublesOnlyFlagged ? 'checked' : ''} onchange="fpDoublesOnlyFlagged=this.checked;renderFuelPurchases()"> только непроверенные с отметками
+        </label>
+        <button class="btn btn-ghost btn-sm" onclick="fpExportDoubles()">Выгрузить в Excel</button>
+      </div>
+      <div class="table-scroll" style="overflow-x:auto">
+        <table class="data-table" style="width:100%">
+          <thead><tr><th>Дата</th><th>Машина</th><th>Объект</th><th style="text-align:center">Заправок</th><th>Заправки</th>
+            <th style="text-align:right">Итого, л</th><th style="text-align:right">Сумма, ₽</th><th>Отметки</th><th></th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:16px">Случаев с отметками нет</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--text3);margin-top:10px">
+      Отметки: больше ${FP_DAY_LIMIT} л за день; дизель в бензиновой машине или наоборот; разные марки бензина в один день;
+      машина в ремонте; разные карты; заправки с разницей до 30 минут; литры в журнале не совпадают с выписками.
+      Офисные машины (объект «… (офис)») не учитываются. «≈» — сумма восстановлена из журнала, точная подтянется при повторной загрузке выписки.
+    </div>`;
+}
+
+function fpExportDoubles() {
+  const list = fpDoubles().filter(d => !fpDoublesOnlyFlagged || (d.flags.length && !d.checked));
+  if (!list.length) { alert('Нет сдвоенных заправок'); return; }
+  const P = { navy: '1B3A6B', white: 'FFFFFF', gray1: 'F8FAFC', gray3: 'E2E8F0', text: '1E293B', amber: 'B45309' };
+  const b = { style: 'thin', color: { rgb: P.gray3 } };
+  const border = { top: b, bottom: b, left: b, right: b };
+  const st = (o) => Object.assign({ font: { sz: 10, color: { rgb: P.text } }, border, alignment: { vertical: 'top', wrapText: true } }, o);
+  const head = st({ font: { bold: true, sz: 10, color: { rgb: P.white } }, fill: { patternType: 'solid', fgColor: { rgb: P.navy } },
+                    alignment: { horizontal: 'center', vertical: 'center', wrapText: true } });
+  const title = 'Сдвоенные заправки — ' + fpMonthLabel(fpMonth) + ' (без офисных машин)';
+  const cols = ['Дата', 'Госномер', 'Марка', 'Объект', 'Заправок', 'Заправки', 'Итого, л', 'Сумма, ₽', 'Отметки'];
+  const ws = {};
+  const put = (r, c, v, s, z) => { const cell = { v, t: typeof v === 'number' ? 'n' : 's', s }; if (z) cell.z = z; ws[XLSX.utils.encode_cell({ r, c })] = cell; };
+  put(0, 0, title, { font: { bold: true, sz: 13 } });
+  cols.forEach((c, i) => put(2, i, c, head));
+  list.forEach((d, i) => {
+    const r = i + 3, fill = i % 2 ? { patternType: 'solid', fgColor: { rgb: P.gray1 } } : undefined;
+    const s = st(fill ? { fill } : {}), sn = st(Object.assign({ alignment: { horizontal: 'right', vertical: 'top' } }, fill ? { fill } : {}));
+    put(r, 0, fmtDate(d.date), s);
+    put(r, 1, d.v.plate || '', s);
+    put(r, 2, d.v.make || '', s);
+    put(r, 3, d.v.object || '', s);
+    put(r, 4, d.list.length, sn);
+    put(r, 5, d.list.map(p => (p.time || '—') + ' ' + (p.grade || '') + ' ' + fpNum(p.qty) + ' л' + (p.sum ? ' · ' + fpNum(p.sum) + ' ₽' : '')).join('\n'), s);
+    put(r, 6, d.litres, sn, '#,##0.00');
+    put(r, 7, d.sum || '', sn, '#,##0.00');
+    put(r, 8, d.flags.join('; ') + (d.checked ? (d.flags.length ? '; ' : '') + 'проверено' + (d.checkNote ? ': ' + d.checkNote : '') : ''), st(Object.assign({ font: { sz: 10, color: { rgb: P.amber } } }, fill ? { fill } : {})));
+  });
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: list.length + 2, c: cols.length - 1 } });
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: cols.length - 1 } }];
+  ws['!cols'] = [11, 14, 18, 30, 9, 40, 11, 13, 40].map(wch => ({ wch }));
+  ws['!freeze'] = { xSplit: 0, ySplit: 3 };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Сдвоенные');
+  XLSX.writeFile(wb, 'Сдвоенные_заправки_' + (fpMonth === 'all' ? 'все' : fpMonth) + '.xlsx');
+}
+
+// Отметка «проверено» для дня хранится на покупках этого дня.
+// Добавится новая покупка за этот день — отметку нужно поставить заново.
+function fpToggleChecked(vehicleId, date) {
+  const list = fpLive().filter(p => p.vehicleId === vehicleId && p.date === date);
+  if (!list.length) return;
+  if (list.every(p => p.doubleChecked)) {
+    list.forEach(p => { p.doubleChecked = false; p.doubleCheckNote = ''; });
+    fpSaveAndRender();
+    return;
+  }
+  const v = (data.vehicles || []).find(x => x.id === vehicleId);
+  openGenericModal('Проверено: ' + (v ? v.plate : '') + ', ' + fmtDate(date), `
+    <div class="form-group"><label>Комментарий (необязательно)</label>
+      <input type="text" id="fpCheckNote" placeholder="например: дальний рейс, две смены"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="btn btn-ghost" onclick="closeModal('genericModal')">Отмена</button>
+      <button class="btn btn-primary" onclick="fpSaveChecked('${vehicleId}','${date}')">Отметить</button>
+    </div>`, 460);
+  setTimeout(() => document.getElementById('fpCheckNote')?.focus(), 50);
+}
+
+function fpSaveChecked(vehicleId, date) {
+  const note = (document.getElementById('fpCheckNote')?.value || '').trim();
+  fpLive().filter(p => p.vehicleId === vehicleId && p.date === date)
+    .forEach(p => { p.doubleChecked = true; p.doubleCheckNote = note; });
+  closeModal('genericModal');
   fpSaveAndRender();
 }
