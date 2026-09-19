@@ -268,6 +268,7 @@ async function renderFuelPurchases() {
   const doubles = fpDoubles();
   const tabs = [['cards', 'По машинам'], ['doubles', 'Сдвоенные заправки' + (doubles.length ? ' (' + doubles.length + ')' : '')],
                 ['compare', 'Сравнение месяцев'],
+                ['negative', 'Отрицательный остаток'],
                 ['unmatched', 'Без машины' + (unmatched.length ? ' (' + unmatched.length + ')' : '')],
                 ['history', 'История загрузок']]
     .map(([id, label]) => `<button class="sec-tab ${fpView === id ? 'active' : ''}" onclick="fpView='${id}';renderFuelPurchases()">${label}</button>`).join('');
@@ -282,6 +283,7 @@ async function renderFuelPurchases() {
   if (fpView === 'unmatched') body = fpUnmatchedHtml(unmatched);
   else if (fpView === 'doubles') body = fpDoublesHtml(doubles);
   else if (fpView === 'compare') body = fpCompareHtml();
+  else if (fpView === 'negative') body = fpNegativeHtml();
   else if (fpView === 'history') body = fpHistoryHtml();
   else body = fpCardsHtml();
 
@@ -296,7 +298,7 @@ async function renderFuelPurchases() {
           ${[...new Set((data.vehicles || []).map(v => v.org).filter(Boolean))].sort()
             .map(o => `<option${o === fpOrg ? ' selected' : ''}>${fpEsc(o)}</option>`).join('')}
         </select>` : ''}
-        ${fpView !== 'history' && fpView !== 'compare' ? monthSel : ''}
+        ${!['history', 'compare', 'negative'].includes(fpView) ? monthSel : ''}
         ${loadBtns}
       </div>
       <div id="fpBody">${body}</div>
@@ -1010,4 +1012,162 @@ function fpExportCompare() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Сравнение');
   XLSX.writeFile(wb, 'Сравнение_расхода_' + fpCmpMonth + '_к_' + prev + '.xlsx');
+}
+
+// ─── Отрицательный остаток ────────────────────────────────
+// Машины, у которых остаток топлива по журналу ушёл в минус. Остаток
+// считается той же функцией, что в карточке машины: начальный остаток
+// плюс выдано минус факт. расход (или расход по норме) минус холостой ход.
+// Минус почти всегда значит, что заправка не попала в журнал: не загружена
+// выписка, заправляли по другой карте, или завышен факт. расход.
+
+let fpNegNoOffice = false;
+let fpNegWithRecovered = false;
+let fpNegOrg = '';
+
+function fpNegRows() {
+  return (data.vehicles || []).map(v => {
+    if (fpNegNoOffice && fpIsOffice(v)) return null;
+    if (fpNegOrg && (v.org || '') !== fpNegOrg) return null;
+    const recs = recsFor(v.id).slice().sort((a, b) => cmpDateAsc(a.date, b.date));
+    if (!recs.length) return null;
+    const bal = computeFuelBalances(v.id);
+    let min = Infinity, minDate = '', firstNeg = '', negRecs = 0, issued = 0, spent = 0;
+    const monthEnd = {}, monthIssued = {}, monthKm = {};
+    recs.forEach(r => {
+      const b = bal[r.id];
+      if (b < min) { min = b; minDate = r.date; }
+      if (b < -0.05) { negRecs++; if (!firstNeg) firstNeg = r.date; }
+      const m = r.date.slice(0, 7);
+      monthEnd[m] = b;
+      monthIssued[m] = (monthIssued[m] || 0) + (+r.fuelIssued || 0);
+      monthKm[m] = (monthKm[m] || 0) + (+r.km || 0);
+      issued += +r.fuelIssued || 0;
+      spent += (r.fuelActual != null ? +r.fuelActual : (+r.fuelUsed || 0)) + (+r.fuelIdle || 0);
+    });
+    if (!(min < -0.05)) return null;
+    const now = bal[recs[recs.length - 1].id];
+    if (now >= -0.05 && !fpNegWithRecovered) return null;
+    // Подсказка: месяцы, где машина ездила, а выдачи нет
+    const dryMonths = Object.keys(monthKm).filter(m => monthKm[m] > 0 && !monthIssued[m]).sort();
+    const hint = !issued ? 'в журнале нет ни одной заправки'
+      : dryMonths.length ? 'нет заправок за ' + dryMonths.map(m => fpMonthLabel(m).toLowerCase()).join(', ')
+      : 'расход больше выдачи';
+    return { v, now, min, minDate, firstNeg, negRecs, issued, spent, start: +v.fuelBalance || 0,
+             monthEnd, last: recs[recs.length - 1].date, hint, recovered: now >= -0.05 };
+  }).filter(Boolean).sort((a, b) => a.now - b.now);
+}
+
+function fpNegativeHtml() {
+  const list = fpNegRows();
+  const months = [...new Set(list.flatMap(r => Object.keys(r.monthEnd)))].sort().slice(-4);
+  const orgs = [...new Set((data.vehicles || []).map(v => v.org).filter(Boolean))].sort();
+  const cur = list.filter(r => !r.recovered);
+  const totalNeg = cur.reduce((s, r) => s + r.now, 0);
+  const card = (t, val, sub, color) => `<div style="flex:1;min-width:170px;background:var(--bg2);border:1px solid var(--border);border-left:4px solid ${color};border-radius:8px;padding:10px 14px">
+      <div style="font-size:12px;color:var(--text3)">${t}</div><div style="font-size:19px;font-weight:800">${val}</div>
+      ${sub ? `<div style="font-size:12px;color:var(--text3)">${sub}</div>` : ''}</div>`;
+  const b = x => x == null ? '<span style="color:var(--text3)">—</span>'
+    : `<span style="${x < -0.05 ? 'color:var(--red);font-weight:700' : ''}">${fpNum(x, 1)}</span>`;
+
+  const rows = list.map(r => `
+    <tr style="cursor:pointer" onclick="fpOpenJournal('${r.v.id}','${(r.firstNeg || r.last).slice(0, 7)}')" title="Открыть журнал пробега с месяца, когда остаток ушёл в минус">
+      <td><b>${fpEsc(r.v.plate)}</b><div style="font-size:12px;color:var(--text3)">${fpEsc(r.v.make || '')}</div></td>
+      <td style="font-size:12px">${fpEsc(r.v.org || '')}<div style="color:var(--text3);max-width:180px;white-space:normal">${fpEsc(r.v.object || '')}</div></td>
+      <td style="text-align:right;font-size:15px">${b(r.now)}${r.recovered ? '<div style="font-size:11px;color:var(--green)">вышел из минуса</div>' : ''}</td>
+      <td style="text-align:right">${b(r.min)}<div style="font-size:11px;color:var(--text3)">${fmtDate(r.minDate)}</div></td>
+      <td>${fmtDate(r.firstNeg)}</td>
+      ${months.map(m => `<td style="text-align:right">${b(r.monthEnd[m])}</td>`).join('')}
+      <td style="text-align:right">${fpNum(r.issued, 0)}</td>
+      <td style="text-align:right">${fpNum(r.spent, 0)}</td>
+      <td style="font-size:12px;color:#b45309;max-width:200px;white-space:normal">${fpEsc(r.hint)}</td>
+    </tr>`).join('');
+
+  return `
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <select class="fsel" onchange="fpNegOrg=this.value;renderFuelPurchases()">
+        <option value="">Все организации</option>
+        ${orgs.map(o => `<option${o === fpNegOrg ? ' selected' : ''}>${fpEsc(o)}</option>`).join('')}
+      </select>
+      <label style="font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" ${fpNegNoOffice ? 'checked' : ''} onchange="fpNegNoOffice=this.checked;renderFuelPurchases()"> без офисных машин</label>
+      <label style="font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" ${fpNegWithRecovered ? 'checked' : ''} onchange="fpNegWithRecovered=this.checked;renderFuelPurchases()"> показать и вышедших из минуса</label>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      ${card('Сейчас в минусе', cur.length + ' машин', '', cur.length ? '#dc2626' : '#16a34a')}
+      ${card('Сумма минусов', fpNum(totalNeg, 1) + ' л', 'не хватает в журнале', '#dc2626')}
+      ${card('Без единой заправки', cur.filter(r => !r.issued).length + ' машин', 'расход есть, выдачи нет', '#d97706')}
+    </div>
+    ${list.length ? `<div class="table-wrap">
+      <div class="table-toolbar">
+        <div class="table-toolbar-left">Машины с отрицательным остатком топлива</div>
+        <button class="btn btn-ghost btn-sm" onclick="fpExportNegative()">Выгрузить в Excel</button>
+      </div>
+      <div class="table-scroll" style="overflow-x:auto">
+        <table class="data-table" style="width:100%">
+          <thead><tr><th>Машина</th><th>Организация / объект</th><th style="text-align:right">Остаток сейчас, л</th>
+            <th style="text-align:right">Минимум, л</th><th>В минусе с</th>
+            ${months.map(m => `<th style="text-align:right">На конец<br><span style="font-weight:400">${fpMonthLabel(m)}</span></th>`).join('')}
+            <th style="text-align:right">Выдано всего, л</th><th style="text-align:right">Расход всего, л</th><th>Вероятная причина</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>` : `<div style="background:#dcfce7;color:#166534;border:1px solid #bbf7d0;border-radius:8px;padding:12px 14px">Машин с отрицательным остатком нет.</div>`}
+    <div style="font-size:12px;color:var(--text3);margin-top:10px">
+      Остаток — как в карточке машины: начальный остаток + выдано − факт. расход (где он пустой — расход по норме) − холостой ход.
+      Минус обычно значит, что заправка не попала в журнал: не загружена выписка за месяц, машину заправляли по другой карте,
+      или факт. расход завышен. Нажмите на строку — откроется журнал пробега с месяца, когда остаток ушёл в минус.
+    </div>`;
+}
+
+function fpOpenJournal(vid, month) {
+  switchSection('vehicles');
+  selectVehicle(vid);
+  if (month) {
+    const [y, m] = month.split('-');
+    selectedYear = +y; selectedMonth = +m;
+  }
+  if (typeof vehicleDetailView !== 'undefined') vehicleDetailView = 'journal';
+  const v = data.vehicles.find(x => x.id === vid);
+  if (v) renderDetail(v);
+}
+
+function fpExportNegative() {
+  const list = fpNegRows();
+  if (!list.length) { alert('Машин с отрицательным остатком нет'); return; }
+  const months = [...new Set(list.flatMap(r => Object.keys(r.monthEnd)))].sort().slice(-4);
+  const P = { navy: '1B3A6B', white: 'FFFFFF', gray1: 'F8FAFC', gray3: 'E2E8F0', text: '1E293B', red: 'B91C1C', amber: 'B45309' };
+  const bd = { style: 'thin', color: { rgb: P.gray3 } };
+  const border = { top: bd, bottom: bd, left: bd, right: bd };
+  const st = o => Object.assign({ font: { sz: 10, color: { rgb: P.text } }, border, alignment: { vertical: 'center', wrapText: true } }, o);
+  const head = st({ font: { bold: true, sz: 10, color: { rgb: P.white } }, fill: { patternType: 'solid', fgColor: { rgb: P.navy } },
+                    alignment: { horizontal: 'center', vertical: 'center', wrapText: true } });
+  const cols = ['Госномер', 'Марка', 'Организация', 'Объект', 'Статус', 'Остаток сейчас, л', 'Минимум, л', 'Дата минимума', 'В минусе с']
+    .concat(months.map(m => 'На конец ' + fpMonthGen(m) + ', л'))
+    .concat(['Начальный остаток, л', 'Выдано всего, л', 'Расход всего, л', 'Вероятная причина']);
+  const ws = {};
+  const put = (r, c, v, s, z) => { const cell = { v: v == null ? '' : v, t: typeof v === 'number' ? 'n' : 's', s }; if (z && typeof v === 'number') cell.z = z; ws[XLSX.utils.encode_cell({ r, c })] = cell; };
+  put(0, 0, 'Машины с отрицательным остатком топлива на ' + new Date().toLocaleDateString('ru'), { font: { bold: true, sz: 13 } });
+  cols.forEach((c, i) => put(2, i, c, head));
+  list.forEach((r, i) => {
+    const R = i + 3, fill = i % 2 ? { fill: { patternType: 'solid', fgColor: { rgb: P.gray1 } } } : {};
+    const s = st(fill), n = st(Object.assign({ alignment: { horizontal: 'right' } }, fill));
+    const neg = x => st(Object.assign({ alignment: { horizontal: 'right' }, font: { sz: 10, bold: x < -0.05, color: { rgb: x < -0.05 ? P.red : P.text } } }, fill));
+    const vals = [r.v.plate, r.v.make, r.v.org, r.v.object, r.v.status, fpRound(r.now), fpRound(r.min), fmtDate(r.minDate), fmtDate(r.firstNeg)]
+      .concat(months.map(m => r.monthEnd[m] != null ? fpRound(r.monthEnd[m]) : null))
+      .concat([fpRound(r.start), fpRound(r.issued), fpRound(r.spent), r.hint]);
+    vals.forEach((v, c) => {
+      const isBal = c === 5 || c === 6 || (c >= 9 && c < 9 + months.length);
+      put(R, c, v, c === vals.length - 1 ? st(Object.assign({ font: { sz: 10, color: { rgb: P.amber } } }, fill))
+        : isBal ? neg(v) : typeof v === 'number' ? n : s, '#,##0.0');
+    });
+  });
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: list.length + 2, c: cols.length - 1 } });
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: cols.length - 1 } }];
+  ws['!cols'] = [14, 18, 13, 28, 11, 11, 11, 11, 11].concat(months.map(() => 12)).concat([11, 11, 11, 36]).map(wch => ({ wch }));
+  ws['!rows'] = [{ hpt: 22 }, {}, { hpt: 40 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Минус по остатку');
+  XLSX.writeFile(wb, 'Отрицательный_остаток_' + new Date().toISOString().slice(0, 10) + '.xlsx');
 }
