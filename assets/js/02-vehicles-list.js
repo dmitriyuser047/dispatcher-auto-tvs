@@ -197,7 +197,7 @@ function renderDetail(v) {
         <td class="td-day">${fullDate} <span style="color:var(--text3)">${dayName}</span></td>
         <td class="td-num">${r.km ? r.km.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${r.odoStart ? r.odoStart.toLocaleString('ru') : '—'} → ${r.odoEnd ? r.odoEnd.toLocaleString('ru') : '—'}</td>
-        <td class="td-num">${r.fuelIssued ? r.fuelIssued.toLocaleString('ru', {maximumFractionDigits:1}) + ' <span style="font-size:10px;color:var(--text3)">' + recordFuelGrade(r, v) + '</span>' : '—'}</td>
+        <td class="td-num">${r.fuelIssued ? r.fuelIssued.toLocaleString('ru', {maximumFractionDigits:1}) + ' <span style="font-size:10px;color:var(--text3)">' + recordFuelGrade(r, v) + '</span>' + (r.fuelSum ? '<div style="font-size:10px;color:var(--text3)">' + (+r.fuelSum).toLocaleString('ru', {maximumFractionDigits:2}) + ' ₽</div>' : '') : '—'}</td>
         <td class="td-num">${r.fuelUsed ? r.fuelUsed.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${r.fuelActual != null ? r.fuelActual.toLocaleString('ru', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</td>
         <td class="td-num">${r.fuelIdle != null ? r.fuelIdle.toLocaleString('ru', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</td>

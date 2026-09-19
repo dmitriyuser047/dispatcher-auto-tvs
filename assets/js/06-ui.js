@@ -43,6 +43,7 @@ function saveRecord() {
     driver: document.getElementById('rec_driver').value.trim() || null,
     fuelGrade: document.getElementById('rec_fuel_grade').value === 'Бензин' ? '' : document.getElementById('rec_fuel_grade').value,
     fuelIssued: parseFloat(document.getElementById('rec_fuel_issued').value) || null,
+    fuelSum:    parseFloat(document.getElementById('rec_fuel_sum').value)    || null,
     fuelUsed:   parseFloat(document.getElementById('rec_fuel_used').value)   || null,
     fuelActual: parseFloat(document.getElementById('rec_fuel_actual').value) || null,
     fuelIdle:   parseFloat(document.getElementById('rec_fuel_idle').value)   || null,

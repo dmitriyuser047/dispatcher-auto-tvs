@@ -150,6 +150,10 @@ function importFuelFromXls(input, mode = 'fuel') {
       const cComment = col(['комментар', 'местонахождение']);
       const cCard    = col(['номер карт']);
       const cVehicle = col(['закреплена', 'тс', 'транспорт', 'авто']);
+      // Цена и сумма клиента — то, что платит компания. ГПН: «Цена клиента»,
+      // «Сумма к оплате»; офисные карты: «Цена клиента, руб.», «Сумма клиента, руб.».
+      const cPrice   = col(['цена клиента']) !== -1 ? col(['цена клиента']) : col(['цена']);
+      const cSum     = col(['сумма к оплате', 'сумма клиента']);
 
       if (cDate === -1 || cQty === -1) {
         alert('Не найдены обязательные столбцы: Дата, Количество.');
@@ -265,7 +269,11 @@ function importFuelFromXls(input, mode = 'fuel') {
         // по-прежнему узнавались при повторной загрузке.
         const plate = extractPlate(vehicleText) || extractPlate(cComment !== -1 ? row[cComment] : '');
 
-        const tx = { sourceRow: i + 1, date: parsedDate, qty, plate, cardNo, fuel, comment, vehicleText };
+        const num = c => c === -1 ? 0 : (parseFloat(String(row[c] ?? '').replace(/\s/g, '').replace(',', '.')) || 0);
+        const price = num(cPrice);
+        const sum = Math.abs(num(cSum)) || fuelImportRoundMoney(qty * price);
+
+        const tx = { sourceRow: i + 1, date: parsedDate, qty, plate, cardNo, fuel, comment, vehicleText, price, sum };
         tx.importKey = importKeyFor({ ...tx, plate: extractPlate(comment + ' ' + vehicleText) });
         transactions.push(tx);
       }
@@ -324,6 +332,8 @@ function importFuelFromXls(input, mode = 'fuel') {
             sourceRow: tx.sourceRow,
             date: tx.date,
             qty: tx.qty,
+            sum: tx.sum,
+            price: tx.price,
             fuel: tx.fuel,
             importKey: tx.importKey,
             cardNo: tx.cardNo,
@@ -339,9 +349,10 @@ function importFuelFromXls(input, mode = 'fuel') {
         const grade = parseFuelGrade(tx.fuel) || vehicleFuelGrade(v);
         const key = v.id + '|' + tx.date + '|' + grade;
         if (!groupedByVehicleDate[key]) {
-          groupedByVehicleDate[key] = { v, date: tx.date, grade, totalQty: 0, fuels: [], importKeys: [], transactions: [] };
+          groupedByVehicleDate[key] = { v, date: tx.date, grade, totalQty: 0, totalSum: 0, fuels: [], importKeys: [], transactions: [] };
         }
         groupedByVehicleDate[key].totalQty += tx.qty;
+        groupedByVehicleDate[key].totalSum = fuelImportRoundMoney(groupedByVehicleDate[key].totalSum + (tx.sum || 0));
         groupedByVehicleDate[key].fuels.push((tx.fuel || 'топливо') + ' ' + tx.qty + 'л');
         groupedByVehicleDate[key].importKeys.push(tx.importKey);
         groupedByVehicleDate[key].transactions.push(tx);
@@ -349,6 +360,15 @@ function importFuelFromXls(input, mode = 'fuel') {
 
       const groupedValues = Object.values(groupedByVehicleDate);
       const mergedTransactions = groupedValues.reduce((s, grp) => s + Math.max(0, grp.importKeys.length - 1), 0);
+
+      // Суммы для записей, загруженных до появления цены: копим по всем
+      // совпавшим строкам выписки и проставляем после цикла — в старой записи
+      // могут быть сложены несколько покупок.
+      const sumBackfill = new Map();
+      const backfill = (rec, grp) => {
+        if (!grp.totalSum || (rec.fuelSum && !sumBackfill.has(rec))) return;
+        sumBackfill.set(rec, fuelImportRoundMoney((sumBackfill.get(rec) || 0) + grp.totalSum));
+      };
 
       groupedValues.forEach(grp => {
         // Уже загруженное узнаём по ключу в любой записи этого дня — в том числе
@@ -372,6 +392,7 @@ function importFuelFromXls(input, mode = 'fuel') {
           );
 
           if (hasImportedKey) {
+            backfill(existing, grp);
             duplicates++;
             duplicateLitres += grp.totalQty;
             reportRows.push(fuelImportReportRow(grp, 'duplicate', existingIssued, existingIssued, 'Уже загружено ранее', existing.id));
@@ -391,6 +412,7 @@ function importFuelFromXls(input, mode = 'fuel') {
               duplicateLitres += grp.totalQty;
             }
             if (!existing.fuelGrade) existing.fuelGrade = grp.grade;
+            backfill(existing, grp);
             if (!existing.note) existing.note = fuelNote + '; ' + importMarker;
             else if (!existing.note.includes(importMarker)) existing.note += '; ' + fuelNote + '; ' + importMarker;
             reportRows.push(fuelImportReportRow(grp, action, existingIssued, existing.fuelIssued, statusText, existing.id));
@@ -405,6 +427,7 @@ function importFuelFromXls(input, mode = 'fuel') {
           const beforeIssued = existingIssued;
           existing.fuelIssued = beforeIssued + grp.totalQty;
           existing.fuelGrade = grp.grade;
+          if (grp.totalSum) existing.fuelSum = fuelImportRoundMoney((+existing.fuelSum || 0) + grp.totalSum);
           if (!existing.note) existing.note = '';
           existing.note = (existing.note ? existing.note + '; ' : '') + fuelNote + '; ' + importMarker;
           updated++;
@@ -418,6 +441,7 @@ function importFuelFromXls(input, mode = 'fuel') {
             date: grp.date,
             km: 0,
             fuelIssued: grp.totalQty,
+            fuelSum: grp.totalSum || null,
             fuelGrade: grp.grade,
             note: fuelNote + '; ' + importMarker,
           };
@@ -427,6 +451,9 @@ function importFuelFromXls(input, mode = 'fuel') {
           reportRows.push(fuelImportReportRow(grp, 'added', null, grp.totalQty, 'Создана новая дневная запись', newRecord.id));
         }
       });
+
+      let backfilledSums = 0;
+      sumBackfill.forEach((sum, rec) => { rec.fuelSum = sum; backfilledSums++; });
 
       const saved = await saveData(data);
       if (!saved) {
@@ -440,6 +467,8 @@ function importFuelFromXls(input, mode = 'fuel') {
         fileName: importTitle + ': ' + file.name,
         transactionsCount: transactions.length,
         sourceLitres: transactions.reduce((s, tx) => s + tx.qty, 0),
+        sourceSum: transactions.reduce((s, tx) => s + (tx.sum || 0), 0),
+        backfilledSums,
         groupedCount: groupedValues.length,
         mergedTransactions,
         added, updated, adjusted, duplicates, skipped,
@@ -468,6 +497,7 @@ function fuelImportReportRow(grp, action, beforeIssued, afterIssued, statusText,
     grade: grp.grade,
     vehicle: vehicleTitle,
     qty: grp.totalQty,
+    sum: grp.totalSum,
     beforeIssued,
     afterIssued,
     sourceRows: grp.transactions.map(tx => tx.sourceRow),
@@ -477,6 +507,8 @@ function fuelImportReportRow(grp, action, beforeIssued, afterIssued, statusText,
     transactions: grp.transactions.map(tx => ({
       sourceRow: tx.sourceRow,
       qty: tx.qty,
+      sum: tx.sum,
+      price: tx.price,
       fuel: tx.fuel,
       importKey: tx.importKey,
       cardNo: tx.cardNo,
@@ -518,6 +550,14 @@ function fuelImportRoundLitres(v) {
   return Math.round((+v || 0) * 100) / 100;
 }
 
+function fuelImportRoundMoney(v) {
+  return Math.round((+v || 0) * 100) / 100;
+}
+
+function fuelImportTxSum(transactions) {
+  return fuelImportRoundMoney((transactions || []).reduce((s, tx) => s + (+tx.sum || 0), 0));
+}
+
 function fuelImportTransactionNote(transactions, fallbackQty) {
   const txs = Array.isArray(transactions) ? transactions : [];
   const fuels = txs
@@ -550,6 +590,8 @@ function fuelImportApplyFuelToVehicle(vehicleId, date, qty, transactions, extraN
   const before = +record.fuelIssued || 0;
   record.fuelIssued = fuelImportRoundLitres(before + (+qty || 0));
   record.fuelGrade = grade;
+  const addSum = fuelImportTxSum(transactions);
+  if (addSum) record.fuelSum = fuelImportRoundMoney((+record.fuelSum || 0) + addSum);
   fuelImportAppendNote(record, fuelImportTransactionNote(transactions, qty));
   fuelImportAppendNote(record, extraNote);
 
@@ -566,6 +608,11 @@ function fuelImportSubtractFromRecord(row) {
   const before = +record.fuelIssued || 0;
   const after = fuelImportRoundLitres(Math.max(0, before - qty));
   record.fuelIssued = after > 0 ? after : null;
+  const subSum = fuelImportTxSum(row.transactions);
+  if (subSum && record.fuelSum) {
+    const left = fuelImportRoundMoney(record.fuelSum - subSum);
+    record.fuelSum = left > 0 ? left : null;
+  }
   fuelImportAppendNote(record, 'перенос заправки из отчёта импорта: -' + fuelImportRoundLitres(qty) + ' л');
   return { record, beforeIssued: before, afterIssued: record.fuelIssued };
 }
@@ -636,6 +683,8 @@ async function assignFuelImportUnmatchedVehicle(unmatchedIndex) {
   const tx = {
     sourceRow: row.sourceRow,
     qty: row.qty,
+    sum: row.sum,
+    price: row.price,
     fuel: row.fuel,
     importKey: row.importKey,
     cardNo: row.cardNo,
@@ -674,7 +723,9 @@ async function assignFuelImportUnmatchedVehicle(unmatchedIndex) {
     vehicleId: targetVehicleId,
     date: row.date,
     vehicle: fuelImportVehicleTitle(target),
+    grade: applied.record.fuelGrade,
     qty: row.qty,
+    sum: row.sum,
     beforeIssued: applied.beforeIssued,
     afterIssued: applied.afterIssued,
     sourceRows: [row.sourceRow],
@@ -728,12 +779,16 @@ function showFuelImportReport(report) {
   report.reportRows.forEach(r => {
     const g = byGrade[r.grade || '—'] || (byGrade[r.grade || '—'] = { loaded: 0, dup: 0, n: 0 });
     if (r.action === 'duplicate') g.dup += +r.qty || 0; else g.loaded += +r.qty || 0;
+    g.sum = (g.sum || 0) + (+r.sum || 0);
+    g.sumQty = (g.sumQty || 0) + (r.sum ? +r.qty || 0 : 0);
     g.n++;
   });
   (report.unmatchedRows || []).forEach(r => {
     const k = parseFuelGrade(r.fuel) || '—';
     const g = byGrade[k] || (byGrade[k] = { loaded: 0, dup: 0, n: 0 });
     g.skip = (g.skip || 0) + (+r.qty || 0);
+    g.sum = (g.sum || 0) + (+r.sum || 0);
+    g.sumQty = (g.sumQty || 0) + (r.sum ? +r.qty || 0 : 0);
   });
   const gradeKeys = Object.keys(byGrade).sort((a, b) =>
     (typeof frFuelSort === 'function' ? frFuelSort(a, b) : a.localeCompare(b, 'ru')));
@@ -741,13 +796,15 @@ function showFuelImportReport(report) {
     <div class="table-wrap" style="margin-bottom:14px">
       <div class="table-toolbar"><div class="table-toolbar-left">По видам топлива</div></div>
       <table class="data-table" style="width:100%">
-        <thead><tr><th>Вид топлива</th><th style="text-align:right">Загружено, л</th><th style="text-align:right">Уже было, л</th><th style="text-align:right">Не загрузилось, л</th><th style="text-align:right">Всего, л</th></tr></thead>
+        <thead><tr><th>Вид топлива</th><th style="text-align:right">Загружено, л</th><th style="text-align:right">Уже было, л</th><th style="text-align:right">Не загрузилось, л</th><th style="text-align:right">Всего, л</th><th style="text-align:right">Сумма, ₽</th><th style="text-align:right">Ср. цена, ₽/л</th></tr></thead>
         <tbody>${gradeKeys.map(k => { const g = byGrade[k]; return `
           <tr><td style="font-weight:700">${esc(k)}</td>
             <td style="text-align:right">${num(g.loaded)}</td>
             <td style="text-align:right">${num(g.dup)}</td>
             <td style="text-align:right;${g.skip ? 'color:var(--red)' : ''}">${num(g.skip || 0)}</td>
-            <td style="text-align:right;font-weight:700">${num(g.loaded + g.dup + (g.skip || 0))}</td></tr>`; }).join('')}</tbody>
+            <td style="text-align:right;font-weight:700">${num(g.loaded + g.dup + (g.skip || 0))}</td>
+            <td style="text-align:right">${g.sum ? num(g.sum) : '—'}</td>
+            <td style="text-align:right">${g.sumQty ? num(g.sum / g.sumQty) : '—'}</td></tr>`; }).join('')}</tbody>
       </table>
     </div>` : '';
 
@@ -765,6 +822,8 @@ function showFuelImportReport(report) {
       <td>${esc(r.vehicle)}</td>
       <td>${esc(r.grade || '—')}</td>
       <td style="text-align:right;font-weight:700">${num(r.qty)}</td>
+      <td style="text-align:right">${r.sum ? num(r.sum) : '—'}</td>
+      <td style="text-align:right">${r.sum && r.qty ? num(r.sum / r.qty) : '—'}</td>
       <td style="text-align:right">${signedNum(r.beforeIssued)}</td>
       <td style="text-align:right">${signedNum(r.afterIssued)}</td>
       <td style="text-align:center">${r.transactionCount}</td>
@@ -787,12 +846,13 @@ function showFuelImportReport(report) {
       </div>
       <div class="table-scroll" style="max-height:220px;overflow:auto">
         <table class="data-table" style="width:100%">
-          <thead><tr><th>Строка Excel</th><th>Дата</th><th style="text-align:right">Литры</th><th>Карта</th><th>ТС</th><th>Комментарий</th><th>Загрузить на ТС</th></tr></thead>
+          <thead><tr><th>Строка Excel</th><th>Дата</th><th style="text-align:right">Литры</th><th style="text-align:right">Сумма, ₽</th><th>Карта</th><th>ТС</th><th>Комментарий</th><th>Загрузить на ТС</th></tr></thead>
           <tbody>${sortedUnmatched.map(r => `
             <tr>
               <td>${esc(r.sourceRow)}</td>
               <td>${esc(r.date)}</td>
               <td style="text-align:right;font-weight:700">${num(r.qty)}</td>
+              <td style="text-align:right">${r.sum ? num(r.sum) : '—'}</td>
               <td>${esc(r.cardNo || '—')}</td>
               <td>${esc(r.vehicleText || '—')}</td>
               <td style="max-width:360px;white-space:normal">${esc(r.comment || '—')}</td>
@@ -822,7 +882,7 @@ function showFuelImportReport(report) {
         <table class="data-table" style="width:100%">
           <thead>
             <tr>
-              <th>Дата</th><th>ТС</th><th>Строка Excel</th><th style="text-align:right">Литры</th><th>Товар</th><th>Карта</th><th>ТС из отчёта</th><th>Комментарий</th>
+              <th>Дата</th><th>ТС</th><th>Строка Excel</th><th style="text-align:right">Литры</th><th style="text-align:right">Сумма, ₽</th><th>Товар</th><th>Карта</th><th>ТС из отчёта</th><th>Комментарий</th>
             </tr>
           </thead>
           <tbody>${mergedRows.map(group => {
@@ -831,6 +891,7 @@ function showFuelImportReport(report) {
                 ${idx === 0 ? `<td rowspan="${group.transactions.length}">${esc(group.date)}</td><td rowspan="${group.transactions.length}">${esc(group.vehicle)}<div style="font-size:11px;color:var(--text3);margin-top:3px">Итого: ${num(group.qty)} л</div></td>` : ''}
                 <td>${esc(tx.sourceRow)}</td>
                 <td style="text-align:right;font-weight:700">${num(tx.qty)}</td>
+                <td style="text-align:right">${tx.sum ? num(tx.sum) : '—'}</td>
                 <td>${esc(tx.fuel || '—')}</td>
                 <td>${esc(tx.cardNo || '—')}</td>
                 <td>${esc(tx.vehicleText || '—')}</td>
@@ -853,7 +914,7 @@ function showFuelImportReport(report) {
       Файл: <b style="color:var(--text1)">${esc(report.fileName || '—')}</b>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">
-      ${card('Транзакций в Excel', String(report.transactionsCount), num(report.sourceLitres) + ' л всего', '#64748b')}
+      ${card('Транзакций в Excel', String(report.transactionsCount), num(report.sourceLitres) + ' л' + (report.sourceSum ? ' · ' + num(report.sourceSum) + ' ₽' : ''), '#64748b')}
       ${card('Дневных записей', String(report.groupedCount), report.mergedTransactions ? 'объединено покупок: ' + report.mergedTransactions : 'без объединений', '#2563eb')}
       ${card('Загружено/изменено', String(changedRows.length), num(loadedLitres) + ' л', '#16a34a')}
       ${card('Уже было', String(report.duplicates), num(report.duplicateLitres) + ' л', '#94a3b8')}
@@ -863,6 +924,7 @@ function showFuelImportReport(report) {
       <span>Добавлено: <b style="color:var(--text1)">${report.added}</b> (${num(report.addedLitres)} л)</span>
       <span>Обновлено: <b style="color:var(--text1)">${report.updated}</b> (${num(report.updatedLitres)} л)</span>
       <span>Уточнено округлений: <b style="color:var(--text1)">${report.adjusted}</b> (${num(report.adjustedLitres)} л)</span>
+      ${report.backfilledSums ? `<span>Проставлены суммы в ранее загруженные записи: <b style="color:var(--text1)">${report.backfilledSums}</b></span>` : ''}
     </div>
     ${gradeHtml}
     <div class="table-wrap">
@@ -873,12 +935,12 @@ function showFuelImportReport(report) {
         <table class="data-table" style="width:100%">
           <thead>
             <tr>
-              <th>Дата</th><th>Статус</th><th>ТС</th><th>Топливо</th><th style="text-align:right">Литры из Excel</th>
+              <th>Дата</th><th>Статус</th><th>ТС</th><th>Топливо</th><th style="text-align:right">Литры из Excel</th><th style="text-align:right">Сумма, ₽</th><th style="text-align:right">Цена, ₽/л</th>
               <th style="text-align:right">Было</th><th style="text-align:right">Стало</th>
               <th style="text-align:center">Покупок</th><th>Строки Excel</th><th>Карта</th><th>Комментарий</th><th>Изменить ТС</th>
             </tr>
           </thead>
-          <tbody>${rowHtml || '<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:16px">Нет обработанных строк</td></tr>'}</tbody>
+          <tbody>${rowHtml || '<tr><td colspan="14" style="text-align:center;color:var(--text3);padding:16px">Нет обработанных строк</td></tr>'}</tbody>
         </table>
       </div>
     </div>

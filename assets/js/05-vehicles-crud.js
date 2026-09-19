@@ -104,7 +104,7 @@ function openAddRecord() {
   document.getElementById('recordModalTitle').textContent = 'Добавить запись';
   const now = new Date();
   document.getElementById('rec_date').value = fmtDate(now.toISOString().split('T')[0]);
-  ['rec_km','rec_km_glonass','rec_odo_start','rec_odo_end','rec_fuel_issued','rec_fuel_used','rec_fuel_actual','rec_fuel_idle','rec_note'].forEach(id => document.getElementById(id).value = '');
+  ['rec_km','rec_km_glonass','rec_odo_start','rec_odo_end','rec_fuel_issued','rec_fuel_sum','rec_fuel_used','rec_fuel_actual','rec_fuel_idle','rec_note'].forEach(id => document.getElementById(id).value = '');
   routeSet([]);
   // Подставляем водителя и одометр начала из последней записи / данных ТС
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
@@ -135,6 +135,7 @@ function openEditRecord(id) {
   document.getElementById('rec_driver').value = r.driver || '';
   document.getElementById('rec_fuel_grade').value = recordFuelGrade(r);
   document.getElementById('rec_fuel_issued').value = r.fuelIssued || '';
+  document.getElementById('rec_fuel_sum').value = r.fuelSum || '';
   document.getElementById('rec_fuel_actual').value = r.fuelActual || '';
   document.getElementById('rec_fuel_idle').value = r.fuelIdle || '';
   routeSet(Array.isArray(r.route) ? r.route : (r.route ? [r.route] : []));

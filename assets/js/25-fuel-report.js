@@ -32,6 +32,8 @@ const FR_METRICS = {
     { id:'act',    label:'По факту, л',    get:v => v.act,                            dec:1 },
     { id:'dev',    label:'Отклонение, л',  get:v => v.norm ? v.act - v.norm : null,   dec:1, sign:true },
     { id:'devpct', label:'Отклонение, %',  get:v => v.norm ? (v.act - v.norm) / v.norm * 100 : null, dec:1, sign:true },
+    { id:'sum',    label:'Сумма, ₽',       get:v => v.sum,                            dec:2 },
+    { id:'price',  label:'Цена за литр',   get:v => v.sumL ? v.sum / v.sumL : null,   dec:2 },
     { id:'km',     label:'Пробег, км',     get:v => v.km,                             dec:0 },
   ],
   gen: [
@@ -78,7 +80,7 @@ function frYears() {
 function frEmptyCell(tab) {
   tab = tab || fuelRepTab;
   if (tab === 'in')  return { l:0, s:0, n:0 };
-  if (tab === 'veh') return { iss:0, norm:0, act:0, km:0, n:0 };
+  if (tab === 'veh') return { iss:0, norm:0, act:0, km:0, sum:0, sumL:0, n:0 };
   return { iss:0, norm:0, act:0, h:0, n:0 };
 }
 
@@ -128,6 +130,8 @@ function frRows(tab, year) {
       const label = [v.plate, v.make].filter(Boolean).join(' — ') || 'ТС без номера';
       const c = row('v:' + v.id + '|' + fuel, label, fuel).cells[+r.date.slice(5, 7) - 1];
       c.iss += issued; c.norm += norm; c.act += act; c.km += km; c.n++;
+      // Цена — только по заправкам с известной суммой, иначе литры без суммы её занизят
+      if (+r.fuelSum) { c.sum += +r.fuelSum; c.sumL += issued; }
     });
   } else {
     const byId = {};
