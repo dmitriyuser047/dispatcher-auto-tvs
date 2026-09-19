@@ -332,7 +332,7 @@ function fcChecklist(month) {
 
   // 7. Госномера уникальны
   const plates = new Map();
-  (data.vehicles || []).forEach(v => { const k = String(v.plate || '').replace(/\s/g, '').toUpperCase(); if (!plates.has(k)) plates.set(k, []); plates.get(k).push(v); });
+  (data.vehicles || []).forEach(v => { const k = plateKey(v.plate); if (!plates.has(k)) plates.set(k, []); plates.get(k).push(v); });
   const dup = [...plates.entries()].filter(([k, l]) => l.length > 1);
   items.push({ title: 'Госномера машин не повторяются', bad: dup.length, soft: true,
     detail: dup.length ? dup.map(([k, l]) => '«' + k + '» — ' + l.length + ' машины (' + l.map(v => v.make).join(', ') + ')').join('; ') : '' });

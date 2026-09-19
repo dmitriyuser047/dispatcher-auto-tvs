@@ -118,9 +118,11 @@ function fgTrips(table) {
 
 // Машина по госномеру в названии объекта: «Mitsubishi L200 Р030 НВ716»
 function fgMatchVehicle(text) {
-  const lat = { A: 'А', B: 'В', E: 'Е', K: 'К', M: 'М', H: 'Н', O: 'О', P: 'Р', C: 'С', T: 'Т', Y: 'У', X: 'Х' };
-  const norm = s => String(s || '').toUpperCase().replace(/[ABEKMHOPCTYX]/g, ch => lat[ch]).replace(/[^А-ЯЁ0-9]/g, '');
+  const norm = plateKey;
   const t = norm(text);
+  // Объект, который уже привязали вручную
+  const alias = (data.vehicles || []).find(v => (v.glonassAliases || []).includes(t));
+  if (alias) return alias;
   // Номер в отчёте бывает без региона («НИВА М800ВХ»): сравниваем по основе номера
   const cores = t.match(/[АВЕКМНОРСТУХ]\d{3}[АВЕКМНОРСТУХ]{2}|\d{4}[АВЕКМНОРСТУХ]{2}/g) || [];
   const vs = (data.vehicles || []).filter(v => norm(v.plate).length >= 5);
@@ -139,12 +141,26 @@ async function importGlonassTrips() {
   const table = res.kind === 'pdf' ? fgTableFromPdf(res.items) : fgTableFromXlsx(res.base64);
   const trips = table && fgTrips(table);
   if (!trips || !trips.length) { alert('В файле не найдена таблица ГЛОНАСС: нужны колонки «Объект», «Начало» или «Дата» и «Пробег, км» или «Пройденный путь, км».'); return; }
+  const { report, unknown } = fgApplyTrips(trips);
+  _fgLast = { fileName: res.fileName, trips, report, unknown };
+  await saveData(data);
+  fgShowImportReport();
+  if (activeSection === 'fuelPurchases') renderFuelPurchases();
+}
 
-  // Выезды → машина × день
+let _fgLast = null;
+
+// Выезды → машина × день → запись журнала
+function fgApplyTrips(trips) {
   const days = new Map(), unknown = new Map();
   trips.forEach(t => {
     const v = fgMatchVehicle(t.object);
-    if (!v) { unknown.set(t.object, (unknown.get(t.object) || 0) + 1); return; }
+    if (!v) {
+      const u = unknown.get(t.object) || { trips: 0, km: 0 };
+      u.trips++; u.km += t.km;
+      unknown.set(t.object, u);
+      return;
+    }
     const k = v.id + '|' + t.date;
     const d = days.get(k) || { v, date: t.date, km: 0, fuel: 0, fuelIdle: 0, engine: 0, idle: 0, odoStart: null, odoEnd: null, trips: 0, sensor: false };
     d.km += t.km; d.trips++;
@@ -181,12 +197,44 @@ async function importGlonassTrips() {
     if (action === 'updated' && before === rec.kmGlonass) action = 'same';
     report.push({ d, action, rec });
   });
+  return { report, unknown };
+}
+
+// Похожая машина для ненайденного объекта: те же цифры номера,
+// буквы отличаются не больше чем одной (опечатка «К424АН» вместо «К424АМ»)
+function fgSuggest(text) {
+  const t = plateKey(text);
+  const cores = t.match(/[А-Я]\d{3}[А-Я]{2}/g) || [];
+  const found = (data.vehicles || []).filter(v => {
+    const p = plateKey(v.plate).match(/^[А-Я]\d{3}[А-Я]{2}/);
+    if (!p) return false;
+    return cores.some(c => c.slice(1, 4) === p[0].slice(1, 4) &&
+      [0, 4, 5].filter(i => c[i] !== p[0][i]).length <= 1);
+  });
+  return found.length === 1 ? found[0] : null;
+}
+
+// Привязать объект ГЛОНАСС к машине: запоминается в карточке машины,
+// выезды этого объекта сразу загружаются
+async function fgAssign(idx) {
+  if (!_fgLast) return;
+  const object = [..._fgLast.unknown.keys()][idx];
+  const vid = document.getElementById('fgAssign_' + idx)?.value;
+  const v = (data.vehicles || []).find(x => x.id === vid);
+  if (!object || !v) { alert('Выберите машину'); return; }
+  const key = plateKey(object);
+  (v.glonassAliases || (v.glonassAliases = [])).includes(key) || v.glonassAliases.push(key);
+  const res = fgApplyTrips(_fgLast.trips.filter(t => t.object === object));
+  _fgLast.report.push(...res.report);
+  _fgLast.unknown.delete(object);
   await saveData(data);
-  fgShowImportReport(res.fileName, trips.length, report, unknown);
+  fgShowImportReport();
   if (activeSection === 'fuelPurchases') renderFuelPurchases();
 }
 
-function fgShowImportReport(fileName, tripCount, report, unknown) {
+function fgShowImportReport() {
+  const { fileName, trips, report, unknown } = _fgLast;
+  const tripCount = trips.length;
   const cnt = a => report.filter(x => x.action === a).length;
   const label = { created: 'создана запись', updated: 'добавлен ГЛОНАСС', same: 'без изменений', closed: 'месяц закрыт', skip: 'не ездила' };
   const color = { created: '#15803d', updated: '#1d4ed8', same: 'var(--text3)', closed: '#b45309', skip: 'var(--text3)' };
@@ -206,8 +254,17 @@ function fgShowImportReport(fileName, tripCount, report, unknown) {
   openGenericModal('Загрузка ГЛОНАСС: ' + fileName, `
     <div style="font-size:13px;margin-bottom:10px">Выездов в отчёте: <b>${tripCount}</b>, машино-дней: <b>${report.length}</b>.
       Добавлен ГЛОНАСС: <b>${cnt('updated')}</b>, создано записей: <b>${cnt('created')}</b>, без изменений: ${cnt('same')}${cnt('closed') ? ', в закрытом месяце: ' + cnt('closed') : ''}.</div>
-    ${unknown.size ? `<div style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px">
-      Не найдены машины по номеру: ${[...unknown.keys()].map(fpEsc).join('; ')}</div>` : ''}
+    ${unknown.size ? `<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px">
+      <div style="color:#92400e;font-weight:600;margin-bottom:6px">Не найдены машины по номеру — выберите машину, привязка запомнится</div>
+      ${[...unknown.entries()].map(([obj, u], i) => {
+        const s = fgSuggest(obj);
+        return `<div style="display:flex;gap:8px;align-items:center;margin:4px 0;flex-wrap:wrap">
+          <span style="min-width:220px"><b>${fpEsc(obj)}</b> <span style="color:var(--text3)">· ${u.trips} стр., ${fpNum(u.km, 0)} км</span></span>
+          <select id="fgAssign_${i}" class="fsel" style="max-width:260px">${fuelImportVehicleOptions(s ? s.id : '', true)}</select>
+          <button class="btn btn-primary btn-sm" onclick="fgAssign(${i})">Привязать и загрузить</button>
+          ${s ? '<span style="color:#92400e;font-size:12px">похоже на ' + fpEsc(s.plate) + ' — проверьте номер в ГЛОНАСС</span>' : ''}
+        </div>`;
+      }).join('')}</div>` : ''}
     <div style="max-height:55vh;overflow:auto"><table class="data-table" style="width:100%">
       <thead><tr><th>Дата</th><th>Машина</th><th>Что сделано</th><th style="text-align:right">ГЛОНАСС, км</th><th style="text-align:right">Журнал, км</th>
         <th style="text-align:right">Датчик, л</th><th style="text-align:right">Датчик, л/100</th><th style="text-align:right">Моточасы</th></tr></thead>
