@@ -307,6 +307,23 @@ function fcChecklist(month) {
   items.push({ title: 'Нет машин с отрицательным остатком на конец месяца', bad: neg.length,
     detail: neg.length ? neg.map(x => x.v.plate + ' ' + fpNum(x.b, 0) + ' л').join(', ') : '', tab: 'negative' });
 
+  // 5а. Пробег по ГЛОНАСС
+  if (typeof fgRows === 'function') {
+    const saveNo = fgNoOffice; fgNoOffice = true;
+    const gl = fgRows(month).filter(r => r.diff >= FG_DIFF_KM && r.pct != null && r.pct >= FG_DIFF_PCT);
+    fgNoOffice = saveNo;
+    items.push({ title: 'Пробег в журнале не больше ГЛОНАСС', bad: gl.length, soft: true,
+      detail: gl.length ? gl.map(r => r.v.plate + ' +' + fpNum(r.diff, 0) + ' км').join(', ') : '', tab: 'glonass' });
+  }
+
+  // 5б. Сверка с 1С внесена
+  if (typeof frcData === 'function') {
+    const recon = (fuelPeriod(month) || {}).recon || {};
+    const missing = [...frcData(month).keys()].filter(k => !recon[k] || recon[k].litres === '' || recon[k].litres == null);
+    items.push({ title: 'Сверка с 1С внесена по всем поставщикам', bad: missing.length, soft: true,
+      detail: missing.length ? 'нет цифр 1С: ' + missing.join(', ') : '', tab: 'recon' });
+  }
+
   // 6. Лимиты карт
   const overs = fcList().filter(c => c.limit).map(c => ({ c, u: fpLive().filter(p => inM(p) && fcNorm(p.cardNo) === c.number).reduce((s, p) => s + p.qty, 0) }))
     .filter(x => x.u > x.c.limit);
@@ -339,7 +356,7 @@ function fcCloseHtml() {
         <div style="font-weight:600">${fpEsc(i.title)}${i.bad ? ` <span style="color:var(--text3);font-weight:400">— ${i.bad}</span>` : ''}</div>
         ${i.detail ? `<div style="font-size:12px;color:var(--text3);margin-top:2px">${fpEsc(i.detail)}</div>` : ''}
       </div>
-      ${i.bad && i.tab ? `<button class="btn btn-ghost btn-sm" onclick="fpView='${i.tab}';fpMonth='${fcCloseMonth}';renderFuelPurchases()">Открыть</button>` : ''}
+      ${i.bad && i.tab ? `<button class="btn btn-ghost btn-sm" onclick="fpView='${i.tab}';fpMonth='${fcCloseMonth}';frcMonth='${fcCloseMonth}';renderFuelPurchases()">Открыть</button>` : ''}
     </div>`).join('');
 
   const hist = (per && per.history || []).slice().reverse().map(h =>

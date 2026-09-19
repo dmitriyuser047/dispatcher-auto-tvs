@@ -276,6 +276,8 @@ async function renderFuelPurchases() {
                 ['negative', 'Отрицательный остаток'],
                 ['checks', 'Проверки'],
                 ['measures', 'Замеры'],
+                ['glonass', 'ГЛОНАСС'],
+                ['recon', 'Сверка с 1С'],
                 ['fcards', 'Карты'],
                 ['close', 'Закрытие месяца'],
                 ['unmatched', 'Без машины' + (unmatched.length ? ' (' + unmatched.length + ')' : '')],
@@ -296,6 +298,8 @@ async function renderFuelPurchases() {
   else if (fpView === 'fcards') body = fcCardsHtml();
   else if (fpView === 'checks') body = fkChecksHtml();
   else if (fpView === 'measures') body = fkMeasuresHtml();
+  else if (fpView === 'glonass') body = fgHtml();
+  else if (fpView === 'recon') body = frcHtml();
   else if (fpView === 'close') body = fcCloseHtml();
   else if (fpView === 'history') body = fpHistoryHtml();
   else body = fpCardsHtml();
@@ -311,7 +315,7 @@ async function renderFuelPurchases() {
           ${[...new Set((data.vehicles || []).map(v => v.org).filter(Boolean))].sort()
             .map(o => `<option${o === fpOrg ? ' selected' : ''}>${fpEsc(o)}</option>`).join('')}
         </select>` : ''}
-        ${!['history', 'compare', 'negative', 'close'].includes(fpView) ? monthSel : ''}
+        ${!['history', 'compare', 'negative', 'close', 'recon'].includes(fpView) ? monthSel : ''}
         ${loadBtns}
       </div>
       <div id="fpBody">${body}</div>

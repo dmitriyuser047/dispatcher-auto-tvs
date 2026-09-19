@@ -452,6 +452,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
 
     // Строки
     let i=0, tKm=0,tGl=0,tIdle=0,tStart=0,tIss=0,tNorm=0,tAct=0,tEnd=0,tEco=0;
+    const measuredPlates=[];
     const tSup=[0,0,0,0,0];
     orgVehicles.forEach(v=>{
       const ft=v.fuel||'diesel';
@@ -462,9 +463,15 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       const idle=per.reduce((s,r)=>s+(r.fuelIdle||0),0);
       const iss=per.reduce((s,r)=>s+(r.fuelIssued||0),0);
       const normL=per.reduce((s,r)=>s+(r.fuelUsed||0),0);
-      const actL=per.reduce((s,r)=>s+(r.fuelActual!=null?r.fuelActual:(r.fuelUsed||0)),0);
-      const sBal=startBalance(v, allRecs);
-      const eBal=sBal + per.reduce((s,r)=>s+((r.fuelIssued||0)-(r.fuelActual!=null?r.fuelActual:(r.fuelUsed||0))-(r.fuelIdle||0)),0);
+      // Остатки — той же функцией, что в карточке машины: она учитывает замеры
+      // остатка в баке. Тогда «по факту» = остаток на начало + получено − остаток
+      // на конец, и если в периоде был замер, списание идёт по нему, а не по норме.
+      const balMap=computeFuelBalances(v.id);
+      const before=dateFrom?allRecs.filter(r=>r.date<dateFrom):[];
+      const sBal=before.length?balMap[before[before.length-1].id]:(v.fuelBalance||0);
+      const eBal=per.length?balMap[per[per.length-1].id]:sBal;
+      const actL=sBal+iss-eBal-idle;
+      if (per.some(r=>r.tankMeasured!=null&&r.tankMeasured!=='')) measuredPlates.push(v.plate);
       const eco=normL-actL;
       const odoNach = per.length? (per[0].odoStart!=null?per[0].odoStart:'') : (v.odometer!=null?v.odometer:'');
       const odoKon  = per.length? (per[per.length-1].odoEnd!=null?per[per.length-1].odoEnd:'') : (v.odometer!=null?v.odometer:'');
@@ -509,6 +516,9 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     put(n,25,'',ST.tot);
     rowH(n,18); n++;
 
+    if (measuredPlates.length) {
+      put(n,0,'Списано по факту с учётом замеров остатка в баке: '+measuredPlates.join(', ')+'.',ST.plain); merge(n,0,n,NC); rowH(n,16); n++;
+    }
     // Подписи
     put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,6); n++;
     put(n,0,'Комиссия:   Главный механик _______________ / ________________ /',ST.plain); merge(n,0,n,NC); rowH(n,16); n++;
