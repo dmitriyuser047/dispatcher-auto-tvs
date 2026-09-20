@@ -18,7 +18,7 @@ let fuelRepShowSkipped = false;  // показывать ли исключённ
 // Приходы, которые не идут в отчёт: это не закупка топлива у поставщика
 // (ГПНЗ и Диэлком — свои перемещения и разовые поступления без накладной,
 // приходы без источника — неизвестного происхождения).
-const FR_IN_SKIP = [/гпнз/i, /диэлком/i];
+const FR_IN_SKIP = [/гпнз/i, /диэлком/i, /перемещ/i];
 function frIncomeSkipped(r) {
   const s = String(r.source || '').trim();
   return !s || FR_IN_SKIP.some(re => re.test(s));
@@ -342,6 +342,7 @@ function renderFuelReport() {
       '<div class="table-wrap"><div class="table-toolbar">' +
         '<div class="table-toolbar-left">' + FR_TABS[fuelRepTab] + ' · ' + M.label + ' за ' + fuelRepYear +
           (fuelRepFuel ? ' · ' + fuelRepFuel : '') + '</div>' +
+        (fuelRepTab === 'in' ? '<button class="btn btn-ghost btn-sm" onclick="exportFuelIncomeSummaryXlsx()" title="Объекты и поставщики: литры, цена за литр и сумма по месяцам в одной таблице">Сводная по объектам и поставщикам</button> ' : '') +
         '<button class="btn btn-ghost btn-sm" onclick="exportFuelReportXlsx()">Выгрузить в Excel</button>' +
       '</div><div class="table-scroll" style="overflow-x:auto">' +
         '<table class="data-table" style="width:100%"><thead>' + head + '</thead><tbody>' + body + '</tbody></table>' +
@@ -472,4 +473,132 @@ function exportFuelReportXlsx() {
   const short = { in:'Приход', veh:'Расход ТС', gen:'Расход ДЭС' }[fuelRepTab];
   XLSX.utils.book_append_sheet(wb, ws, short + ' ' + fuelRepYear);
   XLSX.writeFile(wb, 'Топливо_' + short.replace(/\s+/g, '_') + '_' + fuelRepYear + (fuelRepFuel ? '_' + fuelRepFuel : '') + '.xlsx');
+}
+
+
+// ─── Сводная по приходу: объект → поставщик, по месяцам ───
+// Одна таблица: в каждом месяце литры, цена за литр и сумма. Суммы с НДС,
+// цена — из суммы с НДС; в базе суммы хранятся без НДС.
+function frIncomeSummary(year) {
+  const objs = new Map();
+  (data.tankIncomes || []).forEach(r => {
+    if ((r.date || '').slice(0, 4) !== year || r.linkId || (+r.amount || 0) <= 0) return;
+    if (frIncomeSkipped(r)) return;
+    const t = (data.tanks || []).find(x => x.id === r.tankId);
+    const obj = t ? (t.object || t.name) : '—';
+    const sup = (r.source || '').trim() || 'Поставщик не указан';
+    const o = objs.get(obj) || { obj, sup: new Map() };
+    const s = o.sup.get(sup) || { sup, m: Array.from({ length: 12 }, () => ({ l: 0, s: 0 })) };
+    const c = s.m[+r.date.slice(5, 7) - 1];
+    c.l += +r.amount || 0;
+    c.s += Math.abs(+r.sum || 0) * (1 + FUEL_VAT_RATE / 100);
+    s.sup = sup; o.sup.set(sup, s); objs.set(obj, o);
+  });
+  const months = [];
+  for (let m = 0; m < 12; m++) {
+    let has = false;
+    objs.forEach(o => o.sup.forEach(s => { if (s.m[m].l) has = true; }));
+    if (has) months.push(m);
+  }
+  return { objs: [...objs.values()].sort((a, b) => a.obj.localeCompare(b.obj, 'ru')), months };
+}
+
+function exportFuelIncomeSummaryXlsx() {
+  const { objs, months } = frIncomeSummary(fuelRepYear);
+  if (!objs.length) { alert('Нет приходов за ' + fuelRepYear); return; }
+
+  const P = { navy: '1B3A6B', navyLight: 'D6E4F7', white: 'FFFFFF', gray1: 'F8FAFC', gray3: 'E2E8F0', text: '1E293B' };
+  const bd = (st, rgb) => ({ style: st, color: { rgb } });
+  const bAll = (st, rgb) => { const b = bd(st, rgb); return { top: b, bottom: b, left: b, right: b }; };
+  const cs = (font, fill, align, border) => ({ font: font || {},
+    fill: fill ? { patternType: 'solid', fgColor: { rgb: fill } } : { patternType: 'none' },
+    alignment: align || { vertical: 'center' }, border: border || {} });
+  const S = {
+    title: cs({ bold: true, sz: 14, color: { rgb: P.white } }, '0F1117', { horizontal: 'center', vertical: 'center' }, bAll('medium', '0F1117')),
+    head:  cs({ bold: true, sz: 10, color: { rgb: P.white } }, P.navy, { horizontal: 'center', vertical: 'center', wrapText: true }, bAll('thin', P.navy)),
+    headL: cs({ bold: true, sz: 10, color: { rgb: P.white } }, P.navy, { horizontal: 'left', vertical: 'center', indent: 1 }, bAll('thin', P.navy)),
+    objL:  cs({ bold: true, sz: 10, color: { rgb: P.navy } }, P.navyLight, { horizontal: 'left', vertical: 'center', indent: 1 }, bAll('thin', P.navy)),
+    objN:  cs({ bold: true, sz: 10, color: { rgb: P.navy } }, P.navyLight, { horizontal: 'right', vertical: 'center' }, bAll('thin', P.navy)),
+    totL:  cs({ bold: true, sz: 11, color: { rgb: P.text } }, P.gray3, { horizontal: 'left', vertical: 'center', indent: 1 }, bAll('medium', P.navy)),
+    totN:  cs({ bold: true, sz: 11, color: { rgb: P.text } }, P.gray3, { horizontal: 'right', vertical: 'center' }, bAll('medium', P.navy)),
+  };
+  const L = (bg, indent) => cs({ sz: 10, color: { rgb: P.text } }, bg, { horizontal: 'left', vertical: 'center', indent: indent || 1, wrapText: true }, bAll('thin', P.gray3));
+  const R = (bg) => cs({ sz: 10, color: { rgb: P.text } }, bg, { horizontal: 'right', vertical: 'center' }, bAll('thin', P.gray3));
+
+  const NC = 1 + (months.length + 1) * 3;
+  const ws = { '!merges': [], '!rows': [] };
+  let row = 0;
+  const put = (r, c, v, s, z) => {
+    const cell = { v: v == null ? '' : v, t: typeof v === 'number' ? 'n' : 's', s };
+    if (z && typeof v === 'number') cell.z = z;
+    ws[XLSX.utils.encode_cell({ r, c })] = cell;
+    ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r, c: NC } });
+  };
+  const fill = (r, s) => { for (let c = 0; c <= NC; c++) if (!ws[XLSX.utils.encode_cell({ r, c })]) put(r, c, '', s); };
+
+  put(row, 0, 'ПРИХОД ТОПЛИВА ПО ОБЪЕКТАМ И ПОСТАВЩИКАМ — ' + fuelRepYear + ' Г. (суммы с НДС ' + FUEL_VAT_RATE + '%)', S.title);
+  ws['!merges'].push({ s: { r: row, c: 0 }, e: { r: row, c: NC } });
+  fill(row, S.title); ws['!rows'][row] = { hpt: 30 }; row += 2;
+
+  // шапка: месяц над тройкой колонок
+  const hRow = row, sRow = row + 1;
+  put(hRow, 0, 'Объект', S.headL); put(hRow, 1, 'Поставщик', S.headL);
+  ws['!merges'].push({ s: { r: hRow, c: 0 }, e: { r: sRow, c: 0 } });
+  ws['!merges'].push({ s: { r: hRow, c: 1 }, e: { r: sRow, c: 1 } });
+  const blocks = months.map(m => FR_MONTHS[m]).concat(['Итого']);
+  blocks.forEach((name, i) => {
+    const c0 = 2 + i * 3;
+    put(hRow, c0, name, S.head); put(hRow, c0 + 1, '', S.head); put(hRow, c0 + 2, '', S.head);
+    ws['!merges'].push({ s: { r: hRow, c: c0 }, e: { r: hRow, c: c0 + 2 } });
+    ['Литры', 'Цена, ₽/л', 'Сумма, ₽'].forEach((t, k) => put(sRow, c0 + k, t, S.head));
+  });
+  ws['!rows'][hRow] = { hpt: 20 }; ws['!rows'][sRow] = { hpt: 20 };
+  row += 2;
+
+  const r2 = x => Math.round((+x || 0) * 100) / 100;
+  const writeCells = (cells, tot, sL, sN) => {
+    cells.concat([tot]).forEach((c, i) => {
+      const c0 = 2 + i * 3;
+      put(row, c0, c.l ? r2(c.l) : '—', sN, '#,##0.0');
+      put(row, c0 + 1, c.l && c.s ? r2(c.s / c.l) : '—', sN, '#,##0.00');
+      put(row, c0 + 2, c.s ? r2(c.s) : '—', sN, '#,##0.00');
+    });
+  };
+  const sumCells = list => {
+    const out = months.map(m => list.reduce((a, s) => ({ l: a.l + s.m[m].l, s: a.s + s.m[m].s }), { l: 0, s: 0 }));
+    const tot = out.reduce((a, c) => ({ l: a.l + c.l, s: a.s + c.s }), { l: 0, s: 0 });
+    return { cells: out, tot };
+  };
+
+  const all = [];
+  objs.forEach((o, oi) => {
+    const sups = [...o.sup.values()].sort((a, b) => a.sup.localeCompare(b.sup, 'ru'));
+    sups.forEach((s, i) => {
+      all.push(s);
+      const bg = i % 2 ? P.gray1 : P.white;
+      put(row, 0, i === 0 ? o.obj : '', L(bg));
+      put(row, 1, s.sup, L(bg, 2));
+      const cells = months.map(m => s.m[m]);
+      const tot = cells.reduce((a, c) => ({ l: a.l + c.l, s: a.s + c.s }), { l: 0, s: 0 });
+      writeCells(cells, tot, L(bg), R(bg));
+      row++;
+    });
+    if (sups.length > 1) {
+      const { cells, tot } = sumCells(sups);
+      put(row, 0, 'Итого ' + o.obj, S.objL); put(row, 1, '', S.objL);
+      writeCells(cells, tot, S.objL, S.objN);
+      row++;
+    }
+    if (sups.length) ws['!merges'].push({ s: { r: row - sups.length - (sups.length > 1 ? 1 : 0), c: 0 }, e: { r: row - 1 - (sups.length > 1 ? 1 : 0), c: 0 } });
+  });
+  const { cells, tot } = sumCells(all);
+  put(row, 0, 'ВСЕГО', S.totL); put(row, 1, '', S.totL);
+  writeCells(cells, tot, S.totL, S.totN);
+  ws['!rows'][row] = { hpt: 22 };
+
+  ws['!cols'] = [{ wch: 26 }, { wch: 28 }].concat(blocks.flatMap(() => [{ wch: 11 }, { wch: 10 }, { wch: 14 }]));
+  ws['!freeze'] = { xSplit: 2, ySplit: sRow + 1 };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Приход ' + fuelRepYear);
+  XLSX.writeFile(wb, 'Приход_топлива_объекты_поставщики_' + fuelRepYear + '.xlsx');
 }
