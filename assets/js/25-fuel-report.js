@@ -13,6 +13,16 @@ let fuelRepMetric = 'issued';    // выбранный показатель
 let fuelRepFuel   = '';          // фильтр по виду топлива, '' — все
 let fuelRepView   = 'detail';    // 'detail' — по технике, 'fuel' — только итоги по видам топлива
 let fuelRepDim    = 'object';    // приход: 'object' — по объектам, 'supplier' — по поставщикам
+let fuelRepShowSkipped = false;  // показывать ли исключённые приходы
+
+// Приходы, которые не идут в отчёт: это не закупка топлива у поставщика
+// (ГПНЗ и Диэлком — свои перемещения и разовые поступления без накладной,
+// приходы без источника — неизвестного происхождения).
+const FR_IN_SKIP = [/гпнз/i, /диэлком/i];
+function frIncomeSkipped(r) {
+  const s = String(r.source || '').trim();
+  return !s || FR_IN_SKIP.some(re => re.test(s));
+}
 
 const FR_MONTHS = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
 const FR_TABS = { in: 'Приход', veh: 'Расход ТС', gen: 'Расход ДЭС' };
@@ -50,6 +60,10 @@ const FR_METRICS = {
     { id:'hours',  label:'Моточасы',       get:v => v.h,                              dec:1 },
   ],
 };
+
+function fpNumSafe(v) {
+  return (+v || 0).toLocaleString('ru', { maximumFractionDigits: 1 });
+}
 
 function frMetric() {
   const list = FR_METRICS[fuelRepTab];
@@ -109,6 +123,7 @@ function frRows(tab, year) {
     // объём считался бы дважды — при покупке и при перевозке.
     (data.tankIncomes || []).forEach(r => {
       if ((r.date || '').slice(0, 4) !== year || r.linkId || (+r.amount || 0) <= 0) return;
+      if (!fuelRepShowSkipped && frIncomeSkipped(r)) return;
       const t = (data.tanks || []).find(x => x.id === r.tankId);
       // Разрез: объект (куда привезли) или поставщик (от кого) — поле «Источник»
       const label = fuelRepDim === 'supplier'
@@ -226,9 +241,17 @@ function renderFuelReport() {
     ? btn('mtab', !fuelRepFuel, "fuelRepFuel='';renderFuelReport()", 'Все виды') +
       B.fuels.map(f => btn('mtab', fuelRepFuel === f, "fuelRepFuel='" + f + "';renderFuelReport()", f)).join('')
     : '';
+  const skipped = fuelRepTab === 'in'
+    ? (data.tankIncomes || []).filter(r => (r.date || '').slice(0, 4) === fuelRepYear && !r.linkId && (+r.amount || 0) > 0 && frIncomeSkipped(r))
+    : [];
+  const skippedL = skipped.reduce((s, r) => s + (+r.amount || 0), 0);
   const dimBtns = fuelRepTab === 'in'
     ? btn('mtab', fuelRepDim === 'object', "fuelRepDim='object';renderFuelReport()", 'По объектам') +
-      btn('mtab', fuelRepDim === 'supplier', "fuelRepDim='supplier';renderFuelReport()", 'По поставщикам')
+      btn('mtab', fuelRepDim === 'supplier', "fuelRepDim='supplier';renderFuelReport()", 'По поставщикам') +
+      (skipped.length || fuelRepShowSkipped
+        ? btn('mtab', fuelRepShowSkipped, "fuelRepShowSkipped=" + !fuelRepShowSkipped + ";renderFuelReport()",
+            fuelRepShowSkipped ? 'Скрыть ГПНЗ, Диэлком и без поставщика' : 'Показать ГПНЗ, Диэлком и без поставщика')
+        : '')
     : '';
   const viewBtns = btn('mtab', fuelRepView === 'detail', "fuelRepView='detail';renderFuelReport()", 'По технике') +
                    btn('mtab', fuelRepView === 'fuel', "fuelRepView='fuel';renderFuelReport()", 'Итоги по видам топлива');
@@ -295,7 +318,11 @@ function renderFuelReport() {
   const hint = {
     in:  'Суммы в базе хранятся без НДС — как в карточке счёта 10.03.1, где налог идёт отдельно на счёте 19; «с НДС» — плюс ' + FUEL_VAT_RATE + '%. ' +
          'Цена за литр — от суммы без НДС. Поставщик берётся из поля «Источник» прихода в ёмкость. ' +
-         'Перемещения между объектами в приход не входят: это не закупка.',
+         'Перемещения между объектами в приход не входят: это не закупка.' +
+         (skipped.length && !fuelRepShowSkipped
+           ? ' Не включены приходы ГПНЗ, Диэлком и без указанного поставщика: ' + skipped.length + ' шт. на ' +
+             fpNumSafe(skippedL) + ' л — их видно кнопкой выше.'
+           : ''),
     veh: '«Выдано» — заправлено в машину. «По норме» — расход по норме за пробег. «По факту» — реально израсходовано. ' +
          'Вид топлива — по марке из карточки машины. Перерасход красным, экономия зелёной.',
     gen: '«Выдано» — отпущено в ДЭС. «По норме» — расход при фактической нагрузке, умноженный на моточасы. ' +
