@@ -118,6 +118,7 @@ async function loadData() {
   if (!d.fuelImports)   d.fuelImports   = [];
   if (!d.fuelCards)     d.fuelCards     = [];
   if (!d.fuelPeriods)   d.fuelPeriods   = [];
+  if (!d.appMeta)       d.appMeta       = [];
   return d;
 }
 // Резервная копия в localStorage. Основное хранилище — файл data.json через

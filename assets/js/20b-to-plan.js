@@ -222,3 +222,39 @@ function toExportRegs() {
   XLSX.utils.book_append_sheet(wb, ws, 'Регламенты ТО');
   XLSX.writeFile(wb, 'Регламенты_и_график_ТО_' + new Date().toISOString().slice(0, 10) + '.xlsx');
 }
+
+
+// ─── Разовая настройка после обновления ───────────────────
+// Проставляет регламент машинам, у которых он не заполнен, и один раз строит
+// график ТО, если плановых записей ещё нет. Отметка хранится в базе, поэтому
+// на всех компьютерах это делается один раз, а не при каждом запуске.
+
+async function toAutoSetupOnce() {
+  if (!data.vehicles || !data.vehicles.length) return;
+  const meta = (data.appMeta && data.appMeta[0]) || { id: 'meta' };
+  if (!data.appMeta || !data.appMeta.length) (data.appMeta = data.appMeta || []).push(meta);
+
+  let changed = 0;
+  data.vehicles.forEach(v => {
+    if (!v.toIntervalKm) {
+      const reg = toRegFor(v);
+      v.toIntervalKm = reg.km;
+      v.toIntervalMonths = reg.months;
+      changed++;
+    }
+  });
+
+  const hasPlan = (data.vehicleTo || []).some(r => r.planned);
+  const needPlan = !meta.toPlanInit && !hasPlan;
+  if (!changed && !needPlan) return;
+
+  if (needPlan) {
+    await toRebuildPlan(12);          // внутри сохраняет данные
+    meta.toPlanInit = new Date().toISOString();
+    await saveData(data);
+    showToast && showToast('Построен график ТО по регламентам');
+  } else {
+    await saveData(data);
+    if (changed) showToast && showToast('Регламент ТО проставлен: ' + changed + ' машин');
+  }
+}

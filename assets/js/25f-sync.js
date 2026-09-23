@@ -16,14 +16,14 @@ const SYNC_SECTIONS = [
   'vehicles', 'records', 'generators', 'genRecords', 'toRecords',
   'tanks', 'tankIncomes', 'vehicleTo', 'repairs',
   'reestrRows', 'savedReestrs', 'payments', 'budget', 'contragents',
-  'fuelPurchases', 'fuelImports', 'fuelCards', 'fuelPeriods',
+  'fuelPurchases', 'fuelImports', 'fuelCards', 'fuelPeriods', 'appMeta',
 ];
 const SYNC_NAMES = {
   vehicles: 'машины', records: 'журнал пробега', generators: 'ДЭС', genRecords: 'наработка ДЭС',
   toRecords: 'график ТО', tanks: 'ёмкости', tankIncomes: 'приход в ёмкости', vehicleTo: 'ТО машин',
   repairs: 'ремонты', reestrRows: 'реестр', savedReestrs: 'реестры', payments: 'платежи', budget: 'бюджет',
   contragents: 'контрагенты', fuelPurchases: 'заправки', fuelImports: 'история загрузок',
-  fuelCards: 'топливные карты', fuelPeriods: 'закрытие месяцев',
+  fuelCards: 'топливные карты', fuelPeriods: 'закрытие месяцев', appMeta: 'настройки',
 };
 const SYNC_POLL_MS = 20000;
 

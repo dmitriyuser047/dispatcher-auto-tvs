@@ -12,6 +12,8 @@
   if (typeof syncStartPolling === 'function') syncStartPolling();
   // «Что нового» после обновления — чуть позже, чтобы не мешать отрисовке
   if (typeof clCheckOnStart === 'function') setTimeout(clCheckOnStart, 1500);
+  // Регламенты ТО и первичный график — один раз на базу
+  if (typeof toAutoSetupOnce === 'function') setTimeout(() => toAutoSetupOnce().catch(e => console.warn('[ТО] ' + e.message)), 2500);
   if (window.electronAPI && window.electronAPI.getSettings) {
     _appSettings = await window.electronAPI.getSettings();
     updateSidebarDataPath();
