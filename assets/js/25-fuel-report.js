@@ -15,13 +15,14 @@ let fuelRepView   = 'detail';    // 'detail' — по технике, 'fuel' —
 let fuelRepDim    = 'object';    // приход: 'object' — по объектам, 'supplier' — по поставщикам
 let fuelRepShowSkipped = false;  // показывать ли исключённые приходы
 
-// Приходы, которые не идут в отчёт: это не закупка топлива у поставщика
-// (ГПНЗ и Диэлком — свои перемещения и разовые поступления без накладной,
-// приходы без источника — неизвестного происхождения).
+// Приходы, которые не идут в отчёт: это не закупка топлива у поставщика.
+// Нет суммы — нет УПД, значит и закупки не было (перемещение, внутренняя
+// передача, неразобранная запись). Так же с перемещениями, ГПНЗ и Диэлкомом
+// и приходами без указанного источника.
 const FR_IN_SKIP = [/гпнз/i, /диэлком/i, /перемещ/i];
 function frIncomeSkipped(r) {
   const s = String(r.source || '').trim();
-  return !s || FR_IN_SKIP.some(re => re.test(s));
+  return !s || !(+r.sum) || FR_IN_SKIP.some(re => re.test(s));
 }
 
 const FR_MONTHS = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
@@ -250,7 +251,7 @@ function renderFuelReport() {
       btn('mtab', fuelRepDim === 'supplier', "fuelRepDim='supplier';renderFuelReport()", 'По поставщикам') +
       (skipped.length || fuelRepShowSkipped
         ? btn('mtab', fuelRepShowSkipped, "fuelRepShowSkipped=" + !fuelRepShowSkipped + ";renderFuelReport()",
-            fuelRepShowSkipped ? 'Скрыть ГПНЗ, Диэлком и без поставщика' : 'Показать ГПНЗ, Диэлком и без поставщика')
+            fuelRepShowSkipped ? 'Скрыть приходы без УПД' : 'Показать приходы без УПД (' + skipped.length + ')')
         : '')
     : '';
   const viewBtns = btn('mtab', fuelRepView === 'detail', "fuelRepView='detail';renderFuelReport()", 'По технике') +
@@ -320,8 +321,8 @@ function renderFuelReport() {
          'Цена за литр — от суммы без НДС. Поставщик берётся из поля «Источник» прихода в ёмкость. ' +
          'Перемещения между объектами в приход не входят: это не закупка.' +
          (skipped.length && !fuelRepShowSkipped
-           ? ' Не включены приходы ГПНЗ, Диэлком и без указанного поставщика: ' + skipped.length + ' шт. на ' +
-             fpNumSafe(skippedL) + ' л — их видно кнопкой выше.'
+           ? ' Не включены приходы без УПД (без суммы), перемещения, ГПНЗ, Диэлком и приходы без поставщика: ' +
+             skipped.length + ' шт. на ' + fpNumSafe(skippedL) + ' л — их видно кнопкой выше.'
            : ''),
     veh: '«Выдано» — заправлено в машину. «По норме» — расход по норме за пробег. «По факту» — реально израсходовано. ' +
          'Вид топлива — по марке из карточки машины. Перерасход красным, экономия зелёной.',

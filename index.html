@@ -397,6 +397,17 @@
       </div>
       <div class="form-row">
         <div class="form-group">
+          <label>Интервал ТО, км</label>
+          <input type="number" id="vm_to_km" placeholder="по регламенту марки" min="0" step="500"
+            title="Если не заполнено — берётся заводской регламент по марке">
+        </div>
+        <div class="form-group">
+          <label>Интервал ТО, мес</label>
+          <input type="number" id="vm_to_months" placeholder="12" min="0" step="1">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
           <label>Ответственный</label>
           <input type="text" id="vm_responsible" placeholder="Иванов И.И.">
         </div>
@@ -1684,6 +1695,7 @@
 <script src="assets/js/22-contragents.js"></script>
 <script src="assets/js/23-reports.js"></script>
 <script src="assets/js/24-print-forms.js"></script>
+<script src="assets/js/20b-to-plan.js"></script>
 <script src="assets/js/25-fuel-report.js"></script>
 <script src="assets/js/25b-fuel-purchases.js"></script>
 <script src="assets/js/25c-fuel-control.js"></script>

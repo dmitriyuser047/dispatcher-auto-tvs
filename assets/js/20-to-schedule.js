@@ -87,8 +87,8 @@ function renderToScheduleSection() {
       const icon = r.objType === 'vehicle'
         ? `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><path d="M1 17l2-6h18l2 6"/><circle cx="7" cy="18.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="17" cy="18.5" r="1.5" fill="currentColor" stroke="none"/></svg>`
         : `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M12 12v4m-2-2h4"/></svg>`;
-      rows += `<tr>
-        <td class="td-day">${fmtDate(r.date)}</td>
+      rows += `<tr${r.planned ? ' style="background:var(--bg2)"' : ''}>
+        <td class="td-day">${fmtDate(r.date)}${r.planned ? '<div style="font-size:10px;color:var(--text3)">план</div>' : ''}</td>
         <td style="padding:10px 14px;font-size:13px">${icon}${r.objName}</td>
         <td style="padding:10px 14px;font-size:13px;font-weight:600">${r.type || '—'}</td>
         <td class="td-num">${r.meter != null ? r.meter.toLocaleString('ru',{maximumFractionDigits:1})+' '+r.meterUnit : '—'}</td>
@@ -122,6 +122,14 @@ function renderToScheduleSection() {
         <button class="btn btn-ghost btn-sm ${tssFilter==='vehicle'?'active':''}" onclick="tssSetFilter('vehicle')" style="${tssFilter==='vehicle'?'background:var(--accent);color:#fff':''}">Транспорт</button>
         <button class="btn btn-ghost btn-sm ${tssFilter==='generator'?'active':''}" onclick="tssSetFilter('generator')" style="${tssFilter==='generator'?'background:var(--accent);color:#fff':''}">ДЭС</button>
         <div style="flex:1"></div>
+        <button class="btn btn-ghost btn-sm" onclick="toShowRegs()" title="Регламенты ТО по маркам и ближайшие сроки">
+          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+          Регламенты
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="toRebuildPlanClick()" title="Построить плановые ТО на год вперёд по регламентам и пробегу">
+          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          План по регламенту
+        </button>
         <button class="btn btn-ghost btn-sm" onclick="tssExportExcel()">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Excel

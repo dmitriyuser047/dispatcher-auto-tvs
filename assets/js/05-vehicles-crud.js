@@ -15,6 +15,8 @@ function openAddVehicle() {
   document.getElementById('vm_odometer').value = '';
   document.getElementById('vm_fuel_balance').value = '';
   document.getElementById('vm_tank_volume').value = '';
+  document.getElementById('vm_to_km').value = '';
+  document.getElementById('vm_to_months').value = '';
   openModal('vehicleModal');
 }
 
@@ -37,6 +39,8 @@ function openEditVehicle(id) {
   document.getElementById('vm_odometer').value = v.odometer || '';
   document.getElementById('vm_fuel_balance').value = v.fuelBalance ?? '';
   document.getElementById('vm_tank_volume').value = v.tankVolume || '';
+  document.getElementById('vm_to_km').value = v.toIntervalKm || '';
+  document.getElementById('vm_to_months').value = v.toIntervalMonths || '';
   document.getElementById('vm_responsible').value = v.responsible || '';
   document.getElementById('vm_fuelcard').value = v.fuelcard || '';
   document.getElementById('vm_status').value = v.status || '';
@@ -68,6 +72,8 @@ function saveVehicle() {
     odometer: parseFloat(document.getElementById('vm_odometer').value) || null,
     fuelBalance: parseFloat(document.getElementById('vm_fuel_balance').value) || 0,
     tankVolume: parseFloat(document.getElementById('vm_tank_volume').value) || null,
+    toIntervalKm: parseFloat(document.getElementById('vm_to_km').value) || null,
+    toIntervalMonths: parseFloat(document.getElementById('vm_to_months').value) || null,
     responsible: document.getElementById('vm_responsible').value.trim(),
     fuelcard: document.getElementById('vm_fuelcard').value.trim(),
     status: document.getElementById('vm_status').value.trim(),
