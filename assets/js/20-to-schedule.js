@@ -294,32 +294,85 @@ function tssDeleteDirect(id, source) {
   if (activeSection === 'toSchedule') renderToScheduleSection();
 }
 
+// Выгрузка графика ТО: все месяцы сразу — списком, шахматкой по месяцам
+// и итогами. Фильтр «Транспорт / ДЭС» с экрана учитывается.
 function tssExportExcel() {
   if (typeof XLSX === 'undefined') { alert('Библиотека XLSX не загружена'); return; }
-  const all = tssGetAllRecords();
-  const monthRecs = all.filter(r => {
-    const d = new Date(r.date);
-    return d.getFullYear() === tssYear && (d.getMonth()+1) === tssMonth;
-  }).sort((a, b) => cmpDateAsc(a.date, b.date));
+  const all = tssGetAllRecords().slice().sort((a, b) => cmpDateAsc(a.date, b.date) || (a.objName || '').localeCompare(b.objName || '', 'ru'));
+  if (!all.length) { alert('Нет записей ТО'); return; }
 
-  const header = ['Дата', 'Тип', 'Объект', 'Вид ТО', 'Пробег/Моточасы', 'Ед.', 'Стоимость, руб.', 'Исполнитель', 'Примечание'];
-  const rows = monthRecs.map(r => [
-    fmtDate(r.date),
-    r.objType === 'vehicle' ? 'ТС' : 'ДЭС',
-    r.objName,
-    r.type || '',
-    r.meter != null ? r.meter : '',
-    r.meterUnit,
-    r.cost || '',
-    r.performer || '',
-    r.note || '',
+  const P = { navy: '1B3A6B', navyLight: 'D6E4F7', white: 'FFFFFF', gray1: 'F8FAFC', gray3: 'E2E8F0', text: '1E293B', amber: 'B45309', green: '15803D' };
+  const b = { style: 'thin', color: { rgb: P.gray3 } }, border = { top: b, bottom: b, left: b, right: b };
+  const st = o => Object.assign({ font: { sz: 10, color: { rgb: P.text } }, border, alignment: { vertical: 'center', wrapText: true } }, o);
+  const head = st({ font: { bold: true, sz: 10, color: { rgb: P.white } }, fill: { patternType: 'solid', fgColor: { rgb: P.navy } },
+                    alignment: { horizontal: 'center', vertical: 'center', wrapText: true } });
+  const zebra = i => i % 2 ? { fill: { patternType: 'solid', fgColor: { rgb: P.gray1 } } } : {};
+  const numS = i => st(Object.assign({ alignment: { horizontal: 'right', vertical: 'center' } }, zebra(i)));
+
+  const monthKey = d => (d || '').slice(0, 7);
+  const monthName = m => { const [y, mo] = m.split('-'); return MONTHS_RU[+mo - 1] + ' ' + y; };
+  const months = [...new Set(all.map(r => monthKey(r.date)))].sort();
+
+  const sheet = (title, cols, widths, rowsData, styler) => {
+    const ws = {};
+    const put = (r, c, v, sty, z) => { const cell = { v: v == null ? '' : v, t: typeof v === 'number' ? 'n' : 's', s: sty }; if (z && typeof v === 'number') cell.z = z; ws[XLSX.utils.encode_cell({ r, c })] = cell; };
+    put(0, 0, title, { font: { bold: true, sz: 13, color: { rgb: P.text } } });
+    cols.forEach((c, i) => put(2, i, c, head));
+    rowsData.forEach((row, i) => row.forEach((v, c) => put(i + 3, c, v, styler(row, c, i))));
+    ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowsData.length + 2, c: cols.length - 1 } });
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: cols.length - 1 } }];
+    ws['!cols'] = widths.map(wch => ({ wch }));
+    ws['!rows'] = [{ hpt: 22 }, {}, { hpt: 28 }];
+    ws['!freeze'] = { xSplit: 0, ySplit: 3 };
+    return ws;
+  };
+
+  // Лист 1 — все записи по всем месяцам
+  const rows1 = all.map(r => [
+    monthName(monthKey(r.date)), fmtDate(r.date), r.objType === 'vehicle' ? 'ТС' : 'ДЭС', r.objName,
+    r.planned ? 'план' : 'выполнено', r.type || '', r.meter != null ? +r.meter : '', r.meterUnit,
+    r.cost != null ? +r.cost : '', r.performer || '', r.note || '',
   ]);
+  const ws1 = sheet('График ТО — все месяцы (' + monthName(months[0]) + ' — ' + monthName(months[months.length - 1]) + ')',
+    ['Месяц', 'Дата', 'Тип', 'Объект', 'Состояние', 'Вид ТО', 'Пробег / моточасы', 'Ед.', 'Стоимость, ₽', 'Исполнитель', 'Примечание'],
+    [14, 12, 6, 30, 12, 24, 14, 6, 13, 22, 46], rows1, (row, c, i) => {
+      if (c === 4) return st(Object.assign({ font: { sz: 10, bold: true, color: { rgb: row[4] === 'план' ? P.amber : P.green } } }, zebra(i)));
+      if (c === 6 || c === 8) return numS(i);
+      return st(zebra(i));
+    });
 
-  const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-  ws['!cols'] = [{wch:12},{wch:6},{wch:30},{wch:18},{wch:14},{wch:6},{wch:14},{wch:24},{wch:30}];
+  // Лист 2 — шахматка: объект × месяцы
+  const objs = [...new Set(all.map(r => r.objName))].sort((a, b) => a.localeCompare(b, 'ru'));
+  const cell = (obj, m) => {
+    const list = all.filter(r => r.objName === obj && monthKey(r.date) === m);
+    if (!list.length) return '';
+    return list.map(r => fmtDate(r.date).slice(0, 5) + (r.meter != null ? ' · ' + Math.round(r.meter).toLocaleString('ru') + ' ' + r.meterUnit : '') + (r.planned ? '' : ' ✓')).join('\n');
+  };
+  const rows2 = objs.map(o => [o].concat(months.map(m => cell(o, m))));
+  const ws2 = sheet('ТО по месяцам: план и выполненные («✓» — выполнено)',
+    ['Объект'].concat(months.map(monthName)), [32].concat(months.map(() => 16)), rows2,
+    (row, c, i) => st(Object.assign({ alignment: { horizontal: c ? 'center' : 'left', vertical: 'center', wrapText: true } }, zebra(i))));
+
+  // Лист 3 — итоги по месяцам
+  const rows3 = months.map(m => {
+    const list = all.filter(r => monthKey(r.date) === m);
+    return [monthName(m), list.length, list.filter(r => r.objType === 'vehicle').length, list.filter(r => r.objType === 'generator').length,
+            list.filter(r => r.planned).length, list.filter(r => !r.planned).length, list.reduce((s2, r) => s2 + (+r.cost || 0), 0)];
+  });
+  rows3.push(['ИТОГО', all.length, all.filter(r => r.objType === 'vehicle').length, all.filter(r => r.objType === 'generator').length,
+              all.filter(r => r.planned).length, all.filter(r => !r.planned).length, all.reduce((s2, r) => s2 + (+r.cost || 0), 0)]);
+  const ws3 = sheet('Итоги по месяцам', ['Месяц', 'Всего ТО', 'ТС', 'ДЭС', 'План', 'Выполнено', 'Стоимость, ₽'],
+    [16, 11, 8, 8, 9, 12, 15], rows3, (row, c, i) => {
+      const last = i === rows3.length - 1;
+      const base = last ? { font: { bold: true, sz: 10 }, fill: { patternType: 'solid', fgColor: { rgb: P.navyLight } } } : zebra(i);
+      return st(Object.assign({ alignment: { horizontal: c ? 'right' : 'left', vertical: 'center' } }, base));
+    });
+
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'График ТО');
-  XLSX.writeFile(wb, `График_ТО_${MONTHS_RU[tssMonth-1]}_${tssYear}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, ws1, 'Все месяцы');
+  XLSX.utils.book_append_sheet(wb, ws2, 'По месяцам');
+  XLSX.utils.book_append_sheet(wb, ws3, 'Итоги');
+  XLSX.writeFile(wb, 'График_ТО_' + months[0] + '_—_' + months[months.length - 1] + '.xlsx');
 }
 
 function renderReestrSection() {
