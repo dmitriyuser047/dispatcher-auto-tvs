@@ -1234,7 +1234,8 @@ function fpMonthlyHtml() {
     const km = recs.reduce((s, r) => s + (r.km || 0), 0);
     const normL = v.norm ? km * v.norm / 100 : 0;
     const issFromRecs = recs.reduce((s, r) => s + (r.fuelIssued || 0), 0);
-    const stmtLiters = fpLive().filter(p => p.vehicleId === v.id && (p.date || '').startsWith(selMonth)).reduce((s, p) => s + (+p.qty || 0), 0);
+    const vPurchases = fpLive().filter(p => p.vehicleId === v.id && (p.date || '').startsWith(selMonth));
+    const stmtLitersTotal = vPurchases.reduce((s, p) => s + (+p.qty || 0), 0);
 
     const mfRecs = data.monthlyFuel.filter(m => m.vehicleId === v.id && m.month === selMonth);
     const vCardNum = v.fuelcard && typeof fcNorm === 'function' ? fcNorm(v.fuelcard) : '';
@@ -1242,9 +1243,9 @@ function fpMonthlyHtml() {
     const cardRows = mfRecs.length ? mfRecs : [null];
     const totalMfL = mfRecs.reduce((s, m) => s + (m.liters || 0), 0);
     const totalMfS = mfRecs.reduce((s, m) => s + (m.sum || 0), 0);
-    const received = totalMfL > 0 ? totalMfL : stmtLiters || issFromRecs;
+    const received = totalMfL > 0 ? totalMfL : stmtLitersTotal || issFromRecs;
     const eco = received - normL;
-    tKm += km; tNorm += normL; tIss += stmtLiters || issFromRecs;
+    tKm += km; tNorm += normL; tIss += stmtLitersTotal || issFromRecs;
     tMf += totalMfL; tMfSum += totalMfS;
 
     const bg = i % 2 === 0 ? '' : 'background:var(--bg2)';
@@ -1257,7 +1258,10 @@ function fpMonthlyHtml() {
       const mfVal = mf ? mf.liters : null;
       const mfSumVal = mf ? mf.sum : null;
       const isFirst = ci === 0;
-      const isLast = ci === span - 1;
+
+      const cardStmt = cardNum && typeof fcNorm === 'function'
+        ? vPurchases.filter(p => fcNorm(p.cardNo) === cardNum).reduce((s, p) => s + (+p.qty || 0), 0)
+        : (isFirst ? stmtLitersTotal : 0);
 
       return `<tr style="${bg}" data-vid="${v.id}">
         ${isFirst ? `<td rowspan="${span}">${fpEsc(v.plate)}</td>
@@ -1265,14 +1269,14 @@ function fpMonthlyHtml() {
         <td rowspan="${span}">${fpEsc(v.org || '—')}</td>
         <td rowspan="${span}" style="text-align:right">${km ? km.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td rowspan="${span}" style="text-align:right">${v.norm || '—'}</td>
-        <td rowspan="${span}" style="text-align:right">${normL ? normL.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
-        <td rowspan="${span}" style="text-align:right;font-size:12px;color:var(--text3)">${stmtLiters ? stmtLiters.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>` : ''}
+        <td rowspan="${span}" style="text-align:right">${normL ? normL.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>` : ''}
         <td style="padding:2px 4px">
           <select data-vid="${v.id}" data-month="${selMonth}" data-mfid="${mfId}" style="${selStyle}"
             onchange="mfSaveCard(this)">${mfCardOptions(v.id, cardNum)}</select>
         </td>
+        <td style="text-align:right;font-size:12px;color:var(--text3)">${cardStmt ? cardStmt.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td style="text-align:right;padding:0">
-          <input type="number" value="${mfVal != null ? mfVal : ''}" placeholder="${isFirst && stmtLiters ? stmtLiters.toLocaleString('ru', {maximumFractionDigits:1}) : '0'}"
+          <input type="number" value="${mfVal != null ? mfVal : ''}" placeholder="${cardStmt ? cardStmt.toLocaleString('ru', {maximumFractionDigits:1}) : '0'}"
             data-vid="${v.id}" data-month="${selMonth}" data-mfid="${mfId}" min="0" step="0.1"
             style="${inputStyle}" onchange="mfSaveRow(this)">
         </td>
@@ -1307,7 +1311,7 @@ function fpMonthlyHtml() {
         <thead><tr>
           <th>Госномер</th><th>Марка</th><th>Организация</th>
           <th style="text-align:right">Пробег, км</th><th style="text-align:right">Норма</th><th style="text-align:right">По норме, л</th>
-          <th style="text-align:right">Из выписок, л</th><th>Карта</th><th style="text-align:right">Получено, л</th><th style="text-align:right">Сумма, ₽</th>
+          <th>Карта</th><th style="text-align:right">Из выписок, л</th><th style="text-align:right">Получено, л</th><th style="text-align:right">Сумма, ₽</th>
           <th style="text-align:right">Эконом./Перерасх.</th><th style="width:36px"></th>
         </tr></thead>
         <tbody>${rowsHtml}</tbody>
@@ -1315,8 +1319,8 @@ function fpMonthlyHtml() {
           <td colspan="3">ИТОГО</td>
           <td style="text-align:right">${tKm.toLocaleString('ru', {maximumFractionDigits:0})}</td><td></td>
           <td style="text-align:right">${tNorm.toLocaleString('ru', {maximumFractionDigits:1})}</td>
-          <td style="text-align:right">${tIss.toLocaleString('ru', {maximumFractionDigits:1})}</td>
           <td></td>
+          <td style="text-align:right">${tIss.toLocaleString('ru', {maximumFractionDigits:1})}</td>
           <td style="text-align:right">${tMf > 0 ? tMf.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
           <td style="text-align:right">${tMfSum > 0 ? tMfSum.toLocaleString('ru', {maximumFractionDigits:2}) : '—'}</td>
           <td style="text-align:right;color:${totalEco >= 0 ? 'var(--green)' : 'var(--red)'}">${(totalEco > 0 ? '+' : '') + totalEco.toLocaleString('ru', {maximumFractionDigits:1})}</td>
