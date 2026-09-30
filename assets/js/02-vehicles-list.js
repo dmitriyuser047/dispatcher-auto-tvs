@@ -139,12 +139,6 @@ function renderDetail(v) {
 
   const monthKm = monthRecs.reduce((s, r) => s + (r.km || 0), 0);
   const monthFuel = monthRecs.reduce((s, r) => s + (r.fuelActual || 0), 0);
-  const monthKey = `${selectedYear}-${String(selectedMonth).padStart(2,'0')}`;
-  const mfRec = (data.monthlyFuel || []).find(m => m.vehicleId === v.id && m.month === monthKey);
-  const mfLiters = mfRec ? mfRec.liters : null;
-  const mfSum = mfRec ? mfRec.sum : null;
-  const monthNorm = v.norm ? (monthKm * v.norm / 100) : null;
-
   // build month tabs grouped by year
   let monthTabsHtml = '';
   if (months.length === 0) {
@@ -439,24 +433,6 @@ function renderDetail(v) {
           </button>
         </div>
       </div>
-      <div class="month-fuel-summary" style="display:flex;align-items:center;gap:16px;padding:10px 16px;background:var(--bg2);border-radius:8px;margin:8px 12px;font-size:13px;flex-wrap:wrap">
-        <div style="display:flex;align-items:center;gap:6px">
-          <span style="color:var(--text3)">Получено за месяц:</span>
-          <input type="number" id="mf_liters" value="${mfLiters != null ? mfLiters : ''}" placeholder="0" min="0" step="0.1"
-            style="width:90px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit;text-align:right"
-            onchange="saveMonthlyFuel()">
-          <span style="color:var(--text3)">л</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:6px">
-          <span style="color:var(--text3)">Сумма:</span>
-          <input type="number" id="mf_sum" value="${mfSum != null ? mfSum : ''}" placeholder="0" min="0" step="0.01"
-            style="width:100px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit;text-align:right"
-            onchange="saveMonthlyFuel()">
-          <span style="color:var(--text3)">₽</span>
-        </div>
-        ${monthNorm != null ? `<div style="color:var(--text3)">Расход по норме: <b style="color:var(--text)">${monthNorm.toLocaleString('ru',{maximumFractionDigits:1})}</b> л</div>` : ''}
-        ${mfLiters != null && monthNorm != null ? `<div style="color:${mfLiters - monthNorm >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:600">${mfLiters - monthNorm >= 0 ? 'Экономия' : 'Перерасход'}: ${Math.abs(mfLiters - monthNorm).toLocaleString('ru',{maximumFractionDigits:1})} л</div>` : ''}
-      </div>
       <div class="table-scroll">
         <table>
           <thead>
@@ -496,25 +472,4 @@ function selectMonth(year, month) {
   if (v) renderDetail(v);
 }
 
-async function saveMonthlyFuel() {
-  if (!selectedVehicleId) return;
-  const monthKey = `${selectedYear}-${String(selectedMonth).padStart(2,'0')}`;
-  const liters = parseFloat(document.getElementById('mf_liters').value) || null;
-  const sum = parseFloat(document.getElementById('mf_sum').value) || null;
-  if (!data.monthlyFuel) data.monthlyFuel = [];
-  let rec = data.monthlyFuel.find(m => m.vehicleId === selectedVehicleId && m.month === monthKey);
-  if (liters == null && sum == null) {
-    if (rec) data.monthlyFuel = data.monthlyFuel.filter(m => m !== rec);
-  } else {
-    if (!rec) {
-      rec = { id: 'mf_' + Date.now(), vehicleId: selectedVehicleId, month: monthKey };
-      data.monthlyFuel.push(rec);
-    }
-    rec.liters = liters;
-    rec.sum = sum;
-  }
-  await saveData(data);
-  const v = data.vehicles.find(x => x.id === selectedVehicleId);
-  if (v) renderDetail(v);
-}
 

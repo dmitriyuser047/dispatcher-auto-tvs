@@ -279,6 +279,7 @@ async function renderFuelPurchases() {
                 ['glonass', 'ГЛОНАСС'],
                 ['recon', 'Сверка с 1С'],
                 ['fcards', 'Карты'],
+                ['monthly', 'Итого за месяц'],
                 ['close', 'Закрытие месяца'],
                 ['unmatched', 'Без машины' + (unmatched.length ? ' (' + unmatched.length + ')' : '')],
                 ['history', 'История загрузок']]
@@ -296,6 +297,7 @@ async function renderFuelPurchases() {
   else if (fpView === 'compare') body = fpCompareHtml();
   else if (fpView === 'negative') body = fpNegativeHtml();
   else if (fpView === 'fcards') body = fcCardsHtml();
+  else if (fpView === 'monthly') body = fpMonthlyHtml();
   else if (fpView === 'checks') body = fkChecksHtml();
   else if (fpView === 'measures') body = fkMeasuresHtml();
   else if (fpView === 'glonass') body = fgHtml();
@@ -315,7 +317,7 @@ async function renderFuelPurchases() {
           ${[...new Set((data.vehicles || []).map(v => v.org).filter(Boolean))].sort()
             .map(o => `<option${o === fpOrg ? ' selected' : ''}>${fpEsc(o)}</option>`).join('')}
         </select>` : ''}
-        ${!['history', 'compare', 'negative', 'close', 'recon'].includes(fpView) ? monthSel : ''}
+        ${!['history', 'compare', 'negative', 'close', 'recon', 'monthly'].includes(fpView) ? monthSel : ''}
         ${loadBtns}
       </div>
       <div id="fpBody">${body}</div>
@@ -1189,4 +1191,111 @@ function fpExportNegative() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Минус по остатку');
   XLSX.writeFile(wb, 'Отрицательный_остаток_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+}
+
+// ─── Вкладка «Итого за месяц» ───────────────────────────
+
+function fpMonthlyHtml() {
+  const mSet = new Set(fpMonthsList());
+  (data.records || []).forEach(r => { const m = (r.date || '').slice(0, 7); if (m) mSet.add(m); });
+  (data.monthlyFuel || []).forEach(m => { if (m.month) mSet.add(m.month); });
+  const months = [...mSet].sort().reverse();
+  if (!months.length) return '<div class="welcome" style="padding:60px 0"><p>Нет данных. Загрузите выписку или добавьте записи пробега.</p></div>';
+  const selMonth = fpMonth && fpMonth !== 'all' && months.includes(fpMonth) ? fpMonth : months[0];
+  if (!data.monthlyFuel) data.monthlyFuel = [];
+
+  const vehicles = (data.vehicles || []).filter(v => {
+    const ft = v.fuel || 'diesel';
+    return ft === 'diesel' || ft === 'gasoline';
+  }).sort((a, b) => (a.plate || '').localeCompare(b.plate || '', 'ru'));
+
+  let tKm = 0, tNorm = 0, tIss = 0, tMf = 0;
+
+  const rows = vehicles.map((v, i) => {
+    const recs = recsFor(v.id).filter(r => (r.date || '').startsWith(selMonth));
+    const km = recs.reduce((s, r) => s + (r.km || 0), 0);
+    const normL = v.norm ? km * v.norm / 100 : 0;
+    const issFromRecs = recs.reduce((s, r) => s + (r.fuelIssued || 0), 0);
+    const stmtLiters = fpLive().filter(p => p.vehicleId === v.id && (p.date || '').startsWith(selMonth)).reduce((s, p) => s + (+p.qty || 0), 0);
+    const mfRec = data.monthlyFuel.find(m => m.vehicleId === v.id && m.month === selMonth);
+    const mfVal = mfRec ? mfRec.liters : null;
+    const mfSumVal = mfRec ? mfRec.sum : null;
+    const received = mfVal != null ? mfVal : stmtLiters || issFromRecs;
+    const eco = received - normL;
+    tKm += km; tNorm += normL; tIss += stmtLiters || issFromRecs; tMf += (mfVal != null ? mfVal : 0);
+
+    const bg = i % 2 === 0 ? '' : 'background:var(--bg2)';
+    const ecoColor = eco > 0.05 ? 'var(--green)' : eco < -0.05 ? 'var(--red)' : 'var(--text3)';
+    return `<tr style="${bg}">
+      <td>${fpEsc(v.plate)}</td>
+      <td>${fpEsc(v.make || '—')}</td>
+      <td>${fpEsc(v.org || '—')}</td>
+      <td style="text-align:right">${km ? km.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
+      <td style="text-align:right">${v.norm || '—'}</td>
+      <td style="text-align:right">${normL ? normL.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
+      <td style="text-align:right;font-size:12px;color:var(--text3)">${stmtLiters ? stmtLiters.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
+      <td style="text-align:right;padding:0">
+        <input type="number" value="${mfVal != null ? mfVal : ''}" placeholder="${stmtLiters ? stmtLiters.toLocaleString('ru', {maximumFractionDigits:1}) : '0'}"
+          data-vid="${v.id}" data-month="${selMonth}" min="0" step="0.1"
+          style="width:90px;padding:4px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);text-align:right;font-family:inherit"
+          onchange="mfSaveRow(this)">
+      </td>
+      <td style="text-align:right;padding:0">
+        <input type="number" value="${mfSumVal != null ? mfSumVal : ''}" placeholder="0"
+          data-vid="${v.id}" data-month="${selMonth}" data-field="sum" min="0" step="0.01"
+          style="width:90px;padding:4px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);text-align:right;font-family:inherit"
+          onchange="mfSaveRow(this)">
+      </td>
+      <td style="text-align:right;font-weight:600;color:${ecoColor}">${(eco > 0 ? '+' : '') + eco.toLocaleString('ru', {maximumFractionDigits:1})}</td>
+    </tr>`;
+  }).join('');
+
+  const totalEco = tMf > 0 ? tMf - tNorm : (tIss - tNorm);
+  const monthSel = `<select class="fsel" onchange="fpMonth=this.value;renderFuelPurchases()" style="margin-bottom:12px">
+    ${months.map(m => `<option value="${m}"${m === selMonth ? ' selected' : ''}>${fpMonthLabel(m)}</option>`).join('')}
+  </select>`;
+
+  return `
+    ${monthSel}
+    <div style="font-size:13px;color:var(--text3);margin-bottom:10px">
+      Общий литраж получения за месяц. Если поле «Получено» заполнено — акт списания ГСМ берёт эту цифру. Иначе — сумму из выписок или журнала.
+    </div>
+    <div class="table-wrap"><div class="table-scroll" style="overflow-x:auto">
+      <table class="data-table" style="width:100%">
+        <thead><tr>
+          <th>Госномер</th><th>Марка</th><th>Организация</th>
+          <th style="text-align:right">Пробег, км</th><th style="text-align:right">Норма</th><th style="text-align:right">По норме, л</th>
+          <th style="text-align:right">Из выписок, л</th><th style="text-align:right">Получено, л</th><th style="text-align:right">Сумма, ₽</th>
+          <th style="text-align:right">Эконом.(+) / Перерасх.(-)</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr style="font-weight:700;background:var(--bg2)">
+          <td colspan="3">ИТОГО</td>
+          <td style="text-align:right">${tKm.toLocaleString('ru', {maximumFractionDigits:0})}</td><td></td>
+          <td style="text-align:right">${tNorm.toLocaleString('ru', {maximumFractionDigits:1})}</td>
+          <td style="text-align:right">${tIss.toLocaleString('ru', {maximumFractionDigits:1})}</td>
+          <td style="text-align:right">${tMf > 0 ? tMf.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td><td></td>
+          <td style="text-align:right;color:${totalEco >= 0 ? 'var(--green)' : 'var(--red)'}">${(totalEco > 0 ? '+' : '') + totalEco.toLocaleString('ru', {maximumFractionDigits:1})}</td>
+        </tr></tfoot>
+      </table>
+    </div></div>`;
+}
+
+async function mfSaveRow(el) {
+  const vid = el.dataset.vid;
+  const month = el.dataset.month;
+  const isSum = el.dataset.field === 'sum';
+  if (!data.monthlyFuel) data.monthlyFuel = [];
+  let rec = data.monthlyFuel.find(m => m.vehicleId === vid && m.month === month);
+  const val = parseFloat(el.value) || null;
+  if (!rec && val == null) return;
+  if (!rec) {
+    rec = { id: 'mf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), vehicleId: vid, month };
+    data.monthlyFuel.push(rec);
+  }
+  if (isSum) rec.sum = val; else rec.liters = val;
+  if (rec.liters == null && rec.sum == null) {
+    data.monthlyFuel = data.monthlyFuel.filter(m => m !== rec);
+  }
+  await saveData(data);
 }
