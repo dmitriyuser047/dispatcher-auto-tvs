@@ -1195,6 +1195,21 @@ function fpExportNegative() {
 
 // ─── Вкладка «Итого за месяц» ───────────────────────────
 
+function mfCardOptions(vid, selectedNum) {
+  const cards = (typeof fcList === 'function' ? fcList() : []).filter(c => c.status !== 'blocked');
+  const v = (data.vehicles || []).find(x => x.id === vid);
+  const vNum = v && typeof fcNorm === 'function' ? fcNorm(v.fuelcard) : '';
+  let html = '<option value="">— без карты —</option>';
+  cards.forEach(c => {
+    const fmt = typeof fcFormat === 'function' ? fcFormat(c.number) : c.number;
+    const prov = c.provider ? ' (' + c.provider + ')' : '';
+    const org = c.org ? ' · ' + c.org : '';
+    const sel = c.number === selectedNum ? ' selected' : '';
+    html += '<option value="' + c.number + '"' + sel + '>' + fmt + prov + org + '</option>';
+  });
+  return html;
+}
+
 function fpMonthlyHtml() {
   const mSet = new Set(fpMonthsList());
   (data.records || []).forEach(r => { const m = (r.date || '').slice(0, 7); if (m) mSet.add(m); });
@@ -1209,45 +1224,72 @@ function fpMonthlyHtml() {
     return ft === 'diesel' || ft === 'gasoline';
   }).sort((a, b) => (a.plate || '').localeCompare(b.plate || '', 'ru'));
 
-  let tKm = 0, tNorm = 0, tIss = 0, tMf = 0;
+  const allCards = typeof fcList === 'function' ? fcList().filter(c => c.status !== 'blocked') : [];
+  let tKm = 0, tNorm = 0, tIss = 0, tMf = 0, tMfSum = 0;
+  const inputStyle = 'width:90px;padding:4px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);text-align:right;font-family:inherit';
+  const selStyle = 'width:170px;padding:4px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:inherit';
 
-  const rows = vehicles.map((v, i) => {
+  const rowsHtml = vehicles.map((v, i) => {
     const recs = recsFor(v.id).filter(r => (r.date || '').startsWith(selMonth));
     const km = recs.reduce((s, r) => s + (r.km || 0), 0);
     const normL = v.norm ? km * v.norm / 100 : 0;
     const issFromRecs = recs.reduce((s, r) => s + (r.fuelIssued || 0), 0);
     const stmtLiters = fpLive().filter(p => p.vehicleId === v.id && (p.date || '').startsWith(selMonth)).reduce((s, p) => s + (+p.qty || 0), 0);
-    const mfRec = data.monthlyFuel.find(m => m.vehicleId === v.id && m.month === selMonth);
-    const mfVal = mfRec ? mfRec.liters : null;
-    const mfSumVal = mfRec ? mfRec.sum : null;
-    const received = mfVal != null ? mfVal : stmtLiters || issFromRecs;
+
+    const mfRecs = data.monthlyFuel.filter(m => m.vehicleId === v.id && m.month === selMonth);
+    const vCardNum = v.fuelcard && typeof fcNorm === 'function' ? fcNorm(v.fuelcard) : '';
+
+    const cardRows = mfRecs.length ? mfRecs : [null];
+    const totalMfL = mfRecs.reduce((s, m) => s + (m.liters || 0), 0);
+    const totalMfS = mfRecs.reduce((s, m) => s + (m.sum || 0), 0);
+    const received = totalMfL > 0 ? totalMfL : stmtLiters || issFromRecs;
     const eco = received - normL;
-    tKm += km; tNorm += normL; tIss += stmtLiters || issFromRecs; tMf += (mfVal != null ? mfVal : 0);
+    tKm += km; tNorm += normL; tIss += stmtLiters || issFromRecs;
+    tMf += totalMfL; tMfSum += totalMfS;
 
     const bg = i % 2 === 0 ? '' : 'background:var(--bg2)';
     const ecoColor = eco > 0.05 ? 'var(--green)' : eco < -0.05 ? 'var(--red)' : 'var(--text3)';
-    return `<tr style="${bg}">
-      <td>${fpEsc(v.plate)}</td>
-      <td>${fpEsc(v.make || '—')}</td>
-      <td>${fpEsc(v.org || '—')}</td>
-      <td style="text-align:right">${km ? km.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
-      <td style="text-align:right">${v.norm || '—'}</td>
-      <td style="text-align:right">${normL ? normL.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
-      <td style="text-align:right;font-size:12px;color:var(--text3)">${stmtLiters ? stmtLiters.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
-      <td style="text-align:right;padding:0">
-        <input type="number" value="${mfVal != null ? mfVal : ''}" placeholder="${stmtLiters ? stmtLiters.toLocaleString('ru', {maximumFractionDigits:1}) : '0'}"
-          data-vid="${v.id}" data-month="${selMonth}" min="0" step="0.1"
-          style="width:90px;padding:4px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);text-align:right;font-family:inherit"
-          onchange="mfSaveRow(this)">
-      </td>
-      <td style="text-align:right;padding:0">
-        <input type="number" value="${mfSumVal != null ? mfSumVal : ''}" placeholder="0"
-          data-vid="${v.id}" data-month="${selMonth}" data-field="sum" min="0" step="0.01"
-          style="width:90px;padding:4px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);text-align:right;font-family:inherit"
-          onchange="mfSaveRow(this)">
-      </td>
-      <td style="text-align:right;font-weight:600;color:${ecoColor}">${(eco > 0 ? '+' : '') + eco.toLocaleString('ru', {maximumFractionDigits:1})}</td>
-    </tr>`;
+    const span = cardRows.length;
+
+    return cardRows.map((mf, ci) => {
+      const mfId = mf ? mf.id : '';
+      const cardNum = mf ? (mf.cardNumber || '') : (ci === 0 ? vCardNum : '');
+      const mfVal = mf ? mf.liters : null;
+      const mfSumVal = mf ? mf.sum : null;
+      const isFirst = ci === 0;
+      const isLast = ci === span - 1;
+
+      return `<tr style="${bg}" data-vid="${v.id}">
+        ${isFirst ? `<td rowspan="${span}">${fpEsc(v.plate)}</td>
+        <td rowspan="${span}">${fpEsc(v.make || '—')}</td>
+        <td rowspan="${span}">${fpEsc(v.org || '—')}</td>
+        <td rowspan="${span}" style="text-align:right">${km ? km.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
+        <td rowspan="${span}" style="text-align:right">${v.norm || '—'}</td>
+        <td rowspan="${span}" style="text-align:right">${normL ? normL.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
+        <td rowspan="${span}" style="text-align:right;font-size:12px;color:var(--text3)">${stmtLiters ? stmtLiters.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>` : ''}
+        <td style="padding:2px 4px">
+          <select data-vid="${v.id}" data-month="${selMonth}" data-mfid="${mfId}" style="${selStyle}"
+            onchange="mfSaveCard(this)">${mfCardOptions(v.id, cardNum)}</select>
+        </td>
+        <td style="text-align:right;padding:0">
+          <input type="number" value="${mfVal != null ? mfVal : ''}" placeholder="${isFirst && stmtLiters ? stmtLiters.toLocaleString('ru', {maximumFractionDigits:1}) : '0'}"
+            data-vid="${v.id}" data-month="${selMonth}" data-mfid="${mfId}" min="0" step="0.1"
+            style="${inputStyle}" onchange="mfSaveRow(this)">
+        </td>
+        <td style="text-align:right;padding:0">
+          <input type="number" value="${mfSumVal != null ? mfSumVal : ''}" placeholder="0"
+            data-vid="${v.id}" data-month="${selMonth}" data-mfid="${mfId}" data-field="sum" min="0" step="0.01"
+            style="${inputStyle}" onchange="mfSaveRow(this)">
+        </td>
+        ${isFirst ? `<td rowspan="${span}" style="text-align:right;font-weight:600;color:${ecoColor}">${(eco > 0 ? '+' : '') + eco.toLocaleString('ru', {maximumFractionDigits:1})}</td>
+        <td rowspan="${span}" style="text-align:center;padding:0">
+          <button onclick="mfAddCardRow('${v.id}','${selMonth}')" title="Добавить карту"
+            style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--accent);padding:2px 6px">+</button>
+        </td>` : `<td style="text-align:center;padding:0">
+          ${mfId ? '<button onclick="mfRemoveRow(\'' + mfId + '\')" title="Удалить строку" style="background:none;border:none;cursor:pointer;font-size:15px;color:var(--red);padding:2px 6px">✕</button>' : ''}
+        </td>`}
+      </tr>`;
+    }).join('');
   }).join('');
 
   const totalEco = tMf > 0 ? tMf - tNorm : (tIss - tNorm);
@@ -1265,37 +1307,88 @@ function fpMonthlyHtml() {
         <thead><tr>
           <th>Госномер</th><th>Марка</th><th>Организация</th>
           <th style="text-align:right">Пробег, км</th><th style="text-align:right">Норма</th><th style="text-align:right">По норме, л</th>
-          <th style="text-align:right">Из выписок, л</th><th style="text-align:right">Получено, л</th><th style="text-align:right">Сумма, ₽</th>
-          <th style="text-align:right">Эконом.(+) / Перерасх.(-)</th>
+          <th style="text-align:right">Из выписок, л</th><th>Карта</th><th style="text-align:right">Получено, л</th><th style="text-align:right">Сумма, ₽</th>
+          <th style="text-align:right">Эконом./Перерасх.</th><th style="width:36px"></th>
         </tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rowsHtml}</tbody>
         <tfoot><tr style="font-weight:700;background:var(--bg2)">
           <td colspan="3">ИТОГО</td>
           <td style="text-align:right">${tKm.toLocaleString('ru', {maximumFractionDigits:0})}</td><td></td>
           <td style="text-align:right">${tNorm.toLocaleString('ru', {maximumFractionDigits:1})}</td>
           <td style="text-align:right">${tIss.toLocaleString('ru', {maximumFractionDigits:1})}</td>
-          <td style="text-align:right">${tMf > 0 ? tMf.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td><td></td>
+          <td></td>
+          <td style="text-align:right">${tMf > 0 ? tMf.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
+          <td style="text-align:right">${tMfSum > 0 ? tMfSum.toLocaleString('ru', {maximumFractionDigits:2}) : '—'}</td>
           <td style="text-align:right;color:${totalEco >= 0 ? 'var(--green)' : 'var(--red)'}">${(totalEco > 0 ? '+' : '') + totalEco.toLocaleString('ru', {maximumFractionDigits:1})}</td>
+          <td></td>
         </tr></tfoot>
       </table>
     </div></div>`;
 }
 
+function mfFindOrCreate(vid, month, mfId) {
+  if (!data.monthlyFuel) data.monthlyFuel = [];
+  if (mfId) {
+    const existing = data.monthlyFuel.find(m => m.id === mfId);
+    if (existing) return existing;
+  }
+  const rec = { id: 'mf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), vehicleId: vid, month };
+  data.monthlyFuel.push(rec);
+  return rec;
+}
+
 async function mfSaveRow(el) {
   const vid = el.dataset.vid;
   const month = el.dataset.month;
+  const mfId = el.dataset.mfid;
   const isSum = el.dataset.field === 'sum';
-  if (!data.monthlyFuel) data.monthlyFuel = [];
-  let rec = data.monthlyFuel.find(m => m.vehicleId === vid && m.month === month);
   const val = parseFloat(el.value) || null;
-  if (!rec && val == null) return;
-  if (!rec) {
-    rec = { id: 'mf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), vehicleId: vid, month };
-    data.monthlyFuel.push(rec);
-  }
+  if (!mfId && val == null) return;
+  const rec = mfFindOrCreate(vid, month, mfId);
+  if (!mfId) el.dataset.mfid = rec.id;
   if (isSum) rec.sum = val; else rec.liters = val;
-  if (rec.liters == null && rec.sum == null) {
+  const tr = el.closest('tr');
+  if (tr) {
+    tr.querySelectorAll('[data-mfid]').forEach(inp => { inp.dataset.mfid = rec.id; });
+  }
+  if (rec.liters == null && rec.sum == null && !rec.cardNumber) {
     data.monthlyFuel = data.monthlyFuel.filter(m => m !== rec);
   }
   await saveData(data);
+}
+
+async function mfSaveCard(sel) {
+  const vid = sel.dataset.vid;
+  const month = sel.dataset.month;
+  const mfId = sel.dataset.mfid;
+  const cardNumber = sel.value || null;
+  if (!mfId && !cardNumber) return;
+  const rec = mfFindOrCreate(vid, month, mfId);
+  if (!mfId) sel.dataset.mfid = rec.id;
+  rec.cardNumber = cardNumber;
+  const tr = sel.closest('tr');
+  if (tr) {
+    tr.querySelectorAll('[data-mfid]').forEach(inp => { inp.dataset.mfid = rec.id; });
+  }
+  if (rec.liters == null && rec.sum == null && !rec.cardNumber) {
+    data.monthlyFuel = data.monthlyFuel.filter(m => m !== rec);
+  }
+  await saveData(data);
+}
+
+async function mfAddCardRow(vid, month) {
+  if (!data.monthlyFuel) data.monthlyFuel = [];
+  data.monthlyFuel.push({
+    id: 'mf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    vehicleId: vid, month, liters: null, sum: null, cardNumber: null
+  });
+  await saveData(data);
+  renderFuelPurchases();
+}
+
+async function mfRemoveRow(mfId) {
+  if (!data.monthlyFuel) return;
+  data.monthlyFuel = data.monthlyFuel.filter(m => m.id !== mfId);
+  await saveData(data);
+  renderFuelPurchases();
 }

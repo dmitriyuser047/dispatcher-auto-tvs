@@ -312,6 +312,12 @@ function exportAllGensToPdf(dateFrom, dateTo){
 
 // ─── АКТ НА СПИСАНИЕ ГСМ ─────────────────────────────────
 // Список организаций (по ТС на дизеле/бензине)
+function actGsmCardOrg(cardNumber) {
+  if (!cardNumber || typeof fcList !== 'function') return '';
+  const card = fcList().find(c => c.number === cardNumber);
+  return card && card.org ? card.org.trim() : '';
+}
+
 function actGsmVehicleOrg(v) {
   if (typeof fcNorm === 'function' && typeof fcList === 'function') {
     const num = fcNorm(v.fuelcard);
@@ -323,12 +329,39 @@ function actGsmVehicleOrg(v) {
   return (v.org || '').trim() || '— Без организации —';
 }
 
-function actGsmOrgs() {
+function actGsmVehicleOrgs(v, dateFrom, dateTo) {
+  const mfRecs = (data.monthlyFuel || []).filter(m => {
+    if (m.vehicleId !== v.id || !m.cardNumber) return false;
+    if (!m.liters) return false;
+    const mStart = m.month + '-01';
+    const md = new Date(m.month + '-01'); md.setMonth(md.getMonth() + 1); md.setDate(0);
+    const mEnd = md.toISOString().slice(0, 10);
+    return (!dateFrom || mEnd >= dateFrom) && (!dateTo || mStart <= dateTo);
+  });
+  if (!mfRecs.length) return [actGsmVehicleOrg(v)];
+  const orgs = new Set();
+  mfRecs.forEach(m => {
+    const org = actGsmCardOrg(m.cardNumber);
+    orgs.add(org || actGsmVehicleOrg(v));
+  });
+  const noCardMf = (data.monthlyFuel || []).filter(m => {
+    if (m.vehicleId !== v.id || m.cardNumber) return false;
+    if (!m.liters) return false;
+    const mStart = m.month + '-01';
+    const md = new Date(m.month + '-01'); md.setMonth(md.getMonth() + 1); md.setDate(0);
+    const mEnd = md.toISOString().slice(0, 10);
+    return (!dateFrom || mEnd >= dateFrom) && (!dateTo || mStart <= dateTo);
+  });
+  if (noCardMf.length) orgs.add(actGsmVehicleOrg(v));
+  return [...orgs];
+}
+
+function actGsmOrgs(dateFrom, dateTo) {
   const set = new Set();
   data.vehicles.forEach(v => {
     const ft = v.fuel || 'diesel';
     if (ft !== 'diesel' && ft !== 'gasoline') return;
-    set.add(actGsmVehicleOrg(v));
+    actGsmVehicleOrgs(v, dateFrom, dateTo).forEach(o => set.add(o));
   });
   return Array.from(set).sort((a, b) => a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0);
 }
@@ -382,7 +415,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     else periodLabel = `${fmtDate(dateFrom)} — ${fmtDate(dateTo)}`;
   } else periodLabel = 'всё время';
 
-  const allOrgs = actGsmOrgs();
+  const allOrgs = actGsmOrgs(dateFrom, dateTo);
   const orgsToRender = (opts.org && opts.org !== '__ALL__') ? [opts.org] : allOrgs;
   if (!orgsToRender.length) { alert('Нет организаций с ТС на дизеле/бензине.'); return; }
 
@@ -435,7 +468,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     const orgVehicles = data.vehicles.filter(v => {
       const ft = v.fuel || 'diesel';
       if (ft !== 'diesel' && ft !== 'gasoline') return false;
-      return actGsmVehicleOrg(v) === org;
+      return actGsmVehicleOrgs(v, dateFrom, dateTo).includes(org);
     }).sort((a,b)=>{ const oa=(a.object||'￿').toLowerCase(), ob=(b.object||'￿').toLowerCase(); return oa<ob?-1:oa>ob?1:0; });
     if (!orgVehicles.length) return;
     renderedAny = true;
@@ -477,15 +510,24 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       const glon=per.reduce((s,r)=>s+(r.kmGlonass||0),0);
       const idle=per.reduce((s,r)=>s+(r.fuelIdle||0),0);
       let iss=per.reduce((s,r)=>s+(r.fuelIssued||0),0);
-      // Если есть «Получено за месяц» — берём оттуда вместо суммы из записей
       if (data.monthlyFuel && data.monthlyFuel.length) {
-        const mfIss = data.monthlyFuel.filter(m => {
+        const mfAll = data.monthlyFuel.filter(m => {
           if (m.vehicleId !== v.id || !m.liters) return false;
           const mStart = m.month + '-01';
           const md = new Date(m.month + '-01'); md.setMonth(md.getMonth() + 1); md.setDate(0);
           const mEnd = md.toISOString().slice(0, 10);
           return (!dateFrom || mEnd >= dateFrom) && (!dateTo || mStart <= dateTo);
-        }).reduce((s, m) => s + (m.liters || 0), 0);
+        });
+        const hasCards = mfAll.some(m => m.cardNumber);
+        let mfIss;
+        if (hasCards) {
+          mfIss = mfAll.filter(m => {
+            const cardOrg = m.cardNumber ? actGsmCardOrg(m.cardNumber) : '';
+            return (cardOrg || actGsmVehicleOrg(v)) === org;
+          }).reduce((s, m) => s + (m.liters || 0), 0);
+        } else {
+          mfIss = mfAll.reduce((s, m) => s + (m.liters || 0), 0);
+        }
         if (mfIss > 0) iss = mfIss;
       }
       const normL=per.reduce((s,r)=>s+(r.fuelUsed||0),0);
