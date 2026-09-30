@@ -476,7 +476,18 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       const km=per.reduce((s,r)=>s+(r.km||0),0);
       const glon=per.reduce((s,r)=>s+(r.kmGlonass||0),0);
       const idle=per.reduce((s,r)=>s+(r.fuelIdle||0),0);
-      const iss=per.reduce((s,r)=>s+(r.fuelIssued||0),0);
+      let iss=per.reduce((s,r)=>s+(r.fuelIssued||0),0);
+      // Если есть «Получено за месяц» — берём оттуда вместо суммы из записей
+      if (data.monthlyFuel && data.monthlyFuel.length) {
+        const mfIss = data.monthlyFuel.filter(m => {
+          if (m.vehicleId !== v.id || !m.liters) return false;
+          const mStart = m.month + '-01';
+          const md = new Date(m.month + '-01'); md.setMonth(md.getMonth() + 1); md.setDate(0);
+          const mEnd = md.toISOString().slice(0, 10);
+          return (!dateFrom || mEnd >= dateFrom) && (!dateTo || mStart <= dateTo);
+        }).reduce((s, m) => s + (m.liters || 0), 0);
+        if (mfIss > 0) iss = mfIss;
+      }
       const normL=per.reduce((s,r)=>s+(r.fuelUsed||0),0);
       // Остатки — той же функцией, что в карточке машины: она учитывает замеры
       // остатка в баке. Тогда «по факту» = остаток на начало + получено − остаток
