@@ -112,6 +112,23 @@ function deleteVehicle(id) {
 }
 
 // ─── RECORD CRUD ─────────────────────────────────────────
+function recFillCardSelect(selectedNum) {
+  const sel = document.getElementById('rec_fuel_card');
+  const cards = (typeof fcList === 'function' ? fcList() : []).filter(c => c.status !== 'blocked');
+  const v = data.vehicles.find(x => x.id === selectedVehicleId);
+  const vCardNum = v ? (typeof fcNorm === 'function' ? fcNorm(v.fuelcard) : '') : '';
+  let html = '<option value="">— не указана —</option>';
+  cards.forEach(c => {
+    const fmt = typeof fcFormat === 'function' ? fcFormat(c.number) : c.number;
+    const prov = c.provider ? ' (' + c.provider + ')' : '';
+    const org = c.org ? ' · ' + c.org : '';
+    html += '<option value="' + c.number + '">' + fmt + prov + org + '</option>';
+  });
+  sel.innerHTML = html;
+  if (selectedNum) sel.value = selectedNum;
+  else if (vCardNum) sel.value = vCardNum;
+}
+
 function openAddRecord() {
   editingRecordId = null;
   document.getElementById('recordModalTitle').textContent = 'Добавить запись';
@@ -123,13 +140,13 @@ function openAddRecord() {
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   document.getElementById('rec_driver').value = v ? (v.driver || '') : '';
   document.getElementById('rec_fuel_grade').value = vehicleFuelGrade(v);
+  recFillCardSelect('');
   const vRecs = recsFor(selectedVehicleId)
     .slice().sort((a, b) => cmpDateAsc(a.date, b.date));
   if (vRecs.length) {
     const last = vRecs[vRecs.length - 1];
     if (last.odoEnd) document.getElementById('rec_odo_start').value = last.odoEnd;
   } else if (v && v.odometer) {
-    // Первая запись — берём начальный одометр из данных ТС
     document.getElementById('rec_odo_start').value = v.odometer;
   }
   openModal('recordModal');
@@ -147,6 +164,7 @@ function openEditRecord(id) {
   document.getElementById('rec_odo_end').value = r.odoEnd || '';
   document.getElementById('rec_driver').value = r.driver || '';
   document.getElementById('rec_fuel_grade').value = recordFuelGrade(r);
+  recFillCardSelect(r.fuelCardNum || '');
   document.getElementById('rec_fuel_issued').value = r.fuelIssued || '';
   document.getElementById('rec_fuel_sum').value = r.fuelSum || '';
   document.getElementById('rec_fuel_actual').value = r.fuelActual || '';

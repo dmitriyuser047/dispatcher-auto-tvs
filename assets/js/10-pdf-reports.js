@@ -312,12 +312,23 @@ function exportAllGensToPdf(dateFrom, dateTo){
 
 // ─── АКТ НА СПИСАНИЕ ГСМ ─────────────────────────────────
 // Список организаций (по ТС на дизеле/бензине)
+function actGsmVehicleOrg(v) {
+  if (typeof fcNorm === 'function' && typeof fcList === 'function') {
+    const num = fcNorm(v.fuelcard);
+    if (num) {
+      const card = fcList().find(c => c.number === num);
+      if (card && card.org) return card.org.trim();
+    }
+  }
+  return (v.org || '').trim() || '— Без организации —';
+}
+
 function actGsmOrgs() {
   const set = new Set();
   data.vehicles.forEach(v => {
     const ft = v.fuel || 'diesel';
     if (ft !== 'diesel' && ft !== 'gasoline') return;
-    set.add((v.org || '').trim() || '— Без организации —');
+    set.add(actGsmVehicleOrg(v));
   });
   return Array.from(set).sort((a, b) => a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0);
 }
@@ -424,7 +435,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     const orgVehicles = data.vehicles.filter(v => {
       const ft = v.fuel || 'diesel';
       if (ft !== 'diesel' && ft !== 'gasoline') return false;
-      return (((v.org||'').trim()) || '— Без организации —') === org;
+      return actGsmVehicleOrg(v) === org;
     }).sort((a,b)=>{ const oa=(a.object||'￿').toLowerCase(), ob=(b.object||'￿').toLowerCase(); return oa<ob?-1:oa>ob?1:0; });
     if (!orgVehicles.length) return;
     renderedAny = true;

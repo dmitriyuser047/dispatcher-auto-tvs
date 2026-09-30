@@ -176,6 +176,10 @@ function fcEdit(id) {
       <div class="form-group"><label>Поставщик</label><input type="text" id="fc_provider" value="${fpEsc(c ? c.provider : '')}" placeholder="Газпромнефть, Лукойл..."></div>
     </div>
     <div class="form-row">
+      <div class="form-group"><label>Организация (для акта списания)</label><input type="text" id="fc_org" value="${fpEsc(c ? c.org || '' : '')}" placeholder="ООО «...»" list="fc_org_list">
+        <datalist id="fc_org_list">${[...new Set((data.vehicles||[]).map(v=>(v.org||'').trim()).filter(Boolean))].sort().map(o=>'<option value="'+fpEsc(o)+'">').join('')}</datalist></div>
+    </div>
+    <div class="form-row">
       <div class="form-group"><label>Машина</label><select id="fc_vehicle">${fuelImportVehicleOptions(cur, true)}</select></div>
       <div class="form-group"><label>С даты (если машина меняется)</label><input type="text" id="fc_from" placeholder="ДД.ММ.ГГГГ"></div>
     </div>
@@ -205,6 +209,7 @@ async function fcSave(id) {
     fcList().push(c);
   }
   c.provider = document.getElementById('fc_provider').value.trim();
+  c.org = document.getElementById('fc_org').value.trim();
   c.limit = parseFloat(document.getElementById('fc_limit').value) || null;
   c.status = document.getElementById('fc_status').value;
   c.note = document.getElementById('fc_note').value.trim();

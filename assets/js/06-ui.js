@@ -50,6 +50,7 @@ function saveRecord() {
     fuelActual: parseFloat(document.getElementById('rec_fuel_actual').value) || null,
     fuelIdle:   parseFloat(document.getElementById('rec_fuel_idle').value)   || null,
     tankMeasured: document.getElementById('rec_tank_measured').value.trim() === '' ? null : parseFloat(document.getElementById('rec_tank_measured').value),
+    fuelCardNum: document.getElementById('rec_fuel_card').value || null,
     route: routeGet(),
     note: document.getElementById('rec_note').value.trim(),
   };
