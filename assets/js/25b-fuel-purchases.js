@@ -1250,7 +1250,6 @@ function fpMonthlyHtml() {
 
     const bg = i % 2 === 0 ? '' : 'background:var(--bg2)';
     const ecoColor = eco > 0.05 ? 'var(--green)' : eco < -0.05 ? 'var(--red)' : 'var(--text3)';
-    const span = cardRows.length;
 
     return cardRows.map((mf, ci) => {
       const mfId = mf ? mf.id : '';
@@ -1264,12 +1263,13 @@ function fpMonthlyHtml() {
         : (isFirst ? stmtLitersTotal : 0);
 
       return `<tr style="${bg}" data-vid="${v.id}">
-        ${isFirst ? `<td rowspan="${span}">${fpEsc(v.plate)}</td>
-        <td rowspan="${span}">${fpEsc(v.make || '—')}</td>
-        <td rowspan="${span}">${fpEsc(v.org || '—')}</td>
-        <td rowspan="${span}" style="text-align:right">${km ? km.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
-        <td rowspan="${span}" style="text-align:right">${v.norm || '—'}</td>
-        <td rowspan="${span}" style="text-align:right">${normL ? normL.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>` : ''}
+        <td style="text-align:center;padding:0;width:28px">${mfId ? '<input type="checkbox" class="mf-check" data-mfid="' + mfId + '" onchange="mfUpdateToolbar()">' : ''}</td>
+        <td>${isFirst ? fpEsc(v.plate) : ''}</td>
+        <td>${isFirst ? fpEsc(v.make || '—') : ''}</td>
+        <td>${isFirst ? fpEsc(v.org || '—') : ''}</td>
+        <td style="text-align:right">${isFirst ? (km ? km.toLocaleString('ru', {maximumFractionDigits:1}) : '—') : ''}</td>
+        <td style="text-align:right">${isFirst ? (v.norm || '—') : ''}</td>
+        <td style="text-align:right">${isFirst ? (normL ? normL.toLocaleString('ru', {maximumFractionDigits:1}) : '—') : ''}</td>
         <td style="padding:2px 4px">
           <select data-vid="${v.id}" data-month="${selMonth}" data-mfid="${mfId}" style="${selStyle}"
             onchange="mfSaveCard(this)">${mfCardOptions(v.id, cardNum)}</select>
@@ -1285,13 +1285,11 @@ function fpMonthlyHtml() {
             data-vid="${v.id}" data-month="${selMonth}" data-mfid="${mfId}" data-field="sum" min="0" step="0.01"
             style="${inputStyle}" onchange="mfSaveRow(this)">
         </td>
-        ${isFirst ? `<td rowspan="${span}" style="text-align:right;font-weight:600;color:${ecoColor}">${(eco > 0 ? '+' : '') + eco.toLocaleString('ru', {maximumFractionDigits:1})}</td>
-        <td rowspan="${span}" style="text-align:center;padding:0">
-          <button onclick="mfAddCardRow('${v.id}','${selMonth}')" title="Добавить карту"
-            style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--accent);padding:2px 6px">+</button>
-        </td>` : `<td style="text-align:center;padding:0">
-          ${mfId ? '<button onclick="mfRemoveRow(\'' + mfId + '\')" title="Удалить строку" style="background:none;border:none;cursor:pointer;font-size:15px;color:var(--red);padding:2px 6px">✕</button>' : ''}
-        </td>`}
+        <td style="text-align:right;font-weight:600;color:${ecoColor}">${isFirst ? ((eco > 0 ? '+' : '') + eco.toLocaleString('ru', {maximumFractionDigits:1})) : ''}</td>
+        <td style="text-align:center;padding:0">${isFirst
+          ? '<button onclick="mfAddCardRow(\'' + v.id + '\',\'' + selMonth + '\')" title="Добавить карту" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--accent);padding:2px 6px">+</button>'
+          : (mfId ? '<button onclick="mfRemoveRow(\'' + mfId + '\')" title="Удалить строку" style="background:none;border:none;cursor:pointer;font-size:15px;color:var(--red);padding:2px 6px">✕</button>' : '')
+        }</td>
       </tr>`;
     }).join('');
   }).join('');
@@ -1306,9 +1304,13 @@ function fpMonthlyHtml() {
     <div style="font-size:13px;color:var(--text3);margin-bottom:10px">
       Общий литраж получения за месяц. Если поле «Получено» заполнено — акт списания ГСМ берёт эту цифру. Иначе — сумму из выписок или журнала.
     </div>
+    <div id="mf-toolbar" style="display:none;margin-bottom:8px">
+      <button onclick="mfDeleteSelected()" style="padding:4px 14px;font-size:13px;background:var(--red);color:#fff;border:none;border-radius:4px;cursor:pointer">Удалить выбранные (<span id="mf-sel-count">0</span>)</button>
+    </div>
     <div class="table-wrap"><div class="table-scroll" style="overflow-x:auto">
       <table class="data-table" style="width:100%">
         <thead><tr>
+          <th style="width:28px"><input type="checkbox" id="mf-check-all" onchange="mfToggleAll(this)"></th>
           <th>Госномер</th><th>Марка</th><th>Организация</th>
           <th style="text-align:right">Пробег, км</th><th style="text-align:right">Норма</th><th style="text-align:right">По норме, л</th>
           <th>Карта</th><th style="text-align:right">Из выписок, л</th><th style="text-align:right">Получено, л</th><th style="text-align:right">Сумма, ₽</th>
@@ -1316,7 +1318,7 @@ function fpMonthlyHtml() {
         </tr></thead>
         <tbody>${rowsHtml}</tbody>
         <tfoot><tr style="font-weight:700;background:var(--bg2)">
-          <td colspan="3">ИТОГО</td>
+          <td colspan="4">ИТОГО</td>
           <td style="text-align:right">${tKm.toLocaleString('ru', {maximumFractionDigits:0})}</td><td></td>
           <td style="text-align:right">${tNorm.toLocaleString('ru', {maximumFractionDigits:1})}</td>
           <td></td>
@@ -1387,12 +1389,39 @@ async function mfAddCardRow(vid, month) {
     vehicleId: vid, month, liters: null, sum: null, cardNumber: null
   });
   await saveData(data);
-  renderFuelPurchases();
+  fpRefreshMonthly();
 }
 
 async function mfRemoveRow(mfId) {
   if (!data.monthlyFuel) return;
   data.monthlyFuel = data.monthlyFuel.filter(m => m.id !== mfId);
   await saveData(data);
-  renderFuelPurchases();
+  fpRefreshMonthly();
+}
+
+function fpRefreshMonthly() {
+  const el = document.getElementById('fpBody');
+  if (el && fpView === 'monthly') el.innerHTML = fpMonthlyHtml();
+}
+
+function mfToggleAll(master) {
+  document.querySelectorAll('.mf-check').forEach(cb => { cb.checked = master.checked; });
+  mfUpdateToolbar();
+}
+
+function mfUpdateToolbar() {
+  const checked = document.querySelectorAll('.mf-check:checked');
+  const tb = document.getElementById('mf-toolbar');
+  const cnt = document.getElementById('mf-sel-count');
+  if (tb) tb.style.display = checked.length ? '' : 'none';
+  if (cnt) cnt.textContent = checked.length;
+}
+
+async function mfDeleteSelected() {
+  const ids = [...document.querySelectorAll('.mf-check:checked')].map(cb => cb.dataset.mfid);
+  if (!ids.length) return;
+  if (!confirm('Удалить выбранные записи (' + ids.length + ')?')) return;
+  data.monthlyFuel = (data.monthlyFuel || []).filter(m => !ids.includes(m.id));
+  await saveData(data);
+  fpRefreshMonthly();
 }
