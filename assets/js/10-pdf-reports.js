@@ -314,15 +314,26 @@ function exportAllGensToPdf(dateFrom, dateTo){
 // Список организаций (по ТС на дизеле/бензине)
 function actGsmCardOrg(cardNumber) {
   if (!cardNumber || typeof fcList !== 'function') return '';
-  const card = fcList().find(c => c.number === cardNumber);
-  return card && card.org ? card.org.trim() : '';
+  const normFn = typeof fcNorm === 'function' ? fcNorm : (s => s);
+  const norm = normFn(cardNumber);
+  const card = norm
+    ? fcList().find(c => normFn(c.number) === norm)
+    : fcList().find(c => (c.number || '').trim().toUpperCase() === cardNumber.trim().toUpperCase());
+  if (!card) return '';
+  if (card.org && card.org.trim()) return card.org.trim();
+  const assign = (card.assignments || []).filter(a => !a.to).pop();
+  if (assign) {
+    const v = (data.vehicles || []).find(x => x.id === assign.vehicleId);
+    if (v && v.org) return v.org.trim();
+  }
+  return '';
 }
 
 function actGsmVehicleOrg(v) {
   if (typeof fcNorm === 'function' && typeof fcList === 'function') {
     const num = fcNorm(v.fuelcard);
     if (num) {
-      const card = fcList().find(c => c.number === num);
+      const card = fcList().find(c => fcNorm(c.number) === num);
       if (card && card.org) return card.org.trim();
     }
   }
@@ -330,6 +341,7 @@ function actGsmVehicleOrg(v) {
 }
 
 function actGsmVehicleOrgs(v, dateFrom, dateTo) {
+  const orgs = new Set();
   const mfRecs = (data.monthlyFuel || []).filter(m => {
     if (m.vehicleId !== v.id || !m.cardNumber) return false;
     const mStart = m.month + '-01';
@@ -337,21 +349,25 @@ function actGsmVehicleOrgs(v, dateFrom, dateTo) {
     const mEnd = md.toISOString().slice(0, 10);
     return (!dateFrom || mEnd >= dateFrom) && (!dateTo || mStart <= dateTo);
   });
-  if (!mfRecs.length) return [actGsmVehicleOrg(v)];
-  const orgs = new Set();
   mfRecs.forEach(m => {
     const org = actGsmCardOrg(m.cardNumber);
-    orgs.add(org || actGsmVehicleOrg(v));
+    if (org) orgs.add(org);
   });
-  const noCardMf = (data.monthlyFuel || []).filter(m => {
-    if (m.vehicleId !== v.id || m.cardNumber) return false;
-    if (!m.liters) return false;
-    const mStart = m.month + '-01';
-    const md = new Date(m.month + '-01'); md.setMonth(md.getMonth() + 1); md.setDate(0);
-    const mEnd = md.toISOString().slice(0, 10);
-    return (!dateFrom || mEnd >= dateFrom) && (!dateTo || mStart <= dateTo);
+  const inP = r => (!dateFrom || r.date >= dateFrom) && (!dateTo || r.date <= dateTo);
+  const recs = (typeof recsFor === 'function' ? recsFor(v.id) : []).filter(inP);
+  recs.forEach(r => {
+    if (r.fuelCardNum && +r.fuelIssued > 0) {
+      const org = actGsmCardOrg(r.fuelCardNum);
+      if (org) orgs.add(org);
+    }
   });
-  if (noCardMf.length) orgs.add(actGsmVehicleOrg(v));
+  (data.fuelPurchases || []).filter(p => p.vehicleId === v.id && p.cardNo && p.qty > 0
+    && (!dateFrom || p.date >= dateFrom) && (!dateTo || p.date <= dateTo)
+  ).forEach(p => {
+    const org = actGsmCardOrg(p.cardNo);
+    if (org) orgs.add(org);
+  });
+  if (!orgs.size) orgs.add(actGsmVehicleOrg(v));
   return [...orgs];
 }
 
@@ -467,6 +483,37 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     return bal;
   }
 
+  // Обогащение журнала: проставляем fuelCardNum из fuelPurchases
+  if (data.fuelPurchases && data.fuelPurchases.length) {
+    const fpByVD = new Map();
+    data.fuelPurchases.forEach(p => {
+      if (!p.vehicleId || !p.date || !p.cardNo || !p.qty) return;
+      const key = p.vehicleId + '|' + p.date;
+      if (!fpByVD.has(key)) fpByVD.set(key, []);
+      fpByVD.get(key).push(p);
+    });
+    let _enrMatched = 0, _enrSkip = 0;
+    data.vehicles.forEach(v => {
+      if (typeof recsFor !== 'function') return;
+      recsFor(v.id).forEach(r => {
+        if (r.fuelCardNum || !(r.fuelIssued > 0)) return;
+        const key = v.id + '|' + r.date;
+        const fps = fpByVD.get(key);
+        if (!fps || !fps.length) { _enrSkip++; return; }
+        const match = fps.find(p => Math.abs(p.qty - r.fuelIssued) < 0.5);
+        if (match) {
+          r.fuelCardNum = match.cardNo;
+          fps.splice(fps.indexOf(match), 1);
+          _enrMatched++;
+        } else if (fps.length === 1) {
+          r.fuelCardNum = fps[0].cardNo;
+          fps.splice(0, 1);
+          _enrMatched++;
+        } else { _enrSkip++; }
+      });
+    });
+  }
+
   let renderedAny = false;
 
   orgsToRender.forEach((org, oi) => {
@@ -505,6 +552,12 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     rowH(h1,16); rowH(h2,30); n+=2;
 
     // Строки
+    const cardKey = s => {
+      if (!s) return '';
+      const d = String(s).replace(/\D/g, '');
+      return d || String(s).trim().toUpperCase();
+    };
+
     let i=0, tKm=0,tGl=0,tIdle=0,tStart=0,tIss=0,tNorm=0,tAct=0,tEnd=0,tEco=0;
     const measuredPlates=[];
     const tSup=[0,0,0,0,0];
@@ -515,31 +568,43 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       const km=per.reduce((s,r)=>s+(r.km||0),0);
       const glon=per.reduce((s,r)=>s+(r.kmGlonass||0),0);
       const idle=per.reduce((s,r)=>s+(r.fuelIdle||0),0);
-      let iss=per.reduce((s,r)=>s+(r.fuelIssued||0),0);
-      if (data.monthlyFuel && data.monthlyFuel.length) {
-        const mfAll = data.monthlyFuel.filter(m => {
-          if (m.vehicleId !== v.id) return false;
-          const mStart = m.month + '-01';
-          const md = new Date(m.month + '-01'); md.setMonth(md.getMonth() + 1); md.setDate(0);
-          const mEnd = md.toISOString().slice(0, 10);
-          return (!dateFrom || mEnd >= dateFrom) && (!dateTo || mStart <= dateTo);
-        });
-        const hasCards = mfAll.some(m => m.cardNumber);
-        let mfIss;
-        if (hasCards) {
-          mfIss = mfAll.filter(m => {
-            const cardOrg = m.cardNumber ? actGsmCardOrg(m.cardNumber) : '';
-            return (cardOrg || actGsmVehicleOrg(v)) === org;
-          }).reduce((s, m) => s + (m.liters || 0), 0);
-        } else {
-          mfIss = mfAll.reduce((s, m) => s + (m.liters || 0), 0);
+      const vOwnOrg = (v.org || '').trim() || '— Без организации —';
+      const isGuestInOrg = (org !== vOwnOrg);
+      const orgCards = new Set();
+      if (typeof fcList === 'function') {
+        fcList().forEach(c => { const k = cardKey(c.number); if (k && actGsmCardOrg(c.number) === org) orgCards.add(k); });
+      }
+      const fpForV = (data.fuelPurchases || []).filter(p =>
+        p.vehicleId === v.id && p.cardNo && p.qty > 0
+        && (!dateFrom || p.date >= dateFrom) && (!dateTo || p.date <= dateTo)
+      );
+      const fpOrgQty = fpForV.filter(p => orgCards.has(cardKey(p.cardNo)))
+        .reduce((s, p) => s + p.qty, 0);
+      const fpOtherQty = fpForV.filter(p => !orgCards.has(cardKey(p.cardNo)))
+        .reduce((s, p) => s + p.qty, 0);
+      const hasFP = fpForV.length > 0;
+      let iss;
+      if (isGuestInOrg) {
+        iss = per.filter(r => r.fuelCardNum && orgCards.has(cardKey(r.fuelCardNum)))
+          .reduce((s, r) => s + (r.fuelIssued || 0), 0);
+      } else if (hasFP) {
+        iss = per.filter(r => r.fuelCardNum && orgCards.has(cardKey(r.fuelCardNum)))
+          .reduce((s, r) => s + (r.fuelIssued || 0), 0);
+      } else {
+        iss = per.reduce((s,r) => s + (r.fuelIssued||0), 0);
+        if (data.monthlyFuel && data.monthlyFuel.length) {
+          const mfAll = (data.monthlyFuel || []).filter(m => {
+            if (m.vehicleId !== v.id) return false;
+            const mStart = m.month + '-01';
+            const md = new Date(m.month + '-01'); md.setMonth(md.getMonth() + 1); md.setDate(0);
+            const mEnd = md.toISOString().slice(0, 10);
+            return (!dateFrom || mEnd >= dateFrom) && (!dateTo || mStart <= dateTo);
+          });
+          const mfIss = mfAll.reduce((s, m) => s + (m.liters || 0), 0);
+          if (mfIss > 0) iss = mfIss;
         }
-        if (mfIss > 0) iss = mfIss;
       }
       const normL=per.reduce((s,r)=>s+(r.fuelUsed||0),0);
-      // Остатки — той же функцией, что в карточке машины: она учитывает замеры
-      // остатка в баке. Тогда «по факту» = остаток на начало + получено − остаток
-      // на конец, и если в периоде был замер, списание идёт по нему, а не по норме.
       const balMap=computeFuelBalances(v.id);
       const before=dateFrom?allRecs.filter(r=>r.date<dateFrom):[];
       const sBal=before.length?balMap[before[before.length-1].id]:(v.fuelBalance||0);
@@ -551,28 +616,22 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       const odoKon  = per.length? (per[per.length-1].odoEnd!=null?per[per.length-1].odoEnd:'') : (v.odometer!=null?v.odometer:'');
       const grade = (v.fuelGrade||'').trim() || fuelMark[ft] || '—';
       const nCity = v.normCity!=null ? v.normCity : (v.norm!=null ? v.norm : null);
-      // Распределение литров по поставщикам: из карт monthlyFuel или из v.supplier
       const supBreak = [0,0,0,0,0];
-      const mfForSup = (data.monthlyFuel || []).filter(m => {
-        if (m.vehicleId !== v.id || !m.cardNumber) return false;
-        const mStart = m.month + '-01';
-        const md2 = new Date(m.month + '-01'); md2.setMonth(md2.getMonth() + 1); md2.setDate(0);
-        const mEnd = md2.toISOString().slice(0, 10);
-        if (dateFrom && mEnd < dateFrom) return false;
-        if (dateTo && mStart > dateTo) return false;
-        const cardOrg = actGsmCardOrg(m.cardNumber);
-        return (cardOrg || actGsmVehicleOrg(v)) === org;
-      });
-      if (mfForSup.length) {
-        mfForSup.forEach(m => {
-          const card = typeof fcList === 'function' ? fcList().find(c => c.number === m.cardNumber) : null;
-          const prov = card ? (card.provider || '').trim() : '';
-          const si = supplierCol(prov) - 15;
-          supBreak[si] += (m.liters || 0);
+      const hasCardRecs = per.some(r => r.fuelCardNum && +r.fuelIssued > 0);
+      if (hasCardRecs) {
+        per.filter(r => +r.fuelIssued > 0).forEach(r => {
+          if (r.fuelCardNum) {
+            if (isGuestInOrg && !orgCards.has(cardKey(r.fuelCardNum))) return;
+            if (!isGuestInOrg && !orgCards.has(cardKey(r.fuelCardNum))) return;
+            const card = typeof fcList === 'function' ? fcList().find(c => cardKey(c.number) === cardKey(r.fuelCardNum)) : null;
+            const prov = card ? (card.provider || '').trim() : '';
+            supBreak[supplierCol(prov) - 15] += r.fuelIssued;
+          } else if (!isGuestInOrg && !hasFP) {
+            supBreak[supplierCol(v.supplier) - 15] += r.fuelIssued;
+          }
         });
       } else {
-        const si = supplierCol(v.supplier) - 15;
-        supBreak[si] = iss;
+        supBreak[supplierCol(v.supplier) - 15] = iss;
       }
       const bg=i%2===0?P.white:P.gray1;
       i++;
@@ -601,9 +660,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       put(n,22,num(idle),ST.tdR(bg));
       put(n,23,num(eBal),ST.tdR(bg));
       put(n,24,num(eco),ecoStyle);
-      const supLabel = mfForSup.length
-        ? [...new Set(mfForSup.map(m => { const c = typeof fcList === 'function' ? fcList().find(x => x.number === m.cardNumber) : null; return c ? (c.provider || '').trim() : ''; }).filter(Boolean))].join(', ') || v.supplier || '—'
-        : (v.supplier || '—');
+      const supLabel = v.supplier || '—';
       put(n,25,supLabel,ST.tdC(bg));
       rowH(n,16); n++;
     });
