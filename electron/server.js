@@ -1,12 +1,45 @@
 const http = require('http');
-const fs   = require('fs');
 const os   = require('os');
 const storage = require('./storage');
+const crypto = require('crypto');
 
 let _server    = null;
 let _dataDir   = null;
 let _backupFn  = null;
 let _writeLock = false;
+let _clientKey = '';
+function configureKey(key) { _clientKey = String(key || ''); }
+function authHeaders() { return { Authorization: 'Bearer ' + _clientKey }; }
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = []; let size = 0;
+    const timer = setTimeout(() => fail(new Error('Время запроса истекло')), 30000);
+    const cleanup = () => { clearTimeout(timer); req.removeListener('data', chunk); req.removeListener('end', end); req.removeListener('aborted', abort); req.removeListener('error', fail); req.removeListener('close', close); };
+    const fail = e => { cleanup(); req.once('error', () => {}); reject(e); };
+    const abort = () => fail(new Error('Соединение прервано'));
+    const close = () => { if (!req.complete) abort(); };
+    const chunk = value => { size += value.length; if (size > 32 * 1024 * 1024) { fail(new Error('Слишком большой запрос')); req.resume(); } else chunks.push(value); };
+    const end = () => { cleanup(); try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch (e) { reject(e); } };
+    req.on('data', chunk); req.on('end', end); req.on('aborted', abort); req.on('error', fail); req.on('close', close);
+  });
+}
+
+async function writeRequest(req, res, full) {
+  const dataDir = _dataDir, backup = _backupFn;
+  try {
+    const payload = await readBody(req);
+    if (_writeLock) { res.writeHead(423); res.end(JSON.stringify({ error: 'Повторите сохранение' })); return; }
+    _writeLock = true;
+    try {
+      if (backup) backup();
+      const r = full ? { ok: true, ...storage.writeAll(dataDir, payload) } : storage.writeSections(dataDir, payload);
+      res.writeHead(r.ok ? 200 : 409, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(r));
+    } finally { _writeLock = false; }
+  } catch (e) {
+    if (!res.destroyed && !res.headersSent) { res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ error: e.message })); }
+  }
+}
 
 function getLocalIPs() {
   const nets = os.networkInterfaces();
@@ -19,16 +52,18 @@ function getLocalIPs() {
   return ips;
 }
 
-function start({ port, dataDir, backupFn, serverName }) {
+function start({ port, dataDir, backupFn, serverName, key }) {
   if (_server) return { ok: false, error: 'Сервер уже запущен' };
+  if (!key || String(key).length < 16) return { ok: false, error: 'Нужен ключ сети длиной от 16 знаков' };
   _dataDir  = dataDir;
   _backupFn = backupFn;
 
   _server = http.createServer((req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    const supplied = Buffer.from(String(req.headers.authorization || ''));
+    const expected = Buffer.from('Bearer ' + key);
+    if (req.headers.origin || supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
+      res.writeHead(401); res.end(JSON.stringify({ error: 'Неверный ключ сети' })); return;
+    }
 
     if (req.method === 'GET' && req.url === '/api/ping') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -83,28 +118,7 @@ function start({ port, dataDir, backupFn, serverName }) {
 
     // Запись только изменившихся разделов с проверкой версии
     if (req.method === 'POST' && req.url === '/api/sections') {
-      if (_writeLock) {
-        res.writeHead(423, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ error: 'Запись заблокирована, попробуйте снова' }));
-        return;
-      }
-      _writeLock = true;
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const payload = JSON.parse(body);
-          if (_backupFn) _backupFn();
-          const r = storage.writeSections(_dataDir, payload);
-          res.writeHead(r.ok ? 200 : 409, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify(r));
-        } catch (e) {
-          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ error: e.message }));
-        } finally {
-          _writeLock = false;
-        }
-      });
+      void writeRequest(req, res, false);
       return;
     }
 
@@ -120,28 +134,7 @@ function start({ port, dataDir, backupFn, serverName }) {
     }
 
     if (req.method === 'POST' && req.url === '/api/data') {
-      if (_writeLock) {
-        res.writeHead(423, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ error: 'Запись заблокирована, попробуйте снова' }));
-        return;
-      }
-      _writeLock = true;
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const data = JSON.parse(body);
-          if (_backupFn) _backupFn();
-          const r = storage.writeAll(_dataDir, data);
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ ok: true, changed: r.changed, revisions: r.revisions }));
-        } catch (e) {
-          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ error: e.message }));
-        } finally {
-          _writeLock = false;
-        }
-      });
+      void writeRequest(req, res, true);
       return;
     }
 
@@ -149,10 +142,12 @@ function start({ port, dataDir, backupFn, serverName }) {
     res.end(JSON.stringify({ error: 'Not found' }));
   });
 
+  _server.requestTimeout = 30000;
+  _server.headersTimeout = 15000;
   return new Promise((resolve) => {
     _server.listen(port, '0.0.0.0', () => {
       const ips = getLocalIPs();
-      resolve({ ok: true, port, ips });
+      resolve({ ok: true, port: _server.address().port, ips });
     });
     _server.on('error', (e) => {
       _server = null;
@@ -165,13 +160,15 @@ function stop() {
   if (!_server) return;
   _server.close();
   _server = null;
+  _writeLock = false;
 }
 
 function isRunning() { return !!_server; }
 
 function fetchData(host, port) {
   return new Promise((resolve, reject) => {
-    const req = http.get({ hostname: host, port, path: '/api/data', timeout: 5000 }, (res) => {
+    const req = http.get({ hostname: host, port, path: '/api/data', timeout: 5000, headers: authHeaders() }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); reject(new Error('HTTP ' + res.statusCode)); return; }
       let body = '';
       res.setEncoding('utf8');
       res.on('data', chunk => { body += chunk; });
@@ -188,7 +185,7 @@ function postData(host, port, jsonStr) {
   return new Promise((resolve, reject) => {
     const opts = {
       hostname: host, port, path: '/api/data', method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(jsonStr) },
+      headers: { ...authHeaders(), 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(jsonStr) },
       timeout: 10000,
     };
     const req = http.request(opts, (res) => {
@@ -208,7 +205,8 @@ function postData(host, port, jsonStr) {
 
 function getJson(host, port, path, timeout) {
   return new Promise((resolve, reject) => {
-    const req = http.get({ hostname: host, port, path, timeout: timeout || 8000 }, (res) => {
+    const req = http.get({ hostname: host, port, path, timeout: timeout || 8000, headers: authHeaders() }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); reject(new Error('HTTP ' + res.statusCode)); return; }
       let body = '';
       res.setEncoding('utf8');
       res.on('data', chunk => { body += chunk; });
@@ -225,7 +223,7 @@ function postSections(host, port, jsonStr) {
   return new Promise((resolve, reject) => {
     const opts = {
       hostname: host, port, path: '/api/sections', method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(jsonStr) },
+      headers: { ...authHeaders(), 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(jsonStr) },
       timeout: 15000,
     };
     const req = http.request(opts, (res) => {
@@ -246,7 +244,7 @@ function postSections(host, port, jsonStr) {
 
 function ping(host, port) {
   return new Promise((resolve) => {
-    const req = http.get({ hostname: host, port, path: '/api/ping', timeout: 3000 }, (res) => {
+    const req = http.get({ hostname: host, port, path: '/api/ping', timeout: 3000, headers: authHeaders() }, (res) => {
       let body = '';
       res.setEncoding('utf8');
       res.on('data', chunk => { body += chunk; });
@@ -259,4 +257,4 @@ function ping(host, port) {
   });
 }
 
-module.exports = { start, stop, isRunning, fetchData, postData, ping, getLocalIPs, getJson, postSections };
+module.exports = { start, stop, isRunning, fetchData, postData, ping, getLocalIPs, getJson, postSections, configureKey };

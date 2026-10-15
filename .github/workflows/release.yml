@@ -28,6 +28,17 @@ jobs:
       - name: Test fuel accounting
         run: npm test
 
+      - name: Install isolated browser test tools
+        run: npm install --prefix "${{ runner.temp }}/tvs-ui-tools" --no-save --package-lock=false playwright@1.62.1
+
+      - name: Install test browser
+        run: node "${{ runner.temp }}/tvs-ui-tools/node_modules/playwright/cli.js" install chromium
+
+      - name: Test forms, deletion, imports and calculations in browser
+        env:
+          TVS_PLAYWRIGHT_MODULES: ${{ runner.temp }}/tvs-ui-tools/node_modules
+        run: npm run test:ui
+
       - name: Build Electron app
         run: npx electron-builder --win --x64 --publish never
 

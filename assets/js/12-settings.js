@@ -89,6 +89,9 @@ async function renderSettingsBody() {
         </div>
         ${serverStatusHtml}` : ''}
       ${clientStatusHtml}
+      ${mode !== 'local' ? `<label style="display:block;margin-top:10px;font-size:12px">Ключ сети
+        <input type="text" id="set_network_key" value="${htmlEsc(s.networkKey || '')}" ${mode === 'server' ? 'readonly' : ''} autocomplete="off" style="width:100%;padding:6px;font-size:12px">
+      </label>` : ''}
     </div>
 
     ${mode !== 'client' ? `
@@ -272,10 +275,13 @@ async function settingsTestConnection() {
   el.innerHTML = '<span style="color:var(--text3)">Проверка соединения...</span>';
   _appSettings.remoteHost = host;
   _appSettings.remotePort = port;
+  const key = document.getElementById('set_network_key').value.trim();
+  if (key.length < 16) { el.textContent = 'Укажите ключ сети с компьютера-сервера'; return; }
+  _appSettings.networkKey = key;
   await window.electronAPI.saveSettings(_appSettings);
   const result = await window.electronAPI.serverPing(host, port);
   if (result && result.ok) {
-    el.innerHTML = '<span style="color:#22c55e;font-weight:600">Подключено! Сервер: ' + (result.name || host) + '</span>';
+    el.innerHTML = '<span style="color:#22c55e;font-weight:600">Подключено! Сервер: ' + htmlEsc(result.name || host) + '</span>';
     data = await loadData();
     rebuildIndex();
     populateOrgSelect();

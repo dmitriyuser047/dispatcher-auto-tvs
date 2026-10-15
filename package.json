@@ -1,10 +1,11 @@
 {
   "name": "dispetcherizaciya-avto",
-  "version": "2.0.99",
+  "version": "2.0.100",
   "description": "Диспетчеризация авто группы компаний ООО Технрайз Велл Сервис",
   "main": "electron/main.js",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
+    "test:ui": "node --test tests/ui-regression.cjs",
     "start": "electron .",
     "build": "electron-builder --win --x64"
   },

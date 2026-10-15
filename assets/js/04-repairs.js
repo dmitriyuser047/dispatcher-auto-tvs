@@ -19,18 +19,18 @@ function renderRepairSection(vid) {
         <td style="padding:10px 14px;font-size:13px;font-weight:600">${r.invoiceNo ? '<span class="invoice-badge"><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' + r.invoiceNo + '</span>' : '—'}</td>
         <td class="td-num">${r.mileage != null ? r.mileage.toLocaleString('ru') + ' км' : '—'}</td>
         <td class="td-num" style="font-weight:600">${r.cost != null ? r.cost.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ₽' : '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${r.description || '—'}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + r.category.split(',')[0].trim() + '</span></div>' : ''}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${htmlEsc(r.description || '—')}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + r.category.split(',')[0].trim() + '</span></div>' : ''}</td>
         <td class="td-num">
           <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:700;color:${r.paid ? 'var(--green)' : 'var(--red)'}">
-            <input type="checkbox" ${r.paid ? 'checked' : ''} onchange="toggleRepairPaid('${r.id}')" style="width:auto;accent-color:var(--accent)">
+            <input type="checkbox" ${r.paid ? 'checked' : ''} onchange="toggleRepairPaid(${htmlJs(r.id)})" style="width:auto;accent-color:var(--accent)">
             ${r.paid ? 'Оплачено' : 'Не оплачено'}
           </label>
         </td>
         <td class="td-actions">
-          <button class="icon-btn" onclick="openEditRepair('${r.id}')">
+          <button class="icon-btn" onclick="openEditRepair(${htmlJs(r.id)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
-          <button class="icon-btn del" onclick="deleteRepair('${r.id}')">
+          <button class="icon-btn del" onclick="deleteRepair(${htmlJs(r.id)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
           </button>
         </td>
@@ -72,7 +72,7 @@ async function populateRepairCategorySelect(presetValue) {
 
 function populateRepairVehicleSelect(selEl, presetVid) {
   selEl.innerHTML = data.vehicles.slice().sort((a,b) => (a.plate||'').localeCompare(b.plate||'', 'ru'))
-    .map(v => `<option value="${v.id}">${v.plate} — ${v.make}${v.driver ? ' · ' + v.driver : ''}</option>`).join('');
+    .map(v => `<option value="${htmlEsc(v.id)}">${htmlEsc(v.plate)} — ${htmlEsc(v.make)}${v.driver ? ' · ' + htmlEsc(v.driver) : ''}</option>`).join('');
   if (presetVid) selEl.value = presetVid;
 }
 
@@ -120,7 +120,7 @@ function openEditRepair(id) {
   openModal('repairModal');
 }
 
-function saveRepair() {
+async function saveRepair() {
   const vehicleId   = document.getElementById('rp_vehicle').value;
   const invoiceDate = parseDate(document.getElementById('rp_invoice_date').value.trim());
   const cost        = parseFloat(document.getElementById('rp_cost').value);
@@ -147,7 +147,7 @@ function saveRepair() {
     obj.id = 'rp_' + Date.now();
     data.repairs.push(obj);
   }
-  saveData(data);
+  if (!await saveData(data)) return;
   closeModal('repairModal');
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   if (v) renderDetail(v);
@@ -157,21 +157,21 @@ function saveRepair() {
   if (document.getElementById('reestrReviewBody') && reestrRows.length) reestrRenderTable();
 }
 
-function deleteRepair(id) {
-  if (!confirm('Удалить эту запись о ремонте?')) return;
+async function deleteRepair(id) {
+  if (!await confirmAction('Удалить эту запись о ремонте?')) return;
   data.repairs = (data.repairs || []).filter(r => r.id !== id);
-  saveData(data);
+  if (!await saveData(data)) return;
   closeModal('repairModal');
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   if (v) renderDetail(v);
   if (document.getElementById('repairsJournalModal').classList.contains('open')) renderRepairsJournal();
 }
 
-function toggleRepairPaid(id) {
+async function toggleRepairPaid(id) {
   const r = (data.repairs || []).find(x => x.id === id);
   if (!r) return;
   r.paid = !r.paid;
-  saveData(data);
+  if (!await saveData(data)) return;
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   if (v) renderDetail(v);
   if (document.getElementById('repairsJournalModal').classList.contains('open')) renderRepairsJournal();
@@ -183,7 +183,7 @@ function openRepairsJournal() {
   const cur = sel.value;
   sel.innerHTML = '<option value="">Все ТС</option>' + data.vehicles.slice()
     .sort((a,b) => (a.plate||'').localeCompare(b.plate||'', 'ru'))
-    .map(v => `<option value="${v.id}">${v.plate} — ${v.make}</option>`).join('');
+    .map(v => `<option value="${htmlEsc(v.id)}">${htmlEsc(v.plate)} — ${htmlEsc(v.make)}</option>`).join('');
   sel.value = cur || '';
   repairsJournalSummaryMode = false;
   const togBtn = document.getElementById('rjSummaryToggle');
@@ -215,18 +215,18 @@ function renderRepairsJournal() {
         <td style="padding:10px 14px;font-size:13px">${r.invoiceNo ? '<span class="invoice-badge"><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' + r.invoiceNo + '</span>' : '—'}</td>
         <td class="td-num">${r.mileage != null ? r.mileage.toLocaleString('ru') + ' км' : '—'}</td>
         <td class="td-num" style="font-weight:600">${r.cost != null ? r.cost.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ₽' : '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${r.description || '—'}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + r.category.split(',')[0].trim() + '</span></div>' : ''}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${htmlEsc(r.description || '—')}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + r.category.split(',')[0].trim() + '</span></div>' : ''}</td>
         <td class="td-num">
           <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:700;color:${r.paid ? 'var(--green)' : 'var(--red)'}">
-            <input type="checkbox" ${r.paid ? 'checked' : ''} onchange="toggleRepairPaid('${r.id}')" style="width:auto;accent-color:var(--accent)">
+            <input type="checkbox" ${r.paid ? 'checked' : ''} onchange="toggleRepairPaid(${htmlJs(r.id)})" style="width:auto;accent-color:var(--accent)">
             ${r.paid ? 'Оплачено' : 'Не оплачено'}
           </label>
         </td>
         <td class="td-actions">
-          <button class="icon-btn" onclick="openEditRepair('${r.id}')">
+          <button class="icon-btn" onclick="openEditRepair(${htmlJs(r.id)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
-          <button class="icon-btn del" onclick="deleteRepair('${r.id}')">
+          <button class="icon-btn del" onclick="deleteRepair(${htmlJs(r.id)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
           </button>
         </td>

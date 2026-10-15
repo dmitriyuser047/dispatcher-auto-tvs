@@ -71,14 +71,14 @@ function renderFinancesSection() {
         ? '<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:10px;font-size:12px">Оплачено</span>'
         : '<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:10px;font-size:12px">Не оплачено</span>';
       const catShort = p.category ? (p.category.length > 30 ? p.category.slice(0,30)+'…' : p.category) : '—';
-      return `<tr style="cursor:pointer" onclick="openEditPayment('${p.id}')">
+      return `<tr style="cursor:pointer" onclick="openEditPayment(${htmlJs(p.id)})">
         <td>${dateStr}</td>
         <td style="font-weight:600">${(p.sum||0).toLocaleString('ru')} ₽</td>
-        <td title="${(p.category||'').replace(/"/g,'&quot;')}" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px">${catShort}</td>
-        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.description||'—'}</td>
-        <td>${p.contragent||'—'}</td>
-        <td>${vPlate}</td>
-        <td>${reestrLabel}</td>
+        <td title="${(p.category||'').replace(/"/g,'&quot;')}" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px">${htmlEsc(catShort)}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${htmlEsc(p.description||'—')}</td>
+        <td>${htmlEsc(p.contragent||'—')}</td>
+        <td>${htmlEsc(vPlate)}</td>
+        <td>${htmlEsc(reestrLabel)}</td>
         <td>${statusBadge}</td>
       </tr>`;
     }).join('');
@@ -165,19 +165,19 @@ function renderFinancesAnalyticsHtml(allPayments) {
 
   const monthRows = Object.entries(byMonth)
     .sort((a,b) => b[1].sortKey.localeCompare(a[1].sortKey))
-    .map(([name,d]) => `<tr><td>${name}</td><td style="font-weight:600">${d.total.toLocaleString('ru')} ₽</td><td style="color:#16a34a">${d.paid.toLocaleString('ru')} ₽</td><td style="color:#dc2626">${d.unpaid.toLocaleString('ru')} ₽</td><td>${d.count}</td></tr>`).join('');
+    .map(([name,d]) => `<tr><td>${htmlEsc(name)}</td><td style="font-weight:600">${d.total.toLocaleString('ru')} ₽</td><td style="color:#16a34a">${d.paid.toLocaleString('ru')} ₽</td><td style="color:#dc2626">${d.unpaid.toLocaleString('ru')} ₽</td><td>${d.count}</td></tr>`).join('');
 
   const palette = ['#2563eb','#7c3aed','#dc2626','#d97706','#059669','#db2777','#64748b','#0284c7','#16a34a','#a21caf'];
   const catEntries = Object.entries(byCat).sort((a,b) => b[1].total - a[1].total);
   const catRows = catEntries.map(([name,d], i) => {
       const pct = grandTotal > 0 ? (d.total/grandTotal*100).toFixed(1) : 0;
       const clr = palette[i % palette.length];
-      return `<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${clr};margin-right:6px"></span><span style="max-width:250px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle">${name}</span></td><td style="font-weight:600">${d.total.toLocaleString('ru')} ₽</td><td>${pct}%</td><td>${d.count}</td></tr>`;
+      return `<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${clr};margin-right:6px"></span><span style="max-width:250px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle">${htmlEsc(name)}</span></td><td style="font-weight:600">${d.total.toLocaleString('ru')} ₽</td><td>${pct}%</td><td>${d.count}</td></tr>`;
     }).join('');
 
   const vehRows = Object.entries(byVehicle)
     .sort((a,b) => b[1].total - a[1].total)
-    .map(([name,d]) => `<tr><td>${name}</td><td style="font-weight:600">${d.total.toLocaleString('ru')} ₽</td><td>${d.count}</td></tr>`).join('');
+    .map(([name,d]) => `<tr><td>${htmlEsc(name)}</td><td style="font-weight:600">${d.total.toLocaleString('ru')} ₽</td><td>${d.count}</td></tr>`).join('');
 
   return `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
@@ -304,7 +304,7 @@ function renderBudgetHtml() {
     </div>`;
 }
 
-function addBudgetEntry() {
+async function addBudgetEntry() {
   const company = document.getElementById('budg_company').value.trim();
   const month = parseInt(document.getElementById('budg_month').value);
   const sum = parseFloat(document.getElementById('budg_sum').value);
@@ -312,15 +312,15 @@ function addBudgetEntry() {
   if (!sum || sum <= 0) return alert('Укажите сумму');
   if (!data.budget) data.budget = [];
   data.budget.push({ id: 'bg_' + Date.now(), company, month, year: budgetYear, sum });
-  saveData();
+  if (!await saveData(data)) return;
   document.getElementById('budg_sum').value = '';
   renderFinancesSection();
 }
 
-function deleteBudgetCompany(company) {
-  if (!confirm('Удалить все записи «' + company + '» за ' + budgetYear + '?')) return;
+async function deleteBudgetCompany(company) {
+  if (!await confirmAction('Удалить все записи «' + company + '» за ' + budgetYear + '?')) return;
   data.budget = (data.budget || []).filter(b => !(b.company === company && b.year === budgetYear));
-  saveData();
+  if (!await saveData(data)) return;
   renderFinancesSection();
 }
 
@@ -434,10 +434,10 @@ async function populatePaymentSelects() {
   filterPayCategory();
   const vSel = document.getElementById('pay_vehicle');
   vSel.innerHTML = '<option value="">— не привязано —</option>' +
-    (data.vehicles||[]).map(v => `<option value="${v.id}">${v.plate}</option>`).join('');
+    (data.vehicles||[]).map(v => `<option value="${htmlEsc(v.id)}">${htmlEsc(v.plate)}</option>`).join('');
   const rSel = document.getElementById('pay_reestr');
   rSel.innerHTML = '<option value="">— не указан —</option>' +
-    (data.savedReestrs||[]).map(r => `<option value="${r.number}">Реестр №${r.number}</option>`).join('');
+    (data.savedReestrs||[]).map(r => `<option value="${htmlEsc(r.number)}">Реестр №${htmlEsc(r.number)}</option>`).join('');
 }
 
 function togglePayCategoryDrop() {
@@ -498,7 +498,7 @@ function selectPayCategory(val) {
   closePayCategoryDrop();
 }
 
-function savePayment() {
+async function savePayment() {
   const dateRaw = document.getElementById('pay_date').value.trim();
   const sum = parseFloat(document.getElementById('pay_sum').value);
   const category = document.getElementById('pay_category').value;
@@ -507,8 +507,8 @@ function savePayment() {
     alert('Заполните обязательные поля: дата, сумма, описание');
     return;
   }
-  const parts = dateRaw.split('.');
-  const isoDate = parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : dateRaw;
+  const isoDate = parseDate(dateRaw);
+  if (!isoDate) { showFieldError('Укажите действительную дату', 'pay_date'); return; }
 
   const obj = {
     id: editingPaymentId || ('pay_' + Date.now()),
@@ -537,21 +537,21 @@ function savePayment() {
   } else {
     data.payments.push(obj);
   }
-  saveData();
+  if (!await saveData(data)) return;
   closeModal('paymentModal');
   renderFinancesSection();
 }
 
-function deletePayment(id) {
+async function deletePayment(id) {
   if (!id) return;
-  if (!confirm('Удалить запись?')) return;
+  if (!await confirmAction('Удалить запись?')) return;
   data.payments = data.payments.filter(p => p.id !== id);
-  saveData();
+  if (!await saveData(data)) return;
   closeModal('paymentModal');
   renderFinancesSection();
 }
 
-function importPaymentsFromJournals() {
+async function importPaymentsFromJournals() {
   if (!data.payments) data.payments = [];
   let imported = 0;
   const existingSourceIds = new Set(data.payments.filter(p=>p.sourceId).map(p=>p.sourceId));
@@ -601,7 +601,7 @@ function importPaymentsFromJournals() {
   });
 
   if (imported > 0) {
-    saveData();
+    if (!await saveData(data)) return;
     renderFinancesSection();
     alert('Импортировано записей: ' + imported);
   } else {

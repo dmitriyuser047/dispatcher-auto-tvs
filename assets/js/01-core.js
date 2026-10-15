@@ -40,6 +40,7 @@ document.addEventListener('keydown', (e) => {
   const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
   // Esc — закрыть любое открытое модальное окно
   if (e.key === 'Escape') {
+    if (document.getElementById('confirmModal')?.classList.contains('open')) return;
     const open = document.querySelectorAll('.modal-overlay.open');
     if (open.length) { open.forEach(m => m.classList.remove('open')); e.preventDefault(); }
     return;
@@ -76,8 +77,27 @@ function parseDate(ddmmyyyy) {
   const parts = ddmmyyyy.split('.');
   if (parts.length !== 3 || parts[2].length !== 4) return '';
   const [d, m, y] = parts;
-  return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+  if (!/^\d{1,2}$/.test(d) || !/^\d{1,2}$/.test(m) || !/^\d{4}$/.test(y)) return '';
+  const iso = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+  const dt = new Date(iso + 'T12:00:00Z');
+  return Number.isFinite(dt.getTime()) && dt.toISOString().slice(0, 10) === iso ? iso : '';
 }
+
+function optionalNumber(id) {
+  const text = document.getElementById(id).value.trim();
+  return text === '' ? null : Number(text.replace(',', '.'));
+}
+function validNonnegativeFields(ids) {
+  for (const id of ids) {
+    const n = optionalNumber(id);
+    if (n != null && (!Number.isFinite(n) || n < 0)) { showFieldError('Введите неотрицательное число', id); return false; }
+  }
+  return true;
+}
+function htmlEsc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+function htmlJs(value) { return htmlEsc(JSON.stringify(String(value ?? ''))); }
 // Автоматически ставит точки при вводе даты
 function autoDateSep(el) {
   let v = el.value.replace(/[^\d]/g, '');
@@ -88,9 +108,12 @@ function autoDateSep(el) {
 
 // ─── DATA ───────────────────────────────────────────────
 const STORAGE_KEY = 'fuel_tracker_v1';
+let _loadWriteBlocked = false;
+let _lastPersisted = null;
 
 async function loadData() {
   let d = null;
+  _loadWriteBlocked = false;
   // Снимок с версиями разделов — для синхронизации нескольких пользователей
   if (typeof syncLoad === 'function') {
     try { d = await syncLoad(); } catch (e) { console.warn('[loadData] снимок: ' + e.message); }
@@ -98,9 +121,15 @@ async function loadData() {
   if (!d && window.electronAPI) {
     try { const raw = await window.electronAPI.readData(); if (raw) d = JSON.parse(raw); } catch {}
   }
+  if (d && (!Array.isArray(d.vehicles) || !Array.isArray(d.records))) d = null;
+  if (!d && window.electronAPI) {
+    _loadWriteBlocked = true;
+    showToast('Основная база недоступна. Открыта резервная копия только для просмотра. Проверьте подключение и файлы базы.');
+  }
   if (!d) {
     try { d = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch {}
   }
+  if (d && (!Array.isArray(d.vehicles) || !Array.isArray(d.records))) d = null;
   if (!d) d = { vehicles: [], records: [] };
   if (!d.generators)  d.generators  = [];
   if (!d.genRecords)  d.genRecords   = [];
@@ -122,6 +151,7 @@ async function loadData() {
   if (!d.fuelPeriods)   d.fuelPeriods   = [];
   if (!d.monthlyFuel)   d.monthlyFuel   = [];
   if (!d.appMeta)       d.appMeta       = [];
+  _lastPersisted = JSON.stringify(d);
   return d;
 }
 // Резервная копия в localStorage. Основное хранилище — файл data.json через
@@ -147,24 +177,36 @@ function scheduleLocalBackup(json) {
   }, 0);
 }
 
-async function saveData(d) {
+async function saveData(d = data) {
   showProgress();
   rebuildIndex();
-  const json = JSON.stringify(d);
-  let saved = true;
-  if (window.electronAPI) {
-    // По разделам с проверкой версии; на старом сервере — целиком, как раньше
-    const ok = typeof _sync !== 'undefined' && _sync.enabled
-      ? await syncSave(d)
-      : await window.electronAPI.writeData(json);
-    if (ok === false) {
-      saved = false;
-      showToast('Ошибка сохранения на сервер. Проверьте соединение.');
+  try {
+    if (_loadWriteBlocked) throw new Error('Основная база не прочитана. Сначала восстановите подключение или базу.');
+    const json = JSON.stringify(d);
+    if (window.electronAPI) {
+      // По разделам с проверкой версии; на старом сервере — целиком, как раньше
+      const ok = typeof _sync !== 'undefined' && _sync.enabled
+        ? await syncSave(d)
+        : await window.electronAPI.writeData(json);
+      if (ok !== true) throw new Error('Изменения не записаны. Проверьте соединение и состояние базы.');
     }
+    _lastPersisted = JSON.stringify(d);
+    scheduleLocalBackup(_lastPersisted);
+    return true;
+  } catch (e) {
+    if (d === data && _lastPersisted) {
+      data = JSON.parse(_lastPersisted);
+      if (typeof _sync !== 'undefined' && _sync.enabled) {
+        Object.entries(_sync.synced).forEach(([name, json]) => { data[name] = JSON.parse(json); });
+      }
+      if (typeof reestrRows !== 'undefined') reestrRows = data.reestrRows || [];
+      rebuildIndex();
+    }
+    showToast('Ошибка сохранения: ' + (e.message || e));
+    return false;
+  } finally {
+    setTimeout(hideProgress, 300);
   }
-  scheduleLocalBackup(json);
-  setTimeout(hideProgress, 300);
-  return saved;
 }
 
 let data = { vehicles: [], records: [], generators: [], genRecords: [] };

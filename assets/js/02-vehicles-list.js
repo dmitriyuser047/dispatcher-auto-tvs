@@ -45,12 +45,12 @@ function renderVehicleList() {
       : v.status === 'В резерве' ? 'var(--accent)'
       : v.status === 'В ремонте' || v.status === 'После ДТП' ? 'var(--red)'
       : 'var(--yellow)';
-    return `<div class="vehicle-row ${selectedVehicleId === v.id ? 'active' : ''}" onclick="selectVehicle('${v.id}')">
+    return `<div class="vehicle-row ${selectedVehicleId === v.id ? 'active' : ''}" onclick="selectVehicle(${htmlJs(v.id)})">
       ${statusColor ? `<span class="vr-dot" style="background:${statusColor}"></span>` : '<span class="vr-dot" style="background:var(--text3);opacity:.3"></span>'}
-      <span class="vr-plate">${v.plate}</span>
+      <span class="vr-plate">${htmlEsc(v.plate)}</span>
       <span class="vr-info">
-        <span class="vr-make">${v.make}</span>
-        <span class="vr-driver">${v.driver || ''}</span>
+        <span class="vr-make">${htmlEsc(v.make)}</span>
+        <span class="vr-driver">${htmlEsc(v.driver || '')}</span>
       </span>
     </div>`;
   }).join('');
@@ -193,7 +193,7 @@ function renderDetail(v) {
       const balance = balMap[r.id];
       const balColor = balance < 0 ? 'var(--red)' : balance === 0 ? 'var(--text3)' : 'var(--green)';
       tableRows += `<tr>
-        <td style="text-align:center;padding:0;width:28px"><input type="checkbox" class="rec-check" data-recid="${r.id}" onchange="recUpdateToolbar()"></td>
+        <td style="text-align:center;padding:0;width:28px"><input type="checkbox" class="rec-check" data-recid="${htmlEsc(r.id)}" onchange="recUpdateToolbar()"></td>
         <td class="td-day">${fullDate} <span style="color:var(--text3)">${dayName}</span></td>
         <td class="td-num">${r.km ? r.km.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${r.odoStart ? r.odoStart.toLocaleString('ru') : '—'} → ${r.odoEnd ? r.odoEnd.toLocaleString('ru') : '—'}</td>
@@ -204,12 +204,12 @@ function renderDetail(v) {
         <td class="td-num" style="color:${balColor};font-weight:600">${balance != null ? balance.toLocaleString('ru', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</td>
         <td class="td-num">${normL100 !== null ? normL100.toFixed(1) : '—'}</td>
         <td class="td-num">${factL100 !== null ? factL100.toFixed(1) + factDevHtml : '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${r.driver || '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.driver || '—')}</td>
         <td class="td-actions">
-          <button class="icon-btn" title="Редактировать" onclick="openEditRecord('${r.id}')">
+          <button class="icon-btn" title="Редактировать" onclick="openEditRecord(${htmlJs(r.id)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
-          <button class="icon-btn del" title="Удалить" onclick="deleteRecord('${r.id}')">
+          <button class="icon-btn del" title="Удалить" onclick="deleteRecord(${htmlJs(r.id)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
           </button>
         </td>
@@ -221,50 +221,50 @@ function renderDetail(v) {
     <!-- Vehicle header -->
     <div class="vehicle-detail-header">
       <div class="vdh-left">
-        <div class="vdh-plate">${v.plate}</div>
-        <div class="vdh-make">${v.make}</div>
+        <div class="vdh-plate">${htmlEsc(v.plate)}</div>
+        <div class="vdh-make">${htmlEsc(v.make)}</div>
         <div class="vdh-meta">
           <div class="vdh-meta-item">
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M6 20v-2a6 6 0 0112 0v2"/></svg>
-            ${v.driver}
+            ${htmlEsc(v.driver)}
           </div>
           ${v.org ? `<div class="vdh-meta-item">
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/></svg>
-            ${v.org}
+            ${htmlEsc(v.org)}
           </div>` : ''}
           ${v.object ? `<div class="vdh-meta-item">
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
-            ${v.object}
+            ${htmlEsc(v.object)}
           </div>` : ''}
           <div class="vdh-meta-item">
             <span class="fuel-tag ${fuelTypeFromGrade(vehicleFuelGrade(v))}">${vehicleFuelGrade(v)}</span>
           </div>
-          ${v.norm ? `<div class="vdh-meta-item" style="color:var(--text3);font-size:12px">Норма: ${v.norm} л/100км</div>` : ''}
+          ${v.norm ? `<div class="vdh-meta-item" style="color:var(--text3);font-size:12px">Норма: ${htmlEsc(v.norm)} л/100км</div>` : ''}
           ${v.odometer != null ? `<div class="vdh-meta-item" style="color:var(--text3);font-size:12px">
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l2 2"/></svg>
             Нач. пробег: ${v.odometer.toLocaleString('ru')} км
           </div>` : ''}
           ${v.responsible ? `<div class="vdh-meta-item">
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
-            Отв.: ${v.responsible}
+            Отв.: ${htmlEsc(v.responsible)}
           </div>` : ''}
           ${v.fuelcard ? `<div class="vdh-meta-item">
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-            <span style="font-family:'Courier New',monospace;letter-spacing:0.5px">№ карты: ${v.fuelcard}</span>
+            <span style="font-family:'Courier New',monospace;letter-spacing:0.5px">№ карты: ${htmlEsc(v.fuelcard)}</span>
           </div>` : ''}
           ${v.status ? `<div class="vdh-meta-item">
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            <span style="color:${v.status === 'На ходу' ? 'var(--green)' : v.status === 'В ремонте' ? 'var(--red)' : v.status === 'После ДТП' ? 'var(--red)' : 'var(--yellow)'}">${v.status}</span>
+            <span style="color:${v.status === 'На ходу' ? 'var(--green)' : v.status === 'В ремонте' ? 'var(--red)' : v.status === 'После ДТП' ? 'var(--red)' : 'var(--yellow)'}">${htmlEsc(v.status)}</span>
           </div>` : ''}
         </div>
-        ${v.justification ? `<div style="margin-top:8px;font-size:12px;color:var(--text2);background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;max-width:600px"><span style="color:var(--text3);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Обоснование: </span>${v.justification}</div>` : ''}
+        ${v.justification ? `<div style="margin-top:8px;font-size:12px;color:var(--text2);background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;max-width:600px"><span style="color:var(--text3);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Обоснование: </span>${htmlEsc(v.justification)}</div>` : ''}
       </div>
       <div class="vdh-actions">
-        <button class="btn btn-ghost btn-sm" onclick="openEditVehicle('${v.id}')">
+        <button class="btn btn-ghost btn-sm" onclick="openEditVehicle(${htmlJs(v.id)})">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           Изменить
         </button>
-        <button class="btn btn-danger btn-sm" onclick="deleteVehicle('${v.id}')">
+        <button class="btn btn-danger btn-sm" onclick="deleteVehicle(${htmlJs(v.id)})">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
           Удалить
         </button>

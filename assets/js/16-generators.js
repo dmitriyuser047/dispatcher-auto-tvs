@@ -64,19 +64,19 @@ function renderGenDetail(g) {
         <td class="td-day">${fmtDate(r.date)} <span style="color:var(--text3)">${dayName}</span></td>
         <td class="td-num">${r.hours!=null ? r.hours.toLocaleString('ru',{maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${r.meterStart!=null?r.meterStart.toLocaleString('ru',{maximumFractionDigits:1}):'—'} → ${r.meterEnd!=null?r.meterEnd.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
-        <td class="td-num" style="cursor:pointer" title="Изменить нагрузку" onclick="event.stopPropagation();openEditGenRecord('${r.id}')">${r.load!=null?r.load.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
+        <td class="td-num" style="cursor:pointer" title="Изменить нагрузку" onclick="event.stopPropagation();openEditGenRecord(${htmlJs(r.id)})">${r.load!=null?r.load.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
         <td class="td-num">${r.fuelIssued!=null?r.fuelIssued.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
         <td class="td-num">${r.fuelUsed!=null?r.fuelUsed.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
         <td class="td-num">${r.fuelActual!=null?r.fuelActual.toLocaleString('ru',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
         <td class="td-num" style="color:${balColor};font-weight:600">${bal!=null?bal.toLocaleString('ru',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
         <td class="td-num">${normLh!==null?normLh.toFixed(1):'—'}</td>
         <td class="td-num">${factLh!==null?factLh.toFixed(1)+factDevHtml:'—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${r.note||'—'}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.note||'—')}</td>
         <td class="td-actions">
-          <button class="icon-btn" title="Редактировать" onclick="openEditGenRecord('${r.id}')">
+          <button class="icon-btn" title="Редактировать" onclick="openEditGenRecord(${htmlJs(r.id)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
-          <button class="icon-btn del" title="Удалить" onclick="deleteGenRecord('${r.id}')">
+          <button class="icon-btn del" title="Удалить" onclick="deleteGenRecord(${htmlJs(r.id)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
           </button>
         </td>
@@ -89,29 +89,29 @@ function renderGenDetail(g) {
   document.getElementById('mainContent').innerHTML = `
     <div class="vehicle-detail-header">
       <div class="vdh-left">
-        <div class="vdh-make">${g.name}</div>
+        <div class="vdh-make">${htmlEsc(g.name)}</div>
         <div class="vdh-meta">
-          ${g.serial?`<div class="vdh-meta-item"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg><span style="font-family:'Courier New',monospace;letter-spacing:0.5px">С/н: ${g.serial}</span></div>`:''}
-          ${g.location?`<div class="vdh-meta-item"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>${g.location}</div>`:''}
-          ${g.responsible?`<div class="vdh-meta-item"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>${g.responsible}</div>`:''}
-          ${g.power!=null?`<div class="vdh-meta-item" style="color:var(--text3);font-size:12px"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>${g.power} кВт</div>`:''}
+          ${g.serial?`<div class="vdh-meta-item"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg><span style="font-family:'Courier New',monospace;letter-spacing:0.5px">С/н: ${htmlEsc(g.serial)}</span></div>`:''}
+          ${g.location?`<div class="vdh-meta-item"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>${htmlEsc(g.location)}</div>`:''}
+          ${g.responsible?`<div class="vdh-meta-item"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>${htmlEsc(g.responsible)}</div>`:''}
+          ${g.power!=null?`<div class="vdh-meta-item" style="color:var(--text3);font-size:12px"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>${htmlEsc(g.power)} кВт</div>`:''}
           ${g.fuel?`<div class="vdh-meta-item"><span class="fuel-tag ${fuelClasses[g.fuel]}">${fuelLabels[g.fuel]}</span></div>`:''}
-          ${g.norm?`<div class="vdh-meta-item" style="color:var(--text3);font-size:12px">Норма: ${g.norm} л/мтч</div>`:''}
+          ${g.norm?`<div class="vdh-meta-item" style="color:var(--text3);font-size:12px">Норма: ${htmlEsc(g.norm)} л/мтч</div>`:''}
           ${g.cost!=null?`<div class="vdh-meta-item" style="color:var(--text3);font-size:12px">Стоимость: ${g.cost.toLocaleString('ru-RU')} руб.</div>`:''}
-          ${stColor?`<div class="vdh-meta-item"><span style="color:${stColor};font-weight:600">${g.status}</span></div>`:''}
+          ${stColor?`<div class="vdh-meta-item"><span style="color:${stColor};font-weight:600">${htmlEsc(g.status)}</span></div>`:''}
         </div>
-        ${g.note?`<div style="margin-top:8px;font-size:12px;color:var(--text2);background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;max-width:600px">${g.note}</div>`:''}
+        ${g.note?`<div style="margin-top:8px;font-size:12px;color:var(--text2);background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;max-width:600px">${htmlEsc(g.note)}</div>`:''}
       </div>
       <div class="vdh-actions">
-        <button class="btn btn-ghost btn-sm" onclick="openGenExportOneModal('${g.id}')">
+        <button class="btn btn-ghost btn-sm" onclick="openGenExportOneModal(${htmlJs(g.id)})">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           XLS
         </button>
-        <button class="btn btn-ghost btn-sm" onclick="openEditGenerator('${g.id}')">
+        <button class="btn btn-ghost btn-sm" onclick="openEditGenerator(${htmlJs(g.id)})">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           Изменить
         </button>
-        <button class="btn btn-danger btn-sm" onclick="deleteGenerator('${g.id}')">
+        <button class="btn btn-danger btn-sm" onclick="deleteGenerator(${htmlJs(g.id)})">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
           Удалить
         </button>
@@ -227,18 +227,18 @@ function renderToSection(gid, currentHours) {
     [...recs].reverse().forEach(r => {
       rows += `<tr>
         <td class="td-day">${fmtDate(r.date)}</td>
-        <td style="padding:10px 14px;font-size:13px;font-weight:600">${r.type || '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;font-weight:600">${htmlEsc(r.type || '—')}</td>
         <td class="td-num">${r.hours != null ? r.hours.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${r.nextHoursAbs != null ? r.nextHoursAbs.toLocaleString('ru', {maximumFractionDigits:0}) : (r.nextHours ? '+'+r.nextHours+' мтч' : '—')}</td>
         <td class="td-day">${r.nextDate ? fmtDate(r.nextDate) : '—'}</td>
         <td class="td-num">${r.cost != null ? r.cost.toLocaleString('ru-RU') + ' ₽' : '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${r.performer || '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${r.note || '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.performer || '—')}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.note || '—')}</td>
         <td class="td-actions">
-          <button class="icon-btn" onclick="openEditToRecord('${r.id}')">
+          <button class="icon-btn" onclick="openEditToRecord(${htmlJs(r.id)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
-          <button class="icon-btn del" onclick="deleteToRecord('${r.id}')">
+          <button class="icon-btn del" onclick="deleteToRecord(${htmlJs(r.id)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
           </button>
         </td>
@@ -309,7 +309,7 @@ function openEditToRecord(id) {
   openModal('toModal');
 }
 
-function saveToRecord() {
+async function saveToRecord() {
   const dateIso = parseDate(document.getElementById('to_date').value.trim());
   const type    = document.getElementById('to_type').value.trim();
   if (!dateIso) { showFieldError('Укажите дату проведения ТО', 'to_date'); return; }
@@ -337,16 +337,16 @@ function saveToRecord() {
     obj.id = 'to_' + Date.now();
     data.toRecords.push(obj);
   }
-  saveData(data);
+  if (!await saveData(data)) return;
   closeModal('toModal');
   const g = (data.generators || []).find(x => x.id === obj.generatorId);
   if (g) renderGenDetail(g);
 }
 
-function deleteToRecord(id) {
-  if (!confirm('Удалить эту запись ТО?')) return;
+async function deleteToRecord(id) {
+  if (!await confirmAction('Удалить эту запись ТО?')) return;
   data.toRecords = (data.toRecords || []).filter(r => r.id !== id);
-  saveData(data);
+  if (!await saveData(data)) return;
   const g = (data.generators || []).find(x => x.id === selectedGeneratorId);
   if (g) renderGenDetail(g);
 }
@@ -359,7 +359,7 @@ function computeGenFuelBalances(gid) {
   let balance = gen ? (gen.fuelBalance || 0) : 0;
   const balMap = {};
   recs.forEach(r => {
-    const spent = r.fuelActual != null ? r.fuelActual : (r.fuelUsed || 0);
+    const spent = genActualSpent(gen, r);
     balance += (r.fuelIssued || 0) - spent;
     balMap[r.id] = +balance.toFixed(2);
   });
@@ -421,9 +421,16 @@ function computeTankBalanceAt(tankId, boundary, inclusive) {
   if (!t) return 0;
   const okDate = d => !boundary || (inclusive ? d <= boundary : d < boundary);
   const income = (data.tankIncomes || []).filter(r => r.tankId === tankId && okDate(r.date)).reduce((s, r) => s + (r.amount || 0), 0);
-  const boundGenIds = new Set((data.generators || []).filter(g => g.tankId === tankId).map(g => g.id));
-  const issued = (data.genRecords || []).filter(r => boundGenIds.has(r.generatorId) && okDate(r.date)).reduce((s, r) => s + (r.fuelIssued || 0), 0);
+  const issued = (data.genRecords || []).filter(r => genRecordTankId(r) === tankId && okDate(r.date)).reduce((s, r) => s + (r.fuelIssued || 0), 0);
   return +((t.balanceInit || 0) + income - issued).toFixed(2);
+}
+
+function genRecordTankId(r) {
+  return Object.prototype.hasOwnProperty.call(r, 'tankId') ? r.tankId : ((data.generators || []).find(g => g.id === r.generatorId) || {}).tankId || null;
+}
+function genPreserveTankHistory(g) {
+  (data.genRecords || []).filter(r => r.generatorId === g.id && !Object.prototype.hasOwnProperty.call(r, 'tankId'))
+    .forEach(r => { r.tankId = g.tankId || null; });
 }
 
 // Баланс генератора без привязанной ёмкости на дату (аналог computeTankBalanceAt)

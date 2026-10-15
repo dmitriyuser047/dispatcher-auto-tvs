@@ -32,6 +32,11 @@ function saveSettings(s) {
 }
 
 let settings = loadSettings();
+if (!settings.networkKey) {
+  settings.networkKey = require('crypto').randomBytes(24).toString('hex');
+  saveSettings(settings);
+}
+server.configureKey(settings.networkKey);
 
 function getActiveUser() {
   const idx = settings.activeUser || 0;
@@ -112,6 +117,11 @@ function createWindow() {
     },
   });
   win.setMenuBarVisibility(false);
+  win.webContents.on('will-navigate', (event, url) => {
+    const origin = 'http://127.0.0.1:' + app._localServerPort;
+    if (!url.startsWith(origin + '/')) event.preventDefault();
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   // Serve index.html via local HTTP to avoid file:// rendering bugs
   const rootDir = path.join(__dirname, '..');
@@ -119,8 +129,11 @@ function createWindow() {
   if (!app._localServer) {
     app._localServer = http.createServer((req, res) => {
       const url = req.url === '/' ? '/index.html' : req.url.split('?')[0];
-      const filePath = path.join(rootDir, decodeURIComponent(url));
-      if (!filePath.startsWith(rootDir)) { res.writeHead(403); res.end(); return; }
+      let filePath;
+      try { filePath = path.resolve(rootDir, '.' + decodeURIComponent(url)); }
+      catch { res.writeHead(400); res.end(); return; }
+      const relative = path.relative(rootDir, filePath);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) { res.writeHead(403); res.end(); return; }
       fs.readFile(filePath, (err, data) => {
         if (err) { res.writeHead(404); res.end(); return; }
         const ext = path.extname(filePath).toLowerCase();
@@ -268,6 +281,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('save-settings', (_event, newSettings) => {
     settings = newSettings;
+    server.configureKey(settings.networkKey);
     saveSettings(settings);
     if (!isClientMode()) ensureDirs();
     return true;
@@ -300,6 +314,7 @@ app.whenReady().then(() => {
       dataDir: getDataDir(),
       backupFn: () => { ensureDirs(); createDailyBackup(); },
       serverName: user.name || os.hostname(),
+      key: settings.networkKey,
     });
   });
 
@@ -327,6 +342,7 @@ app.whenReady().then(() => {
       dataDir: getDataDir(),
       backupFn: () => { ensureDirs(); createDailyBackup(); },
       serverName: getActiveUser().name || os.hostname(),
+      key: settings.networkKey,
     });
   }
 

@@ -14,7 +14,9 @@
 
 // ─── ANIMATED COUNTER for stat values ───
 function animateCounters(container) {
-  // Intentionally static for performance on large local databases.
+  (container || document).querySelectorAll('.counter[data-target]').forEach(el => {
+    el.textContent = Number(el.dataset.target || 0).toLocaleString('ru-RU');
+  });
 }
 
 // ─── PROGRESS BAR helper ───

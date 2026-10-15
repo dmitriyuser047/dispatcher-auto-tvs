@@ -99,7 +99,7 @@ function renderToScheduleSection() {
           <button class="icon-btn" onclick="tssEditRecord('${r.id}','${r.source}')">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
-          <button class="icon-btn del" onclick="if(confirm('Удалить запись ТО?'))tssDeleteDirect('${r.id}','${r.source}')">
+          <button class="icon-btn del" onclick="tssDeleteDirect(${htmlJs(r.id)},${htmlJs(r.source)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
           </button>
         </td>
@@ -230,7 +230,7 @@ function tssEditRecord(id, source) {
   openModal('toScheduleModal');
 }
 
-function tssSaveRecord() {
+async function tssSaveRecord() {
   const dateIso = parseDate(document.getElementById('tss_date').value.trim());
   const type = document.getElementById('tss_type').value.trim();
   if (!dateIso) { showFieldError('Укажите дату', 'tss_date'); return; }
@@ -272,26 +272,26 @@ function tssSaveRecord() {
       data.toRecords.push(obj);
     }
   }
-  saveData(data);
+  if (!await saveData(data)) return;
   closeModal('toScheduleModal');
   renderToScheduleSection();
 }
 
-function tssDeleteRecord() {
-  if (!confirm('Удалить эту запись ТО?')) return;
-  tssDeleteDirect(tssEditingId, tssEditingSource);
-  closeModal('toScheduleModal');
+async function tssDeleteRecord() {
+  if (await tssDeleteDirect(tssEditingId, tssEditingSource)) closeModal('toScheduleModal');
 }
 
-function tssDeleteDirect(id, source) {
+async function tssDeleteDirect(id, source) {
   if (!id) return;
+  if (!await confirmAction('Удалить эту запись ТО?')) return false;
   if (source === 'vehicleTo') {
     data.vehicleTo = (data.vehicleTo || []).filter(r => r.id !== id);
   } else {
     data.toRecords = (data.toRecords || []).filter(r => r.id !== id);
   }
-  saveData(data);
+  if (!await saveData(data)) return false;
   if (activeSection === 'toSchedule') renderToScheduleSection();
+  return true;
 }
 
 // Выгрузка графика ТО: все месяцы сразу — списком, шахматкой по месяцам

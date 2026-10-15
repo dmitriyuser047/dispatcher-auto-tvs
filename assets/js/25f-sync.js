@@ -104,8 +104,10 @@ async function syncSaveNow(d) {
       return await window.electronAPI.writeData(JSON.stringify(d)) !== false;
     }
     if (res && res.ok) {
-      changed.forEach(n => { _sync.synced[n] = cur[n]; });
-      _sync.revs = Object.assign(_sync.revs, res.revisions || {});
+      changed.forEach(n => {
+        _sync.synced[n] = cur[n];
+        if (res.revisions && n in res.revisions) _sync.revs[n] = res.revisions[n];
+      });
       if (mergedNames.size) {
         rebuildIndex();
         showToast('Сохранено вместе с правками другого пользователя: ' + [...mergedNames].map(n => SYNC_NAMES[n] || n).join(', '));
@@ -113,7 +115,7 @@ async function syncSaveNow(d) {
       }
       return true;
     }
-    if (!res || !res.conflicts) return false;
+    if (!res || !res.conflicts) { if (res && res.error) throw new Error(res.error); return false; }
     // Кто-то успел поменять эти разделы — сливаем и пробуем снова
     for (const n of res.conflicts) {
       const remote = await window.electronAPI.readSection(n);
@@ -134,6 +136,7 @@ async function syncSaveNow(d) {
 // Подтянуть чужие изменения
 async function syncPoll() {
   if (!_sync.enabled || !window.electronAPI.getRevisions) return;
+  if (document.querySelector('.modal-overlay.open')) return;
   if (_sync.needRefresh.length) syncRefreshView([]);
   const revs = await window.electronAPI.getRevisions();
   if (!revs) return;
@@ -141,10 +144,12 @@ async function syncPoll() {
   if (!stale.length) return;
   // В очередь с сохранениями, чтобы не подтягивать посреди записи
   _sync.chain = _sync.chain.then(async () => {
+    if (document.querySelector('.modal-overlay.open')) return;
     const got = [];
     for (const n of stale) {
       const remote = await window.electronAPI.readSection(n);
       if (!remote) continue;
+      if (document.querySelector('.modal-overlay.open')) return;
       const localStr = JSON.stringify(data[n] || []);
       if (localStr !== _sync.synced[n]) {
         // У нас есть несохранённые правки в этом разделе — сливаем

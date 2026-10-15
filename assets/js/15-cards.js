@@ -36,16 +36,16 @@ function renderVehicleCards() {
     const totalKm = recs.reduce((s, r) => s + (r.km || 0), 0);
     const lastRec = recs.length ? recs.sort((a,b) => cmpDateDesc(a.date, b.date))[0] : null;
     const accentColor = v.status === 'На ходу' ? '#16a34a' : (v.status === 'В ремонте' || v.status === 'После ДТП') ? '#dc2626' : v.status === 'В резерве' ? '#2563eb' : v.status ? '#d97706' : 'transparent';
-    return `<div class="vehicle-card" onclick="selectVehicle('${v.id}')">
+    return `<div class="vehicle-card" onclick="selectVehicle(${htmlJs(v.id)})">
       <div class="vc-accent-bar" style="background:${accentColor}"></div>
-      <div class="vc-plate">${v.plate}</div>
-      <div class="vc-make">${v.make || '—'}</div>
-      <div class="vc-driver">${v.driver ? '<svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ' + v.driver : ''}</div>
-      ${v.status ? `<span class="vc-status" style="${statusStyle(v.status)}"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0"></span>${v.status}</span>` : ''}
+      <div class="vc-plate">${htmlEsc(v.plate)}</div>
+      <div class="vc-make">${htmlEsc(v.make || '—')}</div>
+      <div class="vc-driver">${v.driver ? '<svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ' + htmlEsc(v.driver) : ''}</div>
+      ${v.status ? `<span class="vc-status" style="${statusStyle(v.status)}"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0"></span>${htmlEsc(v.status)}</span>` : ''}
       <div class="vc-meta">
         <span class="fuel-tag ${fuelTypeFromGrade(vehicleFuelGrade(v))}" style="font-size:10px;padding:1px 6px">${vehicleFuelGrade(v)}</span>
         ${totalKm > 0 ? '<span><svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg> ' + totalKm.toLocaleString('ru') + ' км</span>' : ''}
-        ${v.org ? '<span>' + v.org + '</span>' : ''}
+        ${v.org ? '<span>' + htmlEsc(v.org) + '</span>' : ''}
       </div>
     </div>`;
   }).join('');
@@ -116,17 +116,17 @@ function renderGeneratorCards() {
     const stBorder = g.status === 'В работе' ? 'rgba(22,163,74,0.2)' : g.status === 'Резерв' ? 'rgba(37,99,235,0.2)' : g.status ? 'rgba(220,38,38,0.2)' : '';
     const balColor = fuelBal < 0 ? 'var(--red)' : fuelBal < 50 ? 'var(--yellow)' : 'var(--green)';
 
-    return `<div class="vehicle-card" onclick="openGeneratorDetail('${g.id}')" style="min-height:120px">
+    return `<div class="vehicle-card" onclick="openGeneratorDetail(${htmlJs(g.id)})" style="min-height:120px">
       <div class="vc-accent-bar" style="background:${stColor}"></div>
-      <div class="vc-plate">${g.name}</div>
-      <div class="vc-make">${g.location || '—'}</div>
-      <div class="vc-driver">${g.serial ? '<svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> С/н: ' + g.serial : ''}</div>
-      ${g.status ? `<span class="vc-status" style="background:${stBg};color:${stColor};border:1px solid ${stBorder}"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0"></span>${g.status}</span>` : ''}
+      <div class="vc-plate">${htmlEsc(g.name)}</div>
+      <div class="vc-make">${htmlEsc(g.location || '—')}</div>
+      <div class="vc-driver">${g.serial ? '<svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> С/н: ' + htmlEsc(g.serial) : ''}</div>
+      ${g.status ? `<span class="vc-status" style="background:${stBg};color:${stColor};border:1px solid ${stBorder}"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0"></span>${htmlEsc(g.status)}</span>` : ''}
       <div class="vc-meta">
         ${g.power != null ? '<span><svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> ' + g.power + ' кВт</span>' : ''}
         <span style="font-variant-numeric:tabular-nums">${totalHours.toLocaleString('ru',{maximumFractionDigits:1})} мтч</span>
         <span style="color:${balColor};font-variant-numeric:tabular-nums">${fuelBal.toLocaleString('ru',{maximumFractionDigits:1})} л</span>
-        ${g.fuel ? '<span>' + (fuelLabels[g.fuel] || g.fuel) + '</span>' : ''}
+        ${g.fuel ? '<span>' + htmlEsc(fuelLabels[g.fuel] || g.fuel) + '</span>' : ''}
       </div>
     </div>`;
   }).join('');
@@ -227,7 +227,7 @@ function renderGeneratorList() {
       curLoc = locGroup;
       html += `<div class="gen-loc-header">
         <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
-        ${locGroup}
+        ${htmlEsc(locGroup)}
       </div>`;
     }
     const gRecs      = genRecsFor(g.id);
@@ -245,18 +245,18 @@ function renderGeneratorList() {
     const stColor    = g.status === 'В работе' ? '#22c55e' : g.status === 'Резерв' ? '#3b82f6' : g.status ? '#ef4444' : null;
     const stDot      = stColor ? `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${stColor};flex-shrink:0"></span>` : '';
     const fb         = g.fuel ? { label: fuelLabels[g.fuel], cls: fuelClasses[g.fuel] } : null;
-    html += `<div class="gen-card ${selectedGeneratorId === g.id ? 'active' : ''}" onclick="selectGenerator('${g.id}')">
+    html += `<div class="gen-card ${selectedGeneratorId === g.id ? 'active' : ''}" onclick="selectGenerator(${htmlJs(g.id)})">
       <div class="gen-card-top">
         <div style="flex:1;min-width:0">
-          <div class="gen-card-name">${stDot} ${g.name}</div>
-          <div class="gen-card-sub">${g.serial ? 'С/н: '+g.serial : ''}${g.responsible ? (g.serial?' · ':'')+'Отв.: '+g.responsible : ''}</div>
+          <div class="gen-card-name">${stDot} ${htmlEsc(g.name)}</div>
+          <div class="gen-card-sub">${g.serial ? 'С/н: '+ htmlEsc(g.serial) : ''}${g.responsible ? (g.serial?' · ':'')+'Отв.: '+ htmlEsc(g.responsible) : ''}</div>
         </div>
-        ${g.power != null ? `<div class="gen-card-power">${g.power} кВт</div>` : ''}
+        ${g.power != null ? `<div class="gen-card-power">${htmlEsc(g.power)} кВт</div>` : ''}
       </div>
       <div class="gen-card-badges">
         <div class="gen-badge">${totalHours.toLocaleString('ru',{maximumFractionDigits:1})} мтч</div>
         <div class="gen-badge" style="color:${balColor};border-color:${balColor}4d;background:${balColor}1a">${fuelBal.toLocaleString('ru',{maximumFractionDigits:1})} л</div>
-        ${g.status ? `<div class="gen-badge" style="color:${stColor};border-color:${stColor}4d;background:${stColor}1a">${g.status}</div>` : ''}
+        ${g.status ? `<div class="gen-badge" style="color:${stColor};border-color:${stColor}4d;background:${stColor}1a">${htmlEsc(g.status)}</div>` : ''}
         ${fb ? `<span class="fuel-tag ${fb.cls}" style="font-size:10px;padding:1px 6px">${fb.label}</span>` : ''}
       </div>
     </div>`;

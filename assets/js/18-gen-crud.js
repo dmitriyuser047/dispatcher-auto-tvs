@@ -36,7 +36,7 @@ function openEditGenerator(id) {
   openModal('generatorModal');
 }
 
-function saveGenerator() {
+async function saveGenerator() {
   const name     = document.getElementById('gm_name').value.trim();
   const location = document.getElementById('gm_location').value.trim();
   if (!name)     { showFieldError('Укажите наименование ДЭС', 'gm_name'); return; }
@@ -60,25 +60,28 @@ function saveGenerator() {
     tankId:      document.getElementById('gm_tank').value || null,
   };
   if (editingGeneratorId) {
-    Object.assign(data.generators.find(x => x.id === editingGeneratorId), obj);
+    const g = data.generators.find(x => x.id === editingGeneratorId);
+    if (!g) return;
+    if (g.tankId !== obj.tankId) genPreserveTankHistory(g);
+    Object.assign(g, obj);
   } else {
     obj.id = 'g_' + Date.now();
     data.generators.push(obj);
     selectedGeneratorId = obj.id;
   }
-  saveData(data);
+  if (!await saveData(data)) return;
   closeModal('generatorModal');
   renderGeneratorList();
   const g = data.generators.find(x => x.id === selectedGeneratorId);
   if (g) renderGenDetail(g);
 }
 
-function deleteGenerator(id) {
-  if (!confirm('Удалить этот ДЭС и все его записи?')) return;
+async function deleteGenerator(id) {
+  if (!await confirmAction('Удалить этот ДЭС и все его записи?')) return;
   data.generators = (data.generators || []).filter(g => g.id !== id);
   data.genRecords  = (data.genRecords  || []).filter(r => r.generatorId !== id);
   data.toRecords   = (data.toRecords   || []).filter(r => r.generatorId !== id);
-  saveData(data);
+  if (!await saveData(data)) return;
   selectedGeneratorId = null;
   renderGeneratorList();
   document.getElementById('mainContent').innerHTML = `<div class="welcome">
@@ -121,42 +124,47 @@ function openEditGenRecord(id) {
   openModal('genRecordModal');
 }
 
-function saveGenRecord() {
+async function saveGenRecord() {
   const dateRaw = document.getElementById('gen_rec_date').value.trim();
   const date    = parseDate(dateRaw);
   const hours   = parseFloat(document.getElementById('gen_rec_hours').value);
   if (!date)              { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'gen_rec_date'); return; }
-  if (!hours && hours !== 0) { showFieldError('Укажите наработку за сессию', 'gen_rec_hours'); return; }
+  if (!Number.isFinite(hours) || hours < 0) { showFieldError('Укажите неотрицательную наработку', 'gen_rec_hours'); return; }
+  if (!validNonnegativeFields(['gen_rec_meter_start','gen_rec_meter_end','gen_rec_fuel_issued','gen_rec_fuel_used','gen_rec_fuel_actual','gen_rec_load'])) return;
   if (!data.genRecords) data.genRecords = [];
   const obj = {
     generatorId: selectedGeneratorId, date, hours,
-    meterStart:  parseFloat(document.getElementById('gen_rec_meter_start').value) || null,
-    meterEnd:    parseFloat(document.getElementById('gen_rec_meter_end').value)   || null,
-    fuelIssued:  parseFloat(document.getElementById('gen_rec_fuel_issued').value) || null,
-    fuelUsed:    parseFloat(document.getElementById('gen_rec_fuel_used').value)   || null,
-    fuelActual:  parseFloat(document.getElementById('gen_rec_fuel_actual').value) || null,
-    load:        parseFloat(document.getElementById('gen_rec_load').value)        || null,
+    meterStart:  optionalNumber('gen_rec_meter_start'),
+    meterEnd:    optionalNumber('gen_rec_meter_end'),
+    fuelIssued:  optionalNumber('gen_rec_fuel_issued'),
+    fuelUsed:    optionalNumber('gen_rec_fuel_used'),
+    fuelActual:  optionalNumber('gen_rec_fuel_actual'),
+    load:        optionalNumber('gen_rec_load'),
     note:        document.getElementById('gen_rec_note').value.trim(),
   };
   if (editingGenRecordId) {
-    Object.assign(data.genRecords.find(x => x.id === editingGenRecordId), obj);
+    const old = data.genRecords.find(x => x.id === editingGenRecordId);
+    if (!old) return;
+    obj.tankId = genRecordTankId(old);
+    Object.assign(old, obj);
   } else {
+    obj.tankId = ((data.generators || []).find(g => g.id === selectedGeneratorId) || {}).tankId || null;
     obj.id = 'gr_' + Date.now();
     data.genRecords.push(obj);
   }
   const d = new Date(date);
   selectedGenYear  = d.getFullYear();
   selectedGenMonth = d.getMonth() + 1;
-  saveData(data);
+  if (!await saveData(data)) return;
   closeModal('genRecordModal');
   const g = (data.generators || []).find(x => x.id === selectedGeneratorId);
   if (g) renderGenDetail(g);
 }
 
-function deleteGenRecord(id) {
-  if (!confirm('Удалить эту запись?')) return;
+async function deleteGenRecord(id) {
+  if (!await confirmAction('Удалить эту запись?')) return;
   data.genRecords = (data.genRecords || []).filter(r => r.id !== id);
-  saveData(data);
+  if (!await saveData(data)) return;
   const g = (data.generators || []).find(x => x.id === selectedGeneratorId);
   if (g) renderGenDetail(g);
 }

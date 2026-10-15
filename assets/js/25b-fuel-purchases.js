@@ -1389,6 +1389,7 @@ function mfFindOrCreate(vid, month, mfId) {
 async function mfSaveRow(el) {
   const vid = el.dataset.vid;
   const month = el.dataset.month;
+  if (!fuelEditAllowed(month)) return;
   const mfId = el.dataset.mfid;
   const isSum = el.dataset.field === 'sum';
   const val = parseFloat(el.value) || null;
@@ -1409,6 +1410,7 @@ async function mfSaveRow(el) {
 async function mfSaveCard(sel) {
   const vid = sel.dataset.vid;
   const month = sel.dataset.month;
+  if (!fuelEditAllowed(month)) return;
   const mfId = sel.dataset.mfid;
   const cardNumber = sel.value || null;
   if (!mfId && !cardNumber) return;
@@ -1426,6 +1428,7 @@ async function mfSaveCard(sel) {
 }
 
 async function mfAddCardRow(vid, month) {
+  if (!fuelEditAllowed(month)) return;
   if (!data.monthlyFuel) data.monthlyFuel = [];
   data.monthlyFuel.push({
     id: 'mf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
@@ -1437,6 +1440,7 @@ async function mfAddCardRow(vid, month) {
 
 async function mfRemoveRow(mfId) {
   if (!data.monthlyFuel) return;
+  if (!fuelEditAllowed((data.monthlyFuel.find(m => m.id === mfId) || {}).month)) return;
   data.monthlyFuel = data.monthlyFuel.filter(m => m.id !== mfId);
   await saveData(data);
   fpRefreshMonthly();
@@ -1463,7 +1467,8 @@ function mfUpdateToolbar() {
 async function mfDeleteSelected() {
   const ids = [...document.querySelectorAll('.mf-check:checked')].map(cb => cb.dataset.mfid);
   if (!ids.length) return;
-  if (!confirm('Удалить выбранные записи (' + ids.length + ')?')) return;
+  if (!fuelEditAllowed(...(data.monthlyFuel || []).filter(m => ids.includes(m.id)).map(m => m.month))) return;
+  if (!await confirmAction('Удалить выбранные записи (' + ids.length + ')?')) return;
   data.monthlyFuel = (data.monthlyFuel || []).filter(m => !ids.includes(m.id));
   await saveData(data);
   fpRefreshMonthly();

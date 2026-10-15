@@ -423,10 +423,11 @@ function importFuelFromXls(input, mode = 'fuel') {
         if (existing) {
           const existingIssued = +existing.fuelIssued || 0;
           const hasExistingIssued = existing.fuelIssued != null && existing.fuelIssued !== '' && existingIssued > 0;
-          const sameRoundedIssue = hasExistingIssued && (
-            Math.abs(existingIssued - grp.totalQty) < 0.01 ||
-            Math.abs(existingIssued - grp.totalQty) <= 1 ||
-            Math.round(existingIssued) === Math.round(grp.totalQty)
+          const linkedQty = (data.fuelPurchases || []).filter(p => !p.deleted && p.recordId === existing.id).reduce((s, p) => s + (+p.qty || 0), 0);
+          const manualQty = existingIssued - linkedQty;
+          const sameRoundedIssue = manualQty > 0.011 && (
+            Math.abs(manualQty - grp.totalQty) <= 1 ||
+            Math.round(manualQty) === Math.round(grp.totalQty)
           );
 
           if (hasImportedKey) {
@@ -439,8 +440,8 @@ function importFuelFromXls(input, mode = 'fuel') {
           if (sameRoundedIssue) {
             let action = 'duplicate';
             let statusText = 'Уже было';
-            if (Math.abs(existingIssued - grp.totalQty) >= 0.01) {
-              existing.fuelIssued = grp.totalQty;
+            if (Math.abs(manualQty - grp.totalQty) >= 0.01) {
+              existing.fuelIssued = fuelImportRoundLitres(linkedQty + grp.totalQty);
               adjusted++;
               adjustedLitres += grp.totalQty;
               action = 'adjusted';
@@ -456,10 +457,8 @@ function importFuelFromXls(input, mode = 'fuel') {
             reportRows.push(fuelImportReportRow(grp, action, existingIssued, existing.fuelIssued, statusText, existing.id));
             return;
           }
-          if (hasExistingIssued && existing.note && existing.note.includes('заправка')) {
-            duplicates++;
-            duplicateLitres += grp.totalQty;
-            reportRows.push(fuelImportReportRow(grp, 'duplicate', existingIssued, existingIssued, 'Пропущено: в записи уже есть заправка', existing.id));
+          if (hasExistingIssued && Math.abs(manualQty) > 0.011) {
+            reportRows.push(fuelImportReportRow(grp, 'review', existingIssued, existingIssued, 'Покупка сохранена; ручные литры журнала требуют сверки, это не дубль', existing.id));
             return;
           }
           const beforeIssued = existingIssued;
@@ -864,10 +863,12 @@ function showFuelImportReport(report) {
     added: 'background:#dcfce7;color:#15803d',
     updated: 'background:#dbeafe;color:#1d4ed8',
     adjusted: 'background:#fef3c7;color:#b45309',
+    review: 'background:#fff4d4;color:#785600',
     duplicate: 'background:var(--bg3);color:var(--text3)',
   };
   const actionOrder = { added: 1, adjusted: 2, updated: 3, duplicate: 4 };
-  const changedRows = report.reportRows.filter(r => r.action !== 'duplicate');
+  const changedRows = report.reportRows.filter(r => r.action !== 'duplicate' && r.action !== 'review');
+  const reviewRows = report.reportRows.filter(r => r.action === 'review');
   const loadedLitres = report.addedLitres + report.updatedLitres + report.adjustedLitres;
   const sortedRows = report.reportRows.slice().sort((a, b) =>
     (a.date || '').localeCompare(b.date || '') ||
@@ -1023,6 +1024,7 @@ function showFuelImportReport(report) {
       ${card('Дневных записей', String(report.groupedCount), report.mergedTransactions ? 'объединено покупок: ' + report.mergedTransactions : 'без объединений', '#2563eb')}
       ${card('Загружено/изменено', String(changedRows.length), num(loadedLitres) + ' л', '#16a34a')}
       ${card('Уже было', String(report.duplicates), num(report.duplicateLitres) + ' л', '#94a3b8')}
+      ${reviewRows.length ? card('На сверку с журналом', String(reviewRows.length), num(reviewRows.reduce((s,r) => s + r.qty, 0)) + ' л; ручной журнал не изменён', '#b45309') : ''}
       ${card('Не загрузилось', String(report.skipped), num(report.skippedLitres) + ' л', report.skipped ? '#dc2626' : '#16a34a')}
     </div>
     ${report.closedCount ? `<div style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px">Пропущено строк закрытых месяцев (${report.closedMonths.map(m => fpMonthLabel(m)).join(", ")}): ${report.closedCount}, ${num(report.closedLitres)} л. Чтобы загрузить их, откройте месяц: Заправки → Закрытие месяца.</div>` : ""}

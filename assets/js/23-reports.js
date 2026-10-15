@@ -68,8 +68,8 @@ function renderReportsSection() {
   const pctBar = (val, max) => max > 0 ? `<div style="background:var(--border);border-radius:4px;height:6px;width:100px;display:inline-block;vertical-align:middle;margin-left:8px"><div style="background:#4f46e5;border-radius:4px;height:6px;width:${Math.round(val/max*100)}%"></div></div>` : '';
 
   const tableRows = sorted.map(([name, g]) => `<tr>
-    <td style="font-weight:600">${name}</td>
-    <td class="num">${g.count}</td>
+    <td style="font-weight:600">${htmlEsc(name)}</td>
+    <td class="num">${htmlEsc(g.count)}</td>
     <td class="num">${g.sum.toLocaleString('ru-RU')} ₽ ${pctBar(g.sum, totalSum)}</td>
     <td class="num" style="color:#16a34a">${g.paid.toLocaleString('ru-RU')} ₽</td>
     <td class="num" style="color:#dc2626">${g.unpaid.toLocaleString('ru-RU')} ₽</td>
@@ -81,10 +81,10 @@ function renderReportsSection() {
       ${reportsKindSwitchHtml('payments')}
       <h3 style="margin:0 0 16px;font-size:18px;font-weight:700">Оборотно-сальдовая ведомость</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">
-        <div class="stat-card"><div class="stat-value counter" data-target="${totalSum}">0</div><div class="stat-label">Итого расходов ₽</div></div>
-        <div class="stat-card"><div class="stat-value counter" data-target="${paidSum}">0</div><div class="stat-label" style="color:#16a34a">Оплачено ₽</div></div>
-        <div class="stat-card"><div class="stat-value counter" data-target="${unpaidSum}">0</div><div class="stat-label" style="color:#dc2626">Не оплачено ₽</div></div>
-        <div class="stat-card"><div class="stat-value counter" data-target="${filtered.length}">0</div><div class="stat-label">Документов</div></div>
+        <div class="stat-card"><div class="stat-value counter" data-target="${totalSum}">${totalSum}</div><div class="stat-label">Итого расходов ₽</div></div>
+        <div class="stat-card"><div class="stat-value counter" data-target="${paidSum}">${paidSum}</div><div class="stat-label" style="color:#16a34a">Оплачено ₽</div></div>
+        <div class="stat-card"><div class="stat-value counter" data-target="${unpaidSum}">${unpaidSum}</div><div class="stat-label" style="color:#dc2626">Не оплачено ₽</div></div>
+        <div class="stat-card"><div class="stat-value counter" data-target="${filtered.length}">${filtered.length}</div><div class="stat-label">Документов</div></div>
       </div>
       <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <span style="font-weight:600;font-size:13px;color:var(--text3)">Период:</span>${periodTabs}

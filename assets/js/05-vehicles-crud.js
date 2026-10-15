@@ -49,7 +49,7 @@ function openEditVehicle(id) {
   openModal('vehicleModal');
 }
 
-function saveVehicle() {
+async function saveVehicle() {
   const make = document.getElementById('vm_make').value.trim();
   const plate = document.getElementById('vm_plate').value.trim();
   const driver = document.getElementById('vm_driver').value.trim();
@@ -93,7 +93,7 @@ function saveVehicle() {
     data.vehicles.push(obj);
     selectedVehicleId = obj.id;
   }
-  saveData(data);
+  if (!await saveData(data)) return;
   closeModal('vehicleModal');
   populateOrgSelect();
   renderVehicleList();
@@ -101,11 +101,12 @@ function saveVehicle() {
   if (v) renderDetail(v);
 }
 
-function deleteVehicle(id) {
-  if (!confirm('Удалить это ТС и все его записи?')) return;
+async function deleteVehicle(id) {
+  if (!fuelEditAllowed(...data.records.filter(r => r.vehicleId === id).map(r => r.date))) return;
+  if (!await confirmAction('Удалить это ТС и все его записи?')) return;
   data.vehicles = data.vehicles.filter(v => v.id !== id);
   data.records = data.records.filter(r => r.vehicleId !== id);
-  saveData(data);
+  if (!await saveData(data)) return;
   selectedVehicleId = null;
   populateOrgSelect();
   rebuildIndex();
@@ -123,7 +124,7 @@ function recFillCardSelect(selectedNum, useDefault) {
     const fmt = typeof fcFormat === 'function' ? fcFormat(c.number) : c.number;
     const prov = c.provider ? ' (' + c.provider + ')' : '';
     const org = c.org ? ' · ' + c.org : '';
-    html += '<option value="' + c.number + '">' + fmt + prov + org + '</option>';
+    html += '<option value="' + htmlEsc(c.number) + '">' + htmlEsc(fmt + prov + org) + '</option>';
   });
   sel.innerHTML = html;
   if (selectedNum && !cards.some(c => fcNorm(c.number) === fcNorm(selectedNum))) sel.add(new Option(selectedNum + ' (история)', selectedNum));
@@ -133,6 +134,7 @@ function recFillCardSelect(selectedNum, useDefault) {
 
 function openAddRecord() {
   editingRecordId = null;
+  recordEditingState = null;
   document.getElementById('recordModalTitle').textContent = 'Добавить запись';
   const now = new Date();
   document.getElementById('rec_date').value = fmtDate(now.toISOString().split('T')[0]);
@@ -160,10 +162,10 @@ function openEditRecord(id) {
   editingRecordId = id;
   document.getElementById('recordModalTitle').textContent = 'Редактировать запись';
   document.getElementById('rec_date').value = fmtDate(r.date);
-  document.getElementById('rec_km').value = r.km || '';
+  document.getElementById('rec_km').value = r.km ?? '';
   document.getElementById('rec_km_glonass').value = r.kmGlonass ?? '';
-  document.getElementById('rec_odo_start').value = r.odoStart || '';
-  document.getElementById('rec_odo_end').value = r.odoEnd || '';
+  document.getElementById('rec_odo_start').value = r.odoStart ?? '';
+  document.getElementById('rec_odo_end').value = r.odoEnd ?? '';
   document.getElementById('rec_driver').value = r.driver || '';
   document.getElementById('rec_fuel_grade').value = recordFuelGrade(r);
   recFillCardSelect(r.fuelCardNum || '');
@@ -174,7 +176,8 @@ function openEditRecord(id) {
   document.getElementById('rec_tank_measured').value = r.tankMeasured ?? '';
   routeSet(Array.isArray(r.route) ? r.route : (r.route ? [r.route] : []));
   document.getElementById('rec_note').value = r.note || '';
-  calcFuelAuto(); // пересчитать по норме сразу
+  document.getElementById('rec_fuel_used').value = r.fuelUsed ?? '';
+  recordEditingState = { id, base: JSON.parse(JSON.stringify(r)), fields: recordFormFields() };
   openModal('recordModal');
 }
 

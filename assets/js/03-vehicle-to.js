@@ -59,18 +59,18 @@ function renderVehicleToSection(vid, currentOdometer) {
     [...recs].reverse().forEach(r => {
       rows += `<tr>
         <td class="td-day">${fmtDate(r.date)}</td>
-        <td style="padding:10px 14px;font-size:13px;font-weight:600">${r.type || '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;font-weight:600">${htmlEsc(r.type || '—')}</td>
         <td class="td-num">${r.odometer != null ? r.odometer.toLocaleString('ru', {maximumFractionDigits:0}) : '—'}</td>
         <td class="td-num">${r.nextOdometerAbs != null ? r.nextOdometerAbs.toLocaleString('ru', {maximumFractionDigits:0}) : (r.nextKm ? '+'+r.nextKm.toLocaleString('ru')+' км' : '—')}</td>
         <td class="td-day">${r.nextDate ? fmtDate(r.nextDate) : '—'}</td>
         <td class="td-num">${r.cost != null ? r.cost.toLocaleString('ru-RU') + ' ₽' : '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${r.performer || '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${r.note || '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.performer || '—')}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.note || '—')}</td>
         <td class="td-actions">
-          <button class="icon-btn" onclick="openEditVehicleTo('${r.id}')">
+          <button class="icon-btn" onclick="openEditVehicleTo(${htmlJs(r.id)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
-          <button class="icon-btn del" onclick="deleteVehicleTo('${r.id}')">
+          <button class="icon-btn del" onclick="deleteVehicleTo(${htmlJs(r.id)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
           </button>
         </td>
@@ -141,7 +141,7 @@ function openEditVehicleTo(id) {
   openModal('vehicleToModal');
 }
 
-function saveVehicleTo() {
+async function saveVehicleTo() {
   const dateIso = parseDate(document.getElementById('vto_date').value.trim());
   const type    = document.getElementById('vto_type').value.trim();
   if (!dateIso) { showFieldError('Укажите дату проведения ТО', 'vto_date'); return; }
@@ -171,16 +171,16 @@ function saveVehicleTo() {
     obj.id = 'vto_' + Date.now();
     data.vehicleTo.push(obj);
   }
-  saveData(data);
+  if (!await saveData(data)) return;
   closeModal('vehicleToModal');
   const v = data.vehicles.find(x => x.id === obj.vehicleId);
   if (v) renderDetail(v);
 }
 
-function deleteVehicleTo(id) {
-  if (!confirm('Удалить эту запись ТО?')) return;
+async function deleteVehicleTo(id) {
+  if (!await confirmAction('Удалить эту запись ТО?')) return;
   data.vehicleTo = (data.vehicleTo || []).filter(r => r.id !== id);
-  saveData(data);
+  if (!await saveData(data)) return;
   closeModal('vehicleToModal');
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   if (v) renderDetail(v);

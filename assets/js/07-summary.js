@@ -186,12 +186,11 @@ function computeFuelBalances(vehicleId, dateFrom, dateTo) {
   const vehicle = data.vehicles.find(v => v.id === vehicleId);
   const recs = recsFor(vehicleId)
     .filter(r => {
-      if (dateFrom && r.date < dateFrom) return false;
       if (dateTo   && r.date > dateTo)   return false;
       return true;
     })
     .sort((a, b) => cmpDateAsc(a.date, b.date));
-  let balance = (vehicle && !dateFrom) ? (vehicle.fuelBalance || 0) : 0;
+  let balance = vehicle ? (vehicle.fuelBalance || 0) : 0;
   const balMap = {};
   recs.forEach(r => {
     // Остаток считается по фактическому расходу; если не введён — по норме
