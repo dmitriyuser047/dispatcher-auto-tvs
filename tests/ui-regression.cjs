@@ -42,6 +42,8 @@ test('text drag outside a form keeps it open; a genuine backdrop click closes it
   await page.mouse.move(f.x + 12, f.y + 12); await page.mouse.down(); await page.mouse.move(m.x - 20, f.y + 12, { steps: 12 }); await page.mouse.up();
   assert.equal(await page.locator('#recordModal').evaluate(el => el.classList.contains('open')), true);
   assert.equal(await page.locator('#rec_note').inputValue(), 'Unsaved selected text');
+  await page.mouse.move(5, 5); await page.mouse.down(); await page.mouse.move(f.x + 10, f.y + 10, { steps: 10 }); await page.mouse.up();
+  assert.equal(await page.locator('#recordModal').evaluate(el => el.classList.contains('open')), true);
   await page.mouse.click(5, 5); assert.equal(await page.locator('#recordModal').evaluate(el => el.classList.contains('open')), false);
 });
 test('dynamic generic forms also survive text selection beyond their bounds', async () => {
@@ -107,6 +109,25 @@ test('polling defers while a form is open and field-wise conflict merge preserve
     document.getElementById('rec_note').value = 'Note only'; await saveRecord(); _sync.enabled = false;
     return { whileEditing, after: data.records[0].km, note: data.records[0].note, norm: data.records[0].fuelUsed };
   }); assert.deepEqual(out, { whileEditing: 100, after: 200, note: 'Note only', norm: 12 });
+});
+test('retry after a failed conflict merge retains the original baseline and preserves remote fields', async () => {
+  const out = await page.evaluate(async () => {
+    _sync.enabled = true; _sync.revs = Object.fromEntries(SYNC_SECTIONS.map(n => [n, 1]));
+    SYNC_SECTIONS.forEach(n => _sync.synced[n] = JSON.stringify(data[n] || []));
+    const remote = data.records.map(r => r.id === 'r1' ? { ...r, km: 200, odoEnd: 1200 } : { ...r });
+    window.electronAPI.readSection = async () => ({ rev: 2, rows: remote });
+    let attempts = 0;
+    window.electronAPI.writeSections = async json => {
+      attempts++; const payload = JSON.parse(json);
+      if (payload.base.records === 1) return { ok: false, conflicts: ['records'] };
+      if (attempts === 2) return { ok: false, error: 'offline' };
+      return { ok: true, revisions: { records: 3 } };
+    };
+    openEditRecord('r1'); document.getElementById('rec_note').value = 'Retried note'; await saveRecord();
+    const revisionAfterFailure = _sync.revs.records, stayedOpen = document.getElementById('recordModal').classList.contains('open');
+    await saveRecord(); _sync.enabled = false;
+    return { revisionAfterFailure, stayedOpen, km: data.records[0].km, note: data.records[0].note };
+  }); assert.deepEqual(out, { revisionAfterFailure: 1, stayedOpen: true, km: 200, note: 'Retried note' });
 });
 test('payments, budget and counterparties are persisted immediately and survive reload', async () => {
   const out = await page.evaluate(async () => {

@@ -80,7 +80,16 @@ async function syncLoad() {
 // Сохранения идут строго по очереди — иначе два быстрых сохранения
 // отправили бы одну и ту же версию и поссорились друг с другом
 function syncSave(d) {
-  const p = _sync.chain.then(() => syncSaveNow(d));
+  const p = _sync.chain.then(async () => {
+    const revs = { ..._sync.revs }, synced = { ..._sync.synced };
+    let saved = false;
+    try { saved = await syncSaveNow(d); return saved; }
+    finally {
+      // A failed merge must not turn the old form into a new change relative
+      // to a newer server baseline when the user retries the same operation.
+      if (!saved) { _sync.revs = revs; _sync.synced = synced; }
+    }
+  });
   _sync.chain = p.catch(() => false);
   return p;
 }

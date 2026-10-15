@@ -167,6 +167,8 @@ function confirmAction(message) {
 }
 function bindModalOverlay(el) {
   el.addEventListener('pointerdown', e => { el._backdropDown = e.target === el; });
+  el.addEventListener('pointerup', e => { if (e.target !== el) el._backdropDown = false; });
+  el.addEventListener('pointercancel', () => { el._backdropDown = false; });
   el.addEventListener('click', e => {
     const close = el._backdropDown && e.target === el; el._backdropDown = false;
     if (close) closeModal(el.id);
