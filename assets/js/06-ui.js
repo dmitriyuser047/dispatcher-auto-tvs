@@ -81,6 +81,29 @@ function deleteRecord(id) {
   if (v) renderDetail(v);
 }
 
+function recToggleAll(master) {
+  document.querySelectorAll('.rec-check').forEach(cb => { cb.checked = master.checked; });
+  recUpdateToolbar();
+}
+
+function recUpdateToolbar() {
+  const checked = document.querySelectorAll('.rec-check:checked');
+  const tb = document.getElementById('rec-toolbar');
+  const cnt = document.getElementById('rec-sel-count');
+  if (tb) tb.style.display = checked.length ? '' : 'none';
+  if (cnt) cnt.textContent = checked.length;
+}
+
+function recDeleteSelected() {
+  const ids = [...document.querySelectorAll('.rec-check:checked')].map(cb => cb.dataset.recid);
+  if (!ids.length) return;
+  if (!confirm('Удалить выбранные записи (' + ids.length + ')?')) return;
+  data.records = data.records.filter(r => !ids.includes(r.id));
+  saveData(data);
+  const v = data.vehicles.find(x => x.id === selectedVehicleId);
+  if (v) renderDetail(v);
+}
+
 // ─── MODALS ──────────────────────────────────────────────
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) {

@@ -177,7 +177,7 @@ function renderDetail(v) {
   // rows
   let tableRows = '';
   if (monthRecs.length === 0) {
-    tableRows = `<tr><td colspan="12" class="empty-table">Нет записей за этот месяц. Нажмите «+ Запись» чтобы добавить.</td></tr>`;
+    tableRows = `<tr><td colspan="13" class="empty-table">Нет записей за этот месяц. Нажмите «+ Запись» чтобы добавить.</td></tr>`;
   } else {
     monthRecs.forEach(r => {
       const d = new Date(r.date);
@@ -193,6 +193,7 @@ function renderDetail(v) {
       const balance = balMap[r.id];
       const balColor = balance < 0 ? 'var(--red)' : balance === 0 ? 'var(--text3)' : 'var(--green)';
       tableRows += `<tr>
+        <td style="text-align:center;padding:0;width:28px"><input type="checkbox" class="rec-check" data-recid="${r.id}" onchange="recUpdateToolbar()"></td>
         <td class="td-day">${fullDate} <span style="color:var(--text3)">${dayName}</span></td>
         <td class="td-num">${r.km ? r.km.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${r.odoStart ? r.odoStart.toLocaleString('ru') : '—'} → ${r.odoEnd ? r.odoEnd.toLocaleString('ru') : '—'}</td>
@@ -433,10 +434,14 @@ function renderDetail(v) {
           </button>
         </div>
       </div>
+      <div id="rec-toolbar" style="display:none;margin-bottom:8px">
+        <button onclick="recDeleteSelected()" style="padding:4px 14px;font-size:13px;background:var(--red);color:#fff;border:none;border-radius:4px;cursor:pointer">Удалить выбранные (<span id="rec-sel-count">0</span>)</button>
+      </div>
       <div class="table-scroll">
         <table>
           <thead>
             <tr>
+              <th style="width:28px"><input type="checkbox" id="rec-check-all" onchange="recToggleAll(this)"></th>
               <th>Дата</th>
               <th>Пробег, км</th>
               <th>Одометр</th>
