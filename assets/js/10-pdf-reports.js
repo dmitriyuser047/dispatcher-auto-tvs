@@ -527,18 +527,10 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
         const hasCards = mfAll.some(m => m.cardNumber);
         let mfIss;
         if (hasCards) {
-          const orgMf = mfAll.filter(m => {
+          mfIss = mfAll.filter(m => {
             const cardOrg = m.cardNumber ? actGsmCardOrg(m.cardNumber) : '';
             return (cardOrg || actGsmVehicleOrg(v)) === org;
-          });
-          mfIss = orgMf.reduce((s, m) => {
-            if (m.liters) return s + m.liters;
-            if (m.cardNumber && typeof fcNorm === 'function' && typeof fpLive === 'function') {
-              const cn = fcNorm(m.cardNumber);
-              return s + fpLive().filter(p => p.vehicleId === v.id && (p.date || '').startsWith(m.month) && fcNorm(p.cardNo) === cn).reduce((ss, p) => ss + (+p.qty || 0), 0);
-            }
-            return s;
-          }, 0);
+          }).reduce((s, m) => s + (m.liters || 0), 0);
         } else {
           mfIss = mfAll.reduce((s, m) => s + (m.liters || 0), 0);
         }
@@ -576,12 +568,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
           const card = typeof fcList === 'function' ? fcList().find(c => c.number === m.cardNumber) : null;
           const prov = card ? (card.provider || '').trim() : '';
           const si = supplierCol(prov) - 15;
-          let lit = m.liters || 0;
-          if (!lit && m.cardNumber && typeof fcNorm === 'function' && typeof fpLive === 'function') {
-            const cn = fcNorm(m.cardNumber);
-            lit = fpLive().filter(p => p.vehicleId === v.id && (p.date || '').startsWith(m.month) && fcNorm(p.cardNo) === cn).reduce((s, p) => s + (+p.qty || 0), 0);
-          }
-          supBreak[si] += lit;
+          supBreak[si] += (m.liters || 0);
         });
       } else {
         const si = supplierCol(v.supplier) - 15;
