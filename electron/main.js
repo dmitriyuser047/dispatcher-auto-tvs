@@ -69,15 +69,18 @@ function applyBundledDataSeedOnce() {
 
   try {
     ensureDirs();
+    // Встроенная база нужна только для первой установки, не для обновления рабочих данных.
+    const sectionDir = path.join(dataDir, 'sections');
+    if (fs.existsSync(path.join(dataDir, 'data.json')) ||
+        fs.existsSync(sectionDir) && fs.readdirSync(sectionDir).some(name => name.endsWith('.json'))) {
+      console.log('[bundled-db] existing database preserved');
+      return;
+    }
     fs.mkdirSync(getBackupDir(), { recursive: true });
 
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupFile = path.join(getBackupDir(), 'data_before_bundled_' + seedVersion + '_' + stamp + '.json');
-    try {
-      fs.writeFileSync(backupFile, JSON.stringify(storage.readAll(dataDir), null, 2), 'utf8');
-    } catch (e) {
-      console.error('[bundled-db] backup failed: ' + e.message);
-    }
+    fs.writeFileSync(backupFile, JSON.stringify(storage.readAll(dataDir), null, 2), 'utf8');
 
     const seed = JSON.parse(fs.readFileSync(seedFile, 'utf8'));
     const res = storage.writeAll(dataDir, seed);

@@ -186,19 +186,21 @@ function importFuelFromXls(input, mode = 'fuel') {
         const compact = normalizePlate(raw);
         const digitChunks = raw.match(/\d{3,6}/g) || [];
 
-        return data.vehicles.find(v => {
+        const matches = data.vehicles.filter(v => {
           const vp = normalizePlate(v.plate);
           if (vp.length >= 5 && compact.includes(vp)) return true;
 
           const vDigits = (vp.match(/\d+/g) || []).join('');
-          const hasVehicleDigits = vDigits && digitChunks.includes(vDigits);
+          const mainDigits = (vp.match(/^\d{3,5}/) || [])[0];
+          const hasVehicleDigits = vDigits && digitChunks.includes(vDigits) || mainDigits && digitChunks.includes(mainDigits);
           if (!hasVehicleDigits) return false;
 
           const makeWords = normalizeLooseText(v.make)
             .split(/[^a-zа-я0-9]+/i)
             .filter(w => w.length >= 4);
           return vp.startsWith(vDigits) || makeWords.some(w => low.includes(w));
-        }) || null;
+        });
+        return matches.length === 1 ? matches[0] : null;
       };
       // Номера сравниваются, только если оба похожи на госномер (от 5 знаков):
       // иначе машина с условным номером «1» совпадает с любой строкой,
@@ -304,44 +306,27 @@ function importFuelFromXls(input, mode = 'fuel') {
       }
 
       function matchVehicle(tx) {
-        // Карта из справочника, закреплённая за машиной на дату покупки, — самый надёжный признак
+        // «Закреплена» описывает карту, а не фактического получателя.
+        const assignedColumn = cVehicle !== -1 && headers[cVehicle].includes('закреплена');
+        const actualText = assignedColumn ? tx.comment : [tx.vehicleText, tx.comment].filter(Boolean).join(' ');
+        const actualPlate = extractPlate(actualText);
+        if (actualPlate) {
+          const matches = data.vehicles.filter(v => platesMatch(normalizePlate(v.plate), actualPlate));
+          return matches.length === 1 ? matches[0] : null;
+        }
+        const loose = matchVehicleByLooseText(actualText);
+        if (loose) return loose;
         if (typeof fcVehicleAt === 'function') {
           const byCard = fcVehicleAt(tx.cardNo, tx.date);
           if (byCard) return byCard;
         }
-        if (tx.plate) {
-          const p = normalizePlate(tx.plate);
-          const v = data.vehicles.find(v => platesMatch(normalizePlate(v.plate), p));
-          if (v) return v;
-        }
         if (tx.cardNo) {
-          const cn = normalizeCard(tx.cardNo);
-          const v = data.vehicles.find(v => normalizeCard(v.fuelcard) === cn);
-          if (v) return v;
+          const matches = data.vehicles.filter(v => normalizeCard(v.fuelcard) === normalizeCard(tx.cardNo));
+          if (matches.length === 1) return matches[0];
         }
-        if (tx.vehicleText) {
-          const v = matchVehicleByLooseText(tx.vehicleText);
-          if (v) return v;
-        }
-        if (tx.comment) {
-          const cPlate = extractPlate(tx.comment);
-          if (cPlate) {
-            const v = data.vehicles.find(v => platesMatch(normalizePlate(v.plate), cPlate));
-            if (v) return v;
-          }
-          const cLow = normalizeText(tx.comment).toLowerCase();
-          const v = data.vehicles.find(v => {
-            const p = normalizePlate(v.plate).toLowerCase();
-            return p.length >= 5 && cLow.includes(p);
-          });
-          if (v) return v;
-
-          const looseMatch = matchVehicleByLooseText(tx.comment);
-          if (looseMatch) return looseMatch;
-        }
+        if (assignedColumn) return matchVehicleByLooseText(tx.vehicleText);
         return null;
       }
-
       // Покупки из выписок хранятся в разделе «Заправки». Строка, которая там уже
       // есть, в журнал второй раз не идёт — даже если её перенесли на другую
       // машину, поправили или удалили. У неё только уточняются цена и время.

@@ -136,26 +136,21 @@ function frRows(tab, year) {
       c.n++;
     });
   } else if (tab === 'veh') {
-    const byId = {};
-    (data.vehicles || []).forEach(v => { byId[v.id] = v; });
-    (data.records || []).forEach(r => {
-      const v = byId[r.vehicleId];
-      if (!v || (r.date || '').slice(0, 4) !== year) return;
-      const issued = +r.fuelIssued || 0;
-      const km = +r.km || 0;
-      const norm = r.fuelUsed != null && r.fuelUsed !== ''
-        ? (+r.fuelUsed || 0)
-        : ((+v.norm || 0) && km ? km * (+v.norm) / 100 : 0);
-      const act = r.fuelActual != null && r.fuelActual !== '' ? (+r.fuelActual || 0) : norm;
-      if (!issued && !norm && !act && !km) return;
-      // Вид топлива — из записи: если машину заправляли разным топливом,
-      // у неё будет строка на каждый вид
-      const fuel = recordFuelGrade(r, v);
+    const ledger = gsmBuildLedger(data, { from: year + '-01-01', to: year + '-12-31' });
+    const cellFor = (vehicleId, grade, date) => {
+      const v = (data.vehicles || []).find(x => x.id === vehicleId);
+      if (!v) return null;
       const label = [v.plate, v.make].filter(Boolean).join(' — ') || 'ТС без номера';
-      const c = row('v:' + v.id + '|' + fuel, label, fuel).cells[+r.date.slice(5, 7) - 1];
-      c.iss += issued; c.norm += norm; c.act += act; c.km += km; c.n++;
-      // Цена — только по заправкам с известной суммой, иначе литры без суммы её занизят
-      if (+r.fuelSum) { c.sum += +r.fuelSum; c.sumL += issued; }
+      return row('v:' + v.id + '|' + grade, label, grade).cells[+date.slice(5, 7) - 1];
+    };
+    ledger.receipts.forEach(p => {
+      const c = cellFor(p.vehicleId, p.grade, p.date); if (!c) return;
+      c.iss += p.qty; c.n++;
+      if (p.sum) { c.sum += p.sum; c.sumL += p.qty; }
+    });
+    ledger.movements.filter(m => m.kind === 'consumption' && (m.qty || m.norm || m.km)).forEach(m => {
+      const c = cellFor(m.vehicleId, m.grade, m.date); if (!c) return;
+      c.norm += m.norm; c.act += m.qty; c.km += m.km; c.n++;
     });
   } else {
     const byId = {};

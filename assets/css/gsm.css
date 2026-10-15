@@ -1,0 +1,38 @@
+.gsm-workspace { padding: 22px 26px; height: 100%; overflow: auto; box-sizing: border-box; }
+.gsm-heading, .gsm-section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.gsm-heading h2 { margin: 0; font-size: 23px; }
+.gsm-actions, .gsm-nav, .gsm-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.gsm-actions { justify-content: flex-end; }
+.gsm-nav { margin: 18px 0 12px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+.gsm-nav select { margin-left: auto; max-width: 240px; }
+.gsm-filters { margin-bottom: 20px; }
+.gsm-filters select { max-width: 100%; min-width: 150px; }
+.gsm-filters label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.gsm-filters label input { width: 160px; }
+.gsm-band { margin-bottom: 18px; border-bottom: 1px solid var(--border); padding-bottom: 18px; }
+.gsm-workspace h3 { font-size: 15px; margin: 12px 0; font-weight: 650; }
+.gsm-workspace h3 span { color: var(--text3); font-size: 12px; font-weight: 400; margin-left: 8px; }
+.gsm-table-scroll { overflow-x: auto; max-width: 100%; }
+.gsm-table { width: 100%; min-width: 720px; table-layout: auto; }
+.gsm-table th { white-space: normal; }
+.gsm-table td { vertical-align: top; max-width: 300px; overflow-wrap: anywhere; }
+.gsm-table small { display: block; margin-top: 3px; font-size: 11px; color: var(--text3); }
+.gsm-number { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.gsm-cross, .gsm-cross small { color: #b96818; }
+.gsm-error { color: var(--red, #bb263c); }
+.gsm-status { padding: 8px 0; font-size: 13px; }
+.gsm-ok { color: var(--green, #197849); }
+.gsm-issues { margin: 8px 0 18px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+.gsm-issues summary { cursor: pointer; font-size: 13px; padding: 6px 0; }
+.gsm-issues .gsm-table { margin-top: 10px; }
+.gsm-empty { text-align: center; padding: 28px !important; color: var(--text3); }
+.gsm-opening-row { display: grid; grid-template-columns: minmax(100px, 2fr) minmax(75px, 1fr) minmax(75px, 1fr) 38px; gap: 8px; margin-bottom: 10px; }
+.gsm-opening-row > * { min-width: 0; width: 100%; box-sizing: border-box; }
+.gsm-workspace button:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 760px) {
+  .gsm-workspace { padding: 14px; }
+  .gsm-nav select { margin-left: 0; }
+  .gsm-nav select { flex-basis: 100%; max-width: none; }
+  .gsm-actions { justify-content: flex-start; }
+  .gsm-workspace .btn { white-space: normal; }
+}

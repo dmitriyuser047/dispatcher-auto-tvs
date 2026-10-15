@@ -86,6 +86,7 @@ function saveVehicle() {
       '.\nОдинаковые номера путают загрузку заправок. Всё равно сохранить?')) return;
   if (editingVehicleId) {
     const v = data.vehicles.find(x => x.id === editingVehicleId);
+    if (typeof gsmPreserveVehicleHistory === 'function' && v.org !== obj.org) gsmPreserveVehicleHistory(data, v);
     Object.assign(v, obj);
   } else {
     obj.id = 'v_' + Date.now();
@@ -112,9 +113,9 @@ function deleteVehicle(id) {
 }
 
 // ─── RECORD CRUD ─────────────────────────────────────────
-function recFillCardSelect(selectedNum) {
+function recFillCardSelect(selectedNum, useDefault) {
   const sel = document.getElementById('rec_fuel_card');
-  const cards = (typeof fcList === 'function' ? fcList() : []).filter(c => c.status !== 'blocked');
+  const cards = (typeof fcList === 'function' ? fcList() : []).filter(c => c.status !== 'blocked' || fcNorm(c.number) === fcNorm(selectedNum));
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   const vCardNum = v ? (typeof fcNorm === 'function' ? fcNorm(v.fuelcard) : '') : '';
   let html = '<option value="">— не указана —</option>';
@@ -125,8 +126,9 @@ function recFillCardSelect(selectedNum) {
     html += '<option value="' + c.number + '">' + fmt + prov + org + '</option>';
   });
   sel.innerHTML = html;
-  if (selectedNum) sel.value = selectedNum;
-  else if (vCardNum) sel.value = vCardNum;
+  if (selectedNum && !cards.some(c => fcNorm(c.number) === fcNorm(selectedNum))) sel.add(new Option(selectedNum + ' (история)', selectedNum));
+  if (selectedNum) sel.value = (cards.find(c => fcNorm(c.number) === fcNorm(selectedNum)) || {}).number || selectedNum;
+  else if (useDefault && vCardNum) sel.value = vCardNum;
 }
 
 function openAddRecord() {
@@ -140,7 +142,7 @@ function openAddRecord() {
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   document.getElementById('rec_driver').value = v ? (v.driver || '') : '';
   document.getElementById('rec_fuel_grade').value = vehicleFuelGrade(v);
-  recFillCardSelect('');
+  recFillCardSelect('', true);
   const vRecs = recsFor(selectedVehicleId)
     .slice().sort((a, b) => cmpDateAsc(a.date, b.date));
   if (vRecs.length) {
@@ -167,7 +169,7 @@ function openEditRecord(id) {
   recFillCardSelect(r.fuelCardNum || '');
   document.getElementById('rec_fuel_issued').value = r.fuelIssued || '';
   document.getElementById('rec_fuel_sum').value = r.fuelSum || '';
-  document.getElementById('rec_fuel_actual').value = r.fuelActual || '';
+  document.getElementById('rec_fuel_actual').value = r.fuelActual ?? '';
   document.getElementById('rec_fuel_idle').value = r.fuelIdle || '';
   document.getElementById('rec_tank_measured').value = r.tankMeasured ?? '';
   routeSet(Array.isArray(r.route) ? r.route : (r.route ? [r.route] : []));

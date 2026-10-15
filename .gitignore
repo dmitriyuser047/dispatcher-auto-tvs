@@ -4,6 +4,9 @@ dist/
 .DS_Store
 Thumbs.db
 .claude/
+audit/fuel-reconciliation*/
+audit/text-repair*/
+audit/gsm-cross-*.html
 *.traineddata
 # Словари Tesseract нужны в сборке: без них распознавание по-русски
 # докачивается из интернета при первом запуске и не работает без сети.

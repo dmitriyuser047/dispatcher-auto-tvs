@@ -1932,3 +1932,6 @@
     transform: none !important;
     transform-style: flat !important;
   }
+
+  .btn-primary { background-color: var(--accent); }
+  .btn-primary:hover { background-color: var(--accent2); }

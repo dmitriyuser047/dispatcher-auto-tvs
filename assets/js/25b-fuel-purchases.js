@@ -13,7 +13,7 @@
 // Удалённая покупка не стирается, а помечается deleted: иначе повторная
 // загрузка той же выписки вернула бы её обратно.
 
-let fpView    = 'cards';   // 'cards' | 'vehicle' | 'unmatched' | 'history'
+let fpView    = 'receipts';
 let fpMonth   = '';        // 'ГГГГ-ММ' или 'all'
 let fpVehicle = null;
 let fpSearch  = '';
@@ -68,6 +68,14 @@ function fpRecordIsEmpty(rec) {
 }
 
 // sign = +1 — добавить покупку в журнал, −1 — снять
+function fpLinkedRecord(p) {
+  const records = data.records || [];
+  const direct = records.find(r => r.id === p.recordId && r.vehicleId === p.vehicleId && r.date === p.date);
+  if (direct) return direct;
+  const v = (data.vehicles || []).find(x => x.id === p.vehicleId);
+  const candidates = records.filter(r => r.vehicleId === p.vehicleId && r.date === p.date && recordFuelGrade(r, v) === p.grade);
+  return candidates.length === 1 ? candidates[0] : null;
+}
 function fpApply(p, sign) {
   if (!p || !p.vehicleId || p.deleted) { if (sign < 0 && p) p.recordId = null; return null; }
   if (sign > 0) {
@@ -86,7 +94,7 @@ function fpApply(p, sign) {
     p.recordId = rec.id;
     return { record: rec, before, after: rec.fuelIssued };
   }
-  const rec = p.recordId && (data.records || []).find(r => r.id === p.recordId);
+  const rec = fpLinkedRecord(p);
   p.recordId = null;
   if (!rec) return null;
   const before = +rec.fuelIssued || 0;
@@ -102,6 +110,7 @@ function fpApply(p, sign) {
 
 // Правка покупки: снять старое, применить изменения, добавить новое
 function fpUpdate(p, changes) {
+  if (typeof gsmStampPurchase === 'function') gsmStampPurchase(p, data);
   fpApply(p, -1);
   Object.assign(p, changes, { editedAt: new Date().toISOString() });
   if (p.qty && p.sum) p.price = fpRound(p.sum / p.qty);
@@ -129,6 +138,7 @@ function fpCreate(tx, opts) {
     comment: tx.comment || '',
     sourceRow: tx.sourceRow || null,
   };
+  if (typeof gsmStampPurchase === 'function') gsmStampPurchase(p, data);
   fpList().push(p);
   return p;
 }
@@ -186,8 +196,13 @@ function fpKeysFromNote(note) {
 }
 
 function fpRestoreFromJournal() {
+  const canonical = (date, qty, card, grade) => [date, fpRound(qty), fcNorm(card), grade].join('|');
   const known = new Map();   // ключ → сколько покупок уже есть
-  fpList().forEach(p => { if (p.importKey) known.set(p.importKey, (known.get(p.importKey) || 0) + 1); });
+  fpList().forEach(p => {
+    if (!p.importKey) return;
+    const key = canonical(p.date, p.qty, p.cardNo, p.grade);
+    known.set(key, (known.get(key) || 0) + 1);
+  });
   const owner = new Map();   // ключ → { rec, list } — где заправка числится сейчас
   (data.records || []).forEach(rec => {
     if (!/импорт заправок/.test(rec.note || '')) return;
@@ -195,7 +210,12 @@ function fpRestoreFromJournal() {
     const best = new Map();
     fpKeysFromNote(rec.note).forEach(seg => {
       const cnt = new Map();
-      seg.forEach(k => { if (!cnt.has(k.key)) cnt.set(k.key, []); cnt.get(k.key).push(k); });
+      const v = (data.vehicles || []).find(v => v.id === rec.vehicleId);
+      seg.forEach(k => {
+        const key = canonical(k.date, k.qty, k.card, parseFuelGrade(k.product) || recordFuelGrade(rec, v));
+        if (!cnt.has(key)) cnt.set(key, []);
+        cnt.get(key).push(k);
+      });
       cnt.forEach((list, key) => { if (!best.has(key) || best.get(key).length < list.length) best.set(key, list); });
     });
     best.forEach((list, key) => {
@@ -205,7 +225,9 @@ function fpRestoreFromJournal() {
     });
   });
   const byRec = new Map();
+  const totals = new Map();
   owner.forEach(({ rec, list }, key) => {
+    totals.set(rec, (totals.get(rec) || 0) + list.reduce((s, k) => s + k.qty, 0));
     const todo = list.slice(known.get(key) || 0);
     if (!todo.length) return;
     if (!byRec.has(rec)) byRec.set(rec, []);
@@ -214,7 +236,7 @@ function fpRestoreFromJournal() {
   let created = 0;
   byRec.forEach((keys, rec) => {
     const v = (data.vehicles || []).find(x => x.id === rec.vehicleId);
-    const totalQty = keys.reduce((s, k) => s + k.qty, 0);
+    const totalQty = totals.get(rec);
     keys.forEach(k => {
       const sum = +rec.fuelSum && totalQty ? fpRound(rec.fuelSum * k.qty / totalQty) : null;
       const p = fpCreate({ importKey: k.key, date: k.date, qty: k.qty, sum, cardNo: k.card, comment: k.comment, fuel: k.product },
@@ -260,6 +282,7 @@ function fpMonthLabel(m) {
 function fpInMonth(p) { return fpMonth === 'all' || (p.date || '').startsWith(fpMonth); }
 
 async function renderFuelPurchases() {
+  if (typeof gsmRenderWorkspace === 'function') return gsmRenderWorkspace();
   const restored = fpRestoreFromJournal();
   // Справочник карт заполняется сам при первом открытии раздела
   const seeded = !fcList().length && typeof fcSeed === 'function' ? fcSeed() : 0;
@@ -551,6 +574,10 @@ function fpEdit(id) {
       <div class="form-group"><label>Сумма, ₽</label><input type="number" id="fpe_sum" step="0.01" value="${p.sum ?? ''}"></div>
     </div>
     <div class="form-group"><label>Комментарий</label><input type="text" id="fpe_comment" value="${fpEsc(p.comment || '')}"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Карта</label><input id="fpe_card" value="${fpEsc(p.cardNo || '')}"></div>
+      <div class="form-group"><label>Организация поступления (если карта не определена)</label><input id="fpe_org" value="${fpEsc(p.sourceOrg || gsmCardAt(data, p.cardNo, p.date).org)}"></div>
+    </div>
     <div style="font-size:12px;color:var(--text3);margin:4px 0 12px">Изменения сразу переносятся в журнал пробега: старые литры и сумма снимаются с записи, новые добавляются в запись этого дня и вида топлива.</div>
     <div style="display:flex;justify-content:flex-end;gap:8px">
       <button class="btn btn-ghost" onclick="closeModal('genericModal')">Отмена</button>
@@ -573,6 +600,12 @@ async function fpEditSave(id) {
   const qty = parseFloat(document.getElementById('fpe_qty').value);
   if (!date) { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'fpe_date'); return; }
   if (!(qty > 0)) { showFieldError('Укажите литры', 'fpe_qty'); return; }
+  if (!gsmValidDate(date)) { showFieldError('Некорректная дата', 'fpe_date'); return; }
+  const cardNo = document.getElementById('fpe_card').value.trim();
+  const owner = gsmCardAt(data, cardNo, date);
+  const sameSource = fcNorm(cardNo) === fcNorm(p.cardNo) && date === p.date;
+  const sourceOrg = owner.org ? sameSource && p.sourceOrg || owner.org : document.getElementById('fpe_org').value.trim();
+  if (!sourceOrg) { showFieldError('Укажите организацию поступления', 'fpe_org'); return; }
   const sum = parseFloat(document.getElementById('fpe_sum').value) || null;
   fpUpdate(p, {
     date, qty: fpRound(qty), sum: sum ? fpRound(sum) : null,
@@ -582,6 +615,8 @@ async function fpEditSave(id) {
     vehicleId: document.getElementById('fpe_vehicle').value || null,
     comment: document.getElementById('fpe_comment').value.trim(),
     restored: false,
+    cardNo, sourceOrg, sourceProvider: sameSource && p.sourceProvider ? p.sourceProvider : owner.provider,
+    cardVehicleId: sameSource && p.cardVehicleId ? p.cardVehicleId : owner.vehicleId,
   });
   closeModal('genericModal');
   if (fpView === 'vehicle' && p.vehicleId !== fpVehicle) showToast && showToast('Заправка перенесена на ' + fpVehicleTitle((data.vehicles || []).find(v => v.id === p.vehicleId)));
@@ -611,6 +646,13 @@ async function fpAssign(id) {
 async function fpReturnToJournal(id) {
   const p = fpById(id);
   if (!p || !fuelEditAllowed(p.date)) return;
+  const existing = fpLinkedRecord(p);
+  if (existing) {
+    if (p.recordId === existing.id) { alert('Покупка уже связана с журналом. Проверьте расхождение литров.'); return; }
+    if (!confirm('Связать покупку с найденной строкой журнала без повторного добавления литров?')) return;
+    p.recordId = existing.id;
+    fpSaveAndRender(); return;
+  }
   fpApply(p, +1);
   fpSaveAndRender();
 }
@@ -619,10 +661,11 @@ async function fpReturnToJournal(id) {
 async function fpSyncRecord(recordId) {
   const rec = (data.records || []).find(r => r.id === recordId);
   if (!rec || !fuelEditAllowed(rec.date)) return;
-  const list = fpLive().filter(p => p.recordId === recordId);
+  const list = fpLive().filter(p => fpLinkedRecord(p)?.id === recordId);
   const qty = fpRound(list.reduce((s, p) => s + (+p.qty || 0), 0));
   const sum = fpRound(list.reduce((s, p) => s + (+p.sum || 0), 0));
   if (!confirm(`Поставить в журнал за ${fmtDate(rec.date)}: ${fpNum(qty)} л вместо ${fpNum(rec.fuelIssued)} л?`)) return;
+  list.forEach(p => { p.recordId = recordId; });
   rec.fuelIssued = qty || null;
   if (sum) rec.fuelSum = sum;
   fpSaveAndRender();

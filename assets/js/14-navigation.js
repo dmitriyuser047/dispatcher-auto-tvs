@@ -11,7 +11,7 @@ function switchSection(section) {
     vehicles: 'Транспорт', generators: 'ДЭС', tanks: 'Ёмкости',
     reestr: 'Реестр', toSchedule: 'График ТО', repairs: 'Журнал ремонта',
     finances: 'Финансы', contragents: 'Контрагенты', reports: 'Отчёты',
-    printForms: 'Печатные формы', fuelReport: 'Отчёт по топливу', fuelPurchases: 'Заправки по выпискам'
+    printForms: 'Печатные формы', fuelReport: 'Отчёт по топливу', fuelPurchases: 'ГСМ'
   };
 
   // Header: menu button (always in sections), back button (detail views only)
@@ -88,7 +88,8 @@ function switchSection(section) {
   } else if (section === 'fuelReport') {
     renderFuelReport();
   } else if (section === 'fuelPurchases') {
-    fpView = 'cards'; fpVehicle = null;
+    if (fpView === 'vehicle') fpView = 'receipts';
+    fpVehicle = null;
     renderFuelPurchases();
   }
   hideProgress();

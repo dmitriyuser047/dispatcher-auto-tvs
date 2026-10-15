@@ -47,13 +47,18 @@ async function saveRecord() {
     fuelIssued: parseFloat(document.getElementById('rec_fuel_issued').value) || null,
     fuelSum:    parseFloat(document.getElementById('rec_fuel_sum').value)    || null,
     fuelUsed:   parseFloat(document.getElementById('rec_fuel_used').value)   || null,
-    fuelActual: parseFloat(document.getElementById('rec_fuel_actual').value) || null,
+    fuelActual: document.getElementById('rec_fuel_actual').value.trim() === '' ? null : parseFloat(document.getElementById('rec_fuel_actual').value),
     fuelIdle:   parseFloat(document.getElementById('rec_fuel_idle').value)   || null,
     tankMeasured: document.getElementById('rec_tank_measured').value.trim() === '' ? null : parseFloat(document.getElementById('rec_tank_measured').value),
     fuelCardNum: document.getElementById('rec_fuel_card').value || null,
     route: routeGet(),
     note: document.getElementById('rec_note').value.trim(),
   };
+  if (typeof gsmCardAt === 'function' && (!_old || _old.fuelCardNum !== obj.fuelCardNum || _old.date !== obj.date)) {
+    const owner = gsmCardAt(data, obj.fuelCardNum, obj.date);
+    obj.fuelOrg = owner.org || (!obj.fuelCardNum ? ((data.vehicles || []).find(v => v.id === obj.vehicleId) || {}).org : '') || '';
+    obj.fuelProvider = owner.provider || '';
+  }
   if (editingRecordId) {
     const r = data.records.find(x => x.id === editingRecordId);
     Object.assign(r, obj);
@@ -68,7 +73,8 @@ async function saveRecord() {
   await saveData(data);
   closeModal('recordModal');
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
-  if (v) renderDetail(v);
+  if (typeof activeSection !== 'undefined' && activeSection === 'fuelPurchases') renderFuelPurchases();
+  else if (v) renderDetail(v);
 }
 
 async function deleteRecord(id) {
