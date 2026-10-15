@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const ctx = vm.createContext({ console, window: {}, document: { addEventListener() {}, documentElement: { removeAttribute() {} }, getElementById() {} }, localStorage: { getItem() {} } });
-for (const file of ['assets/js/01-core.js', 'vendor/xlsx.bundle.js', 'assets/js/10-pdf-reports.js', 'assets/js/25-fuel-report.js', 'assets/js/25b-fuel-purchases.js', 'assets/js/25c-fuel-control.js', 'assets/js/25i-gsm-ledger.js', 'assets/js/25k-gsm-export.js']) {
+for (const file of ['assets/js/01-core.js', 'vendor/xlsx.bundle.js', 'assets/js/10-pdf-reports.js', 'assets/js/25-fuel-report.js', 'assets/js/25b-fuel-purchases.js', 'assets/js/25c-fuel-control.js', 'assets/js/25i-gsm-ledger.js', 'assets/js/25j-gsm-workspace.js', 'assets/js/25k-gsm-export.js']) {
   vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), ctx, { filename: file });
 }
 function base() {
@@ -99,6 +99,80 @@ test('legacy act export works without optional settings and does not modify the 
     assert.ok(exported.Sheets['Акт 1']);
     assert.equal(JSON.stringify(db), before);
   } finally { ctx.XLSX.writeFile = originalWrite; }
+});
+
+test('write-off button stays clickable when validation reports errors', () => {
+  const db = base(); record(db, 'r', '2026-08-01', 100, 20); purchase(db, 'p', 'r', '2026-08-01', 30, '111111');
+  ctx.inputData = db; vm.runInContext('data=inputData;gsmOrg="";gsmFuel=""', ctx);
+  const html = ctx.gsmWriteoffHtml(ledger(db));
+  assert.ok(html.includes('Акт требует проверки'));
+  assert.match(html, /onclick="gsmExportCurrentAct\(\)">Выгрузить акт/);
+  assert.doesNotMatch(html, /\sdisabled(?:[\s>]|$)/);
+});
+
+test('validation opens an actionable review; explicit draft export preserves the journal and marks every act', () => {
+  const db = base(); record(db, 'r', '2026-08-01', 100, 20); purchase(db, 'p', 'r', '2026-08-01', 30, '111111');
+  ctx.inputData = db; vm.runInContext('data=inputData', ctx);
+  const before = JSON.stringify(db), originalWrite = ctx.XLSX.writeFile;
+  let modal = null, saved = null, closed = false;
+  ctx.openGenericModal = (title, html) => { modal = { title, html }; };
+  ctx.closeModal = () => { closed = true; };
+  ctx.XLSX.writeFile = (wb, filename) => { saved = { wb, filename }; };
+  try {
+    assert.equal(ctx.exportFuelWriteOffAct('2026-08-01', '2026-08-31', { org: 'A', actNo: '123' }), null);
+    assert.equal(saved, null);
+    assert.ok(modal.html.includes('Выгрузить черновик'));
+    assert.ok(modal.html.includes('Выгрузить сверку'));
+    const wb = ctx.gsmExportActDraft();
+    assert.equal(wb, saved.wb);
+    assert.match(saved.filename, /^Черновик_акта_ГСМ_A_2026-08-01_2026-08-31\.xlsx$/);
+    assert.equal(wb.Sheets['Акт 1'].A1.v, 'Черновик акта списания ГСМ');
+    assert.match(wb.Sheets['Акт 1'].G1.v, /ЧЕРНОВИК.*Не утверждён/);
+    assert.equal(wb.Sheets['Акт 1'].E1.v, '123');
+    assert.ok(ctx.XLSX.utils.sheet_to_json(wb.Sheets['Расхождения']).length > 0);
+    assert.equal(JSON.stringify(db), before);
+    assert.equal(closed, true);
+    assert.equal(ctx.gsmExportActDraft(), null);
+  } finally { ctx.XLSX.writeFile = originalWrite; ctx.gsmCancelActExport(); }
+});
+
+test('pending export keeps its period, organization and fuel filters after screen selection changes', () => {
+  const db = base(); record(db, 'r1', '2026-08-01', 70, 0); purchase(db, 'p1', 'r1', '2026-08-01', 30, '111111');
+  record(db, 'r2', '2026-08-02', 20, 0, { fuelGrade: 'АИ-92' }); purchase(db, 'p2', 'r2', '2026-08-02', 20, '222222', { grade: 'АИ-92' });
+  ctx.inputData = db; vm.runInContext('data=inputData', ctx);
+  const originalWrite = ctx.XLSX.writeFile;
+  let saved = null;
+  ctx.openGenericModal = () => {}; ctx.closeModal = () => {};
+  ctx.XLSX.writeFile = wb => { saved = wb; };
+  try {
+    ctx.exportFuelWriteOffAct('2026-08-01', '2026-08-31', { org: 'A', fuelGrade: 'АИ-95' });
+    vm.runInContext('fpMonth="2026-09";gsmOrg="B";gsmFuel="АИ-92"', ctx);
+    ctx.gsmExportPendingActReconciliation();
+    const receipts = ctx.XLSX.utils.sheet_to_json(saved.Sheets['Поступления'], { header: 1 });
+    assert.equal(receipts.length, 2);
+    assert.equal(receipts[1][2], 'A'); assert.equal(receipts[1][5], 'АИ-95');
+    ctx.gsmExportActDraft();
+    assert.equal(saved.Sheets['Акт 1'].B1.v, 'A'); assert.equal(saved.Sheets['Акт 1'].C1.v, '2026-08-01');
+    assert.equal(saved.Sheets['Акт 2'], undefined);
+  } finally { ctx.XLSX.writeFile = originalWrite; ctx.gsmCancelActExport(); vm.runInContext('gsmOrg="";gsmFuel=""', ctx); }
+});
+
+test('failed file saving reports the error and keeps the draft review available for retry', () => {
+  const db = base(); record(db, 'r', '2026-08-01', 100, 20); purchase(db, 'p', 'r', '2026-08-01', 30, '111111');
+  ctx.inputData = db; vm.runInContext('data=inputData', ctx);
+  const before = JSON.stringify(db), originalWrite = ctx.XLSX.writeFile, originalConsole = ctx.console;
+  const alerts = [];
+  ctx.openGenericModal = () => {}; ctx.closeModal = () => {};
+  ctx.alert = text => alerts.push(text); ctx.console = { error() {} };
+  ctx.XLSX.writeFile = () => { throw Error('disk full'); };
+  try {
+    ctx.exportFuelWriteOffAct('2026-08-01', '2026-08-31', {});
+    assert.equal(ctx.gsmExportActDraft(), null);
+    assert.match(alerts[0], /Не удалось сохранить.*disk full/);
+    let saved = false; ctx.XLSX.writeFile = () => { saved = true; };
+    assert.ok(ctx.gsmExportActDraft()); assert.equal(saved, true);
+    assert.equal(JSON.stringify(db), before);
+  } finally { ctx.XLSX.writeFile = originalWrite; ctx.console = originalConsole; ctx.gsmCancelActExport(); }
 });
 
 test('release version matches the lockfile and has readable in-app release notes', () => {

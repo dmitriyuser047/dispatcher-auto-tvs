@@ -334,13 +334,16 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
     alert('Нет данных для акта за выбранный период'); return null;
   }
   const errors = gsmRelevantIssues(ledger, org, opts && opts.fuelGrade).filter(i => i.severity === 'error');
-  if (errors.length) {
-    alert('Акт не выгружен: расхождений ' + errors.length + '. Откройте ГСМ → Списание. Сверку можно выгрузить отдельно.');
-    return null;
-  }
+  if (errors.length && !opts.draft) return gsmReviewActExport(ledger, org, opts);
   const wb = gsmActWorkbook(ledger, org, opts || {});
   const suffix = org ? org.replace(/[<>:"/\\|?*]/g, '').slice(0, 40) + '_' : '';
-  XLSX.writeFile(wb, 'Акт_ГСМ_' + suffix + (dateFrom || 'начало') + '_' + (dateTo || 'всё') + '.xlsx');
+  const prefix = opts.draft ? 'Черновик_акта_ГСМ_' : 'Акт_ГСМ_';
+  try { XLSX.writeFile(wb, prefix + suffix + (dateFrom || 'начало') + '_' + (dateTo || 'всё') + '.xlsx'); }
+  catch (error) {
+    console.error('[ГСМ] Выгрузка акта: ' + error.message);
+    alert('Не удалось сохранить файл акта: ' + error.message);
+    return null;
+  }
   return wb;
 }
 

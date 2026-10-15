@@ -51,9 +51,9 @@ function gsmJournalHtml(ledger) {
 }
 function gsmWriteoffHtml(ledger) {
   const errors = gsmRelevantIssues(ledger, gsmOrg, gsmFuel).filter(i => i.severity === 'error');
-  return '<div class="gsm-section-title"><h3>Акт списания</h3><button class="btn btn-primary" onclick="gsmExportCurrentAct()"' + (errors.length ? ' disabled title="Сначала устраните расхождения"' : '') + '>Выгрузить акт</button></div>' +
+  return '<div class="gsm-section-title"><h3>Акт списания</h3><button class="btn btn-primary" onclick="gsmExportCurrentAct()">Выгрузить акт</button></div>' +
     '<div class="gsm-filters"><label>Номер акта <input aria-label="Номер акта" value="' + fpEsc(gsmActNo) + '" onchange="gsmActNo=this.value"></label><label>Дата акта <input aria-label="Дата акта" type="date" value="' + gsmActDate + '" onchange="gsmActDate=this.value"></label></div>' +
-    (errors.length ? '<div class="gsm-status gsm-error">Акт не готов: расхождений ' + errors.length + '</div>' : '') +
+    (errors.length ? '<div class="gsm-status gsm-error">Акт требует проверки: расхождений ' + errors.length + '</div>' : '') +
     gsmTable(['Организация списания', 'Машина', 'Организация машины', 'Топливо', 'На начало, л', 'Поступило, л', 'Списано, л', 'В т.ч. х/х, л', 'Остаток, л'],
       ledger.rows.filter(gsmVisible).map(r => '<tr>' + gsmCell(r.org) + gsmCell(fpVehicleTitle(r.vehicle)) + gsmCell(r.vehicle.org || '') + gsmCell(r.grade) +
         ['start', 'issued', 'spent', 'idle', 'end'].map(k => gsmCell(r[k], true)).join('') + '</tr>'));

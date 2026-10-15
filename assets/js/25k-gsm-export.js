@@ -1,3 +1,4 @@
+let gsmPendingAct = null;
 function gsmRelevantIssues(ledger, org, grade) {
   return ledger.issues.filter(i => (!grade || !i.grade || grade === i.grade) && (!org || !i.org && !i.orgs || gsmOrgKey(i.org) === gsmOrgKey(org) || (i.orgs || []).some(o => gsmOrgKey(o) === gsmOrgKey(org))));
 }
@@ -28,12 +29,15 @@ function gsmAppendReconciliation(wb, ledger, org, grade) {
     ...gsmRelevantIssues(ledger, org, grade).map(i => [i.severity === 'error' ? 'Ошибка' : 'Проверить', i.date, i.org || (i.orgs || []).join(', '), vehicle(i.vehicleId), i.grade, i.message, i.purchaseId, i.recordId])], 8);
 }
 function gsmActWorkbook(ledger, org, opts) {
+  opts = opts || {};
   const wb = XLSX.utils.book_new(), organizations = org ? [org] : ledger.organizations;
   const suppliers = [/газпром/i, /волга/i, /спс/i, /наличк|наличн|cash/i];
   organizations.forEach((owner, index) => {
     const rows = ledger.rows.filter(r => gsmOrgKey(r.org) === gsmOrgKey(owner) && (!opts.fuelGrade || r.grade === opts.fuelGrade));
     if (!rows.length) return;
-    const values = [[ 'Акт списания ГСМ', owner, ledger.from, ledger.to, opts.actNo || '', opts.actDate || '' ],
+    const errors = gsmRelevantIssues(ledger, owner, opts.fuelGrade).filter(i => i.severity === 'error');
+    const values = [[ opts.draft ? 'Черновик акта списания ГСМ' : 'Акт списания ГСМ', owner, ledger.from, ledger.to, opts.actNo || '', opts.actDate || '',
+        opts.draft ? 'ЧЕРНОВИК. Не утверждён. Расхождений: ' + errors.length : '' ],
       ['№', 'Марка машины', 'Госномер', 'Объект / организация машины', 'Топливо', 'Водитель', 'Одометр начало', 'Одометр конец', 'Норма город', 'Норма трасса', 'Норма х/х',
         'Пробег (доля), км', 'ГЛОНАСС (доля), км', 'На начало, л', 'Газпром', 'Волга-Интер', 'СПС', 'Наличные', 'Другие', 'Приход всего, л', 'Норма, л', 'Расход всего, л', 'В т.ч. х/х, л', 'На конец, л', 'Экономия, л', 'Поставщики']];
     rows.sort((a, b) => fpVehicleTitle(a.vehicle).localeCompare(fpVehicleTitle(b.vehicle), 'ru') || a.grade.localeCompare(b.grade, 'ru')).forEach((r, i) => {
@@ -52,8 +56,48 @@ function gsmActWorkbook(ledger, org, opts) {
     ws['!merges'] = [{ s: { r: 0, c: 6 }, e: { r: 0, c: 25 } }];
     ws['!cols'] = Array.from({ length: 26 }, (_, c) => ({ wch: c === 0 ? 5 : [1, 3, 5, 25].includes(c) ? 25 : 14 }));
     ws['!rows'] = values.map((_, r) => ({ hpt: r === 1 ? 45 : 30 }));
+    if (opts.draft) ws.G1.s = { font: { name: 'Arial', sz: 12, bold: true, color: { rgb: 'A8192D' } },
+      fill: { patternType: 'solid', fgColor: { rgb: 'FFF1F2' } }, alignment: { vertical: 'center', wrapText: true } };
   });
   gsmAppendReconciliation(wb, ledger, org, opts.fuelGrade);
+  return wb;
+}
+function gsmReviewActExport(ledger, org, opts) {
+  const errors = gsmRelevantIssues(ledger, org, opts.fuelGrade).filter(i => i.severity === 'error');
+  const labels = { 'purchase-duplicate': 'Возможные повторы покупок', 'journal-missing': 'Нет связи покупки с журналом',
+    'journal-difference': 'Разница литров журнала и выписки', 'manual-card-reference': 'Не уточнена карта ручной заправки',
+    'source-org': 'Не определена организация карты', shortage: 'Недостаток расчётного остатка',
+    'carry-shortage': 'Неподтверждённый переходящий остаток', 'measurement-surplus': 'Замер выше расчётного остатка',
+    'unknown-grade': 'Не уточнена марка топлива' };
+  const groups = new Map();
+  errors.forEach(i => {
+    const label = labels[i.code] || i.message;
+    groups.set(label, (groups.get(label) || 0) + 1);
+  });
+  gsmPendingAct = { from: ledger.from, to: ledger.to, opts: { ...opts, org } };
+  openGenericModal('Проверка акта ГСМ', '<div class="gsm-act-review"><p>' + fpEsc(org || 'Все организации') + ' · ' +
+    fpEsc(opts.fuelGrade || 'Все марки топлива') + '</p><p>Период: ' + fpEsc(fmtDate(ledger.from) || 'Начало учёта') + ' — ' +
+    fpEsc(fmtDate(ledger.to) || 'Все даты') + '</p><div class="gsm-status gsm-error">Расчёт требует проверки: ' + errors.length +
+    '. Статус выгрузки: черновик, не утверждён.</div><ul>' + [...groups].map(([label, count]) => '<li>' + fpEsc(label) + ': ' + count + '</li>').join('') +
+    '</ul><div class="gsm-actions"><button class="btn btn-ghost" onclick="gsmCancelActExport()">Отмена</button>' +
+    '<button class="btn btn-ghost" onclick="gsmExportPendingActReconciliation()">Выгрузить сверку</button>' +
+    '<button class="btn btn-primary" onclick="gsmExportActDraft()">Выгрузить черновик</button></div></div>', 680);
+  return null;
+}
+function gsmCancelActExport() { gsmPendingAct = null; closeModal('genericModal'); }
+function gsmExportActDraft() {
+  const pending = gsmPendingAct;
+  if (!pending) return null;
+  const wb = exportFuelWriteOffAct(pending.from, pending.to, { ...pending.opts, draft: true });
+  if (wb) gsmCancelActExport();
+  return wb;
+}
+function gsmExportPendingActReconciliation() {
+  if (!gsmPendingAct) return null;
+  const pending = gsmPendingAct, wb = XLSX.utils.book_new();
+  const ledger = gsmBuildLedger(data, { from: pending.from, to: pending.to });
+  gsmAppendReconciliation(wb, ledger, pending.opts.org, pending.opts.fuelGrade);
+  XLSX.writeFile(wb, 'Сверка_акта_ГСМ_' + (pending.from || 'начало') + '_' + (pending.to || 'всё') + '.xlsx');
   return wb;
 }
 function gsmExportCurrentAct() {
