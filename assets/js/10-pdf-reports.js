@@ -427,7 +427,14 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
   function cs(font,fill,align,border){return{font:font||{},fill:fill?{patternType:'solid',fgColor:{rgb:fill}}:{patternType:'none'},alignment:align||{vertical:'center'},border:border||{}};}
   const NC = 25; // колонки 0..25
   const SUPPLIERS = ['Газпром','Волга-Интер','СПС','Наличка','Другой']; // колонки 15..19
-  const supplierCol = s => { const idx = SUPPLIERS.indexOf(s); return 15 + (idx >= 0 ? idx : 4); }; // не указан/иной → «Другой»
+  const SUP_MATCH = [/газпром/i, /волга/i, /спс/i, /наличк|наличн|cash/i];
+  const supplierCol = s => {
+    const t = (s || '').trim();
+    const exact = SUPPLIERS.indexOf(t);
+    if (exact >= 0) return 15 + exact;
+    for (let i = 0; i < SUP_MATCH.length; i++) if (SUP_MATCH[i].test(t)) return 15 + i;
+    return 19; // «Другой»
+  };
   const ST = {
     appr:  cs({sz:10,color:{rgb:P.text}},null,{horizontal:'left',vertical:'center',wrapText:true},{}),
     title: cs({bold:true,sz:13,color:{rgb:P.text}},null,{horizontal:'center',vertical:'center',wrapText:true},{}),
@@ -545,10 +552,33 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       const odoKon  = per.length? (per[per.length-1].odoEnd!=null?per[per.length-1].odoEnd:'') : (v.odometer!=null?v.odometer:'');
       const grade = (v.fuelGrade||'').trim() || fuelMark[ft] || '—';
       const nCity = v.normCity!=null ? v.normCity : (v.norm!=null ? v.norm : null);
-      const supIdx = supplierCol(v.supplier) - 15;
+      // Распределение литров по поставщикам: из карт monthlyFuel или из v.supplier
+      const supBreak = [0,0,0,0,0];
+      const mfForSup = (data.monthlyFuel || []).filter(m => {
+        if (m.vehicleId !== v.id || !m.liters || !m.cardNumber) return false;
+        const mStart = m.month + '-01';
+        const md2 = new Date(m.month + '-01'); md2.setMonth(md2.getMonth() + 1); md2.setDate(0);
+        const mEnd = md2.toISOString().slice(0, 10);
+        if (dateFrom && mEnd < dateFrom) return false;
+        if (dateTo && mStart > dateTo) return false;
+        const cardOrg = actGsmCardOrg(m.cardNumber);
+        return (cardOrg || actGsmVehicleOrg(v)) === org;
+      });
+      if (mfForSup.length) {
+        mfForSup.forEach(m => {
+          const card = typeof fcList === 'function' ? fcList().find(c => c.number === m.cardNumber) : null;
+          const prov = card ? (card.provider || '').trim() : '';
+          const si = supplierCol(prov) - 15;
+          supBreak[si] += (m.liters || 0);
+        });
+      } else {
+        const si = supplierCol(v.supplier) - 15;
+        supBreak[si] = iss;
+      }
       const bg=i%2===0?P.white:P.gray1;
       i++;
-      tKm+=km; tGl+=glon; tIdle+=idle; tStart+=sBal; tIss+=iss; tNorm+=normL; tAct+=actL+idle; tEnd+=eBal; tEco+=eco; tSup[supIdx]+=iss;
+      tKm+=km; tGl+=glon; tIdle+=idle; tStart+=sBal; tIss+=iss; tNorm+=normL; tAct+=actL+idle; tEnd+=eBal; tEco+=eco;
+      for(let c=0;c<5;c++) tSup[c]+=supBreak[c];
       const ecoBg=eco<0?P.redPale:eco>0?P.greenPale:bg;
       const ecoStyle=cs({bold:true,sz:9,color:{rgb:eco<0?P.red:eco>0?P.green:P.text}},ecoBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
       put(n,0,i,ST.tdC(bg));
@@ -565,14 +595,17 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       put(n,11,num(km,1),ST.tdR(bg));
       put(n,12,glon>0?num(glon,1):'—',ST.tdR(bg));
       put(n,13,num(sBal),ST.tdR(bg));
-      for(let c=0;c<5;c++) put(n,14+c, c===supIdx?num(iss):'', ST.tdR(bg));
+      for(let c=0;c<5;c++) put(n,14+c, supBreak[c]?num(supBreak[c]):'', ST.tdR(bg));
       put(n,19,num(iss),ST.tdR(bg));
       put(n,20,num(normL),ST.tdR(bg));
       put(n,21,num(actL+idle),ST.tdR(bg));
       put(n,22,num(idle),ST.tdR(bg));
       put(n,23,num(eBal),ST.tdR(bg));
       put(n,24,num(eco),ecoStyle);
-      put(n,25,v.supplier||'—',ST.tdC(bg));
+      const supLabel = mfForSup.length
+        ? [...new Set(mfForSup.map(m => { const c = typeof fcList === 'function' ? fcList().find(x => x.number === m.cardNumber) : null; return c ? (c.provider || '').trim() : ''; }).filter(Boolean))].join(', ') || v.supplier || '—'
+        : (v.supplier || '—');
+      put(n,25,supLabel,ST.tdC(bg));
       rowH(n,16); n++;
     });
 
