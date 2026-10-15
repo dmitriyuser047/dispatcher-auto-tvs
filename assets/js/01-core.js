@@ -117,6 +117,8 @@ async function loadData() {
   if (!d.fuelPurchases) d.fuelPurchases = [];
   if (!d.fuelImports)   d.fuelImports   = [];
   if (!d.fuelCards)     d.fuelCards     = [];
+  if (!d.fuelCards.some(c => /наличк/i.test(c.number) || /наличк/i.test(c.provider)))
+    d.fuelCards.push({ id: 'fc_cash', number: 'НАЛИЧКА', provider: 'Наличка', org: '', status: 'active', limit: null, assignments: [], note: 'Для учёта наличных закупок топлива' });
   if (!d.fuelPeriods)   d.fuelPeriods   = [];
   if (!d.monthlyFuel)   d.monthlyFuel   = [];
   if (!d.appMeta)       d.appMeta       = [];
