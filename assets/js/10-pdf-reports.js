@@ -332,7 +332,6 @@ function actGsmVehicleOrg(v) {
 function actGsmVehicleOrgs(v, dateFrom, dateTo) {
   const mfRecs = (data.monthlyFuel || []).filter(m => {
     if (m.vehicleId !== v.id || !m.cardNumber) return false;
-    if (!m.liters) return false;
     const mStart = m.month + '-01';
     const md = new Date(m.month + '-01'); md.setMonth(md.getMonth() + 1); md.setDate(0);
     const mEnd = md.toISOString().slice(0, 10);
@@ -519,7 +518,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       let iss=per.reduce((s,r)=>s+(r.fuelIssued||0),0);
       if (data.monthlyFuel && data.monthlyFuel.length) {
         const mfAll = data.monthlyFuel.filter(m => {
-          if (m.vehicleId !== v.id || !m.liters) return false;
+          if (m.vehicleId !== v.id) return false;
           const mStart = m.month + '-01';
           const md = new Date(m.month + '-01'); md.setMonth(md.getMonth() + 1); md.setDate(0);
           const mEnd = md.toISOString().slice(0, 10);
@@ -555,7 +554,7 @@ function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
       // Распределение литров по поставщикам: из карт monthlyFuel или из v.supplier
       const supBreak = [0,0,0,0,0];
       const mfForSup = (data.monthlyFuel || []).filter(m => {
-        if (m.vehicleId !== v.id || !m.liters || !m.cardNumber) return false;
+        if (m.vehicleId !== v.id || !m.cardNumber) return false;
         const mStart = m.month + '-01';
         const md2 = new Date(m.month + '-01'); md2.setMonth(md2.getMonth() + 1); md2.setDate(0);
         const mEnd = md2.toISOString().slice(0, 10);
