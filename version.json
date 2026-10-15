@@ -1,6 +1,6 @@
 {
-  "version": "2.0.91",
+  "version": "2.0.92",
   "date": "2026-10-15",
-  "notes": "Что нового:\n- Журнал пробега: галочки на каждой записи для выделения и кнопка «Удалить выбранные» для группового удаления. Галочка в шапке выделяет/снимает все.\n\nНажмите «Скачать обновление».",
-  "url": "https://github.com/dmitriyuser047/dispatcher-auto-tvs/releases/download/v2.0.91/Dispatcher-Setup-2.0.91.exe"
+  "notes": "Что нового:\n- Исправлено: после удаления записи в журнале пробега остальные записи блокировались.\n\nНажмите «Скачать обновление».",
+  "url": "https://github.com/dmitriyuser047/dispatcher-auto-tvs/releases/download/v2.0.92/Dispatcher-Setup-2.0.92.exe"
 }

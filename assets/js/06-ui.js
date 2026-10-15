@@ -27,7 +27,7 @@ function showFieldError(msg, fieldId) {
   }
 }
 
-function saveRecord() {
+async function saveRecord() {
   const dateRaw = document.getElementById('rec_date').value.trim();
   const date = parseDate(dateRaw);
   const km = parseFloat(document.getElementById('rec_km').value);
@@ -65,18 +65,18 @@ function saveRecord() {
   const d = new Date(date);
   selectedYear = d.getFullYear();
   selectedMonth = d.getMonth() + 1;
-  saveData(data);
+  await saveData(data);
   closeModal('recordModal');
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   if (v) renderDetail(v);
 }
 
-function deleteRecord(id) {
+async function deleteRecord(id) {
   const _r = data.records.find(x => x.id === id);
   if (_r && typeof fuelEditAllowed === 'function' && !fuelEditAllowed(_r.date)) return;
   if (!confirm('Удалить эту запись?')) return;
   data.records = data.records.filter(r => r.id !== id);
-  saveData(data);
+  await saveData(data);
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   if (v) renderDetail(v);
 }
@@ -94,12 +94,12 @@ function recUpdateToolbar() {
   if (cnt) cnt.textContent = checked.length;
 }
 
-function recDeleteSelected() {
+async function recDeleteSelected() {
   const ids = [...document.querySelectorAll('.rec-check:checked')].map(cb => cb.dataset.recid);
   if (!ids.length) return;
   if (!confirm('Удалить выбранные записи (' + ids.length + ')?')) return;
   data.records = data.records.filter(r => !ids.includes(r.id));
-  saveData(data);
+  await saveData(data);
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   if (v) renderDetail(v);
 }
