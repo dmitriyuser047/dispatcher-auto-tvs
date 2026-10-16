@@ -39,7 +39,7 @@ afterEach(async () => { await page?.close(); assert.deepEqual(errors, []); });
 
 async function openManualStatement() {
   await page.evaluate(() => { fpMonth = '2026-10'; fpView = 'receipts'; gsmOrg = ''; switchSection('fuelPurchases'); });
-  await page.getByRole('button', { name: 'Ручная выписка', exact: true }).click();
+  await page.getByRole('button', { name: 'Добавить вручную', exact: true }).click();
   await page.getByRole('combobox', { name: 'Организация выписки', exact: true }).selectOption('A');
 }
 async function fillManualReceipt(date = '2026-10-03', qty = '45.5') {
@@ -148,6 +148,77 @@ test('manual statement selects the vehicle and grade immediately, saves fuel and
   });
   assert.deepEqual(out, { date: '2026-10-03', vehicle: 'v', grade: 'АИ-95', qty: 45.5, org: 'A', km: 0, total: 75.5, saved: 1 });
   assert.equal(await page.locator('#fpBody').getByRole('button', { name: 'Изменить', exact: true }).count(), 2);
+});
+
+async function openLoadedStatement() {
+  await page.evaluate(() => {
+    data.vehicles.push({ id: 'trekol', plate: '6763АА', make: 'ТРЭКОЛ', org: 'B', object: 'УНГКМ', fuel: 'diesel', fuelGrade: 'ДТ', norm: 30 },
+      { id: 'diesel', plate: 'Р559НВ', make: 'УАЗ', org: 'A', object: 'УНГКМ', fuel: 'diesel', fuelGrade: 'ДТ', norm: 12 },
+      { id: 'nng', plate: 'ННГ', make: 'УАЗ', org: 'A', object: 'ННГ', fuel: 'diesel', fuelGrade: 'ДТ' });
+    data.fuelCards = [{ number: '444444', org: 'A', assignments: [{ vehicleId: 'diesel', from: '', to: '' }] }];
+    data.fuelPurchases = [{ id: 'loaded1', importId: 'file1', importKey: 'original-key-1', date: '2026-09-02', time: '12:00', grade: 'ДТ', qty: 58, sum: 5800, cardNo: '444444', vehicleText: 'Из исходной выписки', sourceOrg: 'A', vehicleId: '' },
+      { id: 'loaded2', importId: 'file1', importKey: 'original-key-2', date: '2026-09-03', grade: 'ДТ', qty: 40, sum: 4000, cardNo: '444444', sourceOrg: 'A', vehicleId: '' }];
+    data.fuelImports = [{ id: 'file1', fileName: 'Report.xlsx' }]; rebuildIndex();
+    fpMonth = ''; fpView = 'receipts'; gsmOrg = ''; gsmFuel = ''; switchSection('fuelPurchases');
+  });
+}
+
+test('loaded statement opens all months and fuels TREKOL and another car from separate original operations', async () => {
+  await openLoadedStatement();
+  assert.equal(await page.getByRole('combobox', { name: 'Месяц', exact: true }).inputValue(), 'all');
+  assert.equal(await page.locator('[data-purchase-id]').count(), 2);
+  const first = page.locator('[data-purchase-id="loaded1"]');
+  await first.getByRole('combobox', { name: 'Заправленная машина', exact: true }).selectOption('trekol');
+  await first.getByRole('button', { name: 'Заправить', exact: true }).click();
+  await page.locator('#gsmStatementCommit').click();
+  await page.waitForFunction(() => data.fuelPurchases[0].vehicleId === 'trekol');
+  const second = page.locator('[data-purchase-id="loaded2"]');
+  await second.getByRole('combobox', { name: 'Заправленная машина', exact: true }).selectOption('diesel');
+  await second.getByRole('spinbutton', { name: 'Литры операции', exact: true }).fill('45');
+  await second.getByRole('button', { name: 'Заправить', exact: true }).click(); await page.locator('#gsmStatementCommit').click();
+  await page.waitForFunction(() => data.fuelPurchases[1].vehicleId === 'diesel');
+  const result = await page.evaluate(() => {
+    const l = gsmBuildLedger(data, gsmMonthRange('2026-09'));
+    return { count: data.fuelPurchases.length, keys: data.fuelPurchases.map(p => p.importKey),
+      rows: l.rows.map(r => ({ car: r.vehicleId, org: r.org, issued: r.issued })),
+      journal: data.records.filter(r => r.date.startsWith('2026-09')).map(r => ({ km: r.km, qty: r.fuelIssued })), disk: JSON.parse(window.__disk).fuelPurchases.length };
+  });
+  assert.equal(result.count, 2); assert.equal(result.disk, 2); assert.deepEqual(result.keys, ['original-key-1', 'original-key-2']);
+  assert.ok(result.rows.some(r => r.car === 'trekol' && r.org === 'A' && r.issued === 58));
+  assert.ok(result.rows.some(r => r.car === 'diesel' && r.issued === 45));
+  assert.deepEqual(result.journal, [{ km: 0, qty: 58 }, { km: 0, qty: 45 }]);
+  assert.match(await first.innerText(), /В журнале/);
+  await first.getByRole('button', { name: 'Заправить', exact: true }).click(); await page.locator('#gsmStatementCommit').click();
+  await page.waitForFunction(() => !document.getElementById('genericModal').classList.contains('open'));
+  assert.equal(await page.evaluate(() => data.records.find(r => r.vehicleId === 'trekol').fuelIssued), 58);
+});
+
+test('loaded statement refuses cross-object assignment and retains input after a failed save', async () => {
+  await openLoadedStatement(); const row = page.locator('[data-purchase-id="loaded1"]');
+  await row.getByRole('combobox', { name: 'Заправленная машина', exact: true }).selectOption('nng');
+  await row.getByRole('button', { name: 'Заправить', exact: true }).click(); assert.match(await row.locator('[data-row-error]').innerText(), /объект/);
+  await row.getByRole('combobox', { name: 'Заправленная машина', exact: true }).selectOption('trekol');
+  await row.getByRole('button', { name: 'Заправить', exact: true }).click();
+  await page.evaluate(() => { window.electronAPI.writeData = async () => false; });
+  await page.locator('#gsmStatementCommit').click(); await page.waitForFunction(() => document.getElementById('gsmStatementError').textContent.includes('Не записано'));
+  assert.equal(await page.evaluate(() => data.fuelPurchases[0].vehicleId), '');
+  assert.equal(await row.getByRole('combobox', { name: 'Заправленная машина', exact: true }).inputValue(), 'trekol');
+  await page.evaluate(() => { window.electronAPI.writeData = async json => { window.__disk = json; return true; }; });
+  await page.locator('#gsmStatementCommit').click(); await page.waitForFunction(() => data.fuelPurchases[0].vehicleId === 'trekol');
+  assert.equal(await page.evaluate(() => data.fuelPurchases.length), 2);
+});
+
+test('loaded statement keeps row edits while changing organization and exposes invalid-date purchases for correction', async () => {
+  await openLoadedStatement();
+  await page.evaluate(() => { data.fuelPurchases.push({ id: 'bad-date', date: 'bad', qty: 12, grade: 'ДТ', sourceOrg: 'A' }); renderFuelPurchases(); });
+  assert.equal(await page.locator('[data-purchase-id]').count(), 3);
+  const row = page.locator('[data-purchase-id="loaded1"]');
+  await row.getByRole('combobox', { name: 'Заправленная машина', exact: true }).selectOption('trekol');
+  await row.getByRole('spinbutton', { name: 'Литры операции', exact: true }).fill('60');
+  await page.getByRole('combobox', { name: 'Организация', exact: true }).selectOption('B');
+  await page.getByRole('combobox', { name: 'Организация', exact: true }).selectOption('A');
+  assert.equal(await row.getByRole('spinbutton', { name: 'Литры операции', exact: true }).inputValue(), '60');
+  assert.equal(await row.getByRole('combobox', { name: 'Заправленная машина', exact: true }).inputValue(), 'trekol');
 });
 
 test('manual statement links existing issued litres without changing mileage or odometers', async () => {

@@ -1,5 +1,5 @@
 let gsmOrg = '', gsmFuel = '', gsmActNo = '', gsmActDate = new Date().toISOString().slice(0, 10);
-const GSM_MAIN_VIEWS = [['receipts', 'Заправки'], ['manual', 'Ручная выписка'], ['journal', 'Журнал и остатки'], ['writeoff', 'Списание']];
+const GSM_MAIN_VIEWS = [['receipts', 'Выписка'], ['manual', 'Добавить вручную'], ['journal', 'Журнал и остатки'], ['writeoff', 'Списание']];
 const GSM_EXTRA_VIEWS = [['fcards', 'Топливные карты'], ['cards', 'По машинам'], ['doubles', 'Повторные заправки'], ['checks', 'Проверки'],
   ['measures', 'Замеры'], ['compare', 'Сравнение месяцев'], ['negative', 'Отрицательные остатки'], ['recon', 'Сверка с 1С'],
   ['monthly', 'Старая месячная сверка'], ['close', 'Закрытие месяца'], ['unmatched', 'Без машины'], ['history', 'История загрузок'], ['glonass', 'ГЛОНАСС']];
@@ -66,17 +66,7 @@ function gsmIssuesHtml(ledger) {
       (i.recordId ? '<button class="btn btn-ghost btn-sm" onclick="gsmEditRecord(' + gsmArg(i.recordId) + ')">Журнал</button>' : '') + '</td></tr>')) + '</details>';
 }
 function gsmReceiptsHtml(ledger) {
-  const list = ledger.receipts.filter(gsmVisible).slice().sort((a, b) => b.date.localeCompare(a.date) || (a.time || '').localeCompare(b.time || ''));
-  return '<div class="gsm-section-title" id="gsmReceiptOperations"><h3>Поступления <span>' + list.length + ' операций · ' + fpNum(list.reduce((s, p) => s + p.qty, 0), 3) + ' л</span></h3>' +
-    '<button class="btn btn-ghost" onclick="gsmAddReceipt()">Добавить заправку</button></div>' +
-    gsmTable(['Дата', 'Карта / поставщик', 'Организация карты', 'Заправленная машина', 'Закрепление карты', 'Топливо', 'Литры', ''], list.map(p => {
-      const v = gsmVehicle(p.vehicleId), holder = gsmVehicle(p.cardVehicleId);
-      const foreign = v && gsmOrgKey(v.org) !== gsmOrgKey(p.org), other = p.cardVehicleId && p.cardVehicleId !== p.vehicleId;
-      return '<tr>' + gsmCell(fmtDate(p.date) + (p.time ? ' ' + p.time : '')) + '<td>' + fpEsc(p.cardNo || 'Ручная') + '<small>' + fpEsc(p.provider) + '</small></td>' +
-        gsmCell(p.org) + '<td>' + fpEsc(fpVehicleTitle(v)) + '<small class="' + (foreign ? 'gsm-cross' : '') + '">' + fpEsc(v && v.org || '') + (foreign ? ' · другая организация' : '') + '</small></td>' +
-        '<td class="' + (other ? 'gsm-cross' : '') + '">' + fpEsc(fpVehicleTitle(holder)) + (other ? '<small>Заправлена другая машина</small>' : '') + '</td>' +
-        gsmCell(p.grade) + gsmCell(p.qty, true) + '<td><button class="btn btn-ghost btn-sm" onclick="' + (p.purchaseId ? 'fpEdit(' + gsmArg(p.purchaseId) : 'gsmEditRecord(' + gsmArg(p.recordId)) + ')">Изменить</button></td></tr>';
-    }));
+  return gsmStatementHtml(ledger);
 }
 function gsmJournalHtml(ledger) {
   const visibleVehicles = new Set(ledger.rows.filter(gsmVisible).map(r => r.vehicleId));
@@ -99,9 +89,9 @@ function gsmWriteoffHtml(ledger) {
 function gsmRenderWorkspace() {
   if (fpView === 'vehicle' && fpVehicle) return fpRenderVehicle();
   const months = [...new Set([...(data.records || []).map(r => (r.date || '').slice(0, 7)), ...fpLive().map(p => (p.date || '').slice(0, 7))])].filter(m => /^\d{4}-\d{2}$/.test(m)).sort().reverse();
-  if (!fpMonth) fpMonth = months[0] || 'all';
+  if (!fpMonth) fpMonth = fpView === 'receipts' ? 'all' : months[0] || 'all';
   const ledger = gsmBuildLedger(data, gsmMonthRange(fpMonth));
-  const orgs = [...new Map([...ledger.organizations, ...ledger.receipts.map(p => p.org)].map(org =>
+  const orgs = [...new Map([...ledger.organizations, ...ledger.receipts.map(p => p.org), ...(data.vehicles || []).map(v => v.org), ...(data.fuelCards || []).map(c => c.org)].filter(Boolean).map(org =>
     [gsmOrgKey(org), String(org).trim().replace(/\s+/g, ' ')])).values()].sort((a, b) => a.localeCompare(b, 'ru'));
   const grades = [...new Set([...ledger.rows.map(r => r.grade), ...ledger.receipts.map(p => p.grade)])].sort();
   if (gsmOrg && fpView !== 'manual') gsmOrg = orgs.find(org => gsmOrgKey(org) === gsmOrgKey(gsmOrg)) || '';

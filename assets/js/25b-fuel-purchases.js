@@ -608,14 +608,14 @@ async function fpEditSave(id) {
   const sourceOrg = owner.org ? sameSource && p.sourceOrg || owner.org : document.getElementById('fpe_org').value.trim();
   if (!sourceOrg) { showFieldError('Укажите организацию поступления', 'fpe_org'); return; }
   const grade = document.getElementById('fpe_grade').value, vehicleId = document.getElementById('fpe_vehicle').value || null;
-  if (p.manualStatement) {
+  if (p.manualStatement || p.statementReviewed) {
     const problem = gsmManualRecipientError(data, vehicleId, cardNo, date, grade);
     if (problem) { showFieldError(problem, 'fpe_vehicle'); return; }
   }
   const sum = optionalNumber('fpe_sum'), price = optionalNumber('fpe_price');
   if ([sum, price].some(n => n != null && (!Number.isFinite(n) || n < 0))) { showFieldError('Сумма и цена должны быть неотрицательными', 'fpe_sum'); return; }
   const before = JSON.stringify(data);
-  fpUpdate(p, {
+  const changes = {
     date, qty: fpRound(qty), sum: sum != null ? fpRound(sum) : null,
     price,
     time: document.getElementById('fpe_time').value.trim(),
@@ -625,8 +625,18 @@ async function fpEditSave(id) {
     restored: false,
     cardNo, sourceOrg, sourceProvider: sameSource && p.sourceProvider ? p.sourceProvider : owner.provider,
     cardVehicleId: sameSource && p.cardVehicleId ? p.cardVehicleId : owner.vehicleId,
-  });
-  if (!await saveData(data, { noMerge: !!p.manualStatement })) { data = JSON.parse(before); rebuildIndex(); return; }
+  };
+  if (vehicleId && typeof gsmStatementPlan === 'function') {
+    try {
+      const plan = gsmStatementPlan(data, id, changes);
+      data = gsmStatementApply(data, plan);
+      const updated = data.fuelPurchases.find(x => x.id === id);
+      Object.assign(updated, { time: changes.time, comment: changes.comment, restored: false });
+      rebuildIndex();
+    } catch (e) { showFieldError(e.message, 'fpe_vehicle'); return; }
+  } else fpUpdate(p, changes);
+  if (!await saveData(data, { noMerge: true })) { data = JSON.parse(before); rebuildIndex(); return; }
+  if (typeof gsmStatementDrafts !== 'undefined') gsmStatementDrafts.delete(id);
   closeModal('genericModal');
   if (fpView === 'vehicle' && p.vehicleId !== fpVehicle) showToast && showToast('Заправка перенесена на ' + fpVehicleTitle((data.vehicles || []).find(v => v.id === p.vehicleId)));
   renderFuelPurchases();
