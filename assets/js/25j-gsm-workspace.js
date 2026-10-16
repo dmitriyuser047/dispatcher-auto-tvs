@@ -6,11 +6,49 @@ const GSM_EXTRA_VIEWS = [['fcards', 'Топливные карты'], ['cards', 
 function gsmArg(value) { return fpEsc(JSON.stringify(String(value || ''))); }
 function gsmVisible(row) { return (!gsmOrg || gsmOrgKey(row.org) === gsmOrgKey(gsmOrg)) && (!gsmFuel || row.grade === gsmFuel); }
 function gsmVehicle(id) { return (data.vehicles || []).find(v => v.id === id); }
-function gsmTable(head, rows) {
+function gsmTable(head, rows, footer) {
   return '<div class="gsm-table-scroll"><table class="data-table gsm-table"><thead><tr>' + head.map(h => '<th>' + h + '</th>').join('') +
-    '</tr></thead><tbody>' + (rows.join('') || '<tr><td colspan="' + head.length + '" class="gsm-empty">Нет данных за выбранный период</td></tr>') + '</tbody></table></div>';
+    '</tr></thead><tbody>' + (rows.join('') || '<tr><td colspan="' + head.length + '" class="gsm-empty">Нет данных за выбранный период</td></tr>') + '</tbody>' + (footer ? '<tfoot>' + footer + '</tfoot>' : '') + '</table></div>';
 }
 function gsmCell(value, number) { return '<td' + (number ? ' class="gsm-number"' : '') + '>' + (number ? fpNum(value, 3) : fpEsc(value)) + '</td>'; }
+function gsmReceiptSummary(ledger, org) {
+  const receipts = ledger.receipts.filter(p => !org || gsmOrgKey(p.org) === gsmOrgKey(org));
+  const grades = [...new Set([...FP_GRADES, ...receipts.map(p => p.grade || 'Не указано')])];
+  const groups = new Map();
+  const groupFor = name => {
+    const label = String(name || GSM_UNKNOWN_ORG).trim().replace(/\s+/g, ' '), key = gsmOrgKey(label);
+    if (!groups.has(key)) groups.set(key, { org: label, quantities: new Map() });
+    return groups.get(key);
+  };
+  (ledger.organizations || []).filter(name => !org || gsmOrgKey(name) === gsmOrgKey(org)).forEach(groupFor);
+  // Поступления без машины входят в приход организации, даже если ещё не попали в остатки ТС.
+  receipts.forEach(p => {
+    const group = groupFor(p.org), grade = p.grade || 'Не указано';
+    group.quantities.set(grade, (group.quantities.get(grade) || 0) + gsmNumber(p.qty));
+  });
+  const rows = [...groups.values()].sort((a, b) => a.org.localeCompare(b.org, 'ru')).map(group => {
+    const quantities = grades.map(grade => gsmRound(group.quantities.get(grade) || 0));
+    return { org: group.org, quantities, total: gsmRound(quantities.reduce((sum, qty) => sum + qty, 0)) };
+  });
+  const totals = grades.map((_, index) => gsmRound(rows.reduce((sum, row) => sum + row.quantities[index], 0)));
+  return { grades, rows, totals, total: gsmRound(totals.reduce((sum, qty) => sum + qty, 0)), count: receipts.length };
+}
+function gsmReceiptSummaryHtml(ledger) {
+  const summary = gsmReceiptSummary(ledger, gsmOrg);
+  const amount = (qty, org, grade) => '<td class="gsm-number"' + (grade ? ' data-grade="' + fpEsc(grade) + '"' : '') + '>' +
+    (qty > 0 ? '<button type="button" class="gsm-receipt-amount" title="' + fpEsc([org || 'Все организации', grade || 'Все марки топлива', 'Поступления'].join(' · ')) +
+      '" onclick="gsmShowReceipts(' + gsmArg(org) + ',' + gsmArg(grade) + ')">' + fpNum(qty, 3) + '</button>' : '<span class="gsm-zero">' + fpNum(qty, 3) + '</span>') + '</td>';
+  const rows = summary.rows.map(row => '<tr data-org="' + fpEsc(row.org) + '"><th scope="row"' + (row.org === GSM_UNKNOWN_ORG ? ' class="gsm-error"' : '') + '>' + fpEsc(row.org) + '</th>' +
+    row.quantities.map((qty, index) => amount(qty, row.org, summary.grades[index])).join('') + amount(row.total, row.org, '') + '</tr>');
+  const footer = '<tr><th scope="row">Итого</th>' + summary.totals.map((qty, index) => amount(qty, gsmOrg, summary.grades[index])).join('') + amount(summary.total, gsmOrg, '') + '</tr>';
+  return '<section class="gsm-band gsm-income-summary" id="gsmIncomeSummary" aria-label="Приход топлива по организациям"><h3>Приход топлива по организациям <span>Все марки · литры · ' + summary.count + ' операций</span></h3>' +
+    gsmTable(['Организация', ...summary.grades.map(fpEsc), 'Всего, л'], rows, footer) + '</section>';
+}
+function gsmShowReceipts(org, grade) {
+  gsmOrg = org || ''; gsmFuel = grade || ''; fpView = 'receipts';
+  renderFuelPurchases();
+  document.getElementById('gsmReceiptOperations')?.scrollIntoView({ block: 'start' });
+}
 function gsmBarrelsHtml(ledger) {
   const rows = ledger.barrels.filter(gsmVisible).map(b => '<tr>' + gsmCell(b.org) + gsmCell(b.grade) +
     ['start', 'issued', 'spent', 'correction', 'end'].map(k => gsmCell(b[k], true)).join('') + '</tr>');
@@ -29,7 +67,7 @@ function gsmIssuesHtml(ledger) {
 }
 function gsmReceiptsHtml(ledger) {
   const list = ledger.receipts.filter(gsmVisible).slice().sort((a, b) => b.date.localeCompare(a.date) || (a.time || '').localeCompare(b.time || ''));
-  return '<div class="gsm-section-title"><h3>Поступления <span>' + list.length + ' операций · ' + fpNum(list.reduce((s, p) => s + p.qty, 0), 3) + ' л</span></h3>' +
+  return '<div class="gsm-section-title" id="gsmReceiptOperations"><h3>Поступления <span>' + list.length + ' операций · ' + fpNum(list.reduce((s, p) => s + p.qty, 0), 3) + ' л</span></h3>' +
     '<button class="btn btn-ghost" onclick="gsmAddReceipt()">Добавить заправку</button></div>' +
     gsmTable(['Дата', 'Карта / поставщик', 'Организация карты', 'Заправленная машина', 'Закрепление карты', 'Топливо', 'Литры', ''], list.map(p => {
       const v = gsmVehicle(p.vehicleId), holder = gsmVehicle(p.cardVehicleId);
@@ -63,9 +101,10 @@ function gsmRenderWorkspace() {
   const months = [...new Set([...(data.records || []).map(r => (r.date || '').slice(0, 7)), ...fpLive().map(p => (p.date || '').slice(0, 7))])].filter(m => /^\d{4}-\d{2}$/.test(m)).sort().reverse();
   if (!fpMonth) fpMonth = months[0] || 'all';
   const ledger = gsmBuildLedger(data, gsmMonthRange(fpMonth));
-  const orgs = [...new Set([...ledger.organizations, ...ledger.receipts.map(p => p.org)])].sort((a, b) => a.localeCompare(b, 'ru'));
+  const orgs = [...new Map([...ledger.organizations, ...ledger.receipts.map(p => p.org)].map(org =>
+    [gsmOrgKey(org), String(org).trim().replace(/\s+/g, ' ')])).values()].sort((a, b) => a.localeCompare(b, 'ru'));
   const grades = [...new Set([...ledger.rows.map(r => r.grade), ...ledger.receipts.map(p => p.grade)])].sort();
-  if (gsmOrg && !orgs.includes(gsmOrg)) gsmOrg = '';
+  if (gsmOrg) gsmOrg = orgs.find(org => gsmOrgKey(org) === gsmOrgKey(gsmOrg)) || '';
   if (gsmFuel && !grades.includes(gsmFuel)) gsmFuel = '';
   const mainView = GSM_MAIN_VIEWS.some(([id]) => id === fpView);
   let body;
@@ -87,7 +126,7 @@ function gsmRenderWorkspace() {
     '<div class="gsm-filters"><select aria-label="Месяц" class="fsel" onchange="fpMonth=this.value;renderFuelPurchases()">' + [...new Set([fpMonth, ...months, 'all'])].map(m => '<option value="' + fpEsc(m) + '"' + (m === fpMonth ? ' selected' : '') + '>' + fpMonthLabel(m) + '</option>').join('') + '</select>' +
     (mainView ? '<select aria-label="Организация" class="fsel" onchange="gsmOrg=this.value;renderFuelPurchases()"><option value="">Все организации</option>' + orgs.map(o => '<option' + (o === gsmOrg ? ' selected' : '') + '>' + fpEsc(o) + '</option>').join('') + '</select>' +
       '<select aria-label="Топливо" class="fsel" onchange="gsmFuel=this.value;renderFuelPurchases()"><option value="">Все марки топлива</option>' + grades.map(g => '<option' + (g === gsmFuel ? ' selected' : '') + '>' + fpEsc(g) + '</option>').join('') + '</select>' : '') + '</div>' +
-    (mainView ? gsmBarrelsHtml(ledger) + gsmIssuesHtml(ledger) : '') + '<div id="fpBody">' + body + '</div></div>';
+    (mainView ? (fpView === 'receipts' ? gsmReceiptSummaryHtml(ledger) : gsmBarrelsHtml(ledger)) + gsmIssuesHtml(ledger) : '') + '<div id="fpBody">' + body + '</div></div>';
 }
 function gsmEditRecord(id) {
   const r = (data.records || []).find(x => x.id === id);

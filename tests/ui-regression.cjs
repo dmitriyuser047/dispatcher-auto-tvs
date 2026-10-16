@@ -52,6 +52,69 @@ test('dynamic generic forms also survive text selection beyond their bounds', as
   await page.mouse.move(f.x + 10, f.y + 10); await page.mouse.down(); await page.mouse.move(m.x - 10, f.y + 10, { steps: 10 }); await page.mouse.up();
   assert.equal(await page.locator('#genericModal').evaluate(el => el.classList.contains('open')), true);
 });
+
+test('vehicle act button opens the original period dialog and exports its selected dates and organization', async () => {
+  await page.getByRole('button', { name: 'Акт ГСМ', exact: true }).click();
+  assert.equal(await page.locator('#actGsmModal').evaluate(el => el.classList.contains('open')), true);
+  assert.equal(await page.evaluate(() => activeSection), 'vehicles');
+  await page.locator('#ag_range').check();
+  assert.equal(await page.locator('#ag_range_inputs').isVisible(), true);
+  await page.locator('#ag_date_from').fill('01.09.2026'); await page.locator('#ag_date_to').fill('30.09.2026');
+  await page.locator('#ag_date').fill('01.10.2026'); await page.locator('#ag_no').fill('25');
+  await page.locator('#ag_org').selectOption('A');
+  await page.evaluate(() => { exportFuelWriteOffAct = (from, to, opts) => { window.__act = { from, to, opts }; return {}; }; });
+  await page.locator('#actGsmModal').getByRole('button', { name: 'Сформировать акт' }).click();
+  assert.deepEqual(await page.evaluate(() => window.__act), { from: '2026-09-01', to: '2026-09-30', opts: { actNo: '25', actDate: '2026-10-01', org: 'A' } });
+  assert.equal(await page.locator('#actGsmModal').evaluate(el => el.classList.contains('open')), false);
+});
+
+test('act dialog rejects invalid dates without exporting or closing', async () => {
+  await page.evaluate(() => { openActGsmModal(); window.__actExports = 0; exportFuelWriteOffAct = () => { window.__actExports++; }; });
+  await page.locator('#ag_range').check(); await page.locator('#ag_date_from').fill('31.02.2026'); await page.locator('#ag_date_to').fill('01.03.2026');
+  await page.locator('#actGsmModal').getByRole('button', { name: 'Сформировать акт' }).click();
+  assert.equal(await page.evaluate(() => window.__actExports), 0);
+  assert.equal(await page.locator('#actGsmModal').evaluate(el => el.classList.contains('open')), true);
+});
+
+test('GSM workspace exports the restored act and does not change the database', async () => {
+  await page.evaluate(() => { fpMonth = '2026-10'; fpView = 'writeoff'; switchSection('fuelPurchases'); window.__actBefore = JSON.stringify(data);
+    XLSX.writeFile = (wb, name) => { window.__actWorkbook = wb; window.__actFilename = name; }; });
+  await page.getByRole('button', { name: 'Выгрузить акт', exact: true }).click();
+  const out = await page.evaluate(() => {
+    const wb = window.__actWorkbook, ws = wb.Sheets['Акт списания ГСМ'];
+    return { names: wb.SheetNames, approval: ws.S1.v, title: ws.A4.v, header: ws.O6.v,
+      signatures: XLSX.utils.sheet_to_json(ws, { header: 1 }).filter(r => /Главный механик|Управляющий директор/.test(r[0])).length,
+      same: window.__actBefore === JSON.stringify(data), filename: window.__actFilename };
+  });
+  assert.deepEqual(out, { names: ['Акт списания ГСМ'], approval: 'Утверждаю:', title: 'Акт списания ГСМ по A за октябрь 2026г.',
+    header: 'Получено, л', signatures: 2, same: true, filename: 'Акт_ГСМ_2026-10-01_2026-10-31.xlsx' });
+});
+
+test('receipt overview shows organization totals for all fuels and drills into the selected operations', async () => {
+  await page.evaluate(() => {
+    data.fuelPurchases = [{ id: 'diesel', date: '2026-10-03', vehicleId: '', cardNo: '123', grade: 'ДТ', qty: 40, sourceOrg: ' B ' },
+      { id: 'gas', date: '2026-10-04', vehicleId: '', grade: 'Газ', qty: 5, sourceOrg: ' B ' },
+      { id: 'deleted', date: '2026-10-04', grade: 'ДТ', qty: 1000, sourceOrg: 'B', deleted: true },
+      { id: 'september', date: '2026-09-01', grade: 'АИ-92', qty: 100, sourceOrg: 'B' }];
+    rebuildIndex(); window.__receiptBefore = JSON.stringify(data); window.__receiptDiskBefore = window.__disk;
+    gsmOrg = ''; gsmFuel = ''; fpMonth = '2026-10'; fpView = 'receipts'; switchSection('fuelPurchases');
+  });
+  const summary = page.locator('#gsmIncomeSummary'), a = summary.locator('tbody tr[data-org="A"]'), b = summary.locator('tbody tr[data-org="B"]');
+  assert.equal(await a.locator('[data-grade="АИ-95"]').innerText(), '30,000');
+  assert.equal(await b.locator('[data-grade="ДТ"]').innerText(), '40,000');
+  assert.equal(await b.locator('[data-grade="Газ"]').innerText(), '5,000');
+  assert.equal(await summary.locator('tfoot td').last().innerText(), '75,000');
+  await b.locator('[data-grade="ДТ"] button').click();
+  assert.deepEqual(await page.evaluate(() => ({ org: gsmOrg, grade: gsmFuel, view: fpView })), { org: 'B', grade: 'ДТ', view: 'receipts' });
+  assert.equal(await page.locator('#fpBody tbody tr').count(), 1);
+  assert.equal(await summary.locator('tbody tr[data-org="B"] [data-grade="Газ"]').innerText(), '5,000');
+  await summary.locator('tbody tr[data-org="B"] td').last().locator('button').click();
+  assert.equal(await page.evaluate(() => gsmFuel), ''); assert.equal(await page.locator('#fpBody tbody tr').count(), 2);
+  await page.getByRole('combobox', { name: 'Месяц', exact: true }).selectOption('2026-09');
+  assert.equal(await summary.locator('tfoot td').last().innerText(), '100,000');
+  const preserved = await page.evaluate(() => ({ memory: window.__receiptBefore === JSON.stringify(data), disk: window.__receiptDiskBefore === window.__disk }));
+  assert.deepEqual(preserved, { memory: true, disk: true });
+});
 test('note-only edit preserves manually stored normative fuel and zero mileage', async () => {
   const out = await page.evaluate(async () => {
     openEditRecord('r1'); document.getElementById('rec_note').value = 'Note'; await saveRecord(); const norm = data.records[0].fuelUsed;

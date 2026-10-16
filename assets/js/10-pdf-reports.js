@@ -319,18 +319,39 @@ function actGsmVehicleOrgs(v, dateFrom, dateTo) {
   return [...new Set(gsmBuildLedger(data, { from: dateFrom, to: dateTo }).rows.filter(r => r.vehicleId === v.id).map(r => r.org))];
 }
 function actGsmOrgs(dateFrom, dateTo) {
-  return gsmBuildLedger(data, { from: dateFrom, to: dateTo }).organizations;
+  return [...new Set(gsmActRows(gsmBuildLedger(data, { from: dateFrom, to: dateTo })).map(r => r.org))].sort((a, b) => a.localeCompare(b, 'ru'));
 }
 function openActGsmModal() {
-  fpView = 'writeoff';
-  switchSection('fuelPurchases');
+  if (!data.vehicles.length) return;
+  const now = new Date(), today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  document.getElementById('ag_all').checked = true;
+  document.getElementById('ag_range_inputs').style.display = 'none';
+  document.getElementById('ag_date').value = fmtDate(today);
+  document.getElementById('ag_date_from').value = fmtDate(today.slice(0, 8) + '01');
+  document.getElementById('ag_date_to').value = fmtDate(today);
+  document.getElementById('ag_org').innerHTML = '<option value="__ALL__">Все организации (по отдельности)</option>' +
+    actGsmOrgs().map(o => '<option value="' + htmlEsc(o) + '">' + htmlEsc(o) + '</option>').join('');
+  openModal('actGsmModal');
 }
-function doExportActGsm() { gsmExportCurrentAct(); }
+function doExportActGsm() {
+  let from = '', to = '';
+  if (document.getElementById('ag_range').checked) {
+    from = parseDate(document.getElementById('ag_date_from').value.trim());
+    to = parseDate(document.getElementById('ag_date_to').value.trim());
+    if (!from || !to) { alert('Укажите обе даты периода в формате ДД.ММ.ГГГГ'); return null; }
+    if (from > to) { alert('Дата «с» не может быть позже даты «по»'); return null; }
+  }
+  const actDate = parseDate(document.getElementById('ag_date').value.trim());
+  if (!actDate) { alert('Укажите дату акта в формате ДД.ММ.ГГГГ'); return null; }
+  const opts = { actNo: document.getElementById('ag_no').value.trim(), actDate, org: document.getElementById('ag_org').value };
+  closeModal('actGsmModal');
+  return exportFuelWriteOffAct(from, to, opts);
+}
 function exportFuelWriteOffAct(dateFrom, dateTo, opts) {
   opts = opts || {};
   const ledger = gsmBuildLedger(data, { from: dateFrom, to: dateTo });
   const org = opts && opts.org !== '__ALL__' ? opts && opts.org : '';
-  if (!ledger.rows.some(r => (!org || gsmOrgKey(r.org) === gsmOrgKey(org)) && (!opts.fuelGrade || r.grade === opts.fuelGrade))) {
+  if (!gsmActRows(ledger, org, opts.fuelGrade).length) {
     alert('Нет данных для акта за выбранный период'); return null;
   }
   const errors = gsmRelevantIssues(ledger, org, opts && opts.fuelGrade).filter(i => i.severity === 'error');

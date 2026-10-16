@@ -20,6 +20,8 @@ function ledger(db, from = '2026-08-01', to = '2026-08-31') { return ctx.gsmBuil
 function barrel(l, org, grade = 'АИ-95') { return l.barrels.find(b => b.org === org && b.grade === grade); }
 function close(a, b) { assert.ok(Math.abs(a - b) <= 0.002, `${a} != ${b}`); }
 function balances(l) { l.rows.forEach(r => close(r.start + r.issued + r.correction - r.spent, r.end)); l.barrels.forEach(b => close(b.start + b.issued + b.correction - b.spent, b.end)); }
+function actRows(wb) { return ctx.XLSX.utils.sheet_to_json(wb.Sheets['Акт списания ГСМ'], { header: 1 }); }
+function actDataRows(wb) { return actRows(wb).filter(row => typeof row[0] === 'number'); }
 
 test('two cards in one journal row: exact receipts, FIFO consumption, no duplicated mileage', () => {
   const db = base(); record(db, 'r', '2026-08-01', 100, 70); purchase(db, 'p1', 'r', '2026-08-01', 60, '111111'); purchase(db, 'p2', 'r', '2026-08-01', 40, '222222');
@@ -46,6 +48,64 @@ test('manual receipts coexist with statements; monthly override cannot invent st
 test('deleted purchases do not enter barrels', () => {
   const db = base(); purchase(db, 'deleted', null, '2026-08-01', 100, '222222', { deleted: true });
   assert.equal(ledger(db).receipts.length, 0); assert.equal(ledger(db).barrels.length, 0);
+});
+
+test('receipt summary separates every grade by the source organization and includes purchases without a vehicle', () => {
+  const db = base(); db.vehicles[0].fuelBalance = 100;
+  record(db, 'r1', '2026-08-01', 50, 20);
+  purchase(db, 'p1', 'r1', '2026-08-01', 20, '111111', { grade: 'АИ-92' });
+  purchase(db, 'p2', 'r1', '2026-08-01', 30, '222222');
+  record(db, 'r2', '2026-08-02', 12, 0, { fuelGrade: 'ДТ', fuelOrg: 'B' });
+  purchase(db, 'unassigned', null, '2026-08-03', 5, '111111', { vehicleId: '', grade: 'ДТ' });
+  purchase(db, 'unknown-owner', null, '2026-08-04', 7, '', { vehicleId: '', grade: 'Газ' });
+  purchase(db, 'deleted', null, '2026-08-04', 999, '111111', { deleted: true });
+  purchase(db, 'september', null, '2026-09-01', 800, '111111');
+  const before = JSON.stringify(db), l = ledger(db), summary = ctx.gsmReceiptSummary(l);
+  const qty = (org, grade) => summary.rows.find(r => r.org === org).quantities[summary.grades.indexOf(grade)];
+  assert.equal(summary.total, 74); assert.equal(summary.count, 5);
+  assert.equal(qty('A', 'АИ-92'), 20); assert.equal(qty('A', 'АИ-95'), 0); assert.equal(qty('A', 'ДТ'), 5);
+  assert.equal(qty('B', 'АИ-95'), 30); assert.equal(qty('B', 'ДТ'), 12); assert.equal(qty('Организация не определена', 'Газ'), 7);
+  assert.equal(summary.rows.find(r => r.org === 'B').total, 42);
+  assert.equal(summary.totals.reduce((sum, q) => sum + q, 0), 74);
+  assert.equal(l.barrels.reduce((sum, b) => sum + b.issued, 0), 62);
+  assert.equal(JSON.stringify(db), before);
+});
+
+test('receipt summary applies organization and period filters but retains all supported grades', () => {
+  const db = base(); record(db, 'a', '2026-08-01', 10, 0); purchase(db, 'a', 'a', '2026-08-01', 10, '111111');
+  record(db, 'b', '2026-08-02', 20, 0); purchase(db, 'b', 'b', '2026-08-02', 20, '222222', { grade: 'АИ-92' });
+  purchase(db, 'next', null, '2026-09-01', 30, '222222', { grade: 'АИ-100' });
+  const august = ctx.gsmReceiptSummary(ledger(db), ' b '), all = ctx.gsmReceiptSummary(ledger(db, '', ''));
+  assert.equal(august.total, 20); assert.equal(august.rows.length, 1); assert.equal(august.rows[0].org, 'B');
+  assert.deepEqual(Array.from(august.grades), ['ДТ', 'АИ-92', 'АИ-95', 'АИ-98', 'АИ-100', 'Газ']);
+  assert.equal(all.total, 60);
+});
+
+test('receipt summary normalizes organization spelling, handles decimal litres and preserves unknown grades', () => {
+  const l = { organizations: [' A ', 'a'], receipts: [
+    { org: 'A', grade: 'ДТ', qty: 0.1 }, { org: ' a ', grade: 'ДТ', qty: 0.2 },
+    { org: 'A', grade: 'Бензин', qty: 1.125 }, { org: '', grade: '', qty: 2.5 },
+  ] };
+  const summary = ctx.gsmReceiptSummary(l);
+  assert.equal(summary.rows.length, 2); assert.equal(summary.total, 3.925);
+  assert.equal(summary.totals[summary.grades.indexOf('ДТ')], 0.3);
+  assert.equal(summary.totals[summary.grades.indexOf('Бензин')], 1.125);
+  assert.equal(summary.totals[summary.grades.indexOf('Не указано')], 2.5);
+});
+
+test('receipt summary HTML keeps every grade visible while detail fuel filters change and escapes organization text', () => {
+  const db = base(); record(db, 'r', '2026-08-01', 20, 0); purchase(db, 'p', 'r', '2026-08-01', 20, '111111');
+  purchase(db, 'diesel', null, '2026-08-02', 15, '222222', { grade: 'ДТ', sourceOrg: '<img src=x onerror=alert(1)>' });
+  ctx.inputData = db; vm.runInContext('data=inputData;gsmOrg="";gsmFuel="АИ-95"', ctx);
+  try {
+    const html = ctx.gsmReceiptSummaryHtml(ledger(db));
+    assert.ok(html.includes('Приход топлива по организациям'));
+    assert.ok(html.includes('data-grade="ДТ"')); assert.ok(html.includes('15,000'));
+    assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;')); assert.ok(!html.includes('<img'));
+    assert.ok(html.includes('gsmShowReceipts(')); assert.ok(html.includes('<tfoot>'));
+    const empty = ctx.gsmReceiptSummary({ receipts: [], organizations: [] });
+    assert.equal(empty.total, 0); assert.equal(empty.count, 0); assert.equal(empty.rows.length, 0);
+  } finally { vm.runInContext('gsmOrg="";gsmFuel=""', ctx); }
 });
 test('ownership is resolved on purchase date, including blocked cards', () => {
   const db = base(), c = db.fuelCards[1]; c.status = 'blocked'; c.org = 'A'; c.orgHistory = [{ org: 'B', from: '', to: '2026-08-15' }, { org: 'A', from: '2026-08-16', to: '' }];
@@ -84,9 +144,9 @@ test('opening sources split between organization barrels and reconcile', () => {
 test('export is read-only and includes recipient in foreign organization act', () => {
   const db = base(); record(db, 'r', '2026-08-01', 30, 10); purchase(db, 'p', 'r', '2026-08-01', 30, '222222'); ctx.inputData = db; vm.runInContext('data = inputData', ctx);
   const before = JSON.stringify(db), wb = ctx.gsmActWorkbook(ledger(db), 'B', {});
-  assert.equal(JSON.stringify(db), before); const rows = ctx.XLSX.utils.sheet_to_json(wb.Sheets['Акт 1'], { header: 1 });
-  assert.equal(rows[2][2], 'RECEIVER'); assert.equal(rows[2][19], 30); assert.equal(rows[2][21], 10); assert.equal(rows[2][23], 20);
-  assert.ok(wb.Sheets['Поступления']); assert.ok(wb.Sheets['Расход по партиям']);
+  assert.equal(JSON.stringify(db), before); const row = actDataRows(wb).find(r => r[2] === 'RECEIVER');
+  assert.equal(row[19], 30); assert.equal(row[21], 10); assert.equal(row[23], 20);
+  assert.deepEqual(Array.from(wb.SheetNames), ['Акт списания ГСМ']);
 });
 test('legacy act export works without optional settings and does not modify the journal', () => {
   const db = base(); record(db, 'r', '2026-08-01', 30, 10); purchase(db, 'p', 'r', '2026-08-01', 30, '222222');
@@ -96,7 +156,7 @@ test('legacy act export works without optional settings and does not modify the 
   ctx.XLSX.writeFile = wb => { exported = wb; };
   try {
     assert.equal(ctx.exportFuelWriteOffAct('2026-08-01', '2026-08-31'), exported);
-    assert.ok(exported.Sheets['Акт 1']);
+    assert.ok(exported.Sheets['Акт списания ГСМ']);
     assert.equal(JSON.stringify(db), before);
   } finally { ctx.XLSX.writeFile = originalWrite; }
 });
@@ -126,10 +186,11 @@ test('validation opens an actionable review; explicit draft export preserves the
     const wb = ctx.gsmExportActDraft();
     assert.equal(wb, saved.wb);
     assert.match(saved.filename, /^Черновик_акта_ГСМ_A_2026-08-01_2026-08-31\.xlsx$/);
-    assert.equal(wb.Sheets['Акт 1'].A1.v, 'Черновик акта списания ГСМ');
-    assert.match(wb.Sheets['Акт 1'].G1.v, /ЧЕРНОВИК.*Не утверждён/);
-    assert.equal(wb.Sheets['Акт 1'].E1.v, '123');
-    assert.ok(ctx.XLSX.utils.sheet_to_json(wb.Sheets['Расхождения']).length > 0);
+    const rows = actRows(wb);
+    assert.match(wb.Sheets['Акт списания ГСМ'].A1.v, /ЧЕРНОВИК.*Не утверждён/);
+    assert.ok(rows.some(r => /^Акт списания ГСМ по A за /.test(r[0])));
+    assert.ok(rows.some(r => /^Акт № 123/.test(r[0])));
+    assert.deepEqual(Array.from(wb.SheetNames), ['Акт списания ГСМ']);
     assert.equal(JSON.stringify(db), before);
     assert.equal(closed, true);
     assert.equal(ctx.gsmExportActDraft(), null);
@@ -152,8 +213,8 @@ test('pending export keeps its period, organization and fuel filters after scree
     assert.equal(receipts.length, 2);
     assert.equal(receipts[1][2], 'A'); assert.equal(receipts[1][5], 'АИ-95');
     ctx.gsmExportActDraft();
-    assert.equal(saved.Sheets['Акт 1'].B1.v, 'A'); assert.equal(saved.Sheets['Акт 1'].C1.v, '2026-08-01');
-    assert.equal(saved.Sheets['Акт 2'], undefined);
+    const titles = actRows(saved).filter(r => /^Акт списания ГСМ по /.test(r[0]));
+    assert.equal(titles.length, 1); assert.equal(titles[0][0], 'Акт списания ГСМ по A за август 2026г.');
   } finally { ctx.XLSX.writeFile = originalWrite; ctx.gsmCancelActExport(); vm.runInContext('gsmOrg="";gsmFuel=""', ctx); }
 });
 
@@ -233,8 +294,63 @@ test('fuel filter applies to the act and all reconciliation sheets', () => {
   const db = base(); record(db, 'r1', '2026-08-01', 30, 0); purchase(db, 'p1', 'r1', '2026-08-01', 30, '222222');
   record(db, 'r2', '2026-08-02', 40, 0, { fuelGrade: 'АИ-92' }); purchase(db, 'p2', 'r2', '2026-08-02', 40, '222222', { grade: 'АИ-92' });
   ctx.inputData = db; vm.runInContext('data=inputData', ctx); const wb = ctx.gsmActWorkbook(ledger(db), 'B', { fuelGrade: 'АИ-92' });
-  const rows = ctx.XLSX.utils.sheet_to_json(wb.Sheets['Акт 1'], { header: 1 }); assert.equal(rows[2][4], 'АИ-92'); assert.equal(rows[3][19], 40);
-  const receipts = ctx.XLSX.utils.sheet_to_json(wb.Sheets['Поступления'], { header: 1 }); assert.equal(receipts.length, 2); assert.equal(receipts[1][7], 40);
+  const rows = actDataRows(wb); assert.equal(rows.length, 1); assert.equal(rows[0][4], 'АИ-92');
+  assert.equal(actRows(wb).find(r => r[0] === 'ИТОГО:')[19], 40);
+  const reconciliation = ctx.XLSX.utils.book_new(); ctx.gsmAppendReconciliation(reconciliation, ledger(db), 'B', 'АИ-92');
+  const receipts = ctx.XLSX.utils.sheet_to_json(reconciliation.Sheets['Поступления'], { header: 1 }); assert.equal(receipts.length, 2); assert.equal(receipts[1][7], 40);
+});
+
+test('act keeps the original approval, two-level headings, column widths and commission signatures', () => {
+  const db = base(); Object.assign(db.vehicles[0], { make: 'Нива', object: 'УНГКМ', driver: 'Водитель', odometer: 0 });
+  record(db, 'r', '2026-08-01', 30, 10, { odoStart: 0, odoEnd: 100 }); purchase(db, 'p', 'r', '2026-08-01', 30, '111111');
+  ctx.inputData = db; vm.runInContext('data=inputData', ctx);
+  const wb = ctx.gsmActWorkbook(ledger(db), 'A', { actNo: '15', actDate: '2026-09-01' }), ws = wb.Sheets['Акт списания ГСМ'];
+  assert.equal(ws.S1.v, 'Утверждаю:'); assert.equal(ws.S2.v, 'Руководитель A');
+  assert.equal(ws.A4.v, 'Акт списания ГСМ по A за август 2026г.'); assert.match(ws.A5.v, /Акт № 15.*01\.09\.2026/);
+  assert.equal(ws.A7.v, '№ п/п'); assert.equal(ws.D7.v, 'Объект'); assert.equal(ws.G7.v, 'Спидометр');
+  assert.equal(ws.G8.v, 'на нач'); assert.equal(ws.H8.v, 'на кон');
+  assert.equal(ws.O7.v, 'Получено, л'); assert.equal(ws.O8.v, 'Газпром'); assert.equal(ws.T8.v, 'Всего');
+  assert.equal(ws.U7.v, 'Списано, л'); assert.equal(ws.U8.v, 'по норме'); assert.equal(ws.V8.v, 'по факту'); assert.equal(ws.W8.v, 'х/х');
+  assert.equal(ws.D9.v, 'УНГКМ'); assert.equal(ws.G9.v, 0); assert.equal(ws.H9.v, 100);
+  assert.equal(ws.O9.v, 30); assert.equal(ws.T9.v, 30); assert.equal(ws.V9.v, 10); assert.equal(ws.X9.v, 20);
+  assert.equal(ws.A10.v, 'ИТОГО:'); assert.equal(ws.T10.v, 30);
+  assert.equal(ws.A12.v, 'Комиссия:   Главный механик _______________ / ________________ /');
+  assert.equal(ws.A13.v, 'Управляющий директор _______________ / ________________ /');
+  assert.deepEqual(Array.from(ws['!cols'], c => c.wch), [4, 18, 12, 14, 8, 18, 9, 9, 7, 7, 6, 9, 10, 9, 9, 10, 8, 8, 8, 9, 9, 9, 8, 9, 11, 13]);
+  assert.ok(ws['!merges'].some(m => ctx.XLSX.utils.encode_range(m) === 'O7:T7'));
+  assert.ok(ws['!merges'].some(m => ctx.XLSX.utils.encode_range(m) === 'A10:K10'));
+  assert.equal(ws.A7.s.fill.fgColor.rgb, '2D5A8E'); assert.equal(ws['!autofilter'], undefined);
+  assert.deepEqual(Array.from(wb.SheetNames), ['Акт списания ГСМ']);
+});
+
+test('all organization acts keep separate totals on the original single sheet without duplicating fuel', () => {
+  const db = base(); record(db, 'r', '2026-08-01', 100, 70); purchase(db, 'p1', 'r', '2026-08-01', 60, '111111'); purchase(db, 'p2', 'r', '2026-08-01', 40, '222222');
+  ctx.inputData = db; vm.runInContext('data=inputData', ctx);
+  const before = JSON.stringify(db), wb = ctx.gsmActWorkbook(ledger(db), '', {}), rows = actRows(wb);
+  const totals = rows.filter(r => r[0] === 'ИТОГО:');
+  assert.equal(totals.length, 2); assert.equal(totals[0][19], 60); assert.equal(totals[0][21], 60);
+  assert.equal(totals[1][19], 40); assert.equal(totals[1][21], 10); assert.equal(totals[1][23], 30);
+  assert.equal(rows.filter(r => r[18] === 'Утверждаю:').length, 2);
+  assert.equal(rows.filter(r => /Главный механик/.test(r[0])).length, 2);
+  assert.equal(JSON.stringify(db), before);
+});
+
+test('stationary vehicles remain in the act with zeros, gas vehicles remain excluded', () => {
+  const db = base(); db.vehicles.push({ id: 'gas', plate: 'GAS', fuel: 'gas', org: 'A' });
+  ctx.inputData = db; vm.runInContext('data=inputData', ctx);
+  const before = JSON.stringify(db), wb = ctx.gsmActWorkbook(ledger(db), 'A', {}), rows = actDataRows(wb);
+  assert.equal(rows.length, 1); assert.equal(rows[0][2], 'RECEIVER'); assert.equal(rows[0][19], 0); assert.equal(rows[0][21], 0);
+  assert.equal(JSON.stringify(db), before);
+});
+
+test('an exported file preserves the original merged headings and numeric totals after readback', () => {
+  const db = base(); record(db, 'r', '2026-08-01', 30, 10); purchase(db, 'p', 'r', '2026-08-01', 30, '111111');
+  ctx.inputData = db; vm.runInContext('data=inputData', ctx);
+  const wb = ctx.gsmActWorkbook(ledger(db), 'A', {}), bytes = ctx.XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const restored = ctx.XLSX.read(bytes, { type: 'buffer', cellStyles: true }), rows = actRows(restored);
+  assert.deepEqual(Array.from(restored.SheetNames), ['Акт списания ГСМ']);
+  assert.equal(actDataRows(restored)[0][19], 30); assert.equal(rows.find(r => r[0] === 'ИТОГО:')[21], 10);
+  assert.ok(restored.Sheets['Акт списания ГСМ']['!merges'].some(m => ctx.XLSX.utils.encode_range(m) === 'O6:T6'));
 });
 test('import uses the actual vehicle before the assigned card vehicle', () => {
   const source = fs.readFileSync(path.join(root, 'assets/js/11-import.js'), 'utf8');

@@ -18,6 +18,18 @@
 .gsm-table td { vertical-align: top; max-width: 300px; overflow-wrap: anywhere; }
 .gsm-table small { display: block; margin-top: 3px; font-size: 11px; color: var(--text3); }
 .gsm-number { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.gsm-income-summary .gsm-table { min-width: 850px; }
+.gsm-income-summary thead th:not(:first-child) { text-align: right; min-width: 94px; }
+.gsm-income-summary tbody th { color: var(--text); font-size: 13px; font-weight: 500; vertical-align: middle; max-width: 280px; overflow-wrap: anywhere; border-bottom: 1px solid var(--border); }
+.gsm-income-summary tbody th.gsm-error { color: var(--red); }
+.gsm-income-summary tfoot th, .gsm-income-summary tfoot td { border-top: 2px solid var(--border2); font-weight: 600; background: var(--bg3); }
+.gsm-income-summary tfoot th { color: var(--text); font-size: 13px; }
+.gsm-income-summary th:first-child { position: sticky; left: 0; z-index: 1; background: var(--bg2); min-width: 180px; }
+.gsm-income-summary tfoot th:first-child { background: var(--bg3); }
+.gsm-receipt-amount { padding: 4px 0; border: 0; background: transparent; color: var(--accent-light); font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.gsm-receipt-amount:hover { color: var(--text); }
+.gsm-receipt-amount:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gsm-zero { color: var(--text2); }
 .gsm-cross, .gsm-cross small { color: #b96818; }
 .gsm-error { color: var(--red, #bb263c); }
 .gsm-status { padding: 8px 0; font-size: 13px; }
