@@ -550,8 +550,9 @@ function fpHistoryHtml() {
 // ─── Действия ─────────────────────────────────────────────
 
 async function fpSaveAndRender() {
-  await saveData(data);
-  renderFuelPurchases();
+  const ok = await saveData(data);
+  if (ok) renderFuelPurchases();
+  return ok;
 }
 
 function fpEdit(id) {
@@ -565,7 +566,7 @@ function fpEdit(id) {
     </div>
     <div class="form-row">
       <div class="form-group"><label>Вид топлива</label><select id="fpe_grade">${grades.filter(Boolean)
-        .map(g => `<option${g === p.grade ? ' selected' : ''}>${g}</option>`).join('')}</select></div>
+        .map(g => `<option${g === p.grade ? ' selected' : ''}>${fpEsc(g)}</option>`).join('')}</select></div>
       <div class="form-group"><label>Машина</label><select id="fpe_vehicle">${fuelImportVehicleOptions(p.vehicleId, true)}</select></div>
     </div>
     <div class="form-row">
@@ -599,38 +600,48 @@ async function fpEditSave(id) {
   if (!fuelEditAllowed(p.date, date)) return;
   const qty = parseFloat(document.getElementById('fpe_qty').value);
   if (!date) { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'fpe_date'); return; }
-  if (!(qty > 0)) { showFieldError('Укажите литры', 'fpe_qty'); return; }
+  if (!Number.isFinite(qty) || !(qty > 0)) { showFieldError('Укажите литры', 'fpe_qty'); return; }
   if (!gsmValidDate(date)) { showFieldError('Некорректная дата', 'fpe_date'); return; }
   const cardNo = document.getElementById('fpe_card').value.trim();
   const owner = gsmCardAt(data, cardNo, date);
   const sameSource = fcNorm(cardNo) === fcNorm(p.cardNo) && date === p.date;
   const sourceOrg = owner.org ? sameSource && p.sourceOrg || owner.org : document.getElementById('fpe_org').value.trim();
   if (!sourceOrg) { showFieldError('Укажите организацию поступления', 'fpe_org'); return; }
-  const sum = parseFloat(document.getElementById('fpe_sum').value) || null;
+  const grade = document.getElementById('fpe_grade').value, vehicleId = document.getElementById('fpe_vehicle').value || null;
+  if (p.manualStatement) {
+    const problem = gsmManualRecipientError(data, vehicleId, cardNo, date, grade);
+    if (problem) { showFieldError(problem, 'fpe_vehicle'); return; }
+  }
+  const sum = optionalNumber('fpe_sum'), price = optionalNumber('fpe_price');
+  if ([sum, price].some(n => n != null && (!Number.isFinite(n) || n < 0))) { showFieldError('Сумма и цена должны быть неотрицательными', 'fpe_sum'); return; }
+  const before = JSON.stringify(data);
   fpUpdate(p, {
-    date, qty: fpRound(qty), sum: sum ? fpRound(sum) : null,
-    price: parseFloat(document.getElementById('fpe_price').value) || null,
+    date, qty: fpRound(qty), sum: sum != null ? fpRound(sum) : null,
+    price,
     time: document.getElementById('fpe_time').value.trim(),
-    grade: document.getElementById('fpe_grade').value,
-    vehicleId: document.getElementById('fpe_vehicle').value || null,
+    grade,
+    vehicleId,
     comment: document.getElementById('fpe_comment').value.trim(),
     restored: false,
     cardNo, sourceOrg, sourceProvider: sameSource && p.sourceProvider ? p.sourceProvider : owner.provider,
     cardVehicleId: sameSource && p.cardVehicleId ? p.cardVehicleId : owner.vehicleId,
   });
+  if (!await saveData(data, { noMerge: !!p.manualStatement })) { data = JSON.parse(before); rebuildIndex(); return; }
   closeModal('genericModal');
   if (fpView === 'vehicle' && p.vehicleId !== fpVehicle) showToast && showToast('Заправка перенесена на ' + fpVehicleTitle((data.vehicles || []).find(v => v.id === p.vehicleId)));
-  fpSaveAndRender();
+  renderFuelPurchases();
 }
 
 async function fpDelete(id) {
   const p = fpById(id);
   if (!p || !fuelEditAllowed(p.date)) return;
-  if (!confirm('Удалить заправку ' + fmtDate(p.date) + ' на ' + fpNum(p.qty) + ' л?' + (p.vehicleId ? '\nЛитры и сумма будут сняты с журнала пробега.' : ''))) return;
+  if (!await confirmAction('Удалить заправку ' + fmtDate(p.date) + ' на ' + fpNum(p.qty) + ' л?' + (p.vehicleId ? '\nЛитры и сумма будут сняты с журнала пробега.' : ''))) return;
+  const before = JSON.stringify(data);
   fpApply(p, -1);
   p.deleted = true;
   p.editedAt = new Date().toISOString();
-  fpSaveAndRender();
+  if (!await saveData(data, { noMerge: !!p.manualStatement })) { data = JSON.parse(before); rebuildIndex(); return; }
+  renderFuelPurchases();
 }
 
 async function fpAssign(id) {

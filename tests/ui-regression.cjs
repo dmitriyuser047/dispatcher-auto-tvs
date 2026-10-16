@@ -36,6 +36,19 @@ beforeEach(async () => {
   await page.evaluate(() => { toAutoSetupOnce = async () => {}; selectedVehicleId = 'v'; switchSection('vehicles'); selectedVehicleId = 'v'; });
 });
 afterEach(async () => { await page?.close(); assert.deepEqual(errors, []); });
+
+async function openManualStatement() {
+  await page.evaluate(() => { fpMonth = '2026-10'; fpView = 'receipts'; gsmOrg = ''; switchSection('fuelPurchases'); });
+  await page.getByRole('button', { name: 'Ручная выписка', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Организация выписки', exact: true }).selectOption('A');
+}
+async function fillManualReceipt(date = '2026-10-03', qty = '45.5') {
+  await page.getByRole('textbox', { name: 'Комментарий 1', exact: true }).fill('Manual receipt');
+  await page.getByLabel('Дата 1', { exact: true }).fill(date);
+  await page.getByRole('combobox', { name: 'Машина 1', exact: true }).selectOption('v');
+  await page.getByRole('spinbutton', { name: 'Литры 1', exact: true }).fill(qty);
+}
+async function reviewManualReceipt() { await page.locator('#fpBody').getByRole('button', { name: 'Заправить', exact: true }).click(); }
 test('text drag outside a form keeps it open; a genuine backdrop click closes it', async () => {
   await page.evaluate(() => { openEditRecord('r1'); document.getElementById('rec_note').value = 'Unsaved selected text'; });
   const f = await page.locator('#rec_note').boundingBox(), m = await page.locator('#recordModal .modal').boundingBox();
@@ -114,6 +127,94 @@ test('receipt overview shows organization totals for all fuels and drills into t
   assert.equal(await summary.locator('tfoot td').last().innerText(), '100,000');
   const preserved = await page.evaluate(() => ({ memory: window.__receiptBefore === JSON.stringify(data), disk: window.__receiptDiskBefore === window.__disk }));
   assert.deepEqual(preserved, { memory: true, disk: true });
+});
+
+test('manual statement selects the vehicle and grade immediately, saves fuel and exposes it in the act', async () => {
+  await openManualStatement();
+  const before = await page.evaluate(() => window.__disk);
+  await fillManualReceipt();
+  assert.equal(await page.getByRole('combobox', { name: 'Топливо 1', exact: true }).inputValue(), 'АИ-95');
+  assert.equal(await page.evaluate(() => window.__disk), before);
+  await reviewManualReceipt();
+  const dialog = await page.locator('#genericModal .modal').evaluate(el => ({ width: el.clientWidth, background: getComputedStyle(el).backgroundColor }));
+  assert.ok(dialog.width >= 900); assert.match(dialog.background, /^rgb\(/);
+  await page.locator('#gsmManualCommit').click();
+  await page.waitForFunction(() => data.fuelPurchases.length === 1);
+  const out = await page.evaluate(() => {
+    const p = data.fuelPurchases[0], r = data.records.find(r => r.id === p.recordId), l = gsmBuildLedger(data, gsmMonthRange('2026-10'));
+    const wb = gsmActWorkbook(l, 'A', {}), rows = XLSX.utils.sheet_to_json(wb.Sheets['Акт списания ГСМ'], { header: 1 });
+    return { date: p.date, vehicle: p.vehicleId, grade: p.grade, qty: p.qty, org: p.sourceOrg, km: r.km,
+      total: rows.find(r => r[0] === 'ИТОГО:')[19], saved: JSON.parse(window.__disk).fuelPurchases.length };
+  });
+  assert.deepEqual(out, { date: '2026-10-03', vehicle: 'v', grade: 'АИ-95', qty: 45.5, org: 'A', km: 0, total: 75.5, saved: 1 });
+  assert.equal(await page.locator('#fpBody').getByRole('button', { name: 'Изменить', exact: true }).count(), 2);
+});
+
+test('manual statement links existing issued litres without changing mileage or odometers', async () => {
+  await openManualStatement(); const before = await page.evaluate(() => JSON.stringify(data.records));
+  await fillManualReceipt('2026-10-01', '30'); await reviewManualReceipt();
+  assert.equal(await page.getByRole('combobox', { name: 'Запись в журнал 1', exact: true }).inputValue(), 'link:r1');
+  await page.locator('#gsmManualCommit').click(); await page.waitForFunction(() => data.fuelPurchases.length === 1);
+  assert.equal(await page.evaluate(() => JSON.stringify(data.records)), before);
+  assert.equal(await page.evaluate(() => data.fuelPurchases[0].recordId), 'r1');
+});
+
+test('manual statement adds separate rows, keeps chosen grades and saves the batch once', async () => {
+  await openManualStatement(); await fillManualReceipt();
+  await page.getByRole('button', { name: '+ Строка', exact: true }).click();
+  assert.equal(await page.getByRole('combobox', { name: 'Машина 2', exact: true }).evaluate(el => document.activeElement === el), true);
+  assert.equal(await page.getByLabel('Дата 2', { exact: true }).inputValue(), '2026-10-03');
+  await page.getByRole('combobox', { name: 'Машина 2', exact: true }).selectOption('v');
+  await page.getByRole('combobox', { name: 'Топливо 2', exact: true }).selectOption('АИ-92');
+  await page.getByRole('spinbutton', { name: 'Литры 2', exact: true }).fill('20');
+  await reviewManualReceipt(); await page.locator('#gsmManualCommit').click(); await page.waitForFunction(() => data.fuelPurchases.length === 2);
+  assert.deepEqual(await page.evaluate(() => data.fuelPurchases.map(p => ({ grade: p.grade, qty: p.qty }))), [{ grade: 'АИ-95', qty: 45.5 }, { grade: 'АИ-92', qty: 20 }]);
+  assert.equal(await page.evaluate(() => data.records.length), 4);
+});
+
+test('failed manual batch persistence keeps typed rows and retry creates no duplicate purchases', async () => {
+  await openManualStatement(); await fillManualReceipt(); await reviewManualReceipt();
+  await page.evaluate(() => { window.electronAPI.writeData = async () => false; });
+  await page.locator('#gsmManualCommit').click();
+  await page.waitForFunction(() => document.getElementById('gsmManualReviewError').textContent.includes('Не записано'));
+  assert.equal(await page.evaluate(() => data.fuelPurchases.length), 0);
+  assert.equal(await page.getByRole('spinbutton', { name: 'Литры 1', exact: true }).inputValue(), '45.5');
+  await page.evaluate(() => { window.electronAPI.writeData = async json => { window.__disk = json; return true; }; });
+  await page.locator('#gsmManualCommit').click(); await page.waitForFunction(() => data.fuelPurchases.length === 1);
+  assert.equal(await page.evaluate(() => data.records.length), 3);
+});
+
+test('saved manual receipt remains editable after failed persistence and removable without blocking later input', async () => {
+  await openManualStatement(); await fillManualReceipt(); await reviewManualReceipt(); await page.locator('#gsmManualCommit').click();
+  await page.waitForFunction(() => data.fuelPurchases.length === 1);
+  await page.evaluate(() => { fpEdit(data.fuelPurchases[0].id); window.electronAPI.writeData = async () => false; });
+  await page.locator('#fpe_qty').fill('50'); await page.locator('#genericModal').getByRole('button', { name: 'Сохранить', exact: true }).click();
+  assert.equal(await page.locator('#genericModal').evaluate(el => el.classList.contains('open')), true);
+  assert.equal(await page.locator('#fpe_qty').inputValue(), '50'); assert.equal(await page.evaluate(() => data.fuelPurchases[0].qty), 45.5);
+  await page.evaluate(() => { window.electronAPI.writeData = async json => { window.__disk = json; return true; }; });
+  await page.locator('#genericModal').getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await page.waitForFunction(() => data.fuelPurchases[0].qty === 50);
+  assert.equal(await page.evaluate(() => data.records.find(r => r.id === data.fuelPurchases[0].recordId).fuelIssued), 50);
+  await page.locator('#fpBody').getByRole('button', { name: 'Удалить', exact: true }).click(); await page.locator('#confirmYes').click();
+  await page.waitForFunction(() => data.fuelPurchases[0].deleted);
+  await fillManualReceipt('2026-10-04', '10'); await reviewManualReceipt(); await page.locator('#gsmManualCommit').click();
+  await page.waitForFunction(() => data.fuelPurchases.filter(p => !p.deleted).length === 1);
+  assert.equal(await page.evaluate(() => data.records.length), 3);
+});
+
+test('manual review refuses stale data and concurrent server changes instead of auto-merging new receipts', async () => {
+  await openManualStatement(); await fillManualReceipt(); await reviewManualReceipt();
+  await page.evaluate(() => { data.vehicles[0].driver = 'Remote driver'; });
+  await page.locator('#gsmManualCommit').click(); assert.match(await page.locator('#gsmManualReviewError').innerText(), /Данные изменились/);
+  await page.locator('#genericModal').getByRole('button', { name: 'Назад', exact: true }).click(); await reviewManualReceipt();
+  await page.evaluate(() => {
+    _sync.enabled = true; _sync.revs = Object.fromEntries(SYNC_SECTIONS.map(n => [n, 1]));
+    SYNC_SECTIONS.forEach(n => _sync.synced[n] = JSON.stringify(data[n] || [])); window.__mergeReads = 0;
+    window.electronAPI.writeSections = async () => ({ ok: false, conflicts: ['fuelPurchases'] });
+    window.electronAPI.readSection = async () => { window.__mergeReads++; return { rev: 2, rows: [] }; };
+  });
+  await page.locator('#gsmManualCommit').click(); await page.waitForFunction(() => document.getElementById('gsmManualReviewError').textContent.includes('Не записано'));
+  assert.equal(await page.evaluate(() => window.__mergeReads), 0); assert.equal(await page.evaluate(() => data.fuelPurchases.length), 0);
 });
 test('note-only edit preserves manually stored normative fuel and zero mileage', async () => {
   const out = await page.evaluate(async () => {

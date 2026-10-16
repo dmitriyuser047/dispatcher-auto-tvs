@@ -177,7 +177,7 @@ function scheduleLocalBackup(json) {
   }, 0);
 }
 
-async function saveData(d = data) {
+async function saveData(d = data, options) {
   showProgress();
   rebuildIndex();
   try {
@@ -186,7 +186,7 @@ async function saveData(d = data) {
     if (window.electronAPI) {
       // По разделам с проверкой версии; на старом сервере — целиком, как раньше
       const ok = typeof _sync !== 'undefined' && _sync.enabled
-        ? await syncSave(d)
+        ? await syncSave(d, options)
         : await window.electronAPI.writeData(json);
       if (ok !== true) throw new Error('Изменения не записаны. Проверьте соединение и состояние базы.');
     }

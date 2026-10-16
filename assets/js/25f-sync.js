@@ -79,11 +79,11 @@ async function syncLoad() {
 
 // Сохранения идут строго по очереди — иначе два быстрых сохранения
 // отправили бы одну и ту же версию и поссорились друг с другом
-function syncSave(d) {
+function syncSave(d, options) {
   const p = _sync.chain.then(async () => {
     const revs = { ..._sync.revs }, synced = { ..._sync.synced };
     let saved = false;
-    try { saved = await syncSaveNow(d); return saved; }
+    try { saved = await syncSaveNow(d, options); return saved; }
     finally {
       // A failed merge must not turn the old form into a new change relative
       // to a newer server baseline when the user retries the same operation.
@@ -94,7 +94,7 @@ function syncSave(d) {
   return p;
 }
 
-async function syncSaveNow(d) {
+async function syncSaveNow(d, options) {
   let cur = {};
   const changedNow = () => SYNC_SECTIONS.filter(n => {
     cur[n] = JSON.stringify(d[n] || []);
@@ -125,6 +125,7 @@ async function syncSaveNow(d) {
       return true;
     }
     if (!res || !res.conflicts) { if (res && res.error) throw new Error(res.error); return false; }
+    if (options && options.noMerge) throw new Error('База изменена другим пользователем. Обновите данные и проверьте строки заново.');
     // Кто-то успел поменять эти разделы — сливаем и пробуем снова
     for (const n of res.conflicts) {
       const remote = await window.electronAPI.readSection(n);

@@ -1,5 +1,5 @@
 let gsmOrg = '', gsmFuel = '', gsmActNo = '', gsmActDate = new Date().toISOString().slice(0, 10);
-const GSM_MAIN_VIEWS = [['receipts', 'Заправки'], ['journal', 'Журнал и остатки'], ['writeoff', 'Списание']];
+const GSM_MAIN_VIEWS = [['receipts', 'Заправки'], ['manual', 'Ручная выписка'], ['journal', 'Журнал и остатки'], ['writeoff', 'Списание']];
 const GSM_EXTRA_VIEWS = [['fcards', 'Топливные карты'], ['cards', 'По машинам'], ['doubles', 'Повторные заправки'], ['checks', 'Проверки'],
   ['measures', 'Замеры'], ['compare', 'Сравнение месяцев'], ['negative', 'Отрицательные остатки'], ['recon', 'Сверка с 1С'],
   ['monthly', 'Старая месячная сверка'], ['close', 'Закрытие месяца'], ['unmatched', 'Без машины'], ['history', 'История загрузок'], ['glonass', 'ГЛОНАСС']];
@@ -104,11 +104,12 @@ function gsmRenderWorkspace() {
   const orgs = [...new Map([...ledger.organizations, ...ledger.receipts.map(p => p.org)].map(org =>
     [gsmOrgKey(org), String(org).trim().replace(/\s+/g, ' ')])).values()].sort((a, b) => a.localeCompare(b, 'ru'));
   const grades = [...new Set([...ledger.rows.map(r => r.grade), ...ledger.receipts.map(p => p.grade)])].sort();
-  if (gsmOrg) gsmOrg = orgs.find(org => gsmOrgKey(org) === gsmOrgKey(gsmOrg)) || '';
+  if (gsmOrg && fpView !== 'manual') gsmOrg = orgs.find(org => gsmOrgKey(org) === gsmOrgKey(gsmOrg)) || '';
   if (gsmFuel && !grades.includes(gsmFuel)) gsmFuel = '';
-  const mainView = GSM_MAIN_VIEWS.some(([id]) => id === fpView);
+  const mainView = GSM_MAIN_VIEWS.some(([id]) => id === fpView) && fpView !== 'manual';
   let body;
-  if (fpView === 'receipts') body = gsmReceiptsHtml(ledger);
+  if (fpView === 'manual') body = gsmManualHtml();
+  else if (fpView === 'receipts') body = gsmReceiptsHtml(ledger);
   else if (fpView === 'journal') body = gsmJournalHtml(ledger);
   else if (fpView === 'writeoff') body = gsmWriteoffHtml(ledger);
   else {
@@ -123,10 +124,11 @@ function gsmRenderWorkspace() {
     '<div class="gsm-nav">' + GSM_MAIN_VIEWS.map(([id, label]) => '<button class="sec-tab ' + (fpView === id ? 'active' : '') + '" onclick="fpView=' + gsmArg(id) + ';renderFuelPurchases()">' + label + '</button>').join('') +
     '<select aria-label="Дополнительно" class="fsel" onchange="if(this.value){fpView=this.value;renderFuelPurchases()}"><option value="">Дополнительно</option>' +
     GSM_EXTRA_VIEWS.map(([id, label]) => '<option value="' + id + '"' + (fpView === id ? ' selected' : '') + '>' + label + '</option>').join('') + '</select></div>' +
-    '<div class="gsm-filters"><select aria-label="Месяц" class="fsel" onchange="fpMonth=this.value;renderFuelPurchases()">' + [...new Set([fpMonth, ...months, 'all'])].map(m => '<option value="' + fpEsc(m) + '"' + (m === fpMonth ? ' selected' : '') + '>' + fpMonthLabel(m) + '</option>').join('') + '</select>' +
+    (fpView === 'manual' ? '' : '<div class="gsm-filters"><select aria-label="Месяц" class="fsel" onchange="fpMonth=this.value;renderFuelPurchases()">' + [...new Set([fpMonth, ...months, 'all'])].map(m => '<option value="' + fpEsc(m) + '"' + (m === fpMonth ? ' selected' : '') + '>' + fpMonthLabel(m) + '</option>').join('') + '</select>' +
     (mainView ? '<select aria-label="Организация" class="fsel" onchange="gsmOrg=this.value;renderFuelPurchases()"><option value="">Все организации</option>' + orgs.map(o => '<option' + (o === gsmOrg ? ' selected' : '') + '>' + fpEsc(o) + '</option>').join('') + '</select>' +
-      '<select aria-label="Топливо" class="fsel" onchange="gsmFuel=this.value;renderFuelPurchases()"><option value="">Все марки топлива</option>' + grades.map(g => '<option' + (g === gsmFuel ? ' selected' : '') + '>' + fpEsc(g) + '</option>').join('') + '</select>' : '') + '</div>' +
+      '<select aria-label="Топливо" class="fsel" onchange="gsmFuel=this.value;renderFuelPurchases()"><option value="">Все марки топлива</option>' + grades.map(g => '<option' + (g === gsmFuel ? ' selected' : '') + '>' + fpEsc(g) + '</option>').join('') + '</select>' : '') + '</div>') +
     (mainView ? (fpView === 'receipts' ? gsmReceiptSummaryHtml(ledger) : gsmBarrelsHtml(ledger)) + gsmIssuesHtml(ledger) : '') + '<div id="fpBody">' + body + '</div></div>';
+  if (fpView === 'manual') gsmManualTotals();
 }
 function gsmEditRecord(id) {
   const r = (data.records || []).find(x => x.id === id);

@@ -30,6 +30,23 @@
 .gsm-receipt-amount:hover { color: var(--text); }
 .gsm-receipt-amount:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .gsm-zero { color: var(--text2); }
+.gsm-manual-grid .gsm-table { min-width: 1140px; }
+.gsm-manual-grid td { padding: 6px; vertical-align: middle; }
+.gsm-manual-grid input, .gsm-manual-grid select { width: 100%; min-width: 0; padding: 7px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg2); color: var(--text); font: inherit; }
+.gsm-manual-grid td:nth-child(2) { width: 145px; }
+.gsm-manual-grid td:nth-child(3) { width: 235px; }
+.gsm-manual-grid td:nth-child(4) { width: 105px; }
+.gsm-manual-grid td:nth-child(5) { width: 210px; }
+.gsm-manual-grid td:nth-child(6), .gsm-manual-grid td:nth-child(7) { width: 100px; }
+.gsm-manual-grid input[type="number"] { text-align: right; }
+.gsm-manual-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0 24px; }
+.gsm-manual-total { margin-left: auto; color: var(--text2); font-variant-numeric: tabular-nums; }
+.gsm-manual-context label { flex-wrap: wrap; }
+.gsm-manual-context select { min-width: 220px; }
+.gsm-manual-duplicate { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; }
+.gsm-manual-duplicate input { width: auto; margin-top: 4px; }
+#genericModal:has(.gsm-manual-review) .modal, #genericModal:has(#fpe_date) .modal { width: calc(100vw - 32px); background: var(--bg2); border-radius: 8px; }
+.gsm-manual-review select { width: 100%; min-width: 250px; padding: 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg2); color: var(--text); font: inherit; }
 .gsm-cross, .gsm-cross small { color: #b96818; }
 .gsm-error { color: var(--red, #bb263c); }
 .gsm-status { padding: 8px 0; font-size: 13px; }
