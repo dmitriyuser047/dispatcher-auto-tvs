@@ -1,0 +1,493 @@
+{
+  "schemaVersion": 1,
+  "customBuild": "tvs-ocr-core-7.0.0-tvs1",
+  "packageVersion": "7.0.0",
+  "nativeVersion": "5.3.0-tvs1",
+  "builtAt": "2026-10-18T16:38:32.433Z",
+  "toolchain": {
+    "emsdkVersion": "4.0.15",
+    "emsdkCommit": "389a68bc35dcff7ebae4614e1615099dafda00d1",
+    "emscriptenRelease": "b412b6307e541b93dd93f01b61181e15c17302ec"
+  },
+  "sourceManifestSha256": "901a542dddce60da1d89fb445f7738d3add56bf3cbb887ba27e2293d993241d4",
+  "buildSchedule": {
+    "configure": "parallel-independent-directories",
+    "compileAndLink": "sequential-variants",
+    "compileJobs": 4,
+    "simultaneousFinalLinks": 1
+  },
+  "provenance": [
+    {
+      "path": "provenance/dependencies/build-dependencies.cjs",
+      "bytes": 17496,
+      "sha256": "43d7e69ebc6992c49dbef4cfcda03f720baab41c530ed8d555cf10ac1c9195de"
+    },
+    {
+      "path": "provenance/dependencies/dependencies.lock.json",
+      "bytes": 5436,
+      "sha256": "b3342fd6615d8e1d3353969177d02232625e43e198bec807e2a52375acc650b7"
+    },
+    {
+      "path": "provenance/dependencies/DEPENDENCIES.md",
+      "bytes": 2926,
+      "sha256": "bfa45134e656d9789c9faf749e82d533d482f9c327c1d83dbc3229c56e7c5b43"
+    },
+    {
+      "path": "provenance/dependencies/dependency-build.json",
+      "bytes": 9311,
+      "sha256": "7203ca66ec86c579f876dc8073ffde765c709f22c669394d16d1773579a2ba68"
+    },
+    {
+      "path": "provenance/dependencies/licenses/giflib/AUTHORS",
+      "bytes": 995,
+      "sha256": "5788998d4049d18f79c130370fc162af5dbc9ec1f9d117345f749146e8d04fd7"
+    },
+    {
+      "path": "provenance/dependencies/licenses/giflib/COPYING",
+      "bytes": 1088,
+      "sha256": "0c9b7990ecdca88b676db232c226548ac408b279f550d424d996f0d83591dd8e"
+    },
+    {
+      "path": "provenance/dependencies/licenses/leptonica/leptonica-license.txt",
+      "bytes": 1521,
+      "sha256": "87829abb5bbb00b55a107365da89e9a33f86c4250169e5a1e5588505be7d5806"
+    },
+    {
+      "path": "provenance/dependencies/licenses/libjpeg/README",
+      "bytes": 19110,
+      "sha256": "c791da525733040e622ed257c7b096b8f5191b332604ead0c6bc2b54cbd8e0d1"
+    },
+    {
+      "path": "provenance/dependencies/licenses/libpng/AUTHORS",
+      "bytes": 1119,
+      "sha256": "a92c2498102a9c6c501245dead1dd4e47c7c50c467da973e691c82ac33f177e2"
+    },
+    {
+      "path": "provenance/dependencies/licenses/libpng/LICENSE",
+      "bytes": 5345,
+      "sha256": "33ba4e187d8b0c8d7ab2bc2e522bb095219e03089e9aa0122b4fb9eb2b7de82b"
+    },
+    {
+      "path": "provenance/dependencies/licenses/libtiff/COPYRIGHT",
+      "bytes": 1146,
+      "sha256": "fbd6fed7938541d2c809c0826225fc85e551fdbfa8732b10f0c87e0847acafd7"
+    },
+    {
+      "path": "provenance/dependencies/licenses/libwebp/AUTHORS",
+      "bytes": 2346,
+      "sha256": "f6399f3a0574412944d3a6c5910b62c6f9c4ec58728ca8eccd3a2cfe3e665fdb"
+    },
+    {
+      "path": "provenance/dependencies/licenses/libwebp/COPYING",
+      "bytes": 1496,
+      "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf"
+    },
+    {
+      "path": "provenance/dependencies/licenses/libwebp/PATENTS",
+      "bytes": 1436,
+      "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c"
+    },
+    {
+      "path": "provenance/dependencies/licenses/openlibm/LICENSE.md",
+      "bytes": 5857,
+      "sha256": "b1843fbf5b03f519a5f0a44fce751bdd1022ae7148614923f9d6293e17a18b17"
+    },
+    {
+      "path": "provenance/dependencies/licenses/openlibm/source-copyright-notices.txt",
+      "bytes": 206909,
+      "sha256": "b000ff9e4b18202dcc6f8d7bfd6b461b83a63080f001aa52df8a46c8a19d452f"
+    },
+    {
+      "path": "provenance/dependencies/licenses/zlib/README",
+      "bytes": 5368,
+      "sha256": "fc2c3368901700f0acdeb1d8afeaca5923296768ec6824ecdf627aac396001fd"
+    },
+    {
+      "path": "provenance/dependencies/licenses/zlib/zlib.h",
+      "bytes": 97317,
+      "sha256": "045cf777c6c9109b28ddcf3a413c5ca15e39fc513c13ef87bd9a3132a59d1b51"
+    },
+    {
+      "path": "provenance/dependencies/local-recipes/giflib-CMakeLists.txt",
+      "bytes": 1295,
+      "sha256": "7fa220a2bd028c0edf30f93d9bb6c66ed4eb8aba464a9d5d07fab9fe4089592a"
+    },
+    {
+      "path": "provenance/dependencies/local-recipes/openlibm-CMakeLists.txt",
+      "bytes": 22335,
+      "sha256": "7c5429d12925d8fb050d5e736b17d1efd4a40788ca616ff1623d0d14c8da0954"
+    },
+    {
+      "path": "provenance/dependencies/local-recipes/openlibm-source-list.json",
+      "bytes": 3696,
+      "sha256": "885f76005767e8cc618533135cf00160cf6c0af3779be780de4e390433d347ba"
+    },
+    {
+      "path": "provenance/dependencies/pinned-sources.json",
+      "bytes": 4163,
+      "sha256": "c0eeb0dc54fac6684a0c82e46648d554d1746a30e5516958e36f559e8e1a36ab"
+    },
+    {
+      "path": "provenance/dependencies/prepare-dependencies.cjs",
+      "bytes": 7035,
+      "sha256": "2b70d7de750c5862210d0e3537143884d702fe25769838c27a36f6ed379c9ef8"
+    },
+    {
+      "path": "provenance/dependencies/toolchain.json",
+      "bytes": 3593,
+      "sha256": "fc7ae08aa6680557ab8fd3c4a4596b0161cf4d576b72380d1fff417e428013b1"
+    },
+    {
+      "path": "provenance/dependencies/upstream-pins.json",
+      "bytes": 3463,
+      "sha256": "c28f905b12ae08ab53eaccf840c369d2197774ad7736cb9f2508b594146aedf4"
+    },
+    {
+      "path": "provenance/dependencies/upstream-recipes/build-giflib.sh",
+      "bytes": 515,
+      "sha256": "e4331d50cd4c70438128410c9ea85bb951e0de638c08d9692791b0455d8afeb7"
+    },
+    {
+      "path": "provenance/dependencies/upstream-recipes/build-leptonica.sh",
+      "bytes": 1029,
+      "sha256": "d1a31bfa6c47a2db4f621a415799d308b6b85eebe2bbe70a0350fb44a15df451"
+    },
+    {
+      "path": "provenance/dependencies/upstream-recipes/build-libjpeg.sh",
+      "bytes": 544,
+      "sha256": "f201cc4c152c8b2f4b3eb8e98f1b4a79a139a3a24ea783cbd0ea01ba0ebb81ff"
+    },
+    {
+      "path": "provenance/dependencies/upstream-recipes/build-libpng.sh",
+      "bytes": 560,
+      "sha256": "1fee48e326c5003570b0f95f810892285c14c999a7818d122d9db26481b598bf"
+    },
+    {
+      "path": "provenance/dependencies/upstream-recipes/build-libtiff.sh",
+      "bytes": 514,
+      "sha256": "3749810a2d219b61986c31df7d7c3c46e28f14f3abf1064d471a4046fb9361ad"
+    },
+    {
+      "path": "provenance/dependencies/upstream-recipes/build-libwebp.sh",
+      "bytes": 1227,
+      "sha256": "3ec8db15e61f8dec95b850404695ec1ac5dcfe7c0d7cbcbbdcb4dc235b10aa0e"
+    },
+    {
+      "path": "provenance/dependencies/upstream-recipes/build-openlibm.sh",
+      "bytes": 229,
+      "sha256": "81f52aa043000633cf939340f84acd7bc104cd788116b13d4d55ca45e1dcb9b5"
+    },
+    {
+      "path": "provenance/dependencies/upstream-recipes/build-tesseract.sh",
+      "bytes": 1707,
+      "sha256": "73e9f3c6ac911e2e43a0fb2732f7fa44429e1b0f3185b0d4b8dc5bdb5d79f5d4"
+    },
+    {
+      "path": "provenance/dependencies/upstream-recipes/build-zlib.sh",
+      "bytes": 641,
+      "sha256": "434fa59a567b8e354b8d9114b9b2ef7e8b622d0d8b575757d63fa51f7468d9ec"
+    },
+    {
+      "path": "provenance/dependencies/upstream-recipes/install-deps.sh",
+      "bytes": 387,
+      "sha256": "e9694f673e0e3f677b2559ae7da4103b9449f4b714dd66c3eaf918d385b7da0f"
+    },
+    {
+      "path": "provenance/dependencies/upstream-recipes/var.sh",
+      "bytes": 2054,
+      "sha256": "afa32cc3ea8effe04bcc3f7aad0f4315f20f6145f70f98f8515283315223da31"
+    },
+    {
+      "path": "provenance/dependency-source-manifest.json",
+      "bytes": 4163,
+      "sha256": "c0eeb0dc54fac6684a0c82e46648d554d1746a30e5516958e36f559e8e1a36ab"
+    },
+    {
+      "path": "provenance/dependency-upstream-pins.json",
+      "bytes": 3463,
+      "sha256": "c28f905b12ae08ab53eaccf840c369d2197774ad7736cb9f2508b594146aedf4"
+    },
+    {
+      "path": "provenance/dependency-build-result.json",
+      "bytes": 9311,
+      "sha256": "7203ca66ec86c579f876dc8073ffde765c709f22c669394d16d1773579a2ba68"
+    }
+  ],
+  "dependencyArchives": [
+    {
+      "path": "lib/libgif.a",
+      "bytes": 41738,
+      "sha256": "c3bd0269c2e0cc94fc61acc5703e4fbaea107df0502f4c3b7042e90bf73d4610"
+    },
+    {
+      "path": "lib/libjpeg.a",
+      "bytes": 318482,
+      "sha256": "8b670d8d4a6cae5349e4d9fa031930efbff052a651f3430b3d2b9f465978835b"
+    },
+    {
+      "path": "lib/libleptonica.a",
+      "bytes": 3334022,
+      "sha256": "9bf3921c4f924fbe9f2e002b08dac4cf1e15df65b1df8d3209cf606b8eba835e"
+    },
+    {
+      "path": "lib/libopenlibm.a",
+      "bytes": 184154,
+      "sha256": "3fcb4e2507f2787c9d6950d1b60e725b9a4f97583dbf5d57b2051e1be3af4735"
+    },
+    {
+      "path": "lib/libpng.a",
+      "bytes": 253898,
+      "sha256": "8007ea48940264d1af4061af77759e0606f8414ebc2b82a764e8c91998bd8699"
+    },
+    {
+      "path": "lib/libtiff.a",
+      "bytes": 594386,
+      "sha256": "73a3ca70f1cecbc3b5dc1be05e5656a21d71d54a3ebfbe7931906f3209293569"
+    },
+    {
+      "path": "lib/libtiffxx.a",
+      "bytes": 8574,
+      "sha256": "6b39703439fc7add42cec2c31700eda94c5238b1875fe6b7e74dbedb4be91f50"
+    },
+    {
+      "path": "lib/libwebp.a",
+      "bytes": 500294,
+      "sha256": "6e0e6a797c4dcd65b88c0306619180a7891c0ad32e9a76535024f19f202fe5ea"
+    },
+    {
+      "path": "lib/libwebpdecoder.a",
+      "bytes": 202934,
+      "sha256": "77b69191056b4b31b6f87c6650b1bfb833a408ece1175bd7dc752b59b17fef98"
+    },
+    {
+      "path": "lib/libwebpdemux.a",
+      "bytes": 11442,
+      "sha256": "ccb8bbf7d766f82c003ba97206372cbf6f4ba117622f7e1659bda14d38e5df02"
+    },
+    {
+      "path": "lib/libwebpmux.a",
+      "bytes": 41254,
+      "sha256": "3355f20baec990f8641e77806da19cf7b6f094214348715e34bccadbd4d57613"
+    },
+    {
+      "path": "lib/libz.a",
+      "bytes": 102560,
+      "sha256": "c4a20c632bfd94a0c4d9b2c2cd918224f8c760320c276f85cff8dabf06068f2c"
+    }
+  ],
+  "variants": [
+    {
+      "id": "scalar-lstm",
+      "name": "tesseract-core-lstm",
+      "sse": false,
+      "avx": false,
+      "legacy": false,
+      "flags": {
+        "HAVE_SSE4_1": false,
+        "HAVE_AVX": false,
+        "HAVE_AVX2": false,
+        "DISABLED_LEGACY_ENGINE": true,
+        "ERROR_ON_UNDEFINED_SYMBOLS": 1
+      },
+      "files": [
+        {
+          "path": "tesseract-core-lstm.js",
+          "bytes": 196126,
+          "sha256": "1a59266da0ccff308a8338f8b615604a5cde04e1905c00d784632ebbedff1624"
+        },
+        {
+          "path": "tesseract-core-lstm.wasm",
+          "bytes": 2919229,
+          "sha256": "416bea07d95409b566ed19e816093d35d7f5ffac9835ccb8f5edf0762f802f9d"
+        }
+      ],
+      "configureArgs": [
+        "-S",
+        "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\source\\core\\third_party\\tesseract",
+        "-B",
+        "D:\\tvs-ocr-native-20261017\\core-build\\scalar-lstm",
+        "-G",
+        "Ninja",
+        "-DCMAKE_TOOLCHAIN_FILE=C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/tools/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+        "-DCMAKE_MAKE_PROGRAM=C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/tools/ninja/ninja.exe",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_PREFIX_PATH=D:/tvs-ocr-native-20261017/prefix",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        "-DLeptonica_DIR=D:/tvs-ocr-native-20261017/prefix/lib/cmake/leptonica",
+        "-DWASM_BUILD=ON",
+        "-DBUILD_SHARED_LIBS=OFF",
+        "-DOPENMP_BUILD=OFF",
+        "-DBUILD_TRAINING_TOOLS=OFF",
+        "-DBUILD_TESTS=OFF",
+        "-DGRAPHICS_DISABLED=ON",
+        "-DSW_BUILD=OFF",
+        "-DDISABLE_CURL=ON",
+        "-DDISABLE_ARCHIVE=ON",
+        "-DENABLE_NATIVE=OFF",
+        "-DENABLE_LTO=OFF",
+        "-DENABLE_OPENCL=OFF",
+        "-DDISABLED_LEGACY_ENGINE=ON",
+        "-DHAVE_SSE4_1=OFF",
+        "-DHAVE_AVX=OFF",
+        "-DHAVE_AVX2=OFF",
+        "-DHAVE_AVX512F=OFF",
+        "-DCMAKE_C_FLAGS=-O3",
+        "-DCMAKE_CXX_FLAGS=-O3"
+      ],
+      "cacheSha256": "510f5ca60dee40be9fdc23f42c7c8112b88b7107a7bef11795dc7aa3d70a6d66",
+      "compileCommandsSha256": "a5b43384a89e0ff594904ee88d6467ed2ed654997bbbaac246ee559f5c4c267e",
+      "versionHeaderSha256": "600d2aff0101b0a00659551294dc1e85c025ee11eee95b5cda23ad50c54681fd",
+      "sourceAndStagedPdfFontSha256": "c7845420925a23d88ed830a63957b8af85a66a8daf8d9fc90e843673b2ef1a59",
+      "bindingEvidence": {
+        "path": "provenance/native-bindings-scalar-lstm.json",
+        "bytes": 40429,
+        "sha256": "f65facf85a54cb09d39a0c54a2016c7667c21b2e2a6755922f0f6d28689db522"
+      },
+      "logPath": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\logs\\core-scalar-lstm.log"
+    },
+    {
+      "id": "simd-lstm",
+      "name": "tesseract-core-simd-lstm",
+      "sse": true,
+      "avx": false,
+      "legacy": false,
+      "flags": {
+        "HAVE_SSE4_1": true,
+        "HAVE_AVX": false,
+        "HAVE_AVX2": false,
+        "DISABLED_LEGACY_ENGINE": true,
+        "ERROR_ON_UNDEFINED_SYMBOLS": 1
+      },
+      "files": [
+        {
+          "path": "tesseract-core-simd-lstm.js",
+          "bytes": 196131,
+          "sha256": "a5c9f8246640d50b5684ffa54c7a04d06b5f82f76e7f7cb4a9cec3feee0938ec"
+        },
+        {
+          "path": "tesseract-core-simd-lstm.wasm",
+          "bytes": 2921468,
+          "sha256": "a6271a3bfe9ea3a49e341aca836583dad75921f49b8b586e861e852c8483921e"
+        }
+      ],
+      "configureArgs": [
+        "-S",
+        "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\source\\core\\third_party\\tesseract",
+        "-B",
+        "D:\\tvs-ocr-native-20261017\\core-build\\simd-lstm",
+        "-G",
+        "Ninja",
+        "-DCMAKE_TOOLCHAIN_FILE=C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/tools/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+        "-DCMAKE_MAKE_PROGRAM=C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/tools/ninja/ninja.exe",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_PREFIX_PATH=D:/tvs-ocr-native-20261017/prefix",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        "-DLeptonica_DIR=D:/tvs-ocr-native-20261017/prefix/lib/cmake/leptonica",
+        "-DWASM_BUILD=ON",
+        "-DBUILD_SHARED_LIBS=OFF",
+        "-DOPENMP_BUILD=OFF",
+        "-DBUILD_TRAINING_TOOLS=OFF",
+        "-DBUILD_TESTS=OFF",
+        "-DGRAPHICS_DISABLED=ON",
+        "-DSW_BUILD=OFF",
+        "-DDISABLE_CURL=ON",
+        "-DDISABLE_ARCHIVE=ON",
+        "-DENABLE_NATIVE=OFF",
+        "-DENABLE_LTO=OFF",
+        "-DENABLE_OPENCL=OFF",
+        "-DDISABLED_LEGACY_ENGINE=ON",
+        "-DHAVE_SSE4_1=ON",
+        "-DHAVE_AVX=OFF",
+        "-DHAVE_AVX2=OFF",
+        "-DHAVE_AVX512F=OFF",
+        "-DCMAKE_C_FLAGS=-O3",
+        "-DCMAKE_CXX_FLAGS=-O3"
+      ],
+      "cacheSha256": "e1795892cad9bde07c73ef2e612448c31a0d6764e1abbefc38147acfe62ac36b",
+      "compileCommandsSha256": "6bf3493cadbdbd8673f2511cc43ea04003c7025d5979f63ba93ee3dc55d8a5a0",
+      "versionHeaderSha256": "600d2aff0101b0a00659551294dc1e85c025ee11eee95b5cda23ad50c54681fd",
+      "sourceAndStagedPdfFontSha256": "c7845420925a23d88ed830a63957b8af85a66a8daf8d9fc90e843673b2ef1a59",
+      "bindingEvidence": {
+        "path": "provenance/native-bindings-simd-lstm.json",
+        "bytes": 40429,
+        "sha256": "fa5d5bdcedac641833c20b43450379deb4d4e016b587457ac17cf7228146afac"
+      },
+      "logPath": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\logs\\core-simd-lstm.log"
+    },
+    {
+      "id": "relaxedsimd-lstm",
+      "name": "tesseract-core-relaxedsimd-lstm",
+      "sse": true,
+      "avx": true,
+      "legacy": false,
+      "flags": {
+        "HAVE_SSE4_1": true,
+        "HAVE_AVX": true,
+        "HAVE_AVX2": true,
+        "DISABLED_LEGACY_ENGINE": true,
+        "ERROR_ON_UNDEFINED_SYMBOLS": 1
+      },
+      "files": [
+        {
+          "path": "tesseract-core-relaxedsimd-lstm.js",
+          "bytes": 196138,
+          "sha256": "bf0f64aa2d9c4a7d16a5f2abf734e6017f852e5ae115523fdef0114548e86259"
+        },
+        {
+          "path": "tesseract-core-relaxedsimd-lstm.wasm",
+          "bytes": 2926616,
+          "sha256": "b975838272c8602c496bb71ea9fc71431ee4dff2052fcf670dc15fa43f1af0cf"
+        }
+      ],
+      "configureArgs": [
+        "-S",
+        "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\source\\core\\third_party\\tesseract",
+        "-B",
+        "D:\\tvs-ocr-native-20261017\\core-build\\relaxedsimd-lstm",
+        "-G",
+        "Ninja",
+        "-DCMAKE_TOOLCHAIN_FILE=C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/tools/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+        "-DCMAKE_MAKE_PROGRAM=C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/tools/ninja/ninja.exe",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_PREFIX_PATH=D:/tvs-ocr-native-20261017/prefix",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        "-DLeptonica_DIR=D:/tvs-ocr-native-20261017/prefix/lib/cmake/leptonica",
+        "-DWASM_BUILD=ON",
+        "-DBUILD_SHARED_LIBS=OFF",
+        "-DOPENMP_BUILD=OFF",
+        "-DBUILD_TRAINING_TOOLS=OFF",
+        "-DBUILD_TESTS=OFF",
+        "-DGRAPHICS_DISABLED=ON",
+        "-DSW_BUILD=OFF",
+        "-DDISABLE_CURL=ON",
+        "-DDISABLE_ARCHIVE=ON",
+        "-DENABLE_NATIVE=OFF",
+        "-DENABLE_LTO=OFF",
+        "-DENABLE_OPENCL=OFF",
+        "-DDISABLED_LEGACY_ENGINE=ON",
+        "-DHAVE_SSE4_1=ON",
+        "-DHAVE_AVX=ON",
+        "-DHAVE_AVX2=ON",
+        "-DHAVE_AVX512F=OFF",
+        "-DCMAKE_C_FLAGS=-O3",
+        "-DCMAKE_CXX_FLAGS=-O3"
+      ],
+      "cacheSha256": "8725b277f71d5130f6ef567621e4382bf13dca9cc02626994a66bd802001526c",
+      "compileCommandsSha256": "f94879db81c585b7c035a736135dca82c4a089e85d83f673ef5339a3e6ea771d",
+      "versionHeaderSha256": "600d2aff0101b0a00659551294dc1e85c025ee11eee95b5cda23ad50c54681fd",
+      "sourceAndStagedPdfFontSha256": "c7845420925a23d88ed830a63957b8af85a66a8daf8d9fc90e843673b2ef1a59",
+      "bindingEvidence": {
+        "path": "provenance/native-bindings-relaxedsimd-lstm.json",
+        "bytes": 40429,
+        "sha256": "9fac8433c84a92092ef2de59c664567900f1f491b073bcd3fb9c987399bbe075"
+      },
+      "logPath": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\logs\\core-relaxedsimd-lstm.log"
+    }
+  ],
+  "testsOrOcrRun": false,
+  "notes": [
+    "Native code compiled from pinned source with the listed TVS patches.",
+    "No OCR quality or runtime compatibility claim is inferred from compilation.",
+    "Models and trained neural weights are unchanged by this native build."
+  ]
+}

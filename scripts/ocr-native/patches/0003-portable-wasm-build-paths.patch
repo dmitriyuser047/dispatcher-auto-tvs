@@ -1,0 +1,85 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f9049ce..d3e1374 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -734,10 +734,18 @@ if (WASM_BUILD)
+   if(HAVE_AVX2)
+       list(APPEND arch_files_opt
+           ${SSE_SIMD_COMMON_FILES}
++          src/arch_sse/dotproductsse.cpp
+           src/arch_sse/dotproductavx.cpp
+           src/arch_sse/intsimdmatrixavx2.cpp
+       )
+ 
++      # The relaxed-SIMD dispatcher retains the SSE dot-product fallback when
++      # the host's relaxed dot-product semantics fail ProbeWasmSDot().
++      set_source_files_properties(
++          src/arch_sse/dotproductsse.cpp
++          PROPERTIES COMPILE_FLAGS "${SIMD_FLAGS_SSE41}"
++      )
++
+       set_source_files_properties(
+           ${SSE_SIMD_COMMON_FILES}
+           src/arch_sse/dotproductavx.cpp
+@@ -1072,7 +1080,7 @@ else()
+ ## Define variable for pre-processor to add emscripten-specific content
+ add_definitions(-DWASM_BUILD)
+ 
+-execute_process(COMMAND ${EMSCRIPTEN_ROOT_PATH}/emcc --version
++execute_process(COMMAND "${CMAKE_C_COMPILER}" --version
+                 OUTPUT_VARIABLE EMCC_VER_RAW)
+ string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" EMCC_VER "${EMCC_VER_RAW}")
+ if(EMCC_VER)
+@@ -1150,8 +1158,8 @@ if(DEFINED EMCC_VER AND EMCC_VER VERSION_LESS "4.0.6")
+   # Allow stackTrace() to emit fully proper demangled c++ names
+   set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} -s DEMANGLE_SUPPORT=1")
+ endif()
+-# Allow unused symbol
+-set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} -s ERROR_ON_UNDEFINED_SYMBOLS=0")
++# A custom core must not silently replace missing native bindings with stubs.
++set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} -s ERROR_ON_UNDEFINED_SYMBOLS=1")
+ #
+ # This flag fix the issue of [float unrepresentable in integer range]
+ # Ref: http://kripken.github.io/emscripten-site/docs/compiling/WebAssembly.html#trap-mode
+@@ -1162,13 +1170,18 @@ set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} -s ERROR_ON_UNDEFINED_SYMBOLS=0")
+ #set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} -s RUNTIME_LOGGING=1")
+ #set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} -s LIBRARY_DEBUG=1")
+ #set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} -s SYSCALL_DEBUG=1")
+-set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} -s EXPORTED_FUNCTIONS='[\"_pixDestroy\",\"_boxaDestroy\",\"_pixaDestroy\",\"_ptaDestroy\",\"_pixReadMem\",\"_pixReadHeaderMem\",\"_malloc\",\"_free\"]'")
+-set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} -s EXPORTED_RUNTIME_METHODS='[\"FS\", \"setValue\", \"getValue\"]'")
+-set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} --post-js ../../../javascript/glue.js")
+-set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} --post-js ../../../javascript/anterior.js")
+-set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} --embed-file ../tessdata/pdf.ttf@pdf.ttf")
+-
+-set_target_properties(${WASM_NAME} PROPERTIES LINK_FLAGS "${TESS_LINK_FLAGS} -s EXPORT_NAME='\"TesseractCore\"'")
++# CSV settings are accepted by emcc and avoid shell-specific JSON quoting.
++set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} -s EXPORTED_FUNCTIONS=_pixDestroy,_boxaDestroy,_pixaDestroy,_ptaDestroy,_pixReadMem,_pixReadHeaderMem,_malloc,_free")
++set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} -s EXPORTED_RUNTIME_METHODS=FS,setValue,getValue")
++set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} --post-js \"${CMAKE_CURRENT_SOURCE_DIR}/../../javascript/glue.js\"")
++set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} --post-js \"${CMAKE_CURRENT_SOURCE_DIR}/../../javascript/anterior.js\"")
++# file_packager emits .incbin assembler paths using the host text encoding.
++# Stage the unchanged font in the build directory (ASCII on our Windows build).
++configure_file("${CMAKE_CURRENT_SOURCE_DIR}/tessdata/pdf.ttf"
++               "${CMAKE_CURRENT_BINARY_DIR}/tvs-pdf.ttf" COPYONLY)
++set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} --embed-file \"${CMAKE_CURRENT_BINARY_DIR}/tvs-pdf.ttf@pdf.ttf\"")
++
++set_target_properties(${WASM_NAME} PROPERTIES LINK_FLAGS "${TESS_LINK_FLAGS} -s EXPORT_NAME=TesseractCore")
+ target_link_libraries         (libtesseract PUBLIC
+   ${CMAKE_PREFIX_PATH}/lib/libgif.a
+   ${CMAKE_PREFIX_PATH}/lib/libjpeg.a
+@@ -1192,7 +1205,7 @@ add_executable                  (${WASM_NAME}.wasm ${tesseract_js_wrapper})
+ 
+ # # Embeds all subresources in the emitted file as base64 string literals
+ set(TESS_LINK_FLAGS "${TESS_LINK_FLAGS} -s SINGLE_FILE=1")
+-set_target_properties(${WASM_NAME}.wasm PROPERTIES LINK_FLAGS "${TESS_LINK_FLAGS} -s EXPORT_NAME='\"TesseractCore\"'")
++set_target_properties(${WASM_NAME}.wasm PROPERTIES LINK_FLAGS "${TESS_LINK_FLAGS} -s EXPORT_NAME=TesseractCore")
+ 
+ target_link_libraries           (${WASM_NAME}.wasm libtesseract)
+ 
+@@ -1213,4 +1226,4 @@ if(NOT TARGET uninstall)
+             ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
+ endif()
+ 
+-# ##############################################################################
+\ No newline at end of file
++# ##############################################################################

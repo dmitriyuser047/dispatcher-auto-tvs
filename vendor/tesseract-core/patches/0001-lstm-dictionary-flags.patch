@@ -1,0 +1,16 @@
+diff --git a/src/lstm/lstmrecognizer.cpp b/src/lstm/lstmrecognizer.cpp
+index 3dd6349..fb4cdbb 100644
+--- a/src/lstm/lstmrecognizer.cpp
++++ b/src/lstm/lstmrecognizer.cpp
+@@ -225,6 +225,11 @@ bool LSTMRecognizer::LoadDictionary(const ParamsVectors *params, const std::stri
+                                     TessdataManager *mgr) {
+   delete dict_;
+   dict_ = new Dict(&ccutil_);
++  // The LSTM recognizer owns a separate CCUtil/ParamsVectors instance.
++  // Honour the caller's init-time dictionary switches as well as user lists.
++  dict_->load_system_dawg.ResetFrom(params);
++  dict_->load_punc_dawg.ResetFrom(params);
++  dict_->load_number_dawg.ResetFrom(params);
+   dict_->user_words_file.ResetFrom(params);
+   dict_->user_words_suffix.ResetFrom(params);
+   dict_->user_patterns_file.ResetFrom(params);

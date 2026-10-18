@@ -41,6 +41,7 @@ async function saveRecord() {
   const date = parseDate(dateRaw);
   const km = parseFloat(document.getElementById('rec_km').value);
   const _old = editingRecordId && data.records.find(x => x.id === editingRecordId);
+  if(_old?.fuelMovementId){showToast('Связанная выдача изменяется отдельной корректировкой движения топлива');return;}
   if (!date) { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'rec_date'); return; }
   if (!Number.isFinite(km) || km < 0) { showFieldError('Укажите неотрицательный пробег за день', 'rec_km'); return; }
   if (!validNonnegativeFields(['rec_km_glonass','rec_odo_start','rec_odo_end','rec_fuel_issued','rec_fuel_sum','rec_fuel_used','rec_fuel_actual','rec_fuel_idle','rec_tank_measured'])) return;
@@ -104,6 +105,7 @@ async function saveRecord() {
 }
 
 async function deleteRecord(id) {
+  if(data.records.find(r=>r.id===id)?.fuelMovementId){showToast('Связанную выдачу нельзя удалить. Оформите корректировку движения топлива.');return;}
   const _r = data.records.find(x => x.id === id);
   if (_r && typeof fuelEditAllowed === 'function' && !fuelEditAllowed(_r.date)) return;
   if (!await confirmAction('Удалить эту запись?')) return;

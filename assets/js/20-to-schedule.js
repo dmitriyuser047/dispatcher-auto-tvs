@@ -9,6 +9,72 @@ let tssYear  = new Date().getFullYear();
 let tssFilter = 'all'; // 'all' | 'vehicle' | 'generator'
 let tssEditingId = null;
 let tssEditingSource = null; // 'vehicleTo' | 'toRecords' | null
+let tssCompletionMode = false;
+
+function tssFindRecord(id, source) {
+  return (data[source === 'vehicleTo' ? 'vehicleTo' : 'toRecords'] || []).find(r => r.id === id);
+}
+
+// Дополнительные поля доступны и для старых записей: до сохранения база не меняется.
+function tssEnsureLifecycleFields() {
+  if (document.getElementById('tss_record_status')) return;
+  const body = document.querySelector('#toScheduleModal .modal-body');
+  if (!body) return;
+  const fields = document.createElement('div');
+  fields.innerHTML = `<div class="form-row">
+    <div class="form-group"><label>Состояние записи</label><select id="tss_record_status"><option value="done">Выполнено</option><option value="planned">План</option></select></div>
+    <div class="form-group"><label id="tss_next_meter_label">Следующее ТО через, км</label><input type="number" id="tss_next_meter" min="0" step="0.1" placeholder="Не задано"></div>
+    </div><div class="form-row"><div class="form-group"><label>Дата следующего ТО</label><input type="text" id="tss_next_date" placeholder="ДД.ММ.ГГГГ" maxlength="10" oninput="autoDateSep(this)"></div>
+    <div class="form-group"><label id="tss_next_abs_label">Следующий одометр, км</label><input type="number" id="tss_next_abs" min="0" step="0.1" placeholder="Либо интервал выше"></div></div>
+    <div id="tss_plan_context" style="font-size:12px;color:var(--text3);margin-bottom:12px"></div>`;
+  body.appendChild(fields);
+  document.getElementById('tss_next_meter').oninput = () => {
+    const meter = optionalNumber('tss_odometer'), interval = optionalNumber('tss_next_meter');
+    if (meter != null && interval != null) document.getElementById('tss_next_abs').value = +(meter + interval).toFixed(1);
+  };
+}
+
+function tssFillLifecycle(r) {
+  tssEnsureLifecycleFields();
+  const vehicle = document.getElementById('tss_obj_type').value === 'vehicle';
+  document.getElementById('tss_record_status').value = r?.planned ? 'planned' : 'done';
+  document.getElementById('tss_next_meter').value = (vehicle ? r?.nextKm : r?.nextHours) ?? '';
+  document.getElementById('tss_next_abs').value = (vehicle ? r?.nextOdometerAbs : r?.nextHoursAbs) ?? '';
+  document.getElementById('tss_next_date').value = r?.nextDate ? fmtDate(r.nextDate) : '';
+  document.getElementById('tss_next_meter_label').textContent = 'Следующее ТО через, ' + (vehicle ? 'км' : 'мтч');
+  document.getElementById('tss_next_abs_label').textContent = vehicle ? 'Следующий одометр, км' : 'Следующий счётчик, мтч';
+  document.getElementById('tss_plan_context').textContent = r?.plannedDate ? 'Исходный план: ' + fmtDate(r.plannedDate) : '';
+}
+
+function tssCompletePlan(id, source) {
+  const r = tssFindRecord(id, source);
+  if (!r?.planned) return;
+  tssEditRecord(id, source);
+  tssCompletionMode = true;
+  document.getElementById('toScheduleModalTitle').textContent = 'Зафиксировать выполнение ТО';
+  document.getElementById('tss_record_status').value = 'done';
+  document.getElementById('tss_record_status').disabled = true;
+  const today = new Date();
+  const dateIso = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  document.getElementById('tss_date').value = fmtDate(dateIso);
+  document.getElementById('tss_type').value = String(r.type || 'ТО').replace(/\s*\(план\)\s*/ig, '').trim();
+  const vehicle = source === 'vehicleTo';
+  const asset = (vehicle ? data.vehicles : data.generators || []).find(x => x.id === (vehicle ? r.vehicleId : r.generatorId));
+  const meter = vehicle && asset ? toCurrentOdo(asset) : asset ? (+asset.hoursInit || 0) + (data.genRecords || []).filter(x => x.generatorId === asset.id).reduce((s,x) => s + (+x.hours || 0), 0) : null;
+  document.getElementById('tss_odometer').value = meter ?? '';
+  // Плановая дата и счётчик не являются сроком следующего обслуживания.
+  const rule = (asset?.maintenanceRules || []).find(x => x.id === r.maintenanceRuleId);
+  const interval = rule ? +(vehicle ? rule.km : rule.hours) || 0 : vehicle ? (+r.nextKm || (asset ? toIntervalKm(asset) : 0)) : (+r.nextHours || 0);
+  document.getElementById('tss_next_meter').value = interval || '';
+  document.getElementById('tss_next_abs').value = interval && meter != null ? +(meter + interval).toFixed(1) : '';
+  const months = rule ? +rule.months || 0 : +r.maintenanceIntervalMonths || (vehicle && asset ? toIntervalMonths(asset) : 0);
+  document.getElementById('tss_next_date').value = months > 0 ? fmtDate(toAddMonths(dateIso, months)) : '';
+  document.getElementById('tss_plan_context').textContent = 'План: ' + fmtDate(r.date) + '. Укажите фактические дату, счётчик, работы и стоимость. Исходный план сохранится в истории записи.';
+  document.getElementById('tss_odometer').oninput = () => {
+    const reading = optionalNumber('tss_odometer'), gap = optionalNumber('tss_next_meter');
+    if (reading != null && gap != null) document.getElementById('tss_next_abs').value = +(reading + gap).toFixed(1);
+  };
+}
 
 function tssGetAllRecords() {
   const vRecs = (data.vehicleTo || []).map(r => {
@@ -75,7 +141,7 @@ function renderToScheduleSection() {
     monthTabsHtml += `</div>`;
   });
 
-  const totalCost = monthRecs.reduce((s,r) => s + (r.cost || 0), 0);
+  const totalCost = monthRecs.filter(r => !r.planned).reduce((s,r) => s + (r.cost || 0), 0);
   const vCount = monthRecs.filter(r => r.objType === 'vehicle').length;
   const gCount = monthRecs.filter(r => r.objType === 'generator').length;
 
@@ -88,15 +154,16 @@ function renderToScheduleSection() {
         ? `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><path d="M1 17l2-6h18l2 6"/><circle cx="7" cy="18.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="17" cy="18.5" r="1.5" fill="currentColor" stroke="none"/></svg>`
         : `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M12 12v4m-2-2h4"/></svg>`;
       rows += `<tr${r.planned ? ' style="background:var(--bg2)"' : ''}>
-        <td class="td-day">${fmtDate(r.date)}${r.planned ? '<div style="font-size:10px;color:var(--text3)">план</div>' : ''}</td>
-        <td style="padding:10px 14px;font-size:13px">${icon}${r.objName}</td>
-        <td style="padding:10px 14px;font-size:13px;font-weight:600">${r.type || '—'}</td>
+        <td class="td-day">${fmtDate(r.date)}<div style="font-size:10px;color:var(--text3)">${r.planned ? 'план' : 'выполнено'}${r.plannedDate ? ' · план ' + fmtDate(r.plannedDate) : ''}</div></td>
+        <td style="padding:10px 14px;font-size:13px">${icon}${htmlEsc(r.objName)}</td>
+        <td style="padding:10px 14px;font-size:13px;font-weight:600">${htmlEsc(r.type || '—')}</td>
         <td class="td-num">${r.meter != null ? r.meter.toLocaleString('ru',{maximumFractionDigits:1})+' '+r.meterUnit : '—'}</td>
         <td class="td-num">${r.cost != null ? r.cost.toLocaleString('ru-RU')+' ₽' : '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${r.performer || '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.note || '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.performer || '—')}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${htmlEsc(r.note || '—')}</td>
         <td class="td-actions">
-          <button class="icon-btn" onclick="tssEditRecord('${r.id}','${r.source}')">
+          ${r.planned ? `<button class="btn btn-primary btn-sm" onclick="tssCompletePlan(${htmlJs(r.id)},${htmlJs(r.source)})">Выполнено</button>` : ''}
+          <button class="icon-btn" onclick="tssEditRecord(${htmlJs(r.id)},${htmlJs(r.source)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
           <button class="icon-btn del" onclick="tssDeleteDirect(${htmlJs(r.id)},${htmlJs(r.source)})">
@@ -172,20 +239,29 @@ function tssObjTypeChanged() {
   const label = document.getElementById('tss_odo_label');
   if (type === 'vehicle') {
     sel.innerHTML = (data.vehicles || []).slice().sort((a,b) => (a.plate||'').localeCompare(b.plate||''))
-      .map(v => `<option value="${v.id}">${v.plate} — ${v.make}</option>`).join('');
+      .map(v => `<option value="${htmlEsc(v.id)}">${htmlEsc(v.plate)} — ${htmlEsc(v.make)}${v.archived ? ' · архив' : ''}</option>`).join('');
     label.textContent = 'Пробег (км)';
     document.getElementById('tss_odometer').placeholder = '0';
   } else {
     sel.innerHTML = (data.generators || []).slice().sort((a,b) => (a.name||'').localeCompare(b.name||''))
-      .map(g => `<option value="${g.id}">${g.name}${g.location ? ' — '+g.location : ''}</option>`).join('');
+      .map(g => `<option value="${htmlEsc(g.id)}">${htmlEsc(g.name)}${g.location ? ' — '+htmlEsc(g.location) : ''}${g.archived ? ' · архив' : ''}</option>`).join('');
     label.textContent = 'Моточасы';
     document.getElementById('tss_odometer').placeholder = '0';
+  }
+  if (document.getElementById('tss_next_meter_label')) {
+    document.getElementById('tss_next_meter_label').textContent = 'Следующее ТО через, ' + (type === 'vehicle' ? 'км' : 'мтч');
+    document.getElementById('tss_next_abs_label').textContent = type === 'vehicle' ? 'Следующий одометр, км' : 'Следующий счётчик, мтч';
   }
 }
 
 function tssOpenAdd() {
   tssEditingId = null;
   tssEditingSource = null;
+  tssCompletionMode = false;
+  document.getElementById('tss_odometer').oninput = null;
+  tssEnsureLifecycleFields();
+  document.getElementById('tss_obj_type').disabled = false;
+  document.getElementById('tss_record_status').disabled = false;
   document.getElementById('toScheduleModalTitle').textContent = 'Добавить запись ТО';
   document.getElementById('tssDeleteBtn').style.display = 'none';
   const now = new Date();
@@ -194,12 +270,18 @@ function tssOpenAdd() {
   ['tss_odometer','tss_cost'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('tss_obj_type').value = tssFilter === 'generator' ? 'generator' : 'vehicle';
   tssObjTypeChanged();
+  tssFillLifecycle(null);
   openModal('toScheduleModal');
 }
 
 function tssEditRecord(id, source) {
   tssEditingId = id;
   tssEditingSource = source;
+  tssCompletionMode = false;
+  document.getElementById('tss_odometer').oninput = null;
+  tssEnsureLifecycleFields();
+  document.getElementById('tss_obj_type').disabled = true;
+  document.getElementById('tss_record_status').disabled = false;
   document.getElementById('toScheduleModalTitle').textContent = 'Редактировать запись ТО';
   document.getElementById('tssDeleteBtn').style.display = '';
   if (source === 'vehicleTo') {
@@ -227,6 +309,7 @@ function tssEditRecord(id, source) {
     document.getElementById('tss_performer').value = r.performer || '';
     document.getElementById('tss_note').value = r.note || '';
   }
+  tssFillLifecycle(tssFindRecord(id, source));
   openModal('toScheduleModal');
 }
 
@@ -239,16 +322,36 @@ async function tssSaveRecord() {
   const objId = document.getElementById('tss_obj_id').value;
   if (!objId) { showFieldError('Выберите объект', 'tss_obj_id'); return; }
   const meter = parseFloat(document.getElementById('tss_odometer').value);
-  const cost = parseFloat(document.getElementById('tss_cost').value) || null;
+  const cost = optionalNumber('tss_cost');
   const performer = document.getElementById('tss_performer').value.trim();
   const note = document.getElementById('tss_note').value.trim();
+  if (!validNonnegativeFields(['tss_odometer', 'tss_cost', 'tss_next_meter', 'tss_next_abs'])) return;
+  const rawNextDate = document.getElementById('tss_next_date').value.trim();
+  const nextDate = rawNextDate ? parseDate(rawNextDate) : null;
+  if (rawNextDate && !nextDate) { showFieldError('Проверьте дату следующего ТО', 'tss_next_date'); return; }
+  const nextInterval = optionalNumber('tss_next_meter');
+  const explicitAbs = optionalNumber('tss_next_abs');
+  const nextAbs = explicitAbs != null ? explicitAbs : nextInterval != null && Number.isFinite(meter) ? +(meter + nextInterval).toFixed(1) : null;
+  const previous = tssEditingId ? tssFindRecord(tssEditingId, tssEditingSource) : null;
+  if (tssEditingId && !previous) { showToast('Запись уже удалена. Обновите график.'); return; }
+  const planned = !tssCompletionMode && document.getElementById('tss_record_status').value === 'planned';
+  if (previous?.planned && !planned && !tssCompletionMode) {
+    tssCompletePlan(previous.id, tssEditingSource);
+    showToast('Укажите фактические сведения и сохраните выполнение ТО');
+    return;
+  }
+  const lifecycle = { planned };
+  if (tssCompletionMode && previous?.planned) Object.assign(lifecycle, {
+    plannedDate: previous.date, plannedMeter: objType === 'vehicle' ? previous.odometer : previous.hours,
+    completedAt: new Date().toISOString(), plannedType: previous.type,
+  });
 
   if (objType === 'vehicle') {
     const obj = {
       vehicleId: objId, date: dateIso, type,
       odometer: !isNaN(meter) ? meter : null,
-      nextKm: null, nextOdometerAbs: null, nextDate: null,
-      cost, performer, note,
+      nextKm: nextInterval, nextOdometerAbs: nextAbs, nextDate,
+      cost, performer, note, ...lifecycle,
     };
     if (!data.vehicleTo) data.vehicleTo = [];
     if (tssEditingId && tssEditingSource === 'vehicleTo') {
@@ -261,8 +364,8 @@ async function tssSaveRecord() {
     const obj = {
       generatorId: objId, date: dateIso, type,
       hours: !isNaN(meter) ? +meter : null,
-      nextHours: null, nextHoursAbs: null, nextDate: null,
-      cost, performer, note,
+      nextHours: nextInterval, nextHoursAbs: nextAbs, nextDate,
+      cost, performer, note, ...lifecycle,
     };
     if (!data.toRecords) data.toRecords = [];
     if (tssEditingId && tssEditingSource === 'toRecords') {
@@ -382,14 +485,15 @@ function renderReestrSection() {
     <div style="padding:28px;max-width:1100px;margin:0 auto;overflow-y:auto;height:100%">
       <h2 style="font-size:22px;font-weight:700;margin:0 0 4px;display:flex;align-items:center;gap:8px">
         <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-        Реестр-Билдер
+        Распознавание счетов
       </h2>
-      <p style="color:var(--text2);margin:0 0 20px;font-size:13px">Собирает реестр на оплату из архива со счетами и УПД</p>
+      <p style="color:var(--text2);margin:0 0 20px;font-size:13px">Загрузите документы, проверьте реквизиты и подготовьте реестр на оплату.</p>
+      <div class="xp-recognition-steps" aria-label="Порядок работы"><span><b>1</b> Документы</span><i>→</i><span><b>2</b> Проверка реквизитов</span><i>→</i><span><b>3</b> Реестр на оплату</span></div>
 
       <!-- Шаг 1: Загрузка -->
       <div id="reestrUpload" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px">
-        <div id="reestrDropzone" style="border:2px dashed var(--border);border-radius:10px;padding:32px 20px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s">
-          <div style="font-size:28px;margin-bottom:6px">📦</div>
+        <div id="reestrDropzone" role="button" tabindex="0" aria-label="Выбрать счета и сканы" style="border:2px dashed var(--border);border-radius:10px;padding:32px 20px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s">
+          <div class="xp-upload-icon">${xpIcon('document',28)}</div>
           <div style="font-size:14px;font-weight:600">Перетащите сюда файлы со счетами</div>
           <div style="font-size:12px;color:var(--text3);margin-top:4px">ZIP, PDF, JPG, PNG, TIFF, BMP — можно несколько</div>
           <input type="file" id="reestrFileInput" accept=".zip,.pdf,.jpg,.jpeg,.png,.tif,.tiff,.bmp" multiple style="display:none">
@@ -481,8 +585,8 @@ function renderReestrSection() {
       </div>
 
       <p style="color:var(--text3);font-size:11px;text-align:center;margin-top:20px">
-        Правила определения объектов и категорий — в файле <code style="background:var(--bg3);padding:1px 5px;border-radius:4px">config.json</code>.
-        Справочник статей БДДС: <span id="reestrStatyiCount">...</span> статей.
+        В таблице нажмите «Источник», чтобы сверить реквизиты с распознанным текстом.
+        Справочник БДДС: <span id="reestrStatyiCount">...</span> статей.
       </p>
     </div>`;
 
@@ -500,6 +604,7 @@ function reestrBindEvents() {
   const dropzone = document.getElementById('reestrDropzone');
   const fileInput = document.getElementById('reestrFileInput');
   dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('keydown', e => { if (e.target === dropzone && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); fileInput.click(); } });
   fileInput.addEventListener('change', e => { reestrAddFiles(e.target.files); fileInput.value = ''; });
   ['dragenter','dragover'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.style.borderColor = 'var(--accent)'; dropzone.style.background = 'color-mix(in srgb, var(--accent) 6%, transparent)'; }));
   ['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.style.borderColor = ''; dropzone.style.background = ''; }));
@@ -536,7 +641,6 @@ function reestrAddFiles(fileList) {
     const ext = file.name.toLowerCase().split('.').pop();
     const type = ext === 'zip' ? 'zip' : ext === 'pdf' ? 'pdf' : REESTR_IMG_EXTS.includes(ext) ? 'img' : null;
     if (!type) continue;
-    if (type === 'zip' && reestrFiles.some(f => f.type === 'zip')) continue;
     if (reestrFiles.some(f => f.file.name === file.name && f.file.size === file.size)) continue;
     reestrFiles.push({ file, type });
   }
@@ -553,7 +657,7 @@ function reestrRenderChips() {
     const icon = f.type === 'zip' ? '📦' : f.type === 'img' ? '🖼' : '📄';
     const color = f.type === 'zip' ? 'var(--accent)' : f.type === 'img' ? 'var(--yellow)' : 'var(--green)';
     const label = f.type === 'img' ? f.file.name.split('.').pop().toUpperCase() : f.type.toUpperCase();
-    chip.innerHTML = `<span>${icon}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.file.name}</span><span style="font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;background:${color};color:#fff">${label}</span><span style="cursor:pointer;color:var(--text3)" onclick="reestrRemoveFile(${i})">✕</span>`;
+    chip.innerHTML = `<span>${icon}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${htmlEsc(f.file.name)}</span><span style="font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;background:${color};color:#fff">${label}</span><span style="cursor:pointer;color:var(--text3)" onclick="reestrRemoveFile(${i})">✕</span>`;
     el.appendChild(chip);
   });
 }
@@ -583,6 +687,7 @@ async function reestrParse() {
   window.reestrAPI.onProgress(({ current, total, fileName }) => {
     progressWrap.style.display = '';
     progressBar.style.width = Math.round((current / total) * 100) + '%';
+    fileName = String(fileName || 'Документ');
     const shortName = fileName.length > 40 ? fileName.slice(0, 37) + '…' : fileName;
     progressFile.textContent = shortName;
     progressCount.textContent = current + ' / ' + total;
@@ -599,10 +704,11 @@ async function reestrParse() {
     const pdfFiles = reestrFiles.filter(f => f.type === 'pdf');
     const imgFiles = reestrFiles.filter(f => f.type === 'img');
     let allRows = [], allLog = [];
-    if (zipFiles.length > 0) {
-      const ab = await zipFiles[0].file.arrayBuffer();
+    for (const archive of zipFiles) {
+      allLog.push({ type: 'info', text: 'Архив: ' + archive.file.name });
+      const ab = await archive.file.arrayBuffer();
       const d = await window.reestrAPI.parseInvoices(ab);
-      allRows.push(...d.rows); allLog.push(...d.log);
+      allRows.push(...(d.rows || [])); allLog.push(...(d.log || []));
     }
     if (pdfFiles.length > 0 || imgFiles.length > 0) {
       const payload = [];
@@ -624,11 +730,11 @@ async function reestrParse() {
         if (autoFilled > 0) {
           allLog.push({ type: 'info', text: `Автозаполнение из истории: ${autoFilled} строк` });
         }
-      } catch {}
+      } catch(e) { allLog.push({type:'warn',text:'База знаний недоступна: '+e.message}); }
     }
     reestrRows = allRows;
     data.reestrRows = reestrRows;
-    saveData(data);
+    if(!await saveData(data))return;
     if (reestrRows.length > 0) {
       await loadReestrStatyi();
       await loadReestrContracts();
@@ -659,7 +765,7 @@ function reestrRenderLog(entries) {
   entries.forEach(({ type, text }) => {
     const row = document.createElement('div');
     row.style.cssText = `padding:5px 10px;border-bottom:1px solid var(--border);display:flex;gap:6px;color:${colors[type] || 'var(--text)'}`;
-    row.innerHTML = `<span style="width:14px;text-align:center;flex-shrink:0">${icons[type] || '·'}</span><span>${text}</span>`;
+    row.innerHTML = `<span style="width:14px;text-align:center;flex-shrink:0">${icons[type] || '·'}</span><span>${htmlEsc(text)}</span>`;
     logEl.appendChild(row);
   });
   const okCount = entries.filter(l => l.type === 'ok').length;
@@ -719,6 +825,12 @@ function reestrRenderTable() {
     } else {
       tdN.textContent = i + 1;
     }
+    const sourceButton = document.createElement('button');
+    sourceButton.type = 'button'; sourceButton.className = 'rx-source-button';
+    sourceButton.textContent = 'Источник';
+    sourceButton.title = 'Посмотреть распознанные реквизиты и текст документа';
+    sourceButton.addEventListener('click', () => rxShowSource(row));
+    tdN.appendChild(sourceButton);
     tr.appendChild(tdN);
 
     const tdS = document.createElement('td'); tdS.style.cssText = 'padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)';
@@ -817,7 +929,7 @@ async function reestrBuild() {
   try {
     // Сохраняем в базу знаний перед формированием
     if (window.reestrAPI.learn) {
-      try { await window.reestrAPI.learn(reestrRows); } catch {}
+      try { await window.reestrAPI.learn(reestrRows); } catch(e) {showToast('Не удалось сохранить базу знаний: '+e.message);}
     }
     const d = await window.reestrAPI.buildXlsx({ rows: reestrRows });
     reestrLastResult = d;

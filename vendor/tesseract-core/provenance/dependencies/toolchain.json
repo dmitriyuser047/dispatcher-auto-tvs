@@ -1,0 +1,35 @@
+{
+  "emsdkVersion": "4.0.15",
+  "emsdkCommit": "389a68bc35dcff7ebae4614e1615099dafda00d1",
+  "emscriptenRelease": "b412b6307e541b93dd93f01b61181e15c17302ec",
+  "root": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС",
+  "emsdk": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk",
+  "cmake": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\cmake\\cmake-3.30.5-windows-x86_64\\bin\\cmake.exe",
+  "ninja": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\ninja\\ninja.exe",
+  "python": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk\\python\\3.13.3_64bit\\python.exe",
+  "node": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk\\node\\22.16.0_64bit\\bin\\node.exe",
+  "emcc": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk\\upstream\\emscripten\\emcc.bat",
+  "emxx": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk\\upstream\\emscripten\\em++.bat",
+  "emcmake": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk\\upstream\\emscripten\\emcmake.bat",
+  "toolchainFile": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk\\upstream\\emscripten\\cmake\\Modules\\Platform\\Emscripten.cmake",
+  "prefix": "D:\\tvs-ocr-native-20261017\\prefix",
+  "coreBuild": "D:\\tvs-ocr-native-20261017\\core-build",
+  "depsBuild": "D:\\tvs-ocr-native-20261017\\deps-build",
+  "pathEntries": [
+    "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\cmake\\cmake-3.30.5-windows-x86_64\\bin",
+    "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\ninja",
+    "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk",
+    "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk\\upstream\\emscripten",
+    "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk\\python\\3.13.3_64bit",
+    "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk\\node\\22.16.0_64bit\\bin"
+  ],
+  "env": {
+    "EMSDK": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk",
+    "EM_CONFIG": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk\\.emscripten",
+    "EMSDK_NODE": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk\\node\\22.16.0_64bit\\bin\\node.exe",
+    "EMSDK_PYTHON": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk\\python\\3.13.3_64bit\\python.exe",
+    "EM_CACHE": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\tools\\emsdk\\upstream\\emscripten\\cache",
+    "EMCC_CORES": "4",
+    "PYTHONUTF8": "1"
+  }
+}

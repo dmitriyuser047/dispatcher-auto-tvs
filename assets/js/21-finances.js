@@ -6,7 +6,32 @@ let editingPaymentId = null;
 let finMonth = 'all';
 let finCategory = '';
 let finPaidFilter = '';
+let finPartyFilter = '';
+let finYearFilter = null;
+let finBudgetDrill = null;
 let finView = 'table'; // 'table' | 'analytics'
+
+function finNumber(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
+function finToday() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function finPaidAmount(payment) {
+  return payment.paidAmount !== undefined && payment.paidAmount !== null
+    ? Math.max(0, finNumber(payment.paidAmount)) : payment.paid ? Math.max(0, finNumber(payment.sum)) : 0;
+}
+function finDebt(payment) { return Math.max(0, finNumber(payment.sum) - finPaidAmount(payment)); }
+function finOverdue(payment) { return finDebt(payment) > 0.005 && /^\d{4}-\d{2}-\d{2}$/.test(payment.dueDate || '') && payment.dueDate < finToday(); }
+function finNameKey(value) { return String(value || '').trim().toLocaleLowerCase('ru').replace(/ё/g, 'е').replace(/[«»"']/g, '').replace(/\s+/g, ' '); }
+function finResolveContragent(payment) {
+  const list = data.contragents || [];
+  if (payment.contragentId) return list.find(c => c.id === payment.contragentId) || null;
+  const key = finNameKey(payment.contragent || payment.company);
+  const matches = key ? list.filter(c => finNameKey(c.name) === key) : [];
+  return matches.length === 1 ? matches[0] : null;
+}
+function finContragentName(payment) { return finResolveContragent(payment)?.name || payment.contragent || payment.company || ''; }
+function finPartyKey(payment) { const party = finResolveContragent(payment); return party ? 'id:' + party.id : payment.contragentId ? 'id:' + payment.contragentId : 'name:' + finNameKey(payment.contragent || payment.company); }
+function finPaymentContext(payment) { return typeof wfContext === 'function' && payment.vehicleId ? wfContext('v:' + payment.vehicleId, payment.date || finToday()) : (data.vehicles || []).find(v => v.id === payment.vehicleId) || {}; }
+function finPaymentOrg(payment) { return typeof payment.org === 'string' ? payment.org : payment.organization || finPaymentContext(payment).org || ''; }
+function finPaymentObject(payment) { return typeof payment.object === 'string' ? payment.object : finPaymentContext(payment).object || ''; }
 
 function renderFinancesSection() {
   const payments = data.payments || [];
@@ -21,62 +46,71 @@ function renderFinancesSection() {
   const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 
   let filtered = payments.filter(p => {
-    if (finMonth !== 'all' && p.date) {
+    if (finYearFilter && !String(p.date || '').startsWith(finYearFilter + '-')) return false;
+    if (finMonth !== 'all') {
+      if (!p.date) return false;
       const d = new Date(p.date);
       const mk = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
       if (mk !== finMonth) return false;
     }
     if (finCategory && p.category !== finCategory) return false;
-    if (finPaidFilter === 'paid' && !p.paid) return false;
-    if (finPaidFilter === 'unpaid' && p.paid) return false;
+    if (finPartyFilter && finPartyKey(p) !== finPartyFilter) return false;
+    if (finBudgetDrill && (!finBudgetMatches(p, false, finBudgetDrill.scope) || finBudgetGroup(p, false, finBudgetDrill.dimension).key !== finBudgetDrill.key)) return false;
+    if (finPaidFilter === 'paid' && finDebt(p) > 0.005) return false;
+    if (finPaidFilter === 'unpaid' && finDebt(p) <= 0.005) return false;
+    if (finPaidFilter === 'partial' && !(finPaidAmount(p) > 0 && finDebt(p) > 0.005)) return false;
+    if (finPaidFilter === 'overdue' && !finOverdue(p)) return false;
     return true;
   });
   filtered.sort((a, b) => cmpDateDesc(a.date, b.date));
 
-  const totalSum = filtered.reduce((s,p) => s + (p.sum||0), 0);
-  const paidSum = filtered.filter(p=>p.paid).reduce((s,p) => s + (p.sum||0), 0);
-  const unpaidSum = totalSum - paidSum;
+  const totalSum = filtered.reduce((s,p) => s + finNumber(p.sum), 0);
+  const paidSum = filtered.reduce((s,p) => s + finPaidAmount(p), 0);
+  const unpaidSum = filtered.reduce((s,p) => s + finDebt(p), 0);
+  const overdueSum = filtered.filter(finOverdue).reduce((s,p) => s + finDebt(p), 0);
 
-  const monthTabs = `<button class="mtab ${finMonth==='all'?'active':''}" onclick="finMonth='all';renderFinancesSection()">Все</button>` +
+  const monthTabs = `<button class="mtab ${finMonth==='all'?'active':''}" onclick="finYearFilter=null;finMonth='all';renderFinancesSection()">Все</button>` +
     sortedMonths.map(m => {
       const [y, mo] = m.split('-');
       const label = monthNames[parseInt(mo)-1] + ' ' + y;
-      return `<button class="mtab ${finMonth===m?'active':''}" onclick="finMonth='${m}';renderFinancesSection()">${label}</button>`;
+      return `<button class="mtab ${finMonth===m?'active':''}" onclick="finYearFilter=null;finMonth='${m}';renderFinancesSection()">${label}</button>`;
     }).join('');
 
   const usedCategories = [...new Set(payments.map(p => p.category).filter(Boolean))].sort();
   const catOptions = `<option value="" ${finCategory===''?'selected':''}>Все статьи</option>` +
     usedCategories.map(c =>
-      `<option value="${c}" ${finCategory===c?'selected':''}>${c}</option>`
+      `<option value="${htmlEsc(c)}" ${finCategory===c?'selected':''}>${htmlEsc(c)}</option>`
     ).join('');
 
-  const paidOptions = [['','Все статусы'],['paid','Оплачено'],['unpaid','Не оплачено']].map(([v,l]) =>
+  const paidOptions = [['','Все статусы'],['paid','Оплачено'],['unpaid','Есть долг'],['partial','Частично оплачено'],['overdue','Просрочено']].map(([v,l]) =>
     `<option value="${v}" ${finPaidFilter===v?'selected':''}>${l}</option>`
   ).join('');
 
-  const vMap = {};
+  const vMap = Object.create(null);
   (data.vehicles||[]).forEach(v => vMap[v.id] = v.plate);
+  const parties = new Map(payments.map(p => [finPartyKey(p), finContragentName(p) || 'Без контрагента']));
+  const partyOptions = '<option value="">Все контрагенты</option>' + [...parties].sort((a,b) => a[1].localeCompare(b[1], 'ru')).map(([key,label]) => `<option value="${htmlEsc(key)}" ${finPartyFilter === key ? 'selected' : ''}>${htmlEsc(label)}</option>`).join('');
 
   let contentHtml;
   if (finView === 'budget') {
     contentHtml = renderBudgetHtml();
   } else if (finView === 'analytics') {
-    contentHtml = renderFinancesAnalyticsHtml(payments);
+    contentHtml = renderFinancesAnalyticsHtml(filtered);
   } else {
     const rows = filtered.map(p => {
       const dateStr = p.date ? new Date(p.date).toLocaleDateString('ru') : '—';
       const vPlate = p.vehicleId ? (vMap[p.vehicleId]||'—') : '—';
       const reestrLabel = p.reestrNo ? ('Реестр №'+p.reestrNo) : '—';
-      const statusBadge = p.paid
+      const statusBadge = finDebt(p) <= 0.005
         ? '<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:10px;font-size:12px">Оплачено</span>'
-        : '<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:10px;font-size:12px">Не оплачено</span>';
+        : `<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:10px;font-size:12px">${finOverdue(p) ? 'Просрочено' : finPaidAmount(p) > 0 ? 'Частично' : 'Не оплачено'}</span><div style="font-size:11px;margin-top:4px">Долг ${finDebt(p).toLocaleString('ru')} ₽${p.dueDate ? ' · до ' + htmlEsc(fmtDate(p.dueDate)) : ''}</div>`;
       const catShort = p.category ? (p.category.length > 30 ? p.category.slice(0,30)+'…' : p.category) : '—';
       return `<tr style="cursor:pointer" onclick="openEditPayment(${htmlJs(p.id)})">
         <td>${dateStr}</td>
         <td style="font-weight:600">${(p.sum||0).toLocaleString('ru')} ₽</td>
         <td title="${(p.category||'').replace(/"/g,'&quot;')}" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px">${htmlEsc(catShort)}</td>
-        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${htmlEsc(p.description||'—')}</td>
-        <td>${htmlEsc(p.contragent||'—')}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${htmlEsc(p.description||'—')}${p.sourceMissing ? '<div style="color:var(--red);font-size:11px">Источник удалён или обнулён: проверьте расход</div>' : ''}</td>
+        <td>${htmlEsc(finContragentName(p)||'—')}</td>
         <td>${htmlEsc(vPlate)}</td>
         <td>${htmlEsc(reestrLabel)}</td>
         <td>${statusBadge}</td>
@@ -97,10 +131,13 @@ function renderFinancesSection() {
     <div style="padding:24px 28px;width:100%;box-sizing:border-box;overflow-y:auto;height:100%">
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;overflow-x:auto;padding-bottom:4px">
         ${monthTabs}
+        ${finYearFilter ? `<button class="mtab active" onclick="finYearFilter=null;renderFinancesSection()">${finYearFilter} год ×</button>` : ''}
+        ${finBudgetDrill ? `<button class="mtab active" onclick="finBudgetDrill=null;renderFinancesSection()">Из плана: ${htmlEsc(FIN_BUDGET_DIMS[finBudgetDrill.dimension])} ×</button>` : ''}
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
         <select class="fsel" style="max-width:200px" onchange="finCategory=this.value;renderFinancesSection()">${catOptions}</select>
         <select class="fsel" style="max-width:200px" onchange="finPaidFilter=this.value;renderFinancesSection()">${paidOptions}</select>
+        <select class="fsel" style="max-width:220px" onchange="finPartyFilter=this.value;renderFinancesSection()">${partyOptions}</select>
         <div style="flex:1"></div>
         <button class="toggle-btn ${finView==='analytics'?'active':''}" onclick="finView=finView==='table'?'analytics':'table';renderFinancesSection()">Аналитика</button>
         <button class="btn btn-ghost btn-sm" onclick="finView='budget';renderFinancesSection()">Бюджет</button>
@@ -127,6 +164,7 @@ function renderFinancesSection() {
           <div style="font-size:20px;font-weight:700">${filtered.length}</div>
           <div style="font-size:12px;color:var(--text3)">Записей</div>
         </div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;border-left:4px solid #dc2626"><div style="font-size:20px;font-weight:700">${overdueSum.toLocaleString('ru')} ₽</div><div style="font-size:12px;color:var(--text3)">Просроченный долг</div></div>
       </div>
       ${contentHtml}
     </div>
@@ -136,13 +174,13 @@ function renderFinancesSection() {
 function renderFinancesAnalyticsHtml(allPayments) {
   const payments = allPayments || data.payments || [];
   const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-  const vMap = {};
+  const vMap = Object.create(null);
   (data.vehicles||[]).forEach(v => vMap[v.id] = v.plate);
 
-  const byMonth = {}, byCat = {}, byVehicle = {};
+  const byMonth = Object.create(null), byCat = Object.create(null), byVehicle = Object.create(null);
   let grandTotal = 0;
   payments.forEach(p => {
-    const sum = p.sum || 0;
+    const sum = finNumber(p.sum);
     grandTotal += sum;
     if (p.date) {
       const d = new Date(p.date);
@@ -150,7 +188,7 @@ function renderFinancesAnalyticsHtml(allPayments) {
       if (!byMonth[mk]) byMonth[mk] = {total:0,paid:0,unpaid:0,count:0,sortKey:p.date};
       byMonth[mk].total += sum;
       byMonth[mk].count++;
-      if (p.paid) byMonth[mk].paid += sum; else byMonth[mk].unpaid += sum;
+      byMonth[mk].paid += finPaidAmount(p); byMonth[mk].unpaid += finDebt(p);
       if (!byMonth[mk].sortKey || p.date < byMonth[mk].sortKey) byMonth[mk].sortKey = p.date;
     }
     const cat = p.category || 'Без категории';
@@ -198,193 +236,179 @@ function renderFinancesAnalyticsHtml(allPayments) {
       </div>
     </div>
     <div style="margin-top:20px;padding:16px;background:var(--card);border:1px solid var(--border);border-radius:10px;text-align:center">
-      <div style="font-size:13px;color:var(--text3)">Общий итог за весь период</div>
+      <div style="font-size:13px;color:var(--text3)">Итог по выбранным фильтрам · по дате расхода</div>
       <div style="font-size:26px;font-weight:700;margin-top:4px">${grandTotal.toLocaleString('ru')} ₽</div>
     </div>
   `;
 }
 
-// ─── BUDGET ─────────────────────────────────────────────
+// ─── БЮДЖЕТ: ПЛАН И ФАКТ ──────────────────────────────
+const FIN_BUDGET_DIMS = {contragent:'Контрагент',org:'Организация',object:'Объект',category:'Статья'};
 let budgetYear = new Date().getFullYear();
+let budgetCompareMonth = 'all';
+let budgetGroupBy = 'contragent';
+const budgetScope = {org:'',object:'',category:''};
 
+function finBudgetValues(row, planned) {
+  return {contragent:finContragentName(row),org:planned ? row.org || row.organization || '' : finPaymentOrg(row),object:planned ? row.object || '' : finPaymentObject(row),category:row.category || ''};
+}
+function finBudgetGroup(row, planned, dimension = budgetGroupBy) {
+  const values = finBudgetValues(row,planned), value = values[dimension] || '';
+  if (!value) return {key:(planned ? 'unallocated:' : 'unassigned:') + dimension,name:(planned ? 'План без распределения: ' : 'Расходы без значения: ') + FIN_BUDGET_DIMS[dimension]};
+  return {key:dimension === 'contragent' ? finPartyKey(row) : dimension + ':' + finNameKey(value),name:value};
+}
+function finBudgetMatches(row, planned, scope = budgetScope) {
+  const values = finBudgetValues(row,planned);
+  return Object.entries(scope).every(([dimension,value]) => !value || finNameKey(values[dimension]) === finNameKey(value));
+}
+function finBudgetComparison() {
+  const groups = new Map();
+  const get = (item,planned) => {
+    const group = finBudgetGroup(item,planned);
+    if (!groups.has(group.key)) groups.set(group.key,{...group,plan:0,hasPlan:false,actual:0,paid:0,debt:0,count:0});
+    return groups.get(group.key);
+  };
+  (data.budget || []).filter(b => Number(b.year) === budgetYear && (budgetCompareMonth === 'all' || Number(b.month) === Number(budgetCompareMonth)) && finBudgetMatches(b,true)).forEach(b => {const row=get(b,true);row.plan+=finNumber(b.sum);row.hasPlan=true;});
+  (data.payments || []).filter(p => /^\d{4}-\d{2}-\d{2}$/.test(p.date || '') && Number(p.date.slice(0,4)) === budgetYear && (budgetCompareMonth === 'all' || Number(p.date.slice(5,7)) === Number(budgetCompareMonth)) && finBudgetMatches(p,false)).forEach(p => {const row=get(p,false);row.actual+=finNumber(p.sum);row.paid+=finPaidAmount(p);row.debt+=finDebt(p);row.count++;});
+  return [...groups.values()].sort((a,b) => b.actual-a.actual || a.name.localeCompare(b.name,'ru'));
+}
+function finBudgetAnnual() {
+  const groups = new Map();
+  (data.budget || []).filter(b => Number(b.year) === budgetYear && finBudgetMatches(b,true)).forEach(b => {
+    const group = finBudgetGroup(b,true);
+    if (!groups.has(group.key)) groups.set(group.key,{...group,months:Array(12).fill(0)});
+    if (Number(b.month)>=1 && Number(b.month)<=12) groups.get(group.key).months[Number(b.month)-1]+=finNumber(b.sum);
+  });
+  return [...groups.values()].sort((a,b) => a.name.localeCompare(b.name,'ru'));
+}
+function finBudgetScopeOptions(dimension) {
+  const values = new Set([budgetScope[dimension],...(data.budget || []).map(b=>finBudgetValues(b,true)[dimension]),...(data.payments || []).map(p=>finBudgetValues(p,false)[dimension])].filter(Boolean));
+  return `<option value="">Все: ${FIN_BUDGET_DIMS[dimension].toLocaleLowerCase('ru')}</option>` + [...values].sort((a,b)=>a.localeCompare(b,'ru')).map(value=>`<option value="${htmlEsc(value)}" ${budgetScope[dimension]===value?'selected':''}>${htmlEsc(value)}</option>`).join('');
+}
+function finBudgetSuggestions(dimension) {
+  const values = new Set([...(data.budget || []).map(b=>finBudgetValues(b,true)[dimension]),...(data.payments || []).map(p=>finBudgetValues(p,false)[dimension]),...(dimension==='contragent' ? (data.contragents || []).filter(c=>!c.archived).map(c=>c.name) : dimension==='org' || dimension==='object' ? (data.vehicles || []).map(v=>v[dimension]) : (typeof reestrStatyi!=='undefined'?reestrStatyi:[]).map(s=>s.label))].filter(Boolean));
+  return [...values].sort((a,b)=>a.localeCompare(b,'ru')).map(value=>`<option value="${htmlEsc(value)}">`).join('');
+}
+function finOpenBudgetPayments(key) {
+  finPartyFilter='';finCategory='';finPaidFilter='';finView='table';
+  finBudgetDrill={key,dimension:budgetGroupBy,scope:{...budgetScope}};
+  finYearFilter=budgetCompareMonth==='all'?budgetYear:null;
+  finMonth=budgetCompareMonth==='all'?'all':budgetYear+'-'+String(budgetCompareMonth).padStart(2,'0');
+  renderFinancesSection();
+}
+function renderBudgetPlanFactHtml() {
+  const rows=finBudgetComparison(), money=value=>value.toLocaleString('ru',{maximumFractionDigits:2});
+  const totals=rows.reduce((out,row)=>{['plan','actual','paid','debt'].forEach(k=>out[k]+=row[k]);return out;},{plan:0,actual:0,paid:0,debt:0});
+  const body=rows.map(row=>`<tr><td><button class="btn btn-ghost btn-sm" onclick="finOpenBudgetPayments(${htmlJs(row.key)})">${htmlEsc(row.name)}</button></td><td class="num">${row.hasPlan?money(row.plan):'Не задан'}</td><td class="num">${money(row.actual)}</td><td class="num">${money(row.paid)}</td><td class="num">${money(row.debt)}</td><td class="num" style="color:${row.hasPlan&&row.actual>row.plan?'var(--red)':'inherit'}">${row.hasPlan?money(row.actual-row.plan):'—'}</td><td class="num">${row.plan>0?(row.actual/row.plan*100).toFixed(1)+'%':'—'}</td></tr>`).join('');
+  const options='<option value="all">Весь год</option>'+Array.from({length:12},(_,i)=>`<option value="${i+1}" ${Number(budgetCompareMonth)===i+1?'selected':''}>${new Date(2020,i,1).toLocaleDateString('ru',{month:'long'})}</option>`).join('');
+  return `<section style="margin-top:24px;border-top:1px solid var(--border);padding-top:20px"><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><h3 style="margin:0">План и факт · ${budgetYear}</h3><select onchange="budgetCompareMonth=this.value;renderFinancesSection()">${options}</select></div><p style="font-size:12px;color:var(--text3)">Расходы и оплаты сгруппированы по дате расхода. Частичные оплаты учтены, долг считается по каждому документу. План без нужного распределения показан отдельно и не распределяется автоматически. Нажмите строку, чтобы открыть исходные расходы.</p><div style="overflow:auto"><table class="tbl" style="width:100%;min-width:760px"><thead><tr><th>${FIN_BUDGET_DIMS[budgetGroupBy]}</th><th>План, ₽</th><th>Расходы, ₽</th><th>Оплачено, ₽</th><th>Долг, ₽</th><th>Отклонение, ₽</th><th>Исполнение</th></tr></thead><tbody>${body||'<tr><td colspan="7">Нет планов и расходов за этот период</td></tr>'}</tbody><tfoot><tr><th>Итого</th><th>${money(totals.plan)}</th><th>${money(totals.actual)}</th><th>${money(totals.paid)}</th><th>${money(totals.debt)}</th><th>${rows.every(r=>r.hasPlan&&!r.key.startsWith('unallocated:'))?money(totals.actual-totals.plan):'Есть нераспределённые суммы'}</th><th></th></tr></tfoot></table></div></section>`;
+}
 function renderBudgetHtml() {
-  const budget = data.budget || [];
-  const MN = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
-  const MNF = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-
-  const yearEntries = budget.filter(b => b.year === budgetYear);
-  const companies = [...new Set(yearEntries.map(b => b.company))].sort();
-  const allCompanies = [...new Set(budget.map(b => b.company))].sort();
-
-  const grid = {};
-  yearEntries.forEach(b => {
-    const key = b.company;
-    if (!grid[key]) grid[key] = {};
-    grid[key][b.month] = (grid[key][b.month] || 0) + b.sum;
-  });
-
-  const monthTotals = new Array(12).fill(0);
-  let grandTotal = 0;
-
-  const rows = companies.map(comp => {
-    let rowTotal = 0;
-    const cells = MN.map((_, mi) => {
-      const v = (grid[comp] && grid[comp][mi + 1]) || 0;
-      rowTotal += v;
-      monthTotals[mi] += v;
-      grandTotal += v;
-      return `<td style="text-align:right;padding:6px 8px;font-size:13px">${v ? v.toLocaleString('ru') : ''}</td>`;
-    }).join('');
-    return `<tr>
-      <td style="padding:6px 10px;font-weight:500;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${comp}">${comp}</td>
-      ${cells}
-      <td style="text-align:right;padding:6px 8px;font-weight:700;background:rgba(37,99,235,.04)">${rowTotal.toLocaleString('ru')}</td>
-      <td style="text-align:center;padding:4px">
-        <button class="icon-btn" title="Удалить компанию" onclick="deleteBudgetCompany('${comp.replace(/'/g, "\\'")}')">
-          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#dc2626" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </td>
-    </tr>`;
-  }).join('');
-
-  const totalCells = MN.map((_, mi) =>
-    `<td style="text-align:right;padding:6px 8px;font-weight:700;font-size:13px">${monthTotals[mi] ? monthTotals[mi].toLocaleString('ru') : ''}</td>`
-  ).join('');
-
-  const companyOptions = allCompanies.map(c => `<option value="${c}">`).join('');
-
-  return `
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
-        <h3 style="margin:0;font-size:16px">Бюджет по контрагентам</h3>
-        <div style="flex:1"></div>
-        <button class="btn btn-ghost btn-sm" onclick="budgetYear--;renderFinancesSection()">◀</button>
-        <span style="font-weight:600;font-size:15px">${budgetYear}</span>
-        <button class="btn btn-ghost btn-sm" onclick="budgetYear++;renderFinancesSection()">▶</button>
-        <div style="flex:1"></div>
-        <button class="btn btn-ghost btn-sm" onclick="exportBudgetToXlsx()">Экспорт Excel</button>
-      </div>
-      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px;padding:12px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">
-        <div style="flex:1;min-width:160px">
-          <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:4px">Компания</label>
-          <input type="text" id="budg_company" list="budg_company_list" placeholder="Название компании..." style="width:100%;box-sizing:border-box">
-          <datalist id="budg_company_list">${companyOptions}</datalist>
-        </div>
-        <div style="min-width:120px">
-          <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:4px">Месяц</label>
-          <select id="budg_month" style="width:100%;box-sizing:border-box">
-            ${MNF.map((m, i) => `<option value="${i + 1}">${m}</option>`).join('')}
-          </select>
-        </div>
-        <div style="min-width:100px">
-          <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:4px">Сумма (руб.)</label>
-          <input type="number" id="budg_sum" placeholder="0" min="0" step="0.01" style="width:100%;box-sizing:border-box">
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="addBudgetEntry()" style="height:34px">Добавить</button>
-      </div>
-      <div style="overflow-x:auto">
-        <table class="tbl" style="width:100%;min-width:900px">
-          <thead><tr>
-            <th style="text-align:left;min-width:150px">Компания</th>
-            ${MN.map(m => `<th style="text-align:right;padding:6px 8px">${m}</th>`).join('')}
-            <th style="text-align:right;padding:6px 8px">Итого</th>
-            <th style="width:40px"></th>
-          </tr></thead>
-          <tbody>
-            ${rows || '<tr><td colspan="15" style="text-align:center;color:var(--text3);padding:30px">Нет данных. Добавьте запись выше.</td></tr>'}
-          </tbody>
-          ${companies.length ? `<tfoot><tr style="border-top:2px solid var(--border)">
-            <td style="padding:6px 10px;font-weight:700">ИТОГО</td>
-            ${totalCells}
-            <td style="text-align:right;padding:6px 8px;font-weight:700;font-size:14px;background:rgba(37,99,235,.06)">${grandTotal.toLocaleString('ru')}</td>
-            <td></td>
-          </tr></tfoot>` : ''}
-        </table>
-      </div>
-    </div>`;
+  const monthNames=['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+  const groups=finBudgetAnnual(), totals=Array(12).fill(0);
+  const rows=groups.map(group=>`<tr><td>${htmlEsc(group.name)}</td>${group.months.map((value,i)=>{totals[i]+=value;return `<td class="num">${value?value.toLocaleString('ru'):'—'}</td>`;}).join('')}<td class="num"><b>${group.months.reduce((s,v)=>s+v,0).toLocaleString('ru')}</b></td></tr>`).join('');
+  const dimensions=Object.entries(FIN_BUDGET_DIMS).map(([key,label])=>`<option value="${key}" ${budgetGroupBy===key?'selected':''}>${label}</option>`).join('');
+  const inputs=[['contragent','budg_company'],['org','budg_org'],['object','budg_object'],['category','budg_category']].map(([dimension,id])=>`<div style="flex:1;min-width:180px"><label for="${id}" style="font-size:12px">${FIN_BUDGET_DIMS[dimension]}</label><input id="${id}" list="${id}_list" placeholder="Если известно…" style="width:100%"><datalist id="${id}_list">${finBudgetSuggestions(dimension)}</datalist></div>`).join('');
+  const entries=(data.budget||[]).filter(b=>Number(b.year)===budgetYear&&finBudgetMatches(b,true));
+  const entryRows=entries.map(b=>`<tr><td>${String(b.month).padStart(2,'0')}.${b.year}</td><td>${htmlEsc(finContragentName(b))}</td><td>${htmlEsc(b.org||'')}</td><td>${htmlEsc(b.object||'')}</td><td>${htmlEsc(b.category||'')}</td><td class="num">${finNumber(b.sum).toLocaleString('ru')}</td><td><button class="btn btn-ghost btn-sm" onclick="finEditBudgetEntry(${htmlJs(b.id)})">Изменить</button><button class="btn btn-ghost btn-sm" onclick="finDeleteBudgetEntry(${htmlJs(b.id)})">Удалить</button></td></tr>`).join('');
+  return `<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px"><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px"><h3 style="margin:0">Бюджет</h3><button class="btn btn-ghost btn-sm" onclick="budgetYear--;renderFinancesSection()">◀</button><b>${budgetYear}</b><button class="btn btn-ghost btn-sm" onclick="budgetYear++;renderFinancesSection()">▶</button><label>Группировка <select onchange="budgetGroupBy=this.value;renderFinancesSection()">${dimensions}</select></label><button class="btn btn-ghost btn-sm" onclick="exportBudgetToXlsx()">Экспорт Excel</button></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">${['org','object','category'].map(d=>`<select aria-label="Фильтр: ${FIN_BUDGET_DIMS[d]}" onchange="budgetScope.${d}=this.value;renderFinancesSection()">${finBudgetScopeOptions(d)}</select>`).join('')}</div><details style="margin-bottom:18px"><summary>Добавить строку плана</summary><p style="font-size:12px;color:var(--text3)">Укажите организацию, объект, статью и контрагента в нужной детализации. Незаполненные измерения останутся без распределения.</p><div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;padding:12px;background:var(--bg);border-radius:8px">${inputs}<div><label for="budg_month">Месяц</label><select id="budg_month">${monthNames.map((m,i)=>`<option value="${i+1}">${m}</option>`).join('')}</select></div><div><label for="budg_sum">Сумма, ₽</label><input type="number" id="budg_sum" min="0" step="0.01"></div><button class="btn btn-primary btn-sm" onclick="addBudgetEntry()">Добавить</button></div></details><div style="overflow:auto"><table class="tbl" style="width:100%;min-width:1000px"><thead><tr><th>${FIN_BUDGET_DIMS[budgetGroupBy]}</th>${monthNames.map(m=>`<th>${m}</th>`).join('')}<th>Итого</th></tr></thead><tbody>${rows||'<tr><td colspan="14">Нет плана по выбранным условиям</td></tr>'}</tbody><tfoot><tr><th>Итого</th>${totals.map(v=>`<th class="num">${v.toLocaleString('ru')}</th>`).join('')}<th class="num">${totals.reduce((s,v)=>s+v,0).toLocaleString('ru')}</th></tr></tfoot></table></div>${renderBudgetPlanFactHtml()}<details style="margin-top:20px"><summary>Строки плана · ${entries.length}</summary><div style="overflow:auto"><table class="tbl" style="width:100%;min-width:950px"><thead><tr><th>Период</th><th>Контрагент</th><th>Организация</th><th>Объект</th><th>Статья</th><th>План, ₽</th><th></th></tr></thead><tbody>${entryRows}</tbody></table></div></details></div>`;
 }
-
+function finBudgetPartyId(company,previous) {
+  if (previous?.contragentId&&finNameKey(company)===finNameKey(finContragentName(previous))) return previous.contragentId;
+  return finResolveContragent({company})?.id||null;
+}
 async function addBudgetEntry() {
-  const company = document.getElementById('budg_company').value.trim();
-  const month = parseInt(document.getElementById('budg_month').value);
-  const sum = parseFloat(document.getElementById('budg_sum').value);
-  if (!company) return alert('Укажите компанию');
-  if (!sum || sum <= 0) return alert('Укажите сумму');
-  if (!data.budget) data.budget = [];
-  data.budget.push({ id: 'bg_' + Date.now(), company, month, year: budgetYear, sum });
-  if (!await saveData(data)) return;
-  document.getElementById('budg_sum').value = '';
-  renderFinancesSection();
+  const company=document.getElementById('budg_company').value.trim(),org=document.getElementById('budg_org').value.trim(),object=document.getElementById('budg_object').value.trim(),category=document.getElementById('budg_category').value.trim();
+  const month=Number(document.getElementById('budg_month').value),sum=Number(document.getElementById('budg_sum').value);
+  if(!company&&!org&&!object&&!category)return alert('Укажите хотя бы организацию, объект, статью или контрагента');
+  if(!Number.isFinite(sum)||sum<=0)return alert('Укажите положительную сумму');
+  if(!Number.isInteger(month)||month<1||month>12)return alert('Укажите месяц');
+  if(!data.budget)data.budget=[];
+  data.budget.push({id:'bg_'+(globalThis.crypto?.randomUUID?.()||Date.now()),company,contragentId:finBudgetPartyId(company),org,object,category,month,year:budgetYear,sum});
+  if(await saveData(data,{noMerge:true}))renderFinancesSection();
 }
-
+function finEditBudgetEntry(id) {
+  const entry=(data.budget||[]).find(b=>b.id===id);if(!entry)return;
+  if(typeof wfShowDialog!=='function'){showToast('Окно редактирования недоступно');return;}
+  wfShowDialog('Изменить строку плана',`<form id="finBudgetEditForm"><div class="wf-grid">${[['company','Контрагент'],['org','Организация'],['object','Объект'],['category','Статья']].map(([key,label])=>`<label>${label}<input name="${key}" value="${htmlEsc(key==='company'?finContragentName(entry):entry[key]||'')}"></label>`).join('')}<label>Год<input name="year" type="number" min="2000" max="2200" required value="${Number(entry.year)}"></label><label>Месяц<input name="month" type="number" min="1" max="12" required value="${Number(entry.month)}"></label><label>Сумма, ₽<input name="sum" type="number" min="0.01" step="0.01" required value="${finNumber(entry.sum)}"></label></div><button class="btn btn-primary">Сохранить</button></form>`);
+  document.getElementById('finBudgetEditForm').onsubmit=async event=>{
+    event.preventDefault();const fd=new FormData(event.target),company=String(fd.get('company')||'').trim(),org=String(fd.get('org')||'').trim(),object=String(fd.get('object')||'').trim(),category=String(fd.get('category')||'').trim(),year=Number(fd.get('year')),month=Number(fd.get('month')),sum=Number(fd.get('sum'));
+    if(!company&&!org&&!object&&!category){showToast('Укажите измерение плана');return;}
+    if(!Number.isInteger(year)||year<2000||year>2200||!Number.isInteger(month)||month<1||month>12||!Number.isFinite(sum)||sum<=0){showToast('Проверьте период и сумму');return;}
+    Object.assign(entry,{company,contragentId:finBudgetPartyId(company,entry),org,object,category,year,month,sum});
+    if(await saveData(data,{noMerge:true})){closeModal('wfModal');renderFinancesSection();}
+  };
+}
+async function finDeleteBudgetEntry(id) {
+  if(!await confirmAction('Удалить эту строку плана?'))return;
+  data.budget=(data.budget||[]).filter(b=>b.id!==id);
+  if(await saveData(data,{noMerge:true}))renderFinancesSection();
+}
 async function deleteBudgetCompany(company) {
-  if (!await confirmAction('Удалить все записи «' + company + '» за ' + budgetYear + '?')) return;
-  data.budget = (data.budget || []).filter(b => !(b.company === company && b.year === budgetYear));
-  if (!await saveData(data)) return;
-  renderFinancesSection();
+  const entries=(data.budget||[]).filter(b=>b.company===company&&Number(b.year)===budgetYear);
+  if(!entries.length||!await confirmAction('Удалить строк плана: '+entries.length+'?'))return;
+  const ids=new Set(entries.map(b=>b.id));data.budget=data.budget.filter(b=>!ids.has(b.id));
+  if(await saveData(data,{noMerge:true}))renderFinancesSection();
 }
-
 function exportBudgetToXlsx() {
-  const budget = (data.budget || []).filter(b => b.year === budgetYear);
-  if (!budget.length) return alert('Нет данных для экспорта');
-  const MNF = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-  const companies = [...new Set(budget.map(b => b.company))].sort();
-  const grid = {};
-  budget.forEach(b => {
-    if (!grid[b.company]) grid[b.company] = {};
-    grid[b.company][b.month] = (grid[b.company][b.month] || 0) + b.sum;
-  });
-
-  const ws = {};
-  const NC = 13;
-  let r = 0;
-
-  function put(row, col, val, style) {
-    const addr = XLSX.utils.encode_cell({ r: row, c: col });
-    ws[addr] = { v: val == null ? '' : val, t: typeof val === 'number' ? 'n' : 's', s: style || {} };
+  if(typeof XLSX==='undefined'){showToast('Библиотека Excel не загружена');return;}
+  const annual=finBudgetAnnual(),comparison=finBudgetComparison(),entries=(data.budget||[]).filter(b=>Number(b.year)===budgetYear&&finBudgetMatches(b,true));
+  if(!annual.length&&!comparison.length){showToast('Нет данных для экспорта');return;}
+  const months=['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+  const annualRows=[[FIN_BUDGET_DIMS[budgetGroupBy],...months,'Итого'],...annual.map(g=>[g.name,...g.months,g.months.reduce((s,v)=>s+v,0)])];
+  const comparisonRows=[[FIN_BUDGET_DIMS[budgetGroupBy],'План','Расходы','Оплачено','Долг','Отклонение','Исполнение, %'],...comparison.map(r=>[r.name,r.hasPlan?r.plan:'',r.actual,r.paid,r.debt,r.hasPlan?r.actual-r.plan:'',r.plan>0?r.actual/r.plan*100:''])];
+  const detailRows=[['ID','Год','Месяц','Контрагент','Организация','Объект','Статья','План'],...entries.map(b=>[b.id,b.year,b.month,finContragentName(b),b.org||'',b.object||'',b.category||'',finNumber(b.sum)])];
+  const scopeRows=[['Год',budgetYear],['Месяц план-факта',budgetCompareMonth==='all'?'Весь год':budgetCompareMonth],['Группировка',FIN_BUDGET_DIMS[budgetGroupBy]],...Object.entries(budgetScope).map(([key,value])=>[FIN_BUDGET_DIMS[key],value||'Все']),['Основание','По дате расхода; оплаты могут быть частичными. Нераспределённые планы показаны отдельно.']];
+  const wb=XLSX.utils.book_new();
+  [['Бюджет',annualRows],['План-факт',comparisonRows],['Строки плана',detailRows],['Условия',scopeRows]].forEach(([name,rows])=>{const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=rows[0].map((_,i)=>({wch:i===0?35:20}));XLSX.utils.book_append_sheet(wb,ws,name);});
+  XLSX.writeFile(wb,'Бюджет_'+budgetYear+'.xlsx');
+}
+function finEnsurePaymentFields(payment = {}) {
+  const name = document.getElementById('pay_contragent');
+  let select = document.getElementById('pay_contragent_id');
+  if (!select) {
+    const label = document.createElement('label'); label.textContent = 'Связь со справочником контрагентов';
+    select = document.createElement('select'); select.id = 'pay_contragent_id';
+    name.parentElement.insertBefore(label, name); name.parentElement.insertBefore(select, name);
+    select.addEventListener('change', () => { const party = (data.contragents || []).find(c => c.id === select.value); if (party) name.value = party.name; });
   }
-
-  const hdrStyle = { font: { bold: true, sz: 11 }, fill: { fgColor: { rgb: 'D9E2F3' } }, alignment: { horizontal: 'center' }, border: { bottom: { style: 'thin', color: { rgb: '999999' } } } };
-  const numStyle = { numFmt: '#,##0', alignment: { horizontal: 'right' } };
-  const boldNum = { numFmt: '#,##0', font: { bold: true }, alignment: { horizontal: 'right' }, fill: { fgColor: { rgb: 'E8F0FE' } } };
-  const compStyle = { font: { bold: true, sz: 11 } };
-  const totalRowStyle = { font: { bold: true, sz: 11 }, fill: { fgColor: { rgb: 'D9E2F3' } }, numFmt: '#,##0', alignment: { horizontal: 'right' } };
-
-  put(r, 0, 'Бюджет ' + budgetYear, { font: { bold: true, sz: 14 } });
-  r += 2;
-
-  put(r, 0, 'Компания', hdrStyle);
-  MNF.forEach((m, i) => put(r, i + 1, m, hdrStyle));
-  put(r, 13, 'Итого', hdrStyle);
-  r++;
-
-  const monthTotals = new Array(12).fill(0);
-  let grandTotal = 0;
-
-  companies.forEach(comp => {
-    put(r, 0, comp, compStyle);
-    let rowTotal = 0;
-    for (let mi = 0; mi < 12; mi++) {
-      const v = (grid[comp] && grid[comp][mi + 1]) || 0;
-      if (v) put(r, mi + 1, v, numStyle);
-      rowTotal += v;
-      monthTotals[mi] += v;
-    }
-    grandTotal += rowTotal;
-    put(r, 13, rowTotal, boldNum);
-    r++;
+  select.replaceChildren();
+  const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'Без привязки / ввести название вручную'; select.append(empty);
+  (data.contragents || []).slice().sort((a,b) => (a.name || '').localeCompare(b.name || '', 'ru')).forEach(c => {
+    const option = document.createElement('option'); option.value = c.id; option.textContent = c.name + (c.inn ? ' · ИНН ' + c.inn : '') + (c.archived ? ' · архив' : ''); select.append(option);
   });
-
-  put(r, 0, 'ИТОГО', totalRowStyle);
-  monthTotals.forEach((v, i) => put(r, i + 1, v, totalRowStyle));
-  put(r, 13, grandTotal, totalRowStyle);
-
-  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r, c: NC } });
-  ws['!cols'] = [{ wch: 30 }, ...new Array(12).fill({ wch: 12 }), { wch: 14 }];
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Бюджет ' + budgetYear);
-  XLSX.writeFile(wb, 'Бюджет_' + budgetYear + '.xlsx');
+  if (payment.contragentId && !(data.contragents || []).some(c => c.id === payment.contragentId)) {
+    const missing = document.createElement('option'); missing.value = payment.contragentId; missing.textContent = (payment.contragent || 'Контрагент') + ' · удалён из справочника'; select.append(missing);
+  }
+  select.value = payment.contragentId || finResolveContragent(payment)?.id || '';
+  if (!document.getElementById('pay_due_date')) {
+    const fields = document.createElement('div'); fields.className = 'form-row';
+    fields.innerHTML = '<div class="form-group"><label for="pay_due_date">Срок оплаты</label><input type="date" id="pay_due_date"></div><div class="form-group"><label for="pay_paid_amount">Оплачено, ₽</label><input type="number" id="pay_paid_amount" min="0" step="0.01"></div><div class="form-group"><label for="pay_paid_date">Дата оплаты</label><input type="date" id="pay_paid_date"></div>';
+    const checkbox = document.getElementById('pay_paid');
+    const group = checkbox.closest('.form-group'); group.parentElement.insertBefore(fields, group);
+    checkbox.addEventListener('change', () => { document.getElementById('pay_paid_amount').value = checkbox.checked ? document.getElementById('pay_sum').value || '0' : '0'; });
+    const updatePaidFlag = () => { checkbox.checked = finNumber(document.getElementById('pay_sum').value) > 0 && finNumber(document.getElementById('pay_paid_amount').value) >= finNumber(document.getElementById('pay_sum').value); };
+    document.getElementById('pay_paid_amount').addEventListener('input', updatePaidFlag);
+    document.getElementById('pay_sum').addEventListener('input', updatePaidFlag);
+  }
+  document.getElementById('pay_due_date').value = payment.dueDate || '';
+  document.getElementById('pay_paid_amount').value = finPaidAmount(payment);
+  document.getElementById('pay_paid_date').value = payment.paidDate || '';
+  if (!document.getElementById('pay_org')) {
+    const fields = document.createElement('div'); fields.className = 'form-row';
+    fields.innerHTML = '<div class="form-group"><label for="pay_org">Организация расхода</label><input id="pay_org" list="pay_org_list"><datalist id="pay_org_list"></datalist></div><div class="form-group"><label for="pay_object">Объект расхода</label><input id="pay_object" list="pay_object_list"><datalist id="pay_object_list"></datalist></div>';
+    name.parentElement.insertAdjacentElement('afterend', fields);
+    document.getElementById('pay_vehicle').addEventListener('change', event => {
+      const vehicle = (data.vehicles || []).find(v => v.id === event.target.value);
+      const org = document.getElementById('pay_org'), object = document.getElementById('pay_object');
+      if (!org.value) org.value = vehicle?.org || '';
+      if (!object.value) object.value = vehicle?.object || '';
+    });
+  }
+  document.getElementById('pay_org').value = finPaymentOrg(payment);
+  document.getElementById('pay_object').value = finPaymentObject(payment);
+  document.getElementById('pay_org_list').innerHTML = finBudgetSuggestions('org');
+  document.getElementById('pay_object_list').innerHTML = finBudgetSuggestions('object');
 }
 
 async function openAddPayment() {
@@ -402,6 +426,7 @@ async function openAddPayment() {
   selectPayCategory('');
   document.getElementById('pay_vehicle').value = '';
   document.getElementById('pay_reestr').value = '';
+  finEnsurePaymentFields();
   openModal('paymentModal');
 }
 
@@ -415,14 +440,15 @@ async function openEditPayment(id) {
   document.getElementById('pay_date').value = dateStr;
   document.getElementById('pay_sum').value = p.sum || '';
   document.getElementById('pay_description').value = p.description || '';
-  document.getElementById('pay_contragent').value = p.contragent || '';
+  document.getElementById('pay_contragent').value = finContragentName(p);
   document.getElementById('pay_invoice').value = p.invoiceNo || '';
-  document.getElementById('pay_paid').checked = !!p.paid;
+  document.getElementById('pay_paid').checked = finDebt(p) <= 0.005;
   document.getElementById('pay_note').value = p.note || '';
   await populatePaymentSelects();
   selectPayCategory(p.category || '');
   document.getElementById('pay_vehicle').value = p.vehicleId || '';
   document.getElementById('pay_reestr').value = p.reestrNo || '';
+  finEnsurePaymentFields(p);
   openModal('paymentModal');
 }
 
@@ -503,24 +529,42 @@ async function savePayment() {
   const sum = parseFloat(document.getElementById('pay_sum').value);
   const category = document.getElementById('pay_category').value;
   const description = document.getElementById('pay_description').value.trim();
-  if (!dateRaw || isNaN(sum) || !description) {
+  if (!dateRaw || !Number.isFinite(sum) || sum <= 0 || !description) {
     alert('Заполните обязательные поля: дата, сумма, описание');
     return;
   }
   const isoDate = parseDate(dateRaw);
   if (!isoDate) { showFieldError('Укажите действительную дату', 'pay_date'); return; }
+  const existing = editingPaymentId && (data.payments || []).find(p => p.id === editingPaymentId);
+  const paidAmount = Number(document.getElementById('pay_paid_amount')?.value || 0);
+  if (!Number.isFinite(paidAmount) || paidAmount < 0) { showFieldError('Укажите сумму оплаты не меньше нуля', 'pay_paid_amount'); return; }
+  const dueDate = document.getElementById('pay_due_date')?.value || null;
+  const paidDate = document.getElementById('pay_paid_date')?.value || null;
+  const partyId = document.getElementById('pay_contragent_id')?.value || '';
+  const party = (data.contragents || []).find(c => c.id === partyId);
+  const partyText = document.getElementById('pay_contragent').value.trim();
+  const resolved = party || (!partyId ? finResolveContragent({ contragent: partyText }) : null);
 
   const obj = {
-    id: editingPaymentId || ('pay_' + Date.now()),
+    ...(existing || {}),
+    id: editingPaymentId || ('pay_' + (globalThis.crypto?.randomUUID?.() || Date.now())),
     date: isoDate,
     sum: sum,
     category: category,
     description: description,
     vehicleId: document.getElementById('pay_vehicle').value || null,
-    contragent: document.getElementById('pay_contragent').value.trim(),
+    org: document.getElementById('pay_org')?.value.trim() || '',
+    object: document.getElementById('pay_object')?.value.trim() || '',
+    contragent: resolved?.name || partyText,
+    contragentId: partyId || resolved?.id || null,
+    contragentAtIssue: existing?.contragentAtIssue || existing?.contragent || partyText || resolved?.name || '',
     reestrNo: document.getElementById('pay_reestr').value ? parseInt(document.getElementById('pay_reestr').value) : null,
     invoiceNo: document.getElementById('pay_invoice').value.trim(),
-    paid: document.getElementById('pay_paid').checked,
+    paid: paidAmount >= sum - 0.005,
+    paidAmount,
+    dueDate,
+    paidDate,
+    settlementManual: true,
     note: document.getElementById('pay_note').value.trim(),
     source: null,
     sourceId: null
@@ -552,60 +596,61 @@ async function deletePayment(id) {
 }
 
 async function importPaymentsFromJournals() {
-  if (!data.payments) data.payments = [];
-  let imported = 0;
-  const existingSourceIds = new Set(data.payments.filter(p=>p.sourceId).map(p=>p.sourceId));
-
-  (data.repairs || []).forEach(r => {
-    if ((r.cost || 0) > 0 && !existingSourceIds.has(r.id)) {
-      const parts = (r.invoiceDate || '').split('.');
-      const isoDate = parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : (r.invoiceDate || new Date().toISOString().slice(0,10));
-      data.payments.push({
-        id: 'pay_' + Date.now() + '_r' + imported,
-        date: isoDate,
-        sum: r.cost,
-        category: 'Ремонт',
-        description: r.description || 'Ремонт',
-        vehicleId: r.vehicleId || null,
-        contragent: '',
-        reestrNo: null,
-        invoiceNo: r.invoiceNo || '',
-        paid: !!r.paid,
-        note: '',
-        source: 'repair',
-        sourceId: r.id
-      });
-      imported++;
-    }
+  const draft = JSON.parse(JSON.stringify(data.payments || []));
+  const sources = new Map(), existingBySource = new Map();
+  let imported = 0, updated = 0, missing = 0, skipped = 0, preserved = 0;
+  const add = (row, source) => {
+    if (!row.id || finNumber(row.cost) <= 0) return;
+    const rawDate = String(source === 'repair' ? row.invoiceDate || '' : source === 'workOrder' ? (row.downtimeTo || '').slice(0,10) : row.date || '');
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : parseDate(rawDate);
+    if (!date) { skipped++; return; }
+    sources.set(source + ':' + row.id, { source, sourceId: row.id, date, sum: finNumber(row.cost), category: source === 'repair' || source === 'workOrder' ? 'Ремонт' : 'ТО', description: source === 'repair' ? row.description || 'Ремонт' : source === 'workOrder' ? row.title || 'Принятый ремонтный заказ' : 'ТО: ' + (row.type || row.toType || 'Техническое обслуживание'), vehicleId: source === 'workOrder' ? String(row.assetRef || '').startsWith('v:') ? row.assetRef.slice(2) : null : row.vehicleId || null, assetRef:row.assetRef || null, org:row.org || undefined, object:row.site || row.object || undefined, invoiceNo: row.invoiceNo || '', sourcePaid: source === 'workOrder' ? false : !!row.paid });
+  };
+  (data.repairs || []).forEach(row => add(row, 'repair'));
+  (data.vehicleTo || []).forEach(row => add(row, 'to'));
+  (data.workOrders || []).filter(row => row.status === 'accepted').forEach(row => {
+    const actual = row.actualCost !== undefined && row.actualCost !== null && row.actualCost !== '' ? finNumber(row.actualCost) : row.incurred === true ? finNumber(row.cost) : 0;
+    if (actual > 0) add({...row,cost:actual}, 'workOrder');
   });
-
-  (data.vehicleTo || []).forEach(t => {
-    if ((t.cost || 0) > 0 && !existingSourceIds.has(t.id)) {
-      data.payments.push({
-        id: 'pay_' + Date.now() + '_t' + imported,
-        date: t.date || new Date().toISOString().slice(0,10),
-        sum: t.cost,
-        category: 'ТО',
-        description: t.toType ? ('ТО: ' + t.toType) : 'Техническое обслуживание',
-        vehicleId: t.vehicleId || null,
-        contragent: '',
-        reestrNo: null,
-        invoiceNo: '',
-        paid: !!t.paid,
-        note: '',
-        source: 'to',
-        sourceId: t.id
-      });
-      imported++;
-    }
+  draft.forEach(p => {
+    if (!p.sourceId || !['repair','to','workOrder'].includes(p.source)) return;
+    const key = p.source + ':' + p.sourceId;
+    if (!existingBySource.has(key)) existingBySource.set(key, []);
+    existingBySource.get(key).push(p);
   });
-
-  if (imported > 0) {
-    if (!await saveData(data)) return;
-    renderFinancesSection();
-    alert('Импортировано записей: ' + imported);
-  } else {
-    alert('Нет новых записей для импорта');
-  }
+  sources.forEach((incoming, key) => {
+    const matches = existingBySource.get(key) || [];
+    if (matches.length > 1) { skipped++; return; }
+    const snapshot = {date:incoming.date,sum:incoming.sum,category:incoming.category,description:incoming.description,vehicleId:incoming.vehicleId,assetRef:incoming.assetRef,invoiceNo:incoming.invoiceNo,org:finPaymentOrg(incoming),object:finPaymentObject(incoming)};
+    if (!matches.length) {
+      draft.push({ ...snapshot, id: 'pay_' + (globalThis.crypto?.randomUUID?.() || Date.now() + '_' + imported), contragent:'', contragentId:null, reestrNo:null, note:'', paid:incoming.sourcePaid, paidAmount:incoming.sourcePaid ? incoming.sum : 0, paidDate:null, dueDate:null, source:incoming.source, sourceId:incoming.sourceId, sourceSnapshot:snapshot });
+      imported++; return;
+    }
+    const p = matches[0], before = JSON.stringify(p), paidAmount = finPaidAmount(p);
+    Object.keys(snapshot).forEach(field => {
+      // Known manual edits are preserved. For old imports only the source sum
+      // is refreshed until a baseline has been captured.
+      const manual = p.sourceSnapshot ? JSON.stringify(p[field]) !== JSON.stringify(p.sourceSnapshot[field]) : field !== 'sum';
+      if (manual) { if (JSON.stringify(p[field]) !== JSON.stringify(snapshot[field])) preserved++; }
+      else p[field] = snapshot[field];
+    });
+    p.sourceSnapshot = snapshot; p.sourceMissing = false;
+    // Materialize legacy full-payment flags before changing the source amount.
+    p.paidAmount = paidAmount; p.paid = paidAmount >= finNumber(p.sum) - 0.005;
+    if (before !== JSON.stringify(p)) updated++;
+  });
+  draft.forEach(p => {
+    if (!p.sourceId || !['repair','to','workOrder'].includes(p.source) || sources.has(p.source + ':' + p.sourceId)) return;
+    const list = p.source === 'repair' ? data.repairs || [] : p.source === 'workOrder' ? data.workOrders || [] : data.vehicleTo || [];
+    // A missing date is an import error, not evidence that the source was removed.
+    const source = list.find(row => row.id === p.sourceId);
+    if (source && (p.source !== 'workOrder' ? finNumber(source.cost) > 0 : source.status === 'accepted' && (finNumber(source.actualCost) > 0 || source.incurred === true && finNumber(source.cost) > 0))) return;
+    if (!p.sourceMissing) { p.sourceMissing = true; missing++; }
+  });
+  if (!(imported + updated + missing)) { showToast('Новых изменений нет' + (skipped ? '. Пропущено спорных записей: ' + skipped : '')); return; }
+  if (!await confirmAction('Добавить расходов: ' + imported + ', обновить: ' + updated + ', пометить удалённые или обнулённые источники: ' + missing + '?\nФактические оплаты, сроки и ручные правки сохраняются.\nПропущено спорных записей: ' + skipped + '. Сохранено ручных значений: ' + preserved + '.')) return;
+  data.payments = draft;
+  if (!await saveData(data, {noMerge:true})) return;
+  renderFinancesSection(); showToast('Расходы синхронизированы: добавлено ' + imported + ', обновлено ' + updated + ', источников для проверки ' + missing);
 }
 

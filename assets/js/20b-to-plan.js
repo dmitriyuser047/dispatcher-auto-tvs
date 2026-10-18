@@ -45,110 +45,235 @@ function toRegFor(v) {
 }
 
 // Интервал машины: из карточки, иначе по регламенту марки
-function toIntervalKm(v) { return +v.toIntervalKm || toRegFor(v).km; }
-function toIntervalMonths(v) { return +v.toIntervalMonths || toRegFor(v).months; }
+function toIntervalKm(v) { return +v.toIntervalKm > 0 ? +v.toIntervalKm : (v.toSevereConditions ? toRegFor(v).hard : toRegFor(v).km); }
+function toIntervalMonths(v) { return +v.toIntervalMonths > 0 ? +v.toIntervalMonths : toRegFor(v).months; }
+
+function toLocalDate(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+}
 
 // Текущий пробег: начальный одометр плюс журнал
 function toCurrentOdo(v) {
-  return (+v.odometer || 0) + recsFor(v.id).reduce((s, r) => s + (+r.km || 0), 0);
+  const today = toLocalDate();
+  return (+v.odometer || 0) + recsFor(v.id).filter(r => r.date <= today).reduce((s, r) => s + (+r.km || 0), 0);
 }
 
-// Средний пробег в сутки за последние 90 дней с записями
-function toDailyKm(v) {
-  const recs = recsFor(v.id).filter(r => +r.km > 0).sort((a, b) => cmpDateAsc(a.date, b.date));
-  if (!recs.length) return 0;
-  const last = recs[recs.length - 1].date;
-  const from = new Date(new Date(last) - 89 * 86400000).toISOString().slice(0, 10);
-  const tail = recs.filter(r => r.date >= from);
-  const km = tail.reduce((s, r) => s + (+r.km || 0), 0);
-  const days = Math.max(1, (new Date(last) - new Date(tail[0].date)) / 86400000 + 1);
-  return km / days;
+// Прогноз использует актуальное окно, включая дни простоя. Старые показания не
+// переносят прежнюю интенсивность работы на будущий год.
+function toUsageTrend(records, field, now = new Date()) {
+  const today = toLocalDate(now), day = new Date(today + 'T12:00:00');
+  const fromDate = new Date(day); fromDate.setDate(fromDate.getDate() - 89);
+  const from = toLocalDate(fromDate);
+  const tail = records.filter(r => r.date >= from && r.date <= today && Number.isFinite(+r[field]) && +r[field] >= 0)
+    .slice().sort((a,b) => cmpDateAsc(a.date,b.date));
+  if (!tail.length) return { rate:0, reason:'нет записей за последние 90 дней', age:null, days:0 };
+  const age = Math.round((day - new Date(tail[tail.length-1].date + 'T12:00:00')) / 86400000);
+  const days = Math.max(1, Math.round((day - new Date(tail[0].date + 'T12:00:00')) / 86400000) + 1);
+  if (age > 30) return { rate:0, reason:'последние показания старше 30 дней', age, days };
+  if (days < 7 || new Set(tail.map(r => r.date)).size < 2) return { rate:0, reason:'недостаточно истории для прогноза (минимум 7 дней и 2 даты)', age, days };
+  const amount = tail.reduce((sum,r) => sum + (+r[field] || 0),0);
+  return { rate:amount / days, reason:amount > 0 ? `по ${days} календарным дням, включая простой` : 'движение не зафиксировано', age, days };
 }
+
+function toDailyKm(v) { return toUsageTrend(recsFor(v.id), 'km').rate; }
 
 function toAddMonths(dateIso, months) {
-  const d = new Date(dateIso);
-  d.setMonth(d.getMonth() + months);
-  return d.toISOString().slice(0, 10);
+  const d = new Date(dateIso + 'T12:00:00');
+  const originalDay = d.getDate();
+  d.setDate(1); d.setMonth(d.getMonth() + Math.max(0, Math.round(months)));
+  const lastDay = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+  d.setDate(Math.min(originalDay, lastDay));
+  return toLocalDate(d);
+}
+
+function toGeneratorRulePlan(g, rule, horizonMonths) {
+  const today = toLocalDate(), interval = +rule.hours || 0, months = +rule.months || 0;
+  const records = (data.genRecords || []).filter(r => r.generatorId === g.id);
+  const current = (+g.hoursInit || 0) + records.filter(r => r.date <= today).reduce((s,r) => s + (+r.hours || 0),0);
+  const trend = toUsageTrend(records, 'hours');
+  const done = (data.toRecords || []).filter(r => r.generatorId === g.id && !r.planned && r.date <= today &&
+    (r.maintenanceRuleId === rule.id || !r.maintenanceRuleId && String(r.type || '').toLowerCase() === rule.label.toLowerCase()))
+    .sort((a,b) => cmpDateAsc(a.date,b.date));
+  const last = done[done.length-1];
+  let nextMeter = interval > 0 ? (last?.nextHoursAbs ?? (last?.hours != null ? +last.hours + interval : Math.floor(current / interval) * interval + interval)) : null;
+  let nextDate = last?.nextDate || (months > 0 ? toAddMonths(last?.date || today, months) : null);
+  const limit = toAddMonths(today, horizonMonths), items = [];
+  for (let i=0; i<60; i++) {
+    const byMeter = nextMeter != null && trend.rate > 0 ? toLocalDate(new Date(Date.now() + Math.max(0,(nextMeter-current)/trend.rate) * 86400000)) : nextMeter != null && current >= nextMeter ? today : null;
+    const date = byMeter && (!nextDate || byMeter < nextDate) ? byMeter : nextDate;
+    if (!date || date > limit) break;
+    items.push({ date:date < today ? today : date, dueDate:date, meter:nextMeter != null ? +nextMeter.toFixed(1) : null });
+    if (nextMeter != null) nextMeter = nextMeter <= current ? current + interval : nextMeter + interval;
+    nextDate = months > 0 ? toAddMonths(date < today ? today : date,months) : null;
+  }
+  return { current, trend, items };
+}
+
+let toRulesAssetKind = 'vehicle';
+let toRulesAssetId = null;
+
+function toOpenRules(kind = 'vehicle', id) {
+  toRulesAssetKind = kind === 'generator' ? 'generator' : 'vehicle';
+  const assets = (toRulesAssetKind === 'vehicle' ? data.vehicles : data.generators || []).filter(x => !x.archived);
+  const asset = assets.find(x => x.id === id) || assets[0];
+  toRulesAssetId = asset?.id || null;
+  const name = x => toRulesAssetKind === 'vehicle' ? [x.plate,x.make].filter(Boolean).join(' · ') : [x.name,x.location].filter(Boolean).join(' · ');
+  openGenericModal('Виды и интервалы ТО', `<div class="form-row"><div class="form-group"><label>Тип техники</label><select onchange="toOpenRules(this.value)"><option value="vehicle"${toRulesAssetKind === 'vehicle' ? ' selected' : ''}>Транспорт</option><option value="generator"${toRulesAssetKind === 'generator' ? ' selected' : ''}>ДЭС</option></select></div>
+    <div class="form-group"><label>Техника</label><select onchange="toOpenRules(toRulesAssetKind,this.value)">${assets.map(x => `<option value="${htmlEsc(x.id)}"${x.id === asset?.id ? ' selected' : ''}>${htmlEsc(name(x))}</option>`).join('')}</select></div></div>
+    <p style="font-size:13px;color:var(--text3)">Каждый вид обслуживания имеет свой интервал. Срок наступает по первому условию: пробег или моточасы, либо дата. Пустое условие не применяется. Сохраните настройки выбранной техники перед переключением.</p>
+    ${toRulesAssetKind === 'vehicle' ? `<label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:10px 0"><input id="to_rules_severe" type="checkbox" style="width:auto"${asset?.toSevereConditions ? ' checked' : ''}>Тяжёлые условия для базового регламента марки (если собственный интервал не задан)</label>` : ''}
+    <div id="toRulesRows"></div><button class="btn btn-ghost btn-sm" onclick="toAddRuleRow()">+ Вид обслуживания</button>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px"><button class="btn btn-ghost" onclick="closeModal('genericModal')">Закрыть</button><button class="btn btn-primary" onclick="toSaveRules()"${asset ? '' : ' disabled'}>Сохранить регламенты</button></div>`,850);
+  const rules = asset?.maintenanceRules || [];
+  rules.forEach(toAddRuleRow);
+  if (!rules.length) toAddRuleRow(toRulesAssetKind === 'vehicle' && asset ? { label:'ТО', km:toIntervalKm(asset), months:toIntervalMonths(asset) } : {});
+}
+
+function toAddRuleRow(rule = {}) {
+  const host = document.getElementById('toRulesRows');
+  if (!host) return;
+  const row = document.createElement('div');
+  row.className = 'form-row to-rule-row';
+  row.dataset.ruleId = rule.id || 'rule_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,7);
+  row.style.cssText = 'padding:10px 0;border-bottom:1px solid var(--border);align-items:flex-end';
+  const meter = toRulesAssetKind === 'vehicle' ? rule.km : rule.hours;
+  row.innerHTML = `<div class="form-group" style="flex:2"><label>Вид работ</label><input class="to-rule-label" value="${htmlEsc(rule.label || '')}" placeholder="Замена масла"></div>
+    <div class="form-group"><label>${toRulesAssetKind === 'vehicle' ? 'Каждые, км' : 'Каждые, мтч'}</label><input class="to-rule-meter" type="number" min="0" step="0.1" value="${htmlEsc(meter ?? '')}"></div>
+    <div class="form-group"><label>Каждые, мес.</label><input class="to-rule-months" type="number" min="1" step="1" value="${htmlEsc(rule.months ?? '')}"></div>
+    <label style="font-size:12px;padding-bottom:16px"><input class="to-rule-enabled" type="checkbox" style="width:auto"${rule.enabled !== false ? ' checked' : ''}> Включено</label>
+    <button class="btn btn-ghost btn-sm" style="margin-bottom:14px" onclick="this.closest('.to-rule-row').remove()">Убрать</button>`;
+  host.appendChild(row);
+}
+
+async function toSaveRules() {
+  const asset = (toRulesAssetKind === 'vehicle' ? data.vehicles : data.generators || []).find(x => x.id === toRulesAssetId);
+  if (!asset) return;
+  const rules = [];
+  for (const row of document.querySelectorAll('#toRulesRows .to-rule-row')) {
+    const label = row.querySelector('.to-rule-label').value.trim();
+    const rawMeter = row.querySelector('.to-rule-meter').value.trim(), rawMonths = row.querySelector('.to-rule-months').value.trim();
+    const meter = rawMeter ? Number(rawMeter) : null, months = rawMonths ? Number(rawMonths) : null;
+    if (!label || meter != null && (!Number.isFinite(meter) || meter <= 0) || months != null && (!Number.isInteger(months) || months <= 0) || !(meter > 0 || months > 0)) {
+      showToast('Укажите вид работ и положительный интервал: км/моточасы или целое число месяцев'); return;
+    }
+    if (rules.some(r => r.label.toLowerCase() === label.toLowerCase())) { showToast('Названия видов ТО должны различаться'); return; }
+    rules.push({ id:row.dataset.ruleId, label, [toRulesAssetKind === 'vehicle' ? 'km' : 'hours']:meter, months, enabled:row.querySelector('.to-rule-enabled').checked });
+  }
+  asset.maintenanceRules = rules;
+  if (toRulesAssetKind === 'vehicle') asset.toSevereConditions = !!document.getElementById('to_rules_severe')?.checked;
+  if (!await saveData(data)) return;
+  closeModal('genericModal');
+  showToast('Регламенты сохранены. Постройте план, чтобы обновить график.');
 }
 
 // План ТО машины на horizon месяцев вперёд
-function toPlanFor(v, horizonMonths) {
-  const interval = toIntervalKm(v), months = toIntervalMonths(v);
+function toPlanFor(v, horizonMonths, rule) {
+  const interval = rule ? (+rule.km || 0) : toIntervalKm(v), months = rule ? (+rule.months || 0) : toIntervalMonths(v);
   const cur = toCurrentOdo(v);
-  const perDay = toDailyKm(v);
-  const today = new Date().toISOString().slice(0, 10);
-  const done = vehicleToFor(v.id).filter(r => !r.planned).sort((a, b) => cmpDateAsc(a.date, b.date));
+  const trend = toUsageTrend(recsFor(v.id), 'km'), perDay = trend.rate;
+  const today = toLocalDate();
+  const done = vehicleToFor(v.id).filter(r => !r.planned && r.date <= today && (rule ? (r.maintenanceRuleId === rule.id || !r.maintenanceRuleId && String(r.type || '').toLowerCase() === rule.label.toLowerCase()) : !r.maintenanceRuleId)).sort((a, b) => cmpDateAsc(a.date, b.date));
   const last = done[done.length - 1];
 
   // Отсчёт: от последнего ТО, иначе от ближайшего кратного интервалу пробега
   let nextOdo = last && last.nextOdometerAbs != null ? +last.nextOdometerAbs
     : last && last.odometer != null ? +last.odometer + interval
-    : Math.floor(cur / interval) * interval + interval;
-  let nextDate = last && last.date ? toAddMonths(last.date, months) : toAddMonths(today, months);
+    : interval > 0 ? Math.floor(cur / interval) * interval + interval : null;
+  if (!(interval > 0)) nextOdo = null;
+  let nextDate = last?.nextDate || (months > 0 ? toAddMonths(last?.date || today, months) : null);
 
   const limit = toAddMonths(today, horizonMonths || 12);
   const out = [];
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 60; i++) {
     // Дата по пробегу: сколько дней до нужного пробега при текущем темпе
-    const byKm = perDay > 0 ? new Date(Date.now() + Math.max(0, (nextOdo - cur) / perDay) * 86400000).toISOString().slice(0, 10) : null;
-    const date = byKm && byKm < nextDate ? byKm : nextDate;
+    const byKm = nextOdo != null && perDay > 0 ? toLocalDate(new Date(Date.now() + Math.max(0, (nextOdo - cur) / perDay) * 86400000)) : nextOdo != null && cur >= nextOdo ? today : null;
+    const date = byKm && (!nextDate || byKm < nextDate) ? byKm : nextDate;
+    if (!date) break;
     if (date > limit) break;
-    out.push({ date: date < today ? today : date, odo: nextOdo, overdue: date < today, byKm: !!(byKm && byKm < nextDate) });
-    nextOdo += interval;
-    nextDate = toAddMonths(date, months);
+    out.push({ date: date < today ? today : date, dueDate:date, odo: nextOdo, overdue: date < today || nextOdo != null && cur > nextOdo, byKm: !!(byKm && (!nextDate || byKm < nextDate)) });
+    if (nextOdo != null) nextOdo = nextOdo <= cur ? cur + interval : nextOdo + interval;
+    nextDate = months > 0 ? toAddMonths(date < today ? today : date, months) : null;
   }
-  return { interval, months, cur, perDay, last, items: out };
+  return { interval, months, cur, perDay, trend, last, items: out };
 }
 
 // Пересчёт планов по всему парку: плановые записи заменяются, факт не трогается
 async function toRebuildPlan(horizonMonths) {
-  const vehicles = (data.vehicles || []).filter(v => !/списан|продан/i.test(v.status || ''));
-  data.vehicleTo = (data.vehicleTo || []).filter(r => !r.planned);
+  const vehicles = (data.vehicles || []).filter(v => !v.archived && !/списан|продан/i.test(v.status || ''));
+  // Ручные планы сохраняются; старые автоматически созданные планы узнаются по ID.
+  data.vehicleTo = (data.vehicleTo || []).filter(r => !r.planned || !(r.generatedBy === 'regulation' || String(r.id || '').startsWith('vto_plan_')));
   let added = 0;
   vehicles.forEach(v => {
-    const p = toPlanFor(v, horizonMonths || 12);
+    const rules = (v.maintenanceRules || []).filter(r => r.enabled !== false && (+r.km > 0 || +r.months > 0));
     const reg = toRegFor(v);
+    ((v.maintenanceRules || []).length ? rules : [null]).forEach(rule => {
+    const p = toPlanFor(v, horizonMonths || 12, rule);
     p.items.forEach((it, i) => {
       data.vehicleTo.push({
-        id: 'vto_plan_' + v.id + '_' + i + '_' + Date.now().toString(36),
+        id: 'vto_plan_' + v.id + '_' + (rule?.id || 'default') + '_' + i + '_' + Date.now().toString(36),
         vehicleId: v.id,
         date: it.date,
-        type: 'ТО по регламенту (план)',
+        type: rule ? rule.label + ' (план)' : 'ТО по регламенту (план)',
         planned: true,
-        odometer: Math.round(it.odo),
-        nextKm: p.interval,
-        nextOdometerAbs: Math.round(it.odo),
+        generatedBy: 'regulation', maintenanceRuleId: rule?.id || null,
+        maintenanceIntervalMonths: p.months || null,
+        dueDate: it.dueDate,
+        odometer: it.odo != null ? Math.round(it.odo) : null,
+        nextKm: p.interval || null,
+        nextOdometerAbs: it.odo != null ? Math.round(it.odo) : null,
         nextDate: it.date,
         cost: null,
         performer: '',
         note: 'Регламент: каждые ' + p.interval.toLocaleString('ru') + ' км или ' + p.months + ' мес. (' + reg.src + '). ' +
           (it.byKm ? 'Срок по пробегу' : 'Срок по времени') +
-          (p.perDay ? ', средний пробег ' + Math.round(p.perDay) + ' км/сут' : ', пробег не ведётся') +
+          (p.perDay ? ', средний пробег ' + Math.round(p.perDay) + ' км/сут' : ', прогноз по пробегу недоступен: ' + p.trend.reason) +
           (it.overdue ? '. ТО просрочено — поставлено на сегодня' : ''),
       });
       added++;
     });
+    });
   });
-  await saveData(data);
+  data.toRecords = (data.toRecords || []).filter(r => !r.planned || r.generatedBy !== 'regulation');
+  (data.generators || []).filter(g => !g.archived).forEach(g => {
+    (g.maintenanceRules || []).filter(rule => rule.enabled !== false && (+rule.hours > 0 || +rule.months > 0)).forEach(rule => {
+      const plan = toGeneratorRulePlan(g, rule, horizonMonths || 12);
+      plan.items.forEach((it,i) => {
+        data.toRecords.push({ id:'to_plan_' + g.id + '_' + rule.id + '_' + i + '_' + Date.now().toString(36),
+          generatorId:g.id, date:it.date, dueDate:it.dueDate, type:rule.label + ' (план)', planned:true,
+          generatedBy:'regulation', maintenanceRuleId:rule.id, maintenanceIntervalMonths:+rule.months || null,
+          hours:it.meter, nextHours:+rule.hours || null, nextHoursAbs:it.meter, nextDate:it.date,
+          cost:null, performer:'', note:'Срок наступает по первому условию: ' + (+rule.hours > 0 ? rule.hours + ' мтч ' : '') + (+rule.months > 0 ? rule.months + ' мес. ' : '') + '. ' + plan.trend.reason,
+        });
+        added++;
+      });
+    });
+  });
+  if (!await saveData(data)) return null;
   return added;
 }
 
 // Кнопка в разделе «График ТО»
 async function toRebuildPlanClick() {
-  if (!confirm('Построить план ТО по регламентам на 12 месяцев вперёд?\n\nПлановые записи будут пересозданы, выполненные ТО не изменятся.')) return;
+  if (!await confirmAction('Построить план ТО по регламентам на 12 месяцев вперёд? Автоматические планы будут пересозданы. Ручные планы и выполненные ТО сохранятся.')) return;
   const n = await toRebuildPlan(12);
+  if (n == null) return;
   showToast('План ТО построен: ' + n + ' записей');
   renderToScheduleSection();
 }
 
 // Таблица регламентов и ближайших ТО — для просмотра и выгрузки
 function toPlanOverview() {
-  return (data.vehicles || []).map(v => {
-    const p = toPlanFor(v, 12);
-    const reg = toRegFor(v);
+  return (data.vehicles || []).filter(v => !v.archived).map(v => {
+    const configured = v.maintenanceRules || [];
+    const rules = configured.filter(r => r.enabled !== false && (+r.km > 0 || +r.months > 0));
+    const plans = (configured.length ? rules : [null]).map(rule => ({rule,plan:toPlanFor(v,12,rule)}));
+    plans.sort((a,b) => (a.plan.items[0]?.date || '9999').localeCompare(b.plan.items[0]?.date || '9999'));
+    const chosen = plans[0];
+    const p = chosen?.plan || {interval:0,months:0,cur:toCurrentOdo(v),perDay:0,last:null,items:[]};
+    const reg = chosen?.rule ? {src:'Собственный регламент: ' + chosen.rule.label} : configured.length ? {src:'Все виды ТО отключены'} : toRegFor(v);
     const next = p.items[0];
     return { v, reg, interval: p.interval, months: p.months, cur: p.cur, perDay: p.perDay,
-             last: p.last, next, count: p.items.length };
+             last: p.last, next, count: plans.reduce((n,x) => n + x.plan.items.length,0) };
   }).sort((a, b) => (a.next ? a.next.date : '9').localeCompare(b.next ? b.next.date : '9'));
 }
 
@@ -183,6 +308,7 @@ function toShowRegs() {
       <tbody>${rows}</tbody></table></div>
     <div style="display:flex;justify-content:space-between;gap:8px;margin-top:12px">
       <button class="btn btn-ghost" onclick="toExportRegs()">Выгрузить в Excel</button>
+      <button class="btn btn-ghost" onclick="toOpenRules()">Настроить виды ТО</button>
       <span>
         <button class="btn btn-ghost" onclick="closeModal('genericModal')">Закрыть</button>
         <button class="btn btn-primary" onclick="closeModal('genericModal');toRebuildPlanClick()">Построить план</button>
@@ -249,7 +375,7 @@ async function toAutoSetupOnce() {
   if (!changed && !needPlan) return;
 
   if (needPlan) {
-    await toRebuildPlan(12);          // внутри сохраняет данные
+    if (await toRebuildPlan(12) == null) return;
     meta.toPlanInit = new Date().toISOString();
     await saveData(data);
     showToast && showToast('Построен график ТО по регламентам');

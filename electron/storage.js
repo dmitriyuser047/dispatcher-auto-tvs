@@ -25,6 +25,9 @@ const SECTIONS = [
   'tanks', 'tankIncomes', 'vehicleTo', 'repairs',
   'reestrRows', 'savedReestrs', 'payments', 'budget', 'contragents',
   'fuelPurchases', 'fuelImports', 'fuelCards', 'fuelPeriods', 'monthlyFuel', 'appMeta',
+  'dispatchJobs', 'drivers', 'assetAssignments', 'workOrders', 'opsTasks',
+  'assetDocuments', 'fuelMovements', 'parts', 'partMovements', 'shiftReports',
+  'connectors', 'auditLog', 'savedViews', 'glonassTrips', 'glonassImports',
 ];
 
 const REVISIONS_FILE = 'revisions.json';
@@ -114,7 +117,7 @@ function commitSections(dataDir, sections, revisions) {
 function checkClosedPeriods(previous, next) {
   const closed = new Set((previous.fuelPeriods || []).filter(p => p.closed).map(p => p.month));
   if (!closed.size) return;
-  for (const name of ['records', 'fuelPurchases', 'monthlyFuel']) {
+  for (const name of ['records', 'fuelPurchases', 'monthlyFuel', 'genRecords', 'tankIncomes', 'fuelMovements']) {
     if (!(name in next)) continue;
     const old = previous[name] || [], rows = next[name];
     for (const month of closed) {

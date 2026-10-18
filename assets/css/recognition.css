@@ -1,0 +1,56 @@
+/* Shared by the main registry and its separate editing window. */
+.rx-source-dialog { width: min(880px, calc(100vw - 40px)); max-height: min(90vh, 900px); margin: auto; padding: 0; border: 1px solid var(--border); border-radius: 16px; background: var(--bg2); color: var(--text); box-shadow: 0 24px 75px #07152b38; overflow: hidden; font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif; text-align: left; }
+.rx-source-dialog[open] { display: flex; flex-direction: column; }
+.rx-source-dialog::backdrop { background: #101c35a6; backdrop-filter: blur(4px); }
+.rx-source-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 21px 24px; border-bottom: 1px solid var(--border); background: var(--bg2); }
+.rx-source-eyebrow { display: block; margin-bottom: 5px; color: var(--accent); font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+.rx-source-head h2 { margin: 0; color: var(--text); font-size: 21px; font-weight: 650; letter-spacing: -.025em; line-height: 1.25; }
+.rx-source-close { display: grid; place-items: center; flex-shrink: 0; width: 34px; height: 34px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg2); color: var(--text2); font-family: inherit; font-size: 25px; line-height: 1; cursor: pointer; }
+.rx-source-close:hover { background: var(--bg3); color: var(--text); }
+.rx-source-body { min-height: 0; overflow: auto; padding: 21px 24px 24px; }
+.rx-source-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 24px; margin: 0 0 20px; padding-bottom: 19px; border-bottom: 1px solid var(--border); }
+.rx-source-meta > div { min-width: 0; }
+.rx-source-meta dt { margin-bottom: 4px; color: var(--text2); font-size: 11px; }
+.rx-source-meta dd { margin: 0; color: var(--text); font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
+.rx-source-note { margin: 0 0 14px; color: var(--text2); font-size: 12px; line-height: 1.7; }
+.rx-source-confidence-note { margin: 0 0 16px; padding: 11px 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg3); color: var(--text2); font-size: 11px; line-height: 1.7; }
+.rx-source-warnings { margin-bottom: 18px; padding: 14px 17px; border: 1px solid color-mix(in srgb, var(--yellow, #af6b0e) 35%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--yellow, #af6b0e) 6%, var(--bg2)); }
+.rx-source-warnings h3 { margin: 0 0 8px; color: var(--text); font-size: 13px; font-weight: 650; }
+.rx-source-warnings ul { padding-left: 18px; margin: 0; color: var(--text2); font-size: 12px; line-height: 1.6; }
+.rx-source-warnings li + li { margin-top: 5px; }
+.rx-source-fields { display: grid; gap: 11px; }
+.rx-source-field { min-width: 0; padding: 15px 17px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg2); }
+.rx-source-field-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.rx-source-field-head h3 { margin: 0; color: var(--text2); font-size: 12px; font-weight: 550; }
+.rx-source-field-state { color: var(--text2); font-size: 11px; }
+.rx-source-field.is-missing .rx-source-field-state { color: var(--yellow, #af6b0e); }
+.rx-source-field-value { margin: 6px 0 13px; color: var(--text); font-size: 16px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.rx-source-field.is-missing .rx-source-field-value { font-size: 13px; font-weight: 500; color: var(--text2); }
+.rx-source-line-label { margin-bottom: 5px; color: var(--text2); font-size: 11px; }
+.rx-source-line { margin: 0; padding: 9px 12px; border-left: 2px solid var(--accent); border-radius: 0 5px 5px 0; background: var(--bg3); color: var(--text); font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rx-source-field-pages { margin: 6px 0 0; color: var(--text2); font-size: 11px; }
+.rx-source-unavailable { padding: 30px 20px; border: 1px dashed var(--border); border-radius: 9px; background: var(--bg3); text-align: center; }
+.rx-source-unavailable h3 { margin: 0 0 9px; color: var(--text); font-size: 15px; font-weight: 600; }
+.rx-source-unavailable p { max-width: 560px; margin: 0 auto; color: var(--text2); font-size: 12px; line-height: 1.7; }
+.rx-source-raw { margin-top: 17px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg3); }
+.rx-source-raw summary { padding: 13px 15px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; }
+.rx-source-raw[open] summary { border-bottom: 1px solid var(--border); }
+.rx-source-raw pre { max-height: 320px; overflow: auto; padding: 15px; margin: 0; color: var(--text2); font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rx-source-foot { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 24px; border-top: 1px solid var(--border); background: var(--bg3); }
+.rx-source-foot > span { color: var(--text2); font-size: 11px; line-height: 1.5; }
+.rx-source-dialog :is(button, summary):focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.rx-source-trigger, .rx-source-button { white-space: nowrap; }
+.rx-source-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--accent) 23%, var(--border)); border-radius: 6px; background: color-mix(in srgb, var(--accent) 5%, var(--bg2)); color: var(--accent-light, var(--accent)); font-family: inherit; font-size: 11px; font-weight: 600; line-height: 1.35; cursor: pointer; }
+.rx-source-button:hover { background: color-mix(in srgb, var(--accent) 11%, var(--bg2)); border-color: var(--accent); }
+.rx-source-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 620px) {
+  .rx-source-dialog { width: calc(100vw - 20px); max-height: calc(100vh - 24px); border-radius: 12px; }
+  .rx-source-head { padding: 18px; }
+  .rx-source-head h2 { font-size: 19px; }
+  .rx-source-body { padding: 18px; }
+  .rx-source-meta { grid-template-columns: 1fr; gap: 12px; }
+  .rx-source-field { padding: 13px; }
+  .rx-source-field-value { font-size: 15px; }
+  .rx-source-foot { padding: 14px 18px; gap: 12px; }
+}
+@media (prefers-reduced-motion: reduce) { .rx-source-dialog *, .rx-source-dialog::backdrop { animation: none !important; transition: none !important; } }

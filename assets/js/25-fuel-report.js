@@ -3,9 +3,19 @@
 // столбцы — месяцы. Внутри группы — промежуточный итог по виду топлива,
 // внизу — общий итог. Показатель переключается кнопками.
 
-// Ставка НДС. Суммы прихода хранятся без НДС — так же, как в карточке счёта
-// 10.03.1, где налог учитывается отдельно на счёте 19.
-const FUEL_VAT_RATE = 22;
+// Налог берётся из документа; историческая дата сама по себе ставку не задаёт.
+function frTax(r) {
+  const storedNet=fqValue(r.sum), explicit=fqValue(r.vatAmount), rate=fqValue(r.vatRate), storedGross=fqValue(r.grossSum);
+  let net=storedNet == null ? null : Math.abs(storedNet), vat=explicit, gross=storedGross;
+  let invalid=explicit != null && explicit < 0 || gross != null && gross < 0 || rate != null && (rate < 0 || rate > 100);
+  if (net == null && gross != null && vat != null && gross >= vat) net=gross-vat;
+  if (net == null && gross != null && rate != null && rate >= 0 && rate <= 100) net=gross/(1+rate/100);
+  if (vat == null && gross != null && net != null) vat=gross-net;
+  if (vat == null && net != null && rate != null && rate >= 0 && rate <= 100) vat=net*rate/100;
+  if (gross == null && net != null && vat != null) gross=net+vat;
+  if (vat != null && vat < -0.02 || gross != null && vat != null && gross+0.02 < vat || gross != null && net != null && gross+0.02 < net || gross != null && net != null && vat != null && Math.abs(gross-net-vat)>0.02) invalid=true;
+  return {net,vat:invalid ? null : vat,gross:invalid ? null : gross,invalid};
+}
 
 let fuelRepYear   = String(new Date().getFullYear());
 let fuelRepTab    = 'veh';       // 'in' — приход, 'veh' — расход ТС, 'gen' — расход ДЭС
@@ -21,6 +31,7 @@ let fuelRepShowSkipped = false;  // показывать ли исключённ
 // и приходами без указанного источника.
 const FR_IN_SKIP = [/гпнз/i, /диэлком/i, /перемещ/i];
 function frIncomeSkipped(r) {
+  if(r.operationType)return r.operationType!=='purchase';
   const s = String(r.source || '').trim();
   return !s || !(+r.sum) || FR_IN_SKIP.some(re => re.test(s));
 }
@@ -35,29 +46,31 @@ const FR_METRICS = {
   in: [
     { id:'both',   label:'Литры и сумма с НДС', pair:['litres', 'gross'] },
     { id:'litres', label:'Литры',          get:v => v.l,                              dec:1, short:'л' },
-    { id:'net',    label:'Сумма без НДС',  get:v => v.s,                              dec:2 },
-    { id:'vat',    label:'НДС ' + FUEL_VAT_RATE + '%', get:v => v.s * FUEL_VAT_RATE / 100, dec:2 },
-    { id:'gross',  label:'Всего с НДС',    get:v => v.s * (1 + FUEL_VAT_RATE / 100),  dec:2, short:'₽ с НДС' },
-    { id:'price',  label:'Цена за литр',   get:v => v.l ? v.s / v.l : null,           dec:2 },
+    { id:'net',    label:'Сумма без НДС',  get:v => v.netMissing ? null : v.s, dec:2 },
+    { id:'vat',    label:'НДС по документам', get:v => v.vatMissing?null:v.vat, dec:2 },
+    { id:'gross',  label:'Всего с НДС',    get:v => v.grossMissing?null:v.gross, dec:2, short:'₽ с НДС' },
+    { id:'price',  label:'Цена за литр без НДС', get:v => !v.netMissing && v.l ? v.s / v.l : null, dec:2 },
     { id:'count',  label:'Поставок',       get:v => v.n,                              dec:0 },
   ],
   veh: [
     { id:'both',   label:'Литры и сумма',  pair:['issued', 'sum'] },
     { id:'issued', label:'Выдано, л',      get:v => v.iss,                            dec:1, short:'л' },
     { id:'norm',   label:'По норме, л',    get:v => v.norm,                           dec:1 },
-    { id:'act',    label:'По факту, л',    get:v => v.act,                            dec:1 },
-    { id:'dev',    label:'Отклонение, л',  get:v => v.norm ? v.act - v.norm : null,   dec:1, sign:true },
-    { id:'devpct', label:'Отклонение, %',  get:v => v.norm ? (v.act - v.norm) / v.norm * 100 : null, dec:1, sign:true },
-    { id:'sum',    label:'Сумма, ₽',       get:v => v.sum,                            dec:2, short:'₽' },
-    { id:'price',  label:'Цена за литр',   get:v => v.sumL ? v.sum / v.sumL : null,   dec:2 },
+    { id:'act',    label:'Введённый факт / замер, л', get:v => v.actN?v.act:null, dec:1 },
+    { id:'estimate',label:'Оценка для баланса, л',get:v=>v.estimated,dec:1},
+    { id:'dev',    label:'Отклонение по факту, л', get:v => v.actN && v.actNormN === v.actN ? v.act - v.actNorm : null, dec:1, sign:true },
+    { id:'devpct', label:'Отклонение по факту, %', get:v => v.actN && v.actNormN === v.actN && v.actNorm ? (v.act - v.actNorm) / v.actNorm * 100 : null, dec:1, sign:true },
+    { id:'sum',    label:'Сумма, ₽',       get:v => v.moneyMissing ? null : v.sum, dec:2, short:'₽' },
+    { id:'price',  label:'Цена за литр',   get:v => !v.moneyMissing && v.sumL ? v.sum / v.sumL : null, dec:2 },
     { id:'km',     label:'Пробег, км',     get:v => v.km,                             dec:0 },
   ],
   gen: [
     { id:'issued', label:'Выдано, л',      get:v => v.iss,                            dec:1 },
     { id:'norm',   label:'По норме, л',    get:v => v.norm,                           dec:1 },
-    { id:'act',    label:'По факту, л',    get:v => v.act,                            dec:1 },
-    { id:'dev',    label:'Отклонение, л',  get:v => v.norm ? v.act - v.norm : null,   dec:1, sign:true },
-    { id:'devpct', label:'Отклонение, %',  get:v => v.norm ? (v.act - v.norm) / v.norm * 100 : null, dec:1, sign:true },
+    { id:'act',    label:'Введённый факт, л', get:v => v.actN?v.act:null, dec:1 },
+    { id:'estimate',label:'Оценка для баланса, л',get:v=>v.estimated,dec:1},
+    { id:'dev',    label:'Отклонение по факту, л',get:v=>v.actN&&v.actNormN===v.actN?v.act-v.actNorm:null,dec:1,sign:true},
+    { id:'devpct', label:'Отклонение по факту, %',get:v=>v.actN&&v.actNormN===v.actN&&v.actNorm?(v.act-v.actNorm)/v.actNorm*100:null,dec:1,sign:true},
     { id:'hours',  label:'Моточасы',       get:v => v.h,                              dec:1 },
   ],
 };
@@ -99,9 +112,9 @@ function frYears() {
 
 function frEmptyCell(tab) {
   tab = tab || fuelRepTab;
-  if (tab === 'in')  return { l:0, s:0, n:0 };
-  if (tab === 'veh') return { iss:0, norm:0, act:0, km:0, sum:0, sumL:0, n:0 };
-  return { iss:0, norm:0, act:0, h:0, n:0 };
+  if (tab === 'in')  return { l:0, s:0, n:0, vat:0,gross:0,taxMissing:0,netMissing:0,vatMissing:0,grossMissing:0,taxInvalid:0 };
+  if (tab === 'veh') return { iss:0, norm:0, act:0, actN:0,actNorm:0,actNormN:0,estimated:0, km:0, sum:0, sumL:0,moneyMissing:0, n:0 };
+  return { iss:0, norm:0, act:0, actN:0,actNorm:0,actNormN:0,estimated:0, h:0, n:0 };
 }
 
 function frAddCell(a, b) {
@@ -123,16 +136,22 @@ function frRows(tab, year) {
     // сторонами: у них нет ни накладной, ни НДС, а по компании один и тот же
     // объём считался бы дважды — при покупке и при перевозке.
     (data.tankIncomes || []).forEach(r => {
-      if ((r.date || '').slice(0, 4) !== year || r.linkId || (+r.amount || 0) <= 0) return;
+      if (!fqDate(r.date) || r.date.slice(0, 4) !== year || r.linkId || (+r.amount || 0) <= 0) return;
       if (!fuelRepShowSkipped && frIncomeSkipped(r)) return;
       const t = (data.tanks || []).find(x => x.id === r.tankId);
       // Разрез: объект (куда привезли) или поставщик (от кого) — поле «Источник»
       const label = fuelRepDim === 'supplier'
         ? ((r.source || '').trim() || 'Поставщик не указан')
         : (t ? (t.object || t.name) : '—');
-      const c = row('t:' + label, label, frFuelLabel(t && t.fuel, 'ДТ')).cells[+r.date.slice(5, 7) - 1];
+      const fuelLabel=frFuelLabel(t && t.fuel, t && t.fuelGrade || '');
+      const c = row('t:' + label+'|'+fuelLabel, label, fuelLabel).cells[+r.date.slice(5, 7) - 1];
       c.l += +r.amount || 0;
-      c.s += Math.abs(+r.sum || 0);
+      const tax=frTax(r);
+      if(tax.net == null)c.netMissing++;else c.s+=tax.net;
+      if(tax.vat == null)c.vatMissing++;else c.vat+=tax.vat;
+      if(tax.gross == null)c.grossMissing++;else c.gross+=tax.gross;
+      if(tax.vat == null || tax.gross == null)c.taxMissing++;
+      if(tax.invalid)c.taxInvalid++;
       c.n++;
     });
   } else if (tab === 'veh') {
@@ -146,24 +165,31 @@ function frRows(tab, year) {
     ledger.receipts.forEach(p => {
       const c = cellFor(p.vehicleId, p.grade, p.date); if (!c) return;
       c.iss += p.qty; c.n++;
-      if (p.sum) { c.sum += p.sum; c.sumL += p.qty; }
+      if (fqValue(p.sum) != null) { c.sum += Number(p.sum); c.sumL += p.qty; } else c.moneyMissing++;
     });
-    ledger.movements.filter(m => m.kind === 'consumption' && (m.qty || m.norm || m.km)).forEach(m => {
+    ledger.movements.filter(m => m.kind === 'consumption' && (m.qty || m.norm || m.km || ['actual','measurement'].includes(m.source))).forEach(m => {
       const c = cellFor(m.vehicleId, m.grade, m.date); if (!c) return;
-      c.norm += m.norm; c.act += m.qty; c.km += m.km; c.n++;
+      const totalNorm=fqValue(m.totalNorm);
+      c.norm += totalNorm || 0;
+      if(['actual','measurement'].includes(m.source)) { c.act+=m.qty;c.actN++;if(totalNorm != null){c.actNorm+=totalNorm;c.actNormN++;} }
+      else c.estimated+=m.qty;
+      c.km+=m.km;c.n++;
     });
   } else {
     const byId = {};
     (data.generators || []).forEach(g => { byId[g.id] = g; });
     (data.genRecords || []).forEach(r => {
       const g = byId[r.generatorId];
-      if (!g || (r.date || '').slice(0, 4) !== year) return;
+      if (!g || !fqDate(r.date) || r.date.slice(0, 4) !== year) return;
       const place = g.location || (g.tankId ? ((data.tanks || []).find(t => t.id === g.tankId) || {}).object : '') || '';
       const label = (place ? place + ' · ' : '') + g.name;
       const c = row('g:' + g.id, label, frFuelLabel(g.fuel, '')).cells[+r.date.slice(5, 7) - 1];
       c.iss  += +r.fuelIssued || 0;
       c.norm += genNormSpent(g, r);
-      c.act  += genActualSpent(g, r);
+      if(r.fuelActualSource!=='estimate'&&fqValue(r.fuelActual)!=null) {
+        c.act+=Number(r.fuelActual);c.actN++;
+        if(genNormKnown(g,r)){c.actNorm+=genNormSpent(g,r);c.actNormN++;}
+      } else c.estimated+=genActualSpent(g,r);
       c.h    += +r.hours || 0;
       c.n++;
     });
@@ -219,7 +245,6 @@ function renderFuelReport() {
 
   const fmtBy = (mm, v) => {
     if (v == null) return '—';
-    if (!v && !mm.sign) return '<span style="color:var(--border)">—</span>';
     const s = v.toLocaleString('ru', { minimumFractionDigits: mm.dec, maximumFractionDigits: mm.dec });
     return (mm.sign && v > 0 ? '+' : '') + s;
   };
@@ -312,17 +337,18 @@ function renderFuelReport() {
   }
 
   const hint = {
-    in:  'Суммы в базе хранятся без НДС — как в карточке счёта 10.03.1, где налог идёт отдельно на счёте 19; «с НДС» — плюс ' + FUEL_VAT_RATE + '%. ' +
+    in:  'Сумма без НДС, НДС и итог с НДС проверяются независимо по документам. Неполный показатель показан как «—»; ноль задаётся явно. ' +
+         'Без суммы до налога: '+B.grand.netMissing+'; без НДС: '+B.grand.vatMissing+'; без итога: '+B.grand.grossMissing+'; противоречивых документов: '+B.grand.taxInvalid+'. '+
          'Цена за литр — от суммы без НДС. Поставщик берётся из поля «Источник» прихода в ёмкость. ' +
          'Перемещения между объектами в приход не входят: это не закупка.' +
          (skipped.length && !fuelRepShowSkipped
            ? ' Не включены приходы без УПД (без суммы), перемещения, ГПНЗ, Диэлком и приходы без поставщика: ' +
              skipped.length + ' шт. на ' + fpNumSafe(skippedL) + ' л — их видно кнопкой выше.'
            : ''),
-    veh: '«Выдано» — заправлено в машину. «По норме» — расход по норме за пробег. «По факту» — реально израсходовано. ' +
-         'Вид топлива — по марке из карточки машины. Перерасход красным, экономия зелёной.',
+    veh: '«Выдано» — заправлено в машину. Расход для баланса включает введённый факт, а при его отсутствии — оценку по норме. Сравнение с покрытием фактическими данными доступно в ГСМ → Сравнение. ' +
+         'Отклонение считается только на записях с фактом и известной нормой. Холостой ход включён в обе стороны сравнения. Вид топлива — по операции. Неполная стоимость не показывается полным итогом. Перерасход красным, экономия зелёной.',
     gen: '«Выдано» — отпущено в ДЭС. «По норме» — расход при фактической нагрузке, умноженный на моточасы. ' +
-         '«По факту» — реально израсходовано. Перерасход красным, экономия зелёной.',
+         'Расход для баланса может включать оценку по нагрузке. Источник отмечен в журнале ДЭС.',
   }[fuelRepTab];
 
   const fromReports = activeSection === 'reports';
@@ -339,6 +365,7 @@ function renderFuelReport() {
         '<div class="table-toolbar-left">' + FR_TABS[fuelRepTab] + ' · ' + M.label + ' за ' + fuelRepYear +
           (fuelRepFuel ? ' · ' + fuelRepFuel : '') + '</div>' +
         (fuelRepTab === 'in' ? '<button class="btn btn-ghost btn-sm" onclick="exportFuelIncomeSummaryXlsx()" title="Объекты и поставщики: литры, цена за литр и сумма по месяцам в одной таблице">Сводная по объектам и поставщикам</button> ' : '') +
+        (fuelRepTab==='in'?'<button class="btn btn-ghost btn-sm" onclick="frEditDocumentTax()">Тип операции и НДС</button>':'')+
         '<button class="btn btn-ghost btn-sm" onclick="exportFuelReportXlsx()">Выгрузить в Excel</button>' +
       '</div><div class="table-scroll" style="overflow-x:auto">' +
         '<table class="data-table" style="width:100%"><thead>' + head + '</thead><tbody>' + body + '</tbody></table>' +
@@ -478,16 +505,17 @@ function exportFuelReportXlsx() {
 function frIncomeSummary(year) {
   const objs = new Map();
   (data.tankIncomes || []).forEach(r => {
-    if ((r.date || '').slice(0, 4) !== year || r.linkId || (+r.amount || 0) <= 0) return;
+    if (!fqDate(r.date) || r.date.slice(0, 4) !== year || r.linkId || (+r.amount || 0) <= 0) return;
     if (frIncomeSkipped(r)) return;
     const t = (data.tanks || []).find(x => x.id === r.tankId);
     const obj = t ? (t.object || t.name) : '—';
     const sup = (r.source || '').trim() || 'Поставщик не указан';
     const o = objs.get(obj) || { obj, sup: new Map() };
-    const s = o.sup.get(sup) || { sup, m: Array.from({ length: 12 }, () => ({ l: 0, s: 0 })) };
+    const s = o.sup.get(sup) || { sup, m: Array.from({ length: 12 }, () => ({ l: 0, s: 0, missing:0, n:0 })) };
     const c = s.m[+r.date.slice(5, 7) - 1];
     c.l += +r.amount || 0;
-    c.s += Math.abs(+r.sum || 0) * (1 + FUEL_VAT_RATE / 100);
+    c.n++;
+    const tax=frTax(r);if(tax.gross==null)c.missing=(c.missing||0)+1;else c.s+=tax.gross;
     s.sup = sup; o.sup.set(sup, s); objs.set(obj, o);
   });
   const months = [];
@@ -532,7 +560,7 @@ function exportFuelIncomeSummaryXlsx() {
   };
   const fill = (r, s) => { for (let c = 0; c <= NC; c++) if (!ws[XLSX.utils.encode_cell({ r, c })]) put(r, c, '', s); };
 
-  put(row, 0, 'ПРИХОД ТОПЛИВА ПО ОБЪЕКТАМ И ПОСТАВЩИКАМ — ' + fuelRepYear + ' Г. (суммы с НДС ' + FUEL_VAT_RATE + '%)', S.title);
+  put(row, 0, 'ПРИХОД ТОПЛИВА ПО ОБЪЕКТАМ И ПОСТАВЩИКАМ — ' + fuelRepYear + ' Г. (НДС по документам; пусто — нет данных)', S.title);
   ws['!merges'].push({ s: { r: row, c: 0 }, e: { r: row, c: NC } });
   fill(row, S.title); ws['!rows'][row] = { hpt: 30 }; row += 2;
 
@@ -556,13 +584,13 @@ function exportFuelIncomeSummaryXlsx() {
     cells.concat([tot]).forEach((c, i) => {
       const c0 = 2 + i * 3;
       put(row, c0, c.l ? r2(c.l) : '—', sN, '#,##0.0');
-      put(row, c0 + 1, c.l && c.s ? r2(c.s / c.l) : '—', sN, '#,##0.00');
-      put(row, c0 + 2, c.s ? r2(c.s) : '—', sN, '#,##0.00');
+      put(row, c0 + 1, !c.missing&&c.l ? r2(c.s / c.l) : '—', sN, '#,##0.00');
+      put(row, c0 + 2, c.missing ? '—' : r2(c.s), sN, '#,##0.00');
     });
   };
   const sumCells = list => {
-    const out = months.map(m => list.reduce((a, s) => ({ l: a.l + s.m[m].l, s: a.s + s.m[m].s }), { l: 0, s: 0 }));
-    const tot = out.reduce((a, c) => ({ l: a.l + c.l, s: a.s + c.s }), { l: 0, s: 0 });
+    const out = months.map(m => list.reduce((a, s) => ({ l: a.l + s.m[m].l, s: a.s + s.m[m].s,missing:a.missing+(s.m[m].missing||0) }), { l: 0, s: 0,missing:0 }));
+    const tot = out.reduce((a, c) => ({ l: a.l + c.l, s: a.s + c.s,missing:a.missing+(c.missing||0) }), { l: 0, s: 0,missing:0 });
     return { cells: out, tot };
   };
 
@@ -575,7 +603,7 @@ function exportFuelIncomeSummaryXlsx() {
       put(row, 0, i === 0 ? o.obj : '', L(bg));
       put(row, 1, s.sup, L(bg, 2));
       const cells = months.map(m => s.m[m]);
-      const tot = cells.reduce((a, c) => ({ l: a.l + c.l, s: a.s + c.s }), { l: 0, s: 0 });
+      const tot = cells.reduce((a, c) => ({ l: a.l + c.l, s: a.s + c.s,missing:a.missing+(c.missing||0) }), { l: 0, s: 0,missing:0 });
       writeCells(cells, tot, L(bg), R(bg));
       row++;
     });

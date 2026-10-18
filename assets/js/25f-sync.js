@@ -17,6 +17,9 @@ const SYNC_SECTIONS = [
   'tanks', 'tankIncomes', 'vehicleTo', 'repairs',
   'reestrRows', 'savedReestrs', 'payments', 'budget', 'contragents',
   'fuelPurchases', 'fuelImports', 'fuelCards', 'fuelPeriods', 'monthlyFuel', 'appMeta',
+  'dispatchJobs', 'drivers', 'assetAssignments', 'workOrders', 'opsTasks',
+  'assetDocuments', 'fuelMovements', 'parts', 'partMovements', 'shiftReports',
+  'connectors', 'auditLog', 'savedViews', 'glonassTrips', 'glonassImports',
 ];
 const SYNC_NAMES = {
   vehicles: 'машины', records: 'журнал пробега', generators: 'ДЭС', genRecords: 'наработка ДЭС',
@@ -24,43 +27,70 @@ const SYNC_NAMES = {
   repairs: 'ремонты', reestrRows: 'реестр', savedReestrs: 'реестры', payments: 'платежи', budget: 'бюджет',
   contragents: 'контрагенты', fuelPurchases: 'заправки', fuelImports: 'история загрузок',
   fuelCards: 'топливные карты', fuelPeriods: 'закрытие месяцев', monthlyFuel: 'топливо за месяц', appMeta: 'настройки',
+  dispatchJobs:'заявки', drivers:'сотрудники', assetAssignments:'назначения', workOrders:'заказы на ремонт', opsTasks:'задачи',
+  assetDocuments:'документы', fuelMovements:'движения топлива', parts:'запчасти и шины', partMovements:'движения запчастей', shiftReports:'сменные формы',
+  connectors:'обмен', auditLog:'история действий', savedViews:'представления', glonassTrips:'исходные рейсы', glonassImports:'импорты ГЛОНАСС',
 };
 const SYNC_POLL_MS = 20000;
 
-const _sync = { enabled: false, revs: {}, synced: {}, chain: Promise.resolve(), polling: null, needRefresh: [] };
+const _sync = { enabled: false, revs: {}, synced: {}, access:null, chain: Promise.resolve(), polling: null, needRefresh: [] };
 
 function syncKey(row) { return row && typeof row === 'object' ? (row.id ?? row.month ?? null) : null; }
 
 // Слияние раздела: base — как было при последней синхронизации, local — наше
 // сейчас, remote — на сервере сейчас. Результат: серверные данные плюс наши
 // изменения относительно base.
-function syncMerge(base, local, remote) {
+function syncMerge(base, local, remote, choose) {
   base = base || []; local = local || []; remote = remote || [];
   const keyed = a => a.every(r => syncKey(r) != null);
   if (!keyed(base) || !keyed(local) || !keyed(remote)) {
     // Без ключей по записям слить нельзя: если мы меняли раздел — берём своё
-    return JSON.stringify(local) !== JSON.stringify(base) ? local : remote;
+    if (JSON.stringify(local) === JSON.stringify(base)) return remote;
+    if (JSON.stringify(remote) === JSON.stringify(base) || JSON.stringify(local) === JSON.stringify(remote)) return local;
+    return syncConflictValue({key:'section',field:'Весь раздел',base,local,remote},choose);
   }
   const bMap = new Map(base.map(r => [syncKey(r), r]));
   const lMap = new Map(local.map(r => [syncKey(r), r]));
   const out = new Map(remote.map(r => [syncKey(r), r]));
   lMap.forEach((l, k) => {
     const b = bMap.get(k);
-    if (!b) { out.set(k, l); return; }                        // добавили мы
+    if (!b) {
+      const r=out.get(k);
+      out.set(k,r&&JSON.stringify(r)!==JSON.stringify(l)?syncConflictValue({key:k,field:'Запись',base:null,local:l,remote:r},choose):l);return;
+    }
     if (JSON.stringify(l) === JSON.stringify(b)) return;       // не трогали
     const r = out.get(k);
-    if (!r) { out.set(k, l); return; }                         // у них удалили, у нас правили — оставляем
+    if (!r) { const value=syncConflictValue({key:k,field:'Удаление на сервере',base:b,local:l,remote:null},choose);if(value!=null)out.set(k,value);return; }
     const m = Object.assign({}, r);                            // правили оба — наши поля поверх
     new Set([...Object.keys(l), ...Object.keys(b)]).forEach(f => {
-      if (JSON.stringify(l[f]) !== JSON.stringify(b[f])) { if (f in l) m[f] = l[f]; else delete m[f]; }
+      if (JSON.stringify(l[f]) !== JSON.stringify(b[f])) {
+        const conflict=JSON.stringify(r[f])!==JSON.stringify(b[f])&&JSON.stringify(r[f])!==JSON.stringify(l[f]);
+        const value=conflict?syncConflictValue({key:k,field:f,base:b[f],local:l[f],remote:r[f]},choose):l[f];
+        if(value===undefined)delete m[f];else m[f]=value;
+      }
     });
     out.set(k, m);
   });
-  bMap.forEach((b, k) => { if (!lMap.has(k)) out.delete(k); }); // удалили мы
+  bMap.forEach((b,k)=>{if(!lMap.has(k)){const r=out.get(k);if(r&&JSON.stringify(r)!==JSON.stringify(b)){const value=syncConflictValue({key:k,field:'Локальное удаление',base:b,local:null,remote:r},choose);if(value!=null)out.set(k,value);else out.delete(k);}else out.delete(k);}});
   // Порядок: как на сервере, новые наши — в конце, в своём порядке
   const order = remote.map(syncKey).filter(k => out.has(k));
   local.forEach(r => { const k = syncKey(r); if (!order.includes(k) && out.has(k)) order.push(k); });
   return order.map(k => out.get(k));
+}
+
+function syncConflictValue(conflict,choose){if(choose)return choose(conflict);const error=new Error('Требуется решение конфликта: '+conflict.key+' · '+conflict.field);error.syncConflict=conflict;throw error;}
+async function syncResolveMerge(section,base,local,remote){
+  const conflicts=[];
+  syncMerge(base,local,remote,c=>{conflicts.push(c);return c.remote;});
+  if(!conflicts.length)return syncMerge(base,local,remote);
+  if(typeof wfShowDialog!=='function')throw Error('Конфликт данных. Откройте программу заново для выбора версии.');
+  const resolution=await new Promise(resolve=>{
+    wfShowDialog('Совместное изменение · '+(SYNC_NAMES[section]||section),`<p>Выберите значение каждого поля. Остальные изменения объединятся автоматически.</p><form id="syncConflictForm">${conflicts.map((c,i)=>`<article class="wf-card"><strong>${htmlEsc(c.key)} · ${htmlEsc(c.field)}</strong><details><summary>Было</summary><pre>${htmlEsc(JSON.stringify(c.base,null,2))}</pre></details><div class="wf-grid"><div><b>Моя версия</b><pre>${htmlEsc(JSON.stringify(c.local,null,2))}</pre></div><div><b>На сервере</b><pre>${htmlEsc(JSON.stringify(c.remote,null,2))}</pre></div></div><select name="choice${i}" required><option value="">Выберите версию</option value="local">Моя версия</option><option value="remote">На сервере</option></select></article>`).join('')}<button class="btn btn-primary">Объединить и сохранить</button></form>`);
+    const modal=document.getElementById('wfModal');let settled=false;const finish=value=>{if(settled)return;settled=true;observer.disconnect();resolve(value);};const observer=new MutationObserver(()=>{if(!modal.classList.contains('open')||!modal.isConnected)finish(null);});observer.observe(modal,{attributes:true,attributeFilter:['class']});
+    document.getElementById('syncConflictForm').onsubmit=e=>{e.preventDefault();const fd=new FormData(e.target);finish(conflicts.map((_,i)=>fd.get('choice'+i)));closeModal('wfModal');};
+  });
+  if(!resolution)throw Error('Сохранение отменено: конфликт требует решения');
+  let index=0;return syncMerge(base,local,remote,c=>c[resolution[index++]]);
 }
 
 async function syncLoad() {
@@ -69,6 +99,8 @@ async function syncLoad() {
   if (!raw) return null;
   const snap = JSON.parse(raw);
   if (!snap || !snap.data) return null;
+  _sync.access=snap.access||null;
+  if(typeof wfInitData==='function')wfInitData(snap.data);
   if (snap.revisions) {
     _sync.enabled = true;
     _sync.revs = Object.assign({}, snap.revisions);
@@ -117,6 +149,7 @@ async function syncSaveNow(d, options) {
         _sync.synced[n] = cur[n];
         if (res.revisions && n in res.revisions) _sync.revs[n] = res.revisions[n];
       });
+      Object.entries(res.canonicalSections||{}).forEach(([name,rows])=>{d[name]=rows;_sync.synced[name]=JSON.stringify(rows);if(res.revisions&&name in res.revisions)_sync.revs[name]=res.revisions[name];});
       if (mergedNames.size) {
         rebuildIndex();
         showToast('Сохранено вместе с правками другого пользователя: ' + [...mergedNames].map(n => SYNC_NAMES[n] || n).join(', '));
@@ -131,7 +164,7 @@ async function syncSaveNow(d, options) {
       const remote = await window.electronAPI.readSection(n);
       if (!remote) return false;
       const base = JSON.parse(_sync.synced[n] || '[]');
-      d[n] = syncMerge(base, d[n] || [], remote.rows || []);
+      d[n] = await syncResolveMerge(n,base,d[n]||[],remote.rows||[]);
       _sync.synced[n] = JSON.stringify(remote.rows || []);
       _sync.revs[n] = remote.rev || 0;
       mergedNames.add(n);
@@ -163,7 +196,8 @@ async function syncPoll() {
       const localStr = JSON.stringify(data[n] || []);
       if (localStr !== _sync.synced[n]) {
         // У нас есть несохранённые правки в этом разделе — сливаем
-        data[n] = syncMerge(JSON.parse(_sync.synced[n] || '[]'), data[n] || [], remote.rows || []);
+        try { data[n] = syncMerge(JSON.parse(_sync.synced[n] || '[]'), data[n] || [], remote.rows || []); }
+        catch(e) { if(e.syncConflict){showToast('Есть конфликт в разделе «'+(SYNC_NAMES[n]||n)+'». При сохранении выберите значения.');continue;}throw e; }
       } else {
         data[n] = remote.rows || [];
       }
@@ -194,6 +228,7 @@ function syncRefreshView(names) {
       if (v) renderDetail(v); else if (typeof renderVehicleCards === 'function') renderVehicleCards();
     } else if (activeSection === 'fuelPurchases') renderFuelPurchases();
     else if (activeSection === 'home') renderMainMenu();
+    else if (activeSection === 'workflows' || activeSection === 'dispatch') renderWorkflows();
     else if (activeSection === 'reports') renderReportsSection();
     else if (activeSection === 'fuelReport') renderFuelReport();
     else if (activeSection === 'generators' && typeof renderGeneratorCards === 'function' && !selectedGeneratorId) renderGeneratorCards();

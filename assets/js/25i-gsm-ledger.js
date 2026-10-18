@@ -71,6 +71,7 @@ function gsmBuildLedger(db, options) {
   const from = options.from || '', to = options.to || '';
   const vehicles = new Map((db.vehicles || []).map(v => [v.id, v]));
   const records = (db.records || []).filter(r => vehicles.has(r.vehicleId));
+  const canonicalDays=new Set(records.filter(r=>r.glonassCanonical).map(r=>r.vehicleId+'|'+r.date));
   const byRecord = new Map(records.map(r => [r.id, []])), ambiguous = new Set();
   const receipts = [], issues = [], rows = new Map(), movements = [], journal = [];
   const issueKeys = new Set();
@@ -126,7 +127,7 @@ function gsmBuildLedger(db, options) {
       else candidates.forEach(r => ambiguous.add(r.id));
     }
     const receipt = { id: p.id, purchaseId: p.id, vehicleId: p.vehicleId || '', date: p.date || '', time: p.time || '',
-      qty: gsmNumber(p.qty), sum: gsmNumber(p.sum), grade, cardNo: p.cardNo || '', org: p.sourceOrg || owner.org || (p.manual && v ? gsmVehicleOrgAt(v, p.date) : ''),
+      qty: gsmNumber(p.qty), sum: fqValue(p.sum), grade, cardNo: p.cardNo || '', org: p.sourceOrg || owner.org || (p.manual && v ? gsmVehicleOrgAt(v, p.date) : ''),
       provider: p.sourceProvider || owner.provider || '', cardVehicleId: p.cardVehicleId || owner.vehicleId,
       recordId: linked && linked.id || '', manual: !!p.manual, product: p.product || grade };
     addReceipt(receipt);
@@ -162,7 +163,7 @@ function gsmBuildLedger(db, options) {
     const org = r.fuelOrg || owner.org || (!r.fuelCardNum && !cardReference ? gsmVehicleOrgAt(v, r.date) : '');
     if (cardReference) issue('manual-card-reference', 'error', { vehicleId: v.id, recordId: r.id, date: r.date,
       message: 'В примечании указана карта, но номер не выбран: ' + r.note });
-    addReceipt({ id: 'journal:' + r.id, recordId: r.id, vehicleId: v.id, date: r.date, time: '', qty, sum: gsmNumber(r.fuelSum),
+    addReceipt({ id: 'journal:' + r.id, recordId: r.id, vehicleId: v.id, date: r.date, time: '', qty, sum: fqValue(r.fuelSum),
       grade, cardNo: r.fuelCardNum || '', org, provider: r.fuelProvider || owner.provider || v.supplier || 'Ручное поступление',
       cardVehicleId: owner.vehicleId, manual: true, product: grade });
     if (!r.fuelCardNum && !r.fuelOrg) issue('manual-source', 'warning', { vehicleId: v.id, recordId: r.id, date: r.date, org, grade, qty,
@@ -200,6 +201,7 @@ function gsmBuildLedger(db, options) {
     const events = [];
     const vr = records.filter(r => r.vehicleId === v.id && gsmValidDate(r.date)).sort((a, b) => String(a.date).localeCompare(String(b.date)));
     const lastOnDate = new Map(vr.map(r => [r.date, r.id]));
+    const dailyMeasurements=new Map(vr.filter(r => fqValue(r.tankMeasured) != null && Number(r.tankMeasured) >= 0).map(r => [r.date,r]));
     receipts.filter(p => p.vehicleId === v.id).forEach(p => events.push({ date: p.date, order: 0, time: p.time, receipt: p }));
     vr.forEach(r => events.push({ date: r.date, order: 1, time: '', record: r }));
     events.sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.order - b.order || a.time.localeCompare(b.time));
@@ -237,16 +239,20 @@ function gsmBuildLedger(db, options) {
         continue;
       }
       const r = event.record, grade = gsmGrade(r.fuelGrade, defaultGrade);
-      const norm = r.fuelUsed != null && r.fuelUsed !== '' ? gsmNumber(r.fuelUsed) : gsmNumber(r.km) * gsmNumber(v.norm) / 100;
-      const driving = r.fuelActual != null && r.fuelActual !== '' ? gsmNumber(r.fuelActual) : norm;
-      const idle = gsmNumber(r.fuelIdle);
+      const fuel = fqRecord(r,v);
+      const norm = fuel.norm;
+      const driving = fuel.driving;
+      const idle = fuel.idle;
       if (driving < 0 || idle < 0 || gsmNumber(r.fuelIssued) < 0) issue('negative-input', 'error', {
         vehicleId: v.id, date: r.date, recordId: r.id, org: defaultOrg, orgs: [...new Set(lots.map(l => l.org))], grade, message: 'Отрицательные литры в журнале' });
-      let spent = Math.max(0, driving + idle);
-      const measured = r.tankMeasured != null && r.tankMeasured !== '' && Number.isFinite(Number(r.tankMeasured));
-      if (measured && lastOnDate.get(r.date) === r.id) {
+      let spent = Math.max(0, fuel.total || 0);
+      const measured = fqValue(r.tankMeasured) != null;
+      const appliedMeasurement=lastOnDate.get(r.date) === r.id ? dailyMeasurements.get(r.date) : null;
+      if (fuel.source === 'missing' && gsmNumber(r.km) > 0 && !appliedMeasurement) issue('consumption-missing','error',{vehicleId:v.id,date:r.date,recordId:r.id,grade,message:'Есть пробег, но не указан факт расхода и нет нормы для расчёта'});
+      if (measured && Number(r.tankMeasured) < 0) issue('negative-measurement','error',{vehicleId:v.id,date:r.date,recordId:r.id,grade,message:'Отрицательный замер остатка'});
+      if (appliedMeasurement) {
         const available = lots.filter(l => gsmFamily(l.grade) === gsmFamily(grade)).reduce((s, l) => s + l.qty, 0);
-        const measuredSpent = available - Number(r.tankMeasured);
+        const measuredSpent = available - Number(appliedMeasurement.tankMeasured);
         if (measuredSpent >= 0) spent = measuredSpent;
         else {
           const correction = -measuredSpent;
@@ -256,7 +262,7 @@ function gsmBuildLedger(db, options) {
             qty: gsmRound(correction), message: 'Замер выше расчётного остатка: нужен приход ' + gsmRound(correction) + ' л' });
         }
       } else if (measured) issue('multiple-measurements', 'warning', { vehicleId: v.id, recordId: r.id, date: r.date, grade,
-        message: 'В один день несколько строк; замер применяется в последней строке дня' });
+        message: 'Замер дня применяется после всех строк дня; при нескольких замерах берётся последний' });
       const used = consume(spent, grade, r.date, r.id);
       if (included) {
         const shares = used.length ? used : [{ org: defaultOrg, grade, qty: 0 }];
@@ -264,9 +270,9 @@ function gsmBuildLedger(db, options) {
           const share = spent > 0 ? part.qty / spent : 1;
           const row = rowFor(v.id, part.org, part.grade); row.active = true;
           row.spent += part.qty; row.idle += Math.min(idle, spent) * share;
-          row.norm += norm * share; row.km += gsmNumber(r.km) * share; row.glonass += gsmNumber(r.kmGlonass) * share;
-          movements.push({ kind: 'consumption', date: r.date, vehicleId: v.id, recordId: r.id, org: part.org, grade: part.grade, qty: part.qty,
-            idle: Math.min(idle, spent) * share, norm: norm * share, km: gsmNumber(r.km) * share });
+          row.norm += norm * share; row.km += gsmNumber(r.km) * share; row.glonass += (!canonicalDays.has(r.vehicleId+'|'+r.date)||r.glonassCanonical?gsmNumber(r.kmGlonass):0)*share;
+          movements.push({ kind: 'consumption', source:appliedMeasurement?'measurement':fuel.source, date: r.date, vehicleId: v.id, recordId: r.id, org: part.org, grade: part.grade, qty: part.qty,
+            idle: Math.min(idle, spent) * share, norm: norm == null ? null : norm * share, totalNorm:norm == null ? null : (norm+idle)*share, km: gsmNumber(r.km) * share });
         });
         journal.push({ recordId: r.id, vehicleId: v.id, date: r.date, grade, km: gsmNumber(r.km), norm, spent,
           issued: gsmNumber(r.fuelIssued), statement: gsmRound((byRecord.get(r.id) || []).reduce((s, p) => s + p.qty, 0)), hasPurchases: (byRecord.get(r.id) || []).length > 0,

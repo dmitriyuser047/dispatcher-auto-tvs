@@ -1,0 +1,23 @@
+Tesseract OCR language data
+
+The accurate/rus and accurate/eng files are unmodified traineddata files from
+tesseract-ocr/tessdata_best, commit e12c65a915945e4c28e237a9b52bc4a8f39a0cec.
+All data in that upstream repository are distributed under Apache-2.0.
+The unchanged upstream license is included in LICENSE-tessdata_best.txt.
+
+The codes/rus and codes/eng files are modified containers derived from those
+accurate models. On 2026-10-16, the Dispatcher TVS project removed only
+components 18 (lstm-punc-dawg), 19 (lstm-word-dawg) and 20 (lstm-number-dawg).
+Components 17 (lstm neural weights), 21 (lstm-unicharset), 22 (lstm-recoder)
+and 23 (version) remain byte-identical. No training or fine-tuning was done.
+This change disables DAWG-based decoder dictionaries for code/amount regions.
+It is not a claim of universal accuracy improvement or handwriting support.
+Checksums, exact component lists and derivation are in models-manifest.json.
+
+The existing root rus.traineddata matches the Tesseract.js
+naptha/tessdata 4.0.0_best_int distribution after gzip decoding.
+The existing root eng.traineddata matches tesseract-ocr/tessdata.
+Those original files were preserved. Exact source commits and hashes are in
+models-manifest.json; provenance details are in audit/ocr-model-upstream.json.
+
+Project additions are not endorsed by the upstream Tesseract authors.

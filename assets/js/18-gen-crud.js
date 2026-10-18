@@ -77,10 +77,12 @@ async function saveGenerator() {
 }
 
 async function deleteGenerator(id) {
-  if (!await confirmAction('Удалить этот ДЭС и все его записи?')) return;
-  data.generators = (data.generators || []).filter(g => g.id !== id);
-  data.genRecords  = (data.genRecords  || []).filter(r => r.generatorId !== id);
-  data.toRecords   = (data.toRecords   || []).filter(r => r.generatorId !== id);
+  const g = (data.generators || []).find(x => x.id === id);
+  if (!g || g.archived) return;
+  if (!await confirmAction('Переместить ДЭС «' + g.name + '» в архив? Журналы наработки, ТО и все выдачи из ёмкостей сохранятся. ДЭС можно восстановить.')) return;
+  genPreserveTankHistory(g);
+  g.archived = true;
+  g.archivedAt = new Date().toISOString();
   if (!await saveData(data)) return;
   selectedGeneratorId = null;
   renderGeneratorList();
@@ -89,7 +91,30 @@ async function deleteGenerator(id) {
     <h2>Выберите дизельный генератор</h2><p>Выберите ДЭС из списка слева или добавьте новый</p></div>`;
 }
 
+async function restoreGenerator(id) {
+  const g = (data.generators || []).find(x => x.id === id);
+  if (!g?.archived) return;
+  if (!await confirmAction('Восстановить ДЭС «' + g.name + '» из архива?')) return;
+  g.archived = false;
+  g.restoredAt = new Date().toISOString();
+  if (!await saveData(data)) return;
+  selectedGeneratorId = id;
+  renderGeneratorList();
+  renderGenDetail(g);
+  showToast('ДЭС восстановлен');
+}
+
 // ─── GENERATOR RECORDS CRUD ──────────────────────────────
+function genPrepareActualInput(source) {
+  const input = document.getElementById('gen_rec_fuel_actual');
+  input.dataset.source = source || '';
+  input.classList.toggle('auto-filled', source === 'estimate');
+  input.oninput = () => {
+    input.dataset.source = 'manual';
+    input.classList.remove('auto-filled');
+  };
+}
+
 function openAddGenRecord() {
   editingGenRecordId = null;
   document.getElementById('genRecordModalTitle').textContent = 'Добавить запись';
@@ -97,6 +122,7 @@ function openAddGenRecord() {
   document.getElementById('gen_rec_date').value = fmtDate(now.toISOString().split('T')[0]);
   ['gen_rec_hours','gen_rec_meter_start','gen_rec_meter_end','gen_rec_fuel_issued','gen_rec_fuel_used','gen_rec_fuel_actual','gen_rec_load','gen_rec_note']
     .forEach(id => document.getElementById(id).value = '');
+  genPrepareActualInput(null);
   const g    = (data.generators || []).find(x => x.id === selectedGeneratorId);
   const last = genRecsFor(selectedGeneratorId).slice().sort((a, b) => cmpDateAsc(a.date, b.date)).pop();
   if (last?.meterEnd != null) {
@@ -110,6 +136,7 @@ function openAddGenRecord() {
 function openEditGenRecord(id) {
   const r = (data.genRecords || []).find(x => x.id === id);
   if (!r) return;
+  if (r.fuelMovementId) { showToast('Это выдача из раздела «Движения топлива». Связанная запись не изменяется; оформите отдельное движение с основанием.'); return; }
   editingGenRecordId = id;
   document.getElementById('genRecordModalTitle').textContent = 'Редактировать запись';
   document.getElementById('gen_rec_date').value         = fmtDate(r.date);
@@ -121,16 +148,27 @@ function openEditGenRecord(id) {
   document.getElementById('gen_rec_fuel_actual').value  = r.fuelActual ?? '';
   document.getElementById('gen_rec_load').value         = r.load       ?? '';
   document.getElementById('gen_rec_note').value         = r.note || '';
+  genPrepareActualInput(r.fuelActualSource);
   openModal('genRecordModal');
 }
 
 async function saveGenRecord() {
+  if (editingGenRecordId && (data.genRecords || []).find(r => r.id === editingGenRecordId)?.fuelMovementId) { showToast('Связанная выдача из движения топлива не редактируется в журнале'); return; }
+  const generator = (data.generators || []).find(g => g.id === selectedGeneratorId);
+  if (!generator || generator.archived) { showToast('Для новой записи восстановите ДЭС из архива'); return; }
   const dateRaw = document.getElementById('gen_rec_date').value.trim();
   const date    = parseDate(dateRaw);
   const hours   = parseFloat(document.getElementById('gen_rec_hours').value);
   if (!date)              { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'gen_rec_date'); return; }
   if (!Number.isFinite(hours) || hours < 0) { showFieldError('Укажите неотрицательную наработку', 'gen_rec_hours'); return; }
   if (!validNonnegativeFields(['gen_rec_meter_start','gen_rec_meter_end','gen_rec_fuel_issued','gen_rec_fuel_used','gen_rec_fuel_actual','gen_rec_load'])) return;
+  if (+document.getElementById('gen_rec_fuel_issued').value > 0 && (data.tanks || []).find(t => t.id === generator.tankId)?.archived) {
+    showFieldError('Выберите действующую ёмкость в карточке ДЭС или восстановите прежнюю', 'gen_rec_fuel_issued'); return;
+  }
+  const meterStart = optionalNumber('gen_rec_meter_start'), meterEnd = optionalNumber('gen_rec_meter_end');
+  if (meterStart != null && meterEnd != null && (meterEnd < meterStart || Math.abs((meterEnd - meterStart) - hours) > 0.11)) {
+    showFieldError('Разность показаний счётчика должна совпадать с наработкой', 'gen_rec_meter_end'); return;
+  }
   if (!data.genRecords) data.genRecords = [];
   const obj = {
     generatorId: selectedGeneratorId, date, hours,
@@ -142,6 +180,11 @@ async function saveGenRecord() {
     load:        optionalNumber('gen_rec_load'),
     note:        document.getElementById('gen_rec_note').value.trim(),
   };
+  const actualSource = document.getElementById('gen_rec_fuel_actual').dataset.source;
+  if (actualSource === 'estimate' || actualSource === 'manual' || !editingGenRecordId && obj.fuelActual != null) {
+    obj.fuelActualSource = actualSource || 'manual';
+    obj.modelVersion = obj.fuelActualSource === 'estimate' ? 'gen-load-curve-v1' : null;
+  }
   if (editingGenRecordId) {
     const old = data.genRecords.find(x => x.id === editingGenRecordId);
     if (!old) return;
@@ -162,6 +205,7 @@ async function saveGenRecord() {
 }
 
 async function deleteGenRecord(id) {
+  if ((data.genRecords || []).find(r => r.id === id)?.fuelMovementId) { showToast('Связанная выдача топлива сохраняется в истории. Удаление нарушит остатки.'); return; }
   if (!await confirmAction('Удалить эту запись?')) return;
   data.genRecords = (data.genRecords || []).filter(r => r.id !== id);
   if (!await saveData(data)) return;
@@ -190,10 +234,15 @@ function calcGenActualAuto() {
   const load  = parseFloat(document.getElementById('gen_rec_load').value);
   const inp   = document.getElementById('gen_rec_fuel_actual');
   if (!inp || !g) return;
-  if (!g.norm100 || !g.power || isNaN(hours) || isNaN(load) || hours < 0 || load < 0) return;
+  if (inp.dataset.source === 'manual' && inp.value !== '') return;
+  if (!g.norm100 || !g.power || isNaN(hours) || isNaN(load) || hours < 0 || load < 0) {
+    if (inp.dataset.source === 'estimate') { inp.value = ''; inp.dataset.source = ''; inp.classList.remove('auto-filled'); }
+    return;
+  }
   const rate = genFuelRate(g, load);
   if (rate == null) return;
   inp.value = Math.round(Math.max(0, rate) * hours * 10) / 10;
+  inp.dataset.source = 'estimate';
   inp.classList.add('auto-filled');
 }
 

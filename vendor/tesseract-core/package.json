@@ -1,0 +1,17 @@
+{
+  "name": "@tvs/tesseract.js-core",
+  "version": "7.0.0-tvs.1",
+  "upstreamPackage": "tesseract.js-core@7.0.0",
+  "tvsNativeVersion": "5.3.0-tvs1",
+  "license": "Apache-2.0",
+  "main": "./tesseract-core-lstm.js",
+  "files": [
+    "tesseract-core-lstm.js",
+    "tesseract-core-lstm.wasm",
+    "tesseract-core-simd-lstm.js",
+    "tesseract-core-simd-lstm.wasm",
+    "tesseract-core-relaxedsimd-lstm.js",
+    "tesseract-core-relaxedsimd-lstm.wasm"
+  ],
+  "tvsManifest": "./build-manifest.json"
+}

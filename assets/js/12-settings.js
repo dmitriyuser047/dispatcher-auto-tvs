@@ -4,7 +4,10 @@
 // ─── PDF EDITOR ──────────────────────────────────────────
 async function openPdfEditor() {
   if (window.electronAPI && window.electronAPI.openPdfEditor) {
-    await window.electronAPI.openPdfEditor();
+    try {
+      const result=await window.electronAPI.openPdfEditor();
+      if(result?.error)showToast(result.error);
+    } catch(error) { showToast('Не удалось открыть редактор: '+error.message); }
   }
 }
 
@@ -327,7 +330,8 @@ function showUpdateBanner(info) {
   if (!banner) return;
   title.textContent = `Доступно обновление v${info.version}` +
     (info.currentVersion ? ` (у вас v${info.currentVersion})` : '');
-  notes.textContent = info.notes || '';
+  notes.textContent = (info.notes || '')+(info.blockedReason?'\n\n'+info.blockedReason:'');
+  const download=document.getElementById('updateDownloadBtn');if(download)download.disabled=info.canInstall===false;
   notes.style.whiteSpace = 'pre-line';
   banner.style.display = 'flex';
 }
@@ -381,8 +385,9 @@ async function startUpdateDownload() {
   }
 }
 
-function installUpdate() {
-  window.electronAPI.installUpdate();
+async function installUpdate() {
+  const result=await window.electronAPI.installUpdate();
+  if(!result?.ok)showToast('Ошибка установки: '+(result?.error||'неизвестная ошибка'));
 }
 
 // ─── CALENDAR ────────────────────────────────────────────

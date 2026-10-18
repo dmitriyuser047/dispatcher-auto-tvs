@@ -6,7 +6,9 @@
 // ═══════════════════════════════════════════════════════
 function renderVehicleToSection(vid, currentOdometer) {
   const recs = vehicleToFor(vid).slice().sort((a, b) => cmpDateAsc(a.date, b.date));
-  const last = recs[recs.length - 1];
+  const completed = recs.filter(r => !r.planned);
+  const last = completed[completed.length - 1];
+  const planned = recs.filter(r => r.planned).sort((a, b) => cmpDateAsc(a.date, b.date));
 
   let statusHtml = '';
   if (last) {
@@ -27,10 +29,10 @@ function renderVehicleToSection(vid, currentOdometer) {
       const nd = new Date(last.nextDate);
       const today = new Date(); today.setHours(0,0,0,0);
       const daysLeft = Math.ceil((nd - today) / 86400000);
-      const clr = daysLeft <= 0 ? 'var(--red)' : daysLeft <= 14 ? 'var(--yellow)' : 'var(--green)';
-      const label = daysLeft <= 0 ? 'Дата просрочена' : 'До след. ТО';
-      const val = daysLeft <= 0 ? Math.abs(daysLeft) : daysLeft;
-      const unit = daysLeft <= 0 ? 'дн. назад' : 'дн.';
+      const clr = daysLeft < 0 ? 'var(--red)' : daysLeft <= 14 ? 'var(--yellow)' : 'var(--green)';
+      const label = daysLeft < 0 ? 'Дата просрочена' : daysLeft === 0 ? 'ТО сегодня' : 'До след. ТО';
+      const val = Math.abs(daysLeft);
+      const unit = daysLeft < 0 ? 'дн. назад' : 'дн.';
       cards.push(`<div style="flex:1;min-width:160px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;border-left:4px solid ${clr}">
         <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">${label}</div>
         <div style="font-size:22px;font-weight:700;color:${clr}">${val} <span style="font-size:13px;font-weight:500">${unit}</span></div>
@@ -57,8 +59,8 @@ function renderVehicleToSection(vid, currentOdometer) {
     rows = `<tr><td colspan="8" class="empty-table">Нет записей ТО. Нажмите «+ ТО» чтобы добавить.</td></tr>`;
   } else {
     [...recs].reverse().forEach(r => {
-      rows += `<tr>
-        <td class="td-day">${fmtDate(r.date)}</td>
+      rows += `<tr${r.planned ? ' style="background:var(--bg2)"' : ''}>
+        <td class="td-day">${fmtDate(r.date)}<div style="font-size:10px;color:var(--text3)">${r.planned ? 'план' : 'выполнено'}${r.plannedDate ? ' · план ' + fmtDate(r.plannedDate) : ''}</div></td>
         <td style="padding:10px 14px;font-size:13px;font-weight:600">${htmlEsc(r.type || '—')}</td>
         <td class="td-num">${r.odometer != null ? r.odometer.toLocaleString('ru', {maximumFractionDigits:0}) : '—'}</td>
         <td class="td-num">${r.nextOdometerAbs != null ? r.nextOdometerAbs.toLocaleString('ru', {maximumFractionDigits:0}) : (r.nextKm ? '+'+r.nextKm.toLocaleString('ru')+' км' : '—')}</td>
@@ -67,6 +69,7 @@ function renderVehicleToSection(vid, currentOdometer) {
         <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.performer || '—')}</td>
         <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.note || '—')}</td>
         <td class="td-actions">
+          ${r.planned ? `<button class="btn btn-primary btn-sm" onclick="tssCompletePlan(${htmlJs(r.id)},'vehicleTo')">Выполнено</button>` : ''}
           <button class="icon-btn" onclick="openEditVehicleTo(${htmlJs(r.id)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
@@ -87,10 +90,11 @@ function renderVehicleToSection(vid, currentOdometer) {
       </div>
       <button class="btn btn-primary btn-sm" onclick="openAddVehicleTo('${vid}')">
         <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        + ТО
+        + Факт ТО
       </button>
     </div>
     ${statusHtml}
+    ${planned.length ? `<p style="padding:0 14px;color:var(--text3);font-size:13px">Ближайший план: ${fmtDate(planned[0].date)} · ${htmlEsc(planned[0].type || 'ТО')}. ${planned.length} плановых записей. Выполнение фиксируется отдельно от плана.</p>` : ''}
     <div class="table-scroll">
       <table>
         <thead><tr>
@@ -116,7 +120,7 @@ function openAddVehicleTo(vid) {
     const totalKm = recsFor(vid).reduce((s, r) => s + (r.km || 0), 0);
     const curOdo = (v.odometer || 0) + totalKm;
     if (curOdo > 0) document.getElementById('vto_odometer').value = Math.round(curOdo);
-    const last = vehicleToFor(vid).slice().sort((a,b) => cmpDateAsc(a.date, b.date)).pop();
+    const last = vehicleToFor(vid).filter(r => !r.planned).slice().sort((a,b) => cmpDateAsc(a.date, b.date)).pop();
     if (last && last.nextKm) document.getElementById('vto_next_km').value = last.nextKm;
   }
   document.getElementById('vehicleToModal').dataset.vid = vid;
@@ -126,6 +130,7 @@ function openAddVehicleTo(vid) {
 function openEditVehicleTo(id) {
   const r = (data.vehicleTo || []).find(x => x.id === id);
   if (!r) return;
+  if (r.planned) { tssEditRecord(id, 'vehicleTo'); return; }
   editingVehicleToId = id;
   document.getElementById('vehicleToModalTitle').textContent = 'Редактировать запись ТО';
   document.getElementById('vehicleToDeleteBtn').style.display = '';
@@ -151,6 +156,9 @@ async function saveVehicleTo() {
   const nextDate    = parseDate(document.getElementById('vto_next_date').value.trim()) || null;
   const hasNextKm   = !isNaN(nextKm);
   const hasOdometer = !isNaN(odometer);
+  if (!validNonnegativeFields(['vto_odometer', 'vto_next_km', 'vto_cost'])) return;
+  const rawNextDate = document.getElementById('vto_next_date').value.trim();
+  if (rawNextDate && !nextDate) { showFieldError('Проверьте дату следующего ТО', 'vto_next_date'); return; }
   const nextOdometerAbs = hasOdometer && hasNextKm ? Math.round(odometer + nextKm) : null;
   const obj = {
     vehicleId:  document.getElementById('vehicleToModal').dataset.vid,
@@ -160,7 +168,7 @@ async function saveVehicleTo() {
     nextKm:     hasNextKm ? nextKm : null,
     nextOdometerAbs,
     nextDate,
-    cost:       parseFloat(document.getElementById('vto_cost').value) || null,
+    cost:       optionalNumber('vto_cost'),
     performer:  document.getElementById('vto_performer').value.trim(),
     note:       document.getElementById('vto_note').value.trim(),
   };

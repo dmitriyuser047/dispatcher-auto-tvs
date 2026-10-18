@@ -1,0 +1,293 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-10-18T15:47:38.582Z",
+  "coreCommit": "acffef2b66eb44a31df297e11d905f4b39001068",
+  "emsdkVersion": "4.0.15",
+  "sourceDirectory": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\deps-source",
+  "buildDirectory": "D:\\tvs-ocr-native-20261017\\deps-build",
+  "prefix": "D:\\tvs-ocr-native-20261017\\prefix",
+  "testsRun": false,
+  "ocrRun": false,
+  "stages": [
+    {
+      "stage": "zlib-configure",
+      "seconds": 145.046,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\zlib-configure.log",
+      "ok": true
+    },
+    {
+      "stage": "zlib-build",
+      "seconds": 12.4,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\zlib-build.log",
+      "ok": true
+    },
+    {
+      "stage": "libjpeg-configure",
+      "seconds": 22.715,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\libjpeg-configure.log",
+      "ok": true
+    },
+    {
+      "stage": "libjpeg-build",
+      "seconds": 35.332,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\libjpeg-build.log",
+      "ok": true
+    },
+    {
+      "stage": "giflib-configure",
+      "seconds": 3.228,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\giflib-configure.log",
+      "ok": true
+    },
+    {
+      "stage": "giflib-build",
+      "seconds": 9.676,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\giflib-build.log",
+      "ok": true
+    },
+    {
+      "stage": "libpng-configure",
+      "seconds": 28.429,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\libpng-configure.log",
+      "ok": true
+    },
+    {
+      "stage": "libpng-build",
+      "seconds": 18.595,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\libpng-build.log",
+      "ok": true
+    },
+    {
+      "stage": "libtiff-configure",
+      "seconds": 209.257,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\libtiff-configure.log",
+      "ok": true
+    },
+    {
+      "stage": "libtiff-build",
+      "seconds": 45.75,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\libtiff-build.log",
+      "ok": true
+    },
+    {
+      "stage": "libwebp-configure",
+      "seconds": 139.44,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\libwebp-configure.log",
+      "ok": true
+    },
+    {
+      "stage": "libwebp-build",
+      "seconds": 81.172,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\libwebp-build.log",
+      "ok": true
+    },
+    {
+      "stage": "openlibm-configure",
+      "seconds": 2.175,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\openlibm-configure.log",
+      "ok": true
+    },
+    {
+      "stage": "openlibm-build",
+      "seconds": 12.692,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\openlibm-build.log",
+      "ok": true
+    },
+    {
+      "stage": "leptonica-configure",
+      "seconds": 102.187,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\leptonica-configure.log",
+      "ok": true
+    },
+    {
+      "stage": "leptonica-build",
+      "seconds": 142.119,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\leptonica-build.log",
+      "ok": true
+    },
+    {
+      "stage": "leptonica-install",
+      "seconds": 1.418,
+      "logPath": "D:\\tvs-ocr-native-20261017\\deps-build\\logs\\leptonica-install.log",
+      "ok": true
+    }
+  ],
+  "sourcePatches": [
+    {
+      "file": "C:\\Users\\Дмитрий Ульянов\\Documents\\ChatGPT\\диспетчер ТВС\\.native-ocr\\deps-source\\zlib\\CMakeLists.txt",
+      "originalSha256": "196e9e8c4902d8ac00265469f6bf4a3b0ca4ece44315ece4e8488820461e20f0",
+      "patchedSha256": "767763e764e91e6cde618330f5d2b0b70b2108d4e7fa36c8f7c42505eb09013b",
+      "reason": "Avoid duplicate libz.a Ninja rule for an unused shared target converted to static by the WASM platform. Only zlibstatic is built; codec sources unchanged."
+    }
+  ],
+  "libraries": [
+    {
+      "name": "gif",
+      "path": "D:\\tvs-ocr-native-20261017\\prefix\\lib\\libgif.a",
+      "present": true,
+      "bytes": 41738,
+      "sha256": "c3bd0269c2e0cc94fc61acc5703e4fbaea107df0502f4c3b7042e90bf73d4610",
+      "staticObjectEvidence": {
+        "wasmObjects": 8,
+        "llvmBitcodeObjects": 0,
+        "otherObjects": 0,
+        "metadataMembers": 2
+      }
+    },
+    {
+      "name": "jpeg",
+      "path": "D:\\tvs-ocr-native-20261017\\prefix\\lib\\libjpeg.a",
+      "present": true,
+      "bytes": 318482,
+      "sha256": "8b670d8d4a6cae5349e4d9fa031930efbff052a651f3430b3d2b9f465978835b",
+      "staticObjectEvidence": {
+        "wasmObjects": 46,
+        "llvmBitcodeObjects": 0,
+        "otherObjects": 0,
+        "metadataMembers": 1
+      }
+    },
+    {
+      "name": "openlibm",
+      "path": "D:\\tvs-ocr-native-20261017\\prefix\\lib\\libopenlibm.a",
+      "present": true,
+      "bytes": 184154,
+      "sha256": "3fcb4e2507f2787c9d6950d1b60e725b9a4f97583dbf5d57b2051e1be3af4735",
+      "staticObjectEvidence": {
+        "wasmObjects": 162,
+        "llvmBitcodeObjects": 0,
+        "otherObjects": 0,
+        "metadataMembers": 2
+      }
+    },
+    {
+      "name": "png",
+      "path": "D:\\tvs-ocr-native-20261017\\prefix\\lib\\libpng.a",
+      "present": true,
+      "bytes": 253898,
+      "sha256": "8007ea48940264d1af4061af77759e0606f8414ebc2b82a764e8c91998bd8699",
+      "staticObjectEvidence": {
+        "wasmObjects": 15,
+        "llvmBitcodeObjects": 0,
+        "otherObjects": 0,
+        "metadataMembers": 1
+      }
+    },
+    {
+      "name": "tiff",
+      "path": "D:\\tvs-ocr-native-20261017\\prefix\\lib\\libtiff.a",
+      "present": true,
+      "bytes": 594386,
+      "sha256": "73a3ca70f1cecbc3b5dc1be05e5656a21d71d54a3ebfbe7931906f3209293569",
+      "staticObjectEvidence": {
+        "wasmObjects": 42,
+        "llvmBitcodeObjects": 0,
+        "otherObjects": 0,
+        "metadataMembers": 2
+      }
+    },
+    {
+      "name": "tiffxx",
+      "path": "D:\\tvs-ocr-native-20261017\\prefix\\lib\\libtiffxx.a",
+      "present": true,
+      "bytes": 8574,
+      "sha256": "6b39703439fc7add42cec2c31700eda94c5238b1875fe6b7e74dbedb4be91f50",
+      "staticObjectEvidence": {
+        "wasmObjects": 1,
+        "llvmBitcodeObjects": 0,
+        "otherObjects": 0,
+        "metadataMembers": 2
+      }
+    },
+    {
+      "name": "webp",
+      "path": "D:\\tvs-ocr-native-20261017\\prefix\\lib\\libwebp.a",
+      "present": true,
+      "bytes": 500294,
+      "sha256": "6e0e6a797c4dcd65b88c0306619180a7891c0ad32e9a76535024f19f202fe5ea",
+      "staticObjectEvidence": {
+        "wasmObjects": 91,
+        "llvmBitcodeObjects": 0,
+        "otherObjects": 0,
+        "metadataMembers": 2
+      }
+    },
+    {
+      "name": "webpdecoder",
+      "path": "D:\\tvs-ocr-native-20261017\\prefix\\lib\\libwebpdecoder.a",
+      "present": true,
+      "bytes": 202934,
+      "sha256": "77b69191056b4b31b6f87c6650b1bfb833a408ece1175bd7dc752b59b17fef98",
+      "staticObjectEvidence": {
+        "wasmObjects": 50,
+        "llvmBitcodeObjects": 0,
+        "otherObjects": 0,
+        "metadataMembers": 2
+      }
+    },
+    {
+      "name": "webpdemux",
+      "path": "D:\\tvs-ocr-native-20261017\\prefix\\lib\\libwebpdemux.a",
+      "present": true,
+      "bytes": 11442,
+      "sha256": "ccb8bbf7d766f82c003ba97206372cbf6f4ba117622f7e1659bda14d38e5df02",
+      "staticObjectEvidence": {
+        "wasmObjects": 2,
+        "llvmBitcodeObjects": 0,
+        "otherObjects": 0,
+        "metadataMembers": 1
+      }
+    },
+    {
+      "name": "webpmux",
+      "path": "D:\\tvs-ocr-native-20261017\\prefix\\lib\\libwebpmux.a",
+      "present": true,
+      "bytes": 41254,
+      "sha256": "3355f20baec990f8641e77806da19cf7b6f094214348715e34bccadbd4d57613",
+      "staticObjectEvidence": {
+        "wasmObjects": 4,
+        "llvmBitcodeObjects": 0,
+        "otherObjects": 0,
+        "metadataMembers": 1
+      }
+    },
+    {
+      "name": "z",
+      "path": "D:\\tvs-ocr-native-20261017\\prefix\\lib\\libz.a",
+      "present": true,
+      "bytes": 102560,
+      "sha256": "c4a20c632bfd94a0c4d9b2c2cd918224f8c760320c276f85cff8dabf06068f2c",
+      "staticObjectEvidence": {
+        "wasmObjects": 15,
+        "llvmBitcodeObjects": 0,
+        "otherObjects": 0,
+        "metadataMembers": 1
+      }
+    },
+    {
+      "name": "leptonica",
+      "path": "D:\\tvs-ocr-native-20261017\\prefix\\lib\\libleptonica.a",
+      "present": true,
+      "bytes": 3334022,
+      "sha256": "9bf3921c4f924fbe9f2e002b08dac4cf1e15df65b1df8d3209cf606b8eba835e",
+      "staticObjectEvidence": {
+        "wasmObjects": 179,
+        "llvmBitcodeObjects": 0,
+        "otherObjects": 0,
+        "metadataMembers": 2
+      }
+    }
+  ],
+  "buildRecipe": {
+    "path": "scripts/ocr-native/build-dependencies.cjs",
+    "sha256": "43d7e69ebc6992c49dbef4cfcda03f720baab41c530ed8d555cf10ac1c9195de"
+  },
+  "sourcePreparationRecipe": {
+    "path": "scripts/ocr-native/prepare-dependencies.cjs",
+    "sha256": "2b70d7de750c5862210d0e3537143884d702fe25769838c27a36f6ed379c9ef8"
+  },
+  "dependencyLockSha256": "b3342fd6615d8e1d3353969177d02232625e43e198bec807e2a52375acc650b7",
+  "complete": true,
+  "leptonicaDir": "D:\\tvs-ocr-native-20261017\\prefix\\lib\\cmake\\leptonica",
+  "finishedAt": "2026-10-18T16:04:31.116Z"
+}

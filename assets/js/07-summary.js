@@ -17,13 +17,14 @@ function renderSidebarSummary() {
   const balance = { diesel: 0, gasoline: 0, gas: 0 };
 
   data.vehicles.forEach(v => {
-    const ft = v.fuel || 'diesel';
+    const ft = fuelTypeFromGrade(vehicleFuelGrade(v));
     const vRecs = recsFor(v.id);
+    const canonicalDays=new Set(vRecs.filter(r=>r.glonassCanonical).map(r=>r.date));
     vRecs.forEach(r => {
-      totalKm        += r.km         || 0;
-      totalKmGlonass += r.kmGlonass  || 0;
-      issued[ft]     += r.fuelIssued || 0;
-      used[ft]       += r.fuelUsed   || 0;
+      totalKm        += fqValue(r.km) || 0;
+      totalKmGlonass += (!canonicalDays.has(r.date)||r.glonassCanonical)?Number(r.kmGlonass)||0:0;
+      issued[ft]     += fqValue(r.fuelIssued) || 0;
+      used[ft]       += fqRecord(r,v).total||0;
     });
     // end balance for this vehicle
     const bMap = computeFuelBalances(v.id);
@@ -33,11 +34,11 @@ function renderSidebarSummary() {
       balance[ft] += bMap[last.id] || 0;
     } else {
       // Нет записей — остаток равен начальному значению из карточки ТС
-      balance[ft] += v.fuelBalance || 0;
+      balance[ft] += fqValue(v.fuelBalance) || 0;
     }
   });
 
-  const vehicleFuelTypes = new Set(data.vehicles.map(v => v.fuel || 'diesel'));
+  const vehicleFuelTypes = new Set(data.vehicles.map(v => fuelTypeFromGrade(vehicleFuelGrade(v))));
   const activeFuels = fuelTypes.filter(ft => vehicleFuelTypes.has(ft));
 
   let fuelHtml = '';
@@ -190,14 +191,16 @@ function computeFuelBalances(vehicleId, dateFrom, dateTo) {
       return true;
     })
     .sort((a, b) => cmpDateAsc(a.date, b.date));
-  let balance = vehicle ? (vehicle.fuelBalance || 0) : 0;
+  let balance = fqValue(vehicle && vehicle.fuelBalance) || 0;
+  const lastOnDate=new Map(recs.map(record => [record.date,record.id]));
+  const measurements=new Map(recs.filter(record => fqValue(record.tankMeasured) != null && Number(record.tankMeasured) >= 0).map(record => [record.date,Number(record.tankMeasured)]));
   const balMap = {};
   recs.forEach(r => {
     // Остаток считается по фактическому расходу; если не введён — по норме
-    const spent = r.fuelActual != null ? r.fuelActual : (r.fuelUsed || 0);
-    balance += (r.fuelIssued || 0) - spent - (r.fuelIdle || 0);
+    const fuel = fqRecord(r, vehicle);
+    balance += (fqValue(r.fuelIssued) || 0) - (fuel.total || 0);
     // Замер остатка в баке — фактическое значение: расчёт с него начинается заново
-    if (r.tankMeasured != null && r.tankMeasured !== '' && !isNaN(+r.tankMeasured)) balance = +r.tankMeasured;
+    if (lastOnDate.get(r.date) === r.id && measurements.has(r.date)) balance = measurements.get(r.date);
     balMap[r.id] = +balance.toFixed(2);
   });
   if (cacheable) _fuelBalCache[vehicleId] = balMap;

@@ -1,0 +1,46 @@
+{
+  "upstream": "https://github.com/naptha/tesseract.js",
+  "packageVersion": "7.0.0",
+  "patchSetVersion": 2,
+  "bindingPatchSetVersion": 2,
+  "nativeCorePolicy": "custom-manifest-required; separate native patch ledger",
+  "nativeCoreManifest": "vendor/tesseract-core/manifest.json",
+  "files": [
+    {
+      "file": "upstream.cjs",
+      "sha256": "f39b62af95d86171df7c8dc8a354eade230cf92e07d0e8b6bea7cfc0c4a5aaf6",
+      "upstreamFile": null,
+      "upstreamSha256": null
+    },
+    {
+      "file": "worker.cjs",
+      "sha256": "eb3af4900ad3a0a4427c33ed7301ab2ac56315332935b671ada6c51129370223",
+      "upstreamFile": "worker-script/index.js",
+      "upstreamSha256": "a5759d6d3d8beda31134dd041e2d3482b3adf26b6da4a3e7da9b1c5379114268"
+    },
+    {
+      "file": "dump.cjs",
+      "sha256": "d0a3292445beeb5d2d0dee9685a7d19fe42e136a502dc885544d2a1b8a38e01c",
+      "upstreamFile": "worker-script/utils/dump.js",
+      "upstreamSha256": "09a7e2585627056d48e5ae0facf77cd21a97fcd8219f0ca6abd21065d157ad9f"
+    },
+    {
+      "file": "set-image.cjs",
+      "sha256": "2a4d7af7a5555c2cb65d81e61c92c34588033f850c45a1e57d8bd592ec947a52",
+      "upstreamFile": "worker-script/utils/setImage.js",
+      "upstreamSha256": "608f928a37d0c456ef60ec3a6b1e9b17acc14ce3363fb39fed138aba7208490c"
+    },
+    {
+      "file": "get-core.cjs",
+      "sha256": "5fc41efd99b40da7d51c647fb84d89aff9351a613ea55d85114238b74bc3016c",
+      "upstreamFile": null,
+      "upstreamSha256": null
+    },
+    {
+      "file": "index.cjs",
+      "sha256": "16dc3f75e1c43645ce4d53b55a34dcabe8243fdc54aa049c804f9fff3453b348",
+      "upstreamFile": null,
+      "upstreamSha256": null
+    }
+  ]
+}

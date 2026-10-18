@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.15)
+project(gif C)
+add_library(gif STATIC
+"C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/deps-source/giflib/lib/dgif_lib.c"
+"C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/deps-source/giflib/lib/egif_lib.c"
+"C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/deps-source/giflib/lib/gif_font.c"
+"C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/deps-source/giflib/lib/gif_hash.c"
+"C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/deps-source/giflib/lib/gifalloc.c"
+"C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/deps-source/giflib/lib/openbsd-reallocarray.c"
+"C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/deps-source/giflib/lib/gif_err.c"
+"C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/deps-source/giflib/lib/quantize.c"
+)
+target_include_directories(gif PUBLIC "C:/Users/Дмитрий Ульянов/Documents/ChatGPT/диспетчер ТВС/.native-ocr/deps-source/giflib/lib")

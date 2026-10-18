@@ -28,7 +28,7 @@ function loadSettings() {
 function saveSettings(s) {
   const dir = path.dirname(SETTINGS_FILE);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2), 'utf8');
+  const temp=SETTINGS_FILE+'.tmp';const fd=fs.openSync(temp,'w');try{fs.writeFileSync(fd,JSON.stringify(s,null,2),'utf8');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}fs.renameSync(temp,SETTINGS_FILE);
 }
 
 let settings = loadSettings();
@@ -37,6 +37,13 @@ if (!settings.networkKey) {
   saveSettings(settings);
 }
 server.configureKey(settings.networkKey);
+let networkConfigError='';
+function configureNetwork(s){
+  const ca=s.networkMode==='client'&&s.remoteCaFile?fs.readFileSync(s.remoteCaFile):null;
+  server.configureTransport({protocol:s.remoteProtocol||'http:',ca});
+  server.configureKey(s.networkKey);networkConfigError='';
+}
+try{configureNetwork(settings);}catch(e){networkConfigError=e.message;server.configureTransport({protocol:'https:'});console.error('[network] '+e.message);}
 
 function getActiveUser() {
   const idx = settings.activeUser || 0;
@@ -174,6 +181,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  require('./artifacts').register({ipcMain,getDataDir,isClientMode,getSettings:()=>settings,knowledgeDir:()=>path.join(getDataDir(),'reestr-knowledge')});
   ensureDirs();
   applyBundledDataSeedOnce();
 
@@ -189,6 +197,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('read-data', async () => {
     if (isClientMode()) {
+      if(networkConfigError)return null;
       try {
         return await server.fetchData(settings.remoteHost, settings.remotePort || 3377);
       } catch (e) {
@@ -205,6 +214,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('write-data', async (_event, jsonStr) => {
     if (isClientMode()) {
+      if(networkConfigError)return false;
       try {
         const res = await server.postData(settings.remoteHost, settings.remotePort || 3377, jsonStr);
         return res && res.ok;
@@ -229,6 +239,7 @@ app.whenReady().then(() => {
   // версии неизвестны — клиент работает по-старому, целиком.
   ipcMain.handle('read-snapshot', async () => {
     if (isClientMode()) {
+      if(networkConfigError)return null;
       const host = settings.remoteHost, port = settings.remotePort || 3377;
       try { return JSON.stringify(await server.getJson(host, port, '/api/snapshot', 15000)); }
       catch (e) {
@@ -245,6 +256,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('get-revisions', async () => {
+    if(isClientMode()&&networkConfigError)return null;
     try {
       if (isClientMode()) return await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/revisions', 5000);
       return storage.readRevisions(getDataDir());
@@ -252,6 +264,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('read-section', async (_event, name) => {
+    if(isClientMode()&&networkConfigError)return null;
     try {
       if (isClientMode()) return await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/section/' + encodeURIComponent(name), 15000);
       return storage.readSection(getDataDir(), name);
@@ -260,6 +273,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('write-sections', async (_event, jsonStr) => {
     if (isClientMode()) {
+      if(networkConfigError)return {ok:false,error:networkConfigError};
       try { return await server.postSections(settings.remoteHost, settings.remotePort || 3377, jsonStr); }
       catch (e) { return { ok: false, error: e.message }; }
     }
@@ -276,12 +290,51 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('get-data-path', () => getDataDir());
+  ipcMain.handle('choose-certificate',async(event)=>{const r=await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender),{title:'Сертификат или ключ PEM',properties:['openFile'],filters:[{name:'PEM / CRT / KEY',extensions:['pem','crt','key']}]});return r.canceled?null:r.filePaths[0];});
+
+  ipcMain.handle('get-data-health', async () => {
+    const mode = settings.networkMode || 'local';
+    if (mode === 'client') {
+      if(networkConfigError)return {mode,available:false,error:networkConfigError};
+      try {
+        const ping = await server.ping(settings.remoteHost, settings.remotePort || 3377);
+        return { mode, available: !!(ping && ping.ok), serverName: ping && ping.name || '', checkedAt: new Date().toISOString() };
+      } catch (e) {
+        return { mode, available: false, error: e.message, checkedAt: new Date().toISOString() };
+      }
+    }
+    try {
+      const dir = getDataDir();
+      const sections = path.join(dir, 'sections');
+      const hasSplit = fs.existsSync(path.join(sections, 'revisions.json'));
+      const hasLegacy = fs.existsSync(path.join(dir, 'data.json'));
+      let backups = [];
+      try {
+        backups = fs.readdirSync(getBackupDir()).filter(name => /^data_\d{4}-\d{2}-\d{2}\.json$/.test(name))
+          .map(name => ({ name, time: fs.statSync(path.join(getBackupDir(), name)).mtimeMs }))
+          .sort((a, b) => b.time - a.time);
+      } catch {}
+      return {
+        mode, available: hasSplit || hasLegacy,
+        storage: hasSplit ? 'Разделённая база' : hasLegacy ? 'Файл базы' : 'База не найдена',
+        backupCount: backups.length,
+        lastBackupAt: backups.length ? new Date(backups[0].time).toISOString() : null,
+        checkedAt: new Date().toISOString(),
+      };
+    } catch (e) {
+      return { mode, available: false, error: e.message, checkedAt: new Date().toISOString() };
+    }
+  });
 
   ipcMain.handle('get-settings', () => settings);
 
   ipcMain.handle('save-settings', (_event, newSettings) => {
+    if(!newSettings||!Array.isArray(newSettings.users)||!newSettings.users.length)throw new Error('Нужен хотя бы один профиль данных');
+    if(newSettings.serverUsers)newSettings.serverUsers=require('./access-control').normalizeServerUsers(newSettings.serverUsers);
+    configureNetwork(newSettings);
+    const connectionChanged=JSON.stringify([settings.activeUser,settings.users,settings.serverPort,settings.serverProtocol,settings.serverTlsCert,settings.serverTlsKey,settings.networkMode])!==JSON.stringify([newSettings.activeUser,newSettings.users,newSettings.serverPort,newSettings.serverProtocol,newSettings.serverTlsCert,newSettings.serverTlsKey,newSettings.networkMode]);
+    if(connectionChanged&&server.isRunning())server.stop();
     settings = newSettings;
-    server.configureKey(settings.networkKey);
     saveSettings(settings);
     if (!isClientMode()) ensureDirs();
     return true;
@@ -289,6 +342,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('switch-user', async (_event, idx) => {
     if (idx < 0 || idx >= settings.users.length) return { ok: false };
+    if(server.isRunning())server.stop();
     settings.activeUser = idx;
     saveSettings(settings);
     if (!isClientMode()) ensureDirs();
@@ -306,17 +360,21 @@ app.whenReady().then(() => {
     return { ok: true, path: filePaths[0] };
   });
 
-  ipcMain.handle('server-start', async () => {
+  async function startConfiguredServer(){try{
     const port = settings.serverPort || 3377;
     const user = getActiveUser();
+    const startupDir=getDataDir();
     return await server.start({
       port,
-      dataDir: getDataDir(),
-      backupFn: () => { ensureDirs(); createDailyBackup(); },
+      dataDir: startupDir,
+      backupFn: () => { storage.makeDailyBackup(startupDir,path.join(startupDir,'backups'),30); },
       serverName: user.name || os.hostname(),
       key: settings.networkKey,
+      settings:()=>settings,
+      tls:settings.serverProtocol==='https:'?{cert:fs.readFileSync(settings.serverTlsCert),key:fs.readFileSync(settings.serverTlsKey)}:null,
     });
-  });
+  }catch(e){return {ok:false,error:'Сервер не запущен: '+e.message};}}
+  ipcMain.handle('server-start',startConfiguredServer);
 
   ipcMain.handle('server-stop', () => {
     server.stop();
@@ -332,18 +390,13 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('server-ping', async (_event, host, port) => {
+    if(networkConfigError)return {ok:false,error:networkConfigError};
     return await server.ping(host, port || 3377);
   });
 
   // Автозапуск сервера если настроен режим "server"
   if (settings.networkMode === 'server') {
-    server.start({
-      port: settings.serverPort || 3377,
-      dataDir: getDataDir(),
-      backupFn: () => { ensureDirs(); createDailyBackup(); },
-      serverName: getActiveUser().name || os.hostname(),
-      key: settings.networkKey,
-    });
+    startConfiguredServer().then(r=>{if(!r.ok)console.error(r.error);});
   }
 
   // Импорт данных из RAR-архива (data.json + backups) для пополнения базы
@@ -508,19 +561,22 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('install-update', () => {
-    if (downloadedPath && fs.existsSync(downloadedPath)) {
-      updater.launchInstaller(downloadedPath);
-    }
+  ipcMain.handle('install-update', async () => {
+    try {
+      if(!downloadedPath || !fs.existsSync(downloadedPath))throw new Error('Установщик не загружен');
+      await updater.launchInstaller(downloadedPath);
+      return {ok:true};
+    } catch(e) {return {ok:false,error:e.message};}
   });
 
   // ─── РЕЕСТР-БИЛДЕР ──────────────────────────────────────
   const REESTR_DIR = path.join(__dirname, '..', 'ReestrBuilder');
   const REESTR_LIB_URL = 'file:///' + path.join(REESTR_DIR, 'lib.mjs').replace(/\\/g, '/');
+  async function loadReestrLib(){const lib=await import(REESTR_LIB_URL);lib.configureKnowledgePath(path.join(getDataDir(),'reestr-knowledge'));return lib;}
 
   ipcMain.handle('reestr-parse-invoices', async (event, zipArrayBuffer) => {
     console.log('[reestr] parse-invoices start');
-    const { parseInvoices, loadConfig } = await import(REESTR_LIB_URL);
+    const { parseInvoices, loadConfig } = await loadReestrLib();
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const log = [];
     const rows = await parseInvoices(Buffer.from(zipArrayBuffer), config, (msg) => { log.push(msg); console.log('[reestr] log:', msg.type, msg.text); });
@@ -530,7 +586,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('reestr-parse-pdfs', async (event, pdfFilesRaw) => {
     console.log('[reestr] parse-pdfs start, files:', pdfFilesRaw.length);
-    const { parsePdfFiles, loadConfig } = await import(REESTR_LIB_URL);
+    const { parsePdfFiles, loadConfig } = await loadReestrLib();
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const log = [];
     const pdfFiles = pdfFilesRaw.map(f => ({ name: f.name, buffer: Buffer.from(f.buffer) }));
@@ -544,7 +600,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('reestr-build-xlsx', async (event, { rows }) => {
-    const { buildXlsxFromRows, loadConfig } = await import(REESTR_LIB_URL);
+    const { buildXlsxFromRows, loadConfig } = await loadReestrLib();
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const { buffer, total } = await buildXlsxFromRows(rows, config);
     return {
@@ -555,17 +611,17 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('reestr-learn', async (event, rows) => {
-    const { learnFromRows } = await import(REESTR_LIB_URL);
+    const { learnFromRows } = await loadReestrLib();
     return learnFromRows(rows);
   });
 
   ipcMain.handle('reestr-apply-knowledge', async (event, rows) => {
-    const { applyKnowledge } = await import(REESTR_LIB_URL);
+    const { applyKnowledge } = await loadReestrLib();
     return applyKnowledge(rows);
   });
 
   ipcMain.handle('reestr-analytics', async (event, rows) => {
-    const { getAnalytics } = await import(REESTR_LIB_URL);
+    const { getAnalytics } = await loadReestrLib();
     return getAnalytics(rows);
   });
 
@@ -620,159 +676,8 @@ app.whenReady().then(() => {
     return true;
   });
 
-  // ─── PDF Editor ───
-  ipcMain.handle('open-pdf-editor', async (event) => {
-    const senderWin = BrowserWindow.fromWebContents(event.sender);
-    const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
-      title: 'Выберите PDF-файл для редактирования',
-      filters: [{ name: 'PDF', extensions: ['pdf'] }],
-      properties: ['openFile'],
-    });
-    if (canceled || !filePaths || !filePaths[0]) return { ok: false };
-
-    const pdfPath = filePaths[0];
-    const pdfData = fs.readFileSync(pdfPath);
-
-    const iconPath = path.join(__dirname, '../build/icon.ico');
-    const pdfWin = new BrowserWindow({
-      width: 1400,
-      height: 900,
-      minWidth: 900,
-      minHeight: 600,
-      title: 'PDF-редактор — ' + path.basename(pdfPath),
-      icon: fs.existsSync(iconPath) ? iconPath : undefined,
-      parent: senderWin || undefined,
-      webPreferences: {
-        preload: path.join(__dirname, 'pdf-preload.js'),
-        contextIsolation: true,
-        nodeIntegration: false,
-      },
-    });
-    pdfWin.setMenuBarVisibility(false);
-    pdfEditorData = { pdfBase64: pdfData.toString('base64'), filePath: pdfPath, fileName: path.basename(pdfPath) };
-    pdfWin.loadFile(path.join(__dirname, '../pdf-editor.html'));
-    return { ok: true };
-  });
-
-  let pdfEditorData = null;
-
-  ipcMain.handle('pdf-editor-data', () => pdfEditorData);
-
-  ipcMain.handle('pdf-editor-save', async (event, { pdfBase64, filePath }) => {
-    const senderWin = BrowserWindow.fromWebContents(event.sender);
-    let savePath = filePath;
-    if (!savePath) {
-      const { canceled, filePath: fp } = await dialog.showSaveDialog(senderWin, {
-        title: 'Сохранить PDF',
-        defaultPath: pdfEditorData ? pdfEditorData.filePath : 'edited.pdf',
-        filters: [{ name: 'PDF', extensions: ['pdf'] }],
-      });
-      if (canceled || !fp) return { saved: false };
-      savePath = fp;
-    }
-    fs.writeFileSync(savePath, Buffer.from(pdfBase64, 'base64'));
-    return { saved: true, path: savePath };
-  });
-
-  ipcMain.handle('pdf-editor-merge', async (event) => {
-    const senderWin = BrowserWindow.fromWebContents(event.sender);
-    const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
-      title: 'Выберите PDF для объединения',
-      filters: [{ name: 'PDF', extensions: ['pdf'] }],
-      properties: ['openFile', 'multiSelections'],
-    });
-    if (canceled || !filePaths || !filePaths.length) return { ok: false };
-    const files = filePaths.map(fp => ({
-      name: path.basename(fp),
-      base64: fs.readFileSync(fp).toString('base64'),
-    }));
-    return { ok: true, files };
-  });
-
-  ipcMain.handle('pdf-editor-insert-image', async (event) => {
-    const senderWin = BrowserWindow.fromWebContents(event.sender);
-    const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
-      title: 'Выберите изображение',
-      filters: [{ name: 'Изображения', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'webp'] }],
-      properties: ['openFile'],
-    });
-    if (canceled || !filePaths || !filePaths[0]) return { ok: false };
-    const imgPath = filePaths[0];
-    const ext = path.extname(imgPath).toLowerCase();
-    const base64 = fs.readFileSync(imgPath).toString('base64');
-    const dataUrl = `data:image/${ext === '.jpg' || ext === '.jpeg' ? 'jpeg' : 'png'};base64,${base64}`;
-    return { ok: true, dataUrl, name: path.basename(imgPath) };
-  });
-
-  let ocrWorker = null;
-  ipcMain.handle('pdf-editor-ocr', async (event, { imageBase64 }) => {
-    const Tesseract = require('tesseract.js');
-    if (!ocrWorker) {
-      const langDir = (() => {
-        const dirs = [
-          path.join(process.resourcesPath, 'app.asar.unpacked'),
-          path.join(process.resourcesPath, 'app'),
-          path.join(__dirname, '..'),
-        ];
-        for (const d of dirs) {
-          if (fs.existsSync(path.join(d, 'rus.traineddata'))) return d;
-        }
-        return null;
-      })();
-      const opts = langDir ? { langPath: langDir, gzip: false } : {};
-      ocrWorker = await Tesseract.createWorker('rus+eng', undefined, opts);
-    }
-    const buf = Buffer.from(imageBase64, 'base64');
-    const tmpFile = path.join(os.tmpdir(), `ocr_pdf_${Date.now()}.png`);
-    try {
-      fs.writeFileSync(tmpFile, buf);
-      await ocrWorker.setParameters({
-        tessedit_pageseg_mode: '3',
-        // Страница приходит из редактора отрисованной в 300 DPI. Без явного
-        // указания Tesseract пытается угадать разрешение по картинке и при
-        // ошибке неверно оценивает размер шрифта, что портит распознавание.
-        user_defined_dpi: '300',
-        preserve_interword_spaces: '1',
-      });
-      const result = await Promise.race([
-        ocrWorker.recognize(tmpFile),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('OCR timeout')), 180000)),
-      ]);
-      let lines = [];
-      if (result.data.lines && result.data.lines.length > 0) {
-        lines = result.data.lines.map(line => ({
-          text: line.text.trim(),
-          bbox: { x: line.bbox.x0, y: line.bbox.y0, w: line.bbox.x1 - line.bbox.x0, h: line.bbox.y1 - line.bbox.y0 },
-        })).filter(l => l.text.length > 0);
-      } else if (result.data.blocks && result.data.blocks.length > 0) {
-        for (const block of result.data.blocks) {
-          for (const par of (block.paragraphs || [])) {
-            for (const line of (par.lines || [])) {
-              const text = (line.words || []).map(w => w.text).join(' ').trim();
-              if (!text) continue;
-              const bb = line.bbox;
-              lines.push({
-                text,
-                bbox: { x: bb.x0, y: bb.y0, w: bb.x1 - bb.x0, h: bb.y1 - bb.y0 },
-              });
-            }
-          }
-        }
-      } else if (result.data.text && result.data.text.trim().length > 0) {
-        const textLines = result.data.text.trim().split('\n').filter(l => l.trim().length > 0);
-        const imgH = 1000;
-        const lineH = Math.round(imgH / (textLines.length || 1));
-        textLines.forEach((t, i) => {
-          lines.push({ text: t.trim(), bbox: { x: 50, y: i * lineH + 10, w: 500, h: lineH - 5 } });
-        });
-      }
-      return { ok: true, lines };
-    } catch (e) {
-      return { ok: false, error: e.message };
-    } finally {
-      try { fs.unlinkSync(tmpFile); } catch {}
-    }
-  });
+  // PDF-редактор: независимые документы окон, шрифты, сохранение и OCR.
+  require('./pdf-editor-service.cjs').registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog });
 
   // ─── Импорт Сводки из PDF ───
   ipcMain.handle('import-svodka-pdf', async (event) => {
@@ -839,19 +744,6 @@ app.whenReady().then(() => {
     } catch (e) {
       return { ok: false, error: e.message };
     }
-  });
-
-  ipcMain.handle('pdf-editor-save-as', async (event, { pdfBase64 }) => {
-    const senderWin = BrowserWindow.fromWebContents(event.sender);
-    const { canceled, filePath } = await dialog.showSaveDialog(senderWin, {
-      title: 'Сохранить PDF как…',
-      defaultPath: pdfEditorData ? pdfEditorData.filePath.replace('.pdf', '_edited.pdf') : 'edited.pdf',
-      filters: [{ name: 'PDF', extensions: ['pdf'] }],
-    });
-    if (canceled || !filePath) return { saved: false };
-    fs.writeFileSync(filePath, Buffer.from(pdfBase64, 'base64'));
-    shell.showItemInFolder(filePath);
-    return { saved: true, path: filePath };
   });
 
   ipcMain.handle('reestr-window-data', () => {

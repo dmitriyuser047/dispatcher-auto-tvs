@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "customBuild": "tvs-ocr-core-7.0.0-tvs1",
+  "upstreamPackageVersion": "7.0.0",
+  "upstreamNativeVersion": "5.3.0",
+  "nativeVersion": "5.3.0-tvs1",
+  "sources": [
+    {
+      "name": "core",
+      "repository": "naptha/tesseract.js-core",
+      "commit": "acffef2b66eb44a31df297e11d905f4b39001068",
+      "target": "source/core",
+      "url": "https://codeload.github.com/naptha/tesseract.js-core/tar.gz/acffef2b66eb44a31df297e11d905f4b39001068",
+      "archiveSha256": "35a7e5961bce2435bb6064ad8424de1a3bd9b1d5f5930076aab1bfc7d90f62f5",
+      "archiveBytes": 32031052
+    },
+    {
+      "name": "tesseract",
+      "repository": "Balearica/tesseract",
+      "commit": "2a9c1c49c360462733c386d2a44fcd22c4e21411",
+      "target": "source/core/third_party/tesseract",
+      "url": "https://codeload.github.com/Balearica/tesseract/tar.gz/2a9c1c49c360462733c386d2a44fcd22c4e21411",
+      "archiveSha256": "67e83745bd7fc6940c17e2c5142985f709e448e26b452231a362f5dd0f5e071f",
+      "archiveBytes": 1937174
+    }
+  ],
+  "patches": [
+    {
+      "name": "0001-lstm-dictionary-flags.patch",
+      "sha256": "acb17adceb4b27fd73eef05fbc589199ecd1c8fb9ee95117122e28a5dd53b7a1",
+      "bytes": 808
+    },
+    {
+      "name": "0002-clear-image-on-decode-failure.patch",
+      "sha256": "ee12d6c73738794772e9b6455bcfdc9d6481b03fce92f506215cb4b4e05b75df",
+      "bytes": 872
+    },
+    {
+      "name": "0003-portable-wasm-build-paths.patch",
+      "sha256": "7c6824c781f387bf539f271d06cfe1292b7501965a77a6b6ec802e7ca86e8260",
+      "bytes": 4828
+    },
+    {
+      "name": "0004-tvs-native-version.patch",
+      "sha256": "624451be4b3f9f0fd3ac03d3590857339696e08bcce3e3963ae2a9ba14f66ee0",
+      "bytes": 90
+    },
+    {
+      "name": "0005-glue-overload-dispatch.patch",
+      "sha256": "4857600b4cef3d081b11121d81cd85b3b5af920479088730f655e53f7ea44cda",
+      "bytes": 3374
+    },
+    {
+      "name": "0006-lstm-unavailable-legacy-api.patch",
+      "sha256": "c2a9ebb16d4f8d45eac1e21ee26e389262f3791c994f3263cc80dfff993dde32",
+      "bytes": 3169
+    }
+  ],
+  "sourceOnly": true,
+  "testsOrOcrRun": false,
+  "notes": [
+    "Pinned checked-in WebIDL glue is preserved; it is not regenerated from the older IDL.",
+    "Third-party dependency sources and builds are managed separately.",
+    "Patch 0005 adjusts only two stale JS overload dispatchers to match the existing C++ definitions; custom WebIDL APIs are retained.",
+    "Patch0006 explicitly fails five legacy/OSD APIs when DISABLED_LEGACY_ENGINE is set, including the previously commented AdaptToWordStr binding."
+  ],
+  "files": [
+    {
+      "path": "javascript/glue.js",
+      "sha256": "bbd8fce42687038b0ac6f7baa73ada5c50798e0ba1a8db5980d1ae1f92294741"
+    },
+    {
+      "path": "javascript/src/glue.cpp",
+      "sha256": "b2941aedb105a25ee772b1f471bc2e03567380f141fd41c5916ecb1da084cba1"
+    },
+    {
+      "path": "javascript/src/wrapper.cpp",
+      "sha256": "a58d5f023f4835b3132bc18169b5ab12eef94c604fdcc1255740eb488f637657"
+    },
+    {
+      "path": "javascript/anterior.js",
+      "sha256": "0b17e3b4481bacdbb108799ab2cd509fc27e6feb9d5a67596ce8247bd6d64a8d"
+    },
+    {
+      "path": "third_party/tesseract/src/lstm/lstmrecognizer.cpp",
+      "sha256": "857c0fc7ce41e3cf0e732c503fac90a4d471b1f4eadd21488d61877835db463e"
+    },
+    {
+      "path": "third_party/tesseract/src/api/baseapi.cpp",
+      "sha256": "1979d54a185a58aa56988da4c87bf0afc3d309cafbc4730cf145ec3cdbcc4491"
+    },
+    {
+      "path": "third_party/tesseract/CMakeLists.txt",
+      "sha256": "c8e3ac0cad8d53cd81669f65016178b8036c75ab72105a6149fe052c9abfe9bc"
+    },
+    {
+      "path": "third_party/tesseract/VERSION",
+      "sha256": "bfdc5acc2677351c4af1f7032bbd76247dd56467a772b91ea26586147fc31bad"
+    }
+  ]
+}

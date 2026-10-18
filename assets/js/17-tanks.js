@@ -8,10 +8,20 @@ let genSubView = 'generators';
 let selectedTankId = null;
 let editingTankId = null;
 let editingTankIncomeId = null;
+let tankShowArchived = false;
 
 const TANK_FUEL_LABELS = { diesel:'Дизель', gasoline:'Бензин', gas:'Газ' };
 
 function tanksAll() { return data.tanks || []; }
+
+function tankReserveState(tank, balance) {
+  const reserve = Number(tank.reserveLevel);
+  if (balance < 0) return { level:'negative', color:'var(--red)', label:'Отрицательный расчётный остаток' };
+  if (Number.isFinite(reserve) && reserve > 0 && balance <= reserve) return { level:'low', color:'var(--yellow)', label:'Достигнут резерв ' + reserve.toLocaleString('ru') + ' л' };
+  return { level:'normal', color:'var(--green)', label:reserve > 0 ? 'Резерв ' + reserve.toLocaleString('ru') + ' л' : 'Порог резерва не задан' };
+}
+
+function tankToggleArchive() { tankShowArchived = !tankShowArchived; renderTankList(); }
 
 // Остаток ёмкости = начальный + приход − выдано в привязанные ДЭС
 function computeTankBalance(tankId) {
@@ -20,10 +30,15 @@ function computeTankBalance(tankId) {
   const income = (data.tankIncomes || []).filter(r => r.tankId === tankId).reduce((s,r) => s + (r.amount || 0), 0);
   const issued = (data.genRecords || []).filter(r => genRecordTankId(r) === tankId).reduce((s,r) => s + (r.fuelIssued || 0), 0);
   const init = t.balanceInit || 0;
-  const balance = +(init + income - issued).toFixed(2);
+  const movements = (data.fuelMovements || []).filter(r => !r.deleted && !r.cancelled).reduce((sum,r) => {
+    const qty = Number(r.qty);
+    if (!Number.isFinite(qty) || qty < 0) return sum;
+    return sum + (r.toTankId === tankId ? qty : 0) - (r.fromTankId === tankId ? qty : 0);
+  }, 0);
+  const balance = +(init + income - issued + movements).toFixed(2);
   const capacity = t.capacity || 0;
   const fillPct = capacity > 0 ? Math.max(0, Math.min(100, Math.round(balance / capacity * 100))) : 0;
-  return { init, income, issued, balance, capacity, fillPct };
+  return { init, income, issued, movements, balance, capacity, fillPct };
 }
 
 function switchGenSubView(view) {
@@ -54,22 +69,23 @@ function switchGenSubView(view) {
 
 function renderTankList() {
   const list = document.getElementById('tankList');
-  const tanks = tanksAll();
+  const tanks = tanksAll().filter(t => !!t.archived === tankShowArchived);
+  const archiveButton = `<button class="btn btn-ghost btn-sm" onclick="tankToggleArchive()" style="margin:8px">${tankShowArchived ? 'Рабочие ёмкости' : 'Архив (' + tanksAll().filter(t => t.archived).length + ')'}</button>`;
   if (!tanks.length) {
-    list.innerHTML = `<div class="empty-list">
+    list.innerHTML = archiveButton + `<div class="empty-list">
       <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" style="display:block;margin:0 auto 8px"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8"/></svg>
-      Нет ёмкостей.<br>Нажмите «Добавить ёмкость»</div>`;
+      ${tankShowArchived ? 'Архив ёмкостей пуст.' : 'Нет ёмкостей.<br>Нажмите «Добавить ёмкость»'}</div>`;
     return;
   }
   const sorted = tanks.slice().sort((a,b) => (a.name||'').toLowerCase() < (b.name||'').toLowerCase() ? -1 : 1);
-  let html = '';
+  let html = archiveButton;
   sorted.forEach(t => {
     const b = computeTankBalance(t.id);
-    const balColor = b.balance < 0 ? 'var(--red)' : b.balance < (b.capacity*0.1||50) ? 'var(--yellow)' : 'var(--green)';
+    const balColor = tankReserveState(t, b.balance).color;
     const boundCount = (data.generators || []).filter(g => g.tankId === t.id).length;
     html += `<div class="vehicle-card ${selectedTankId === t.id ? 'active' : ''}" onclick="selectTank(${htmlJs(t.id)})" style="display:flex;flex-direction:column">
       <div style="flex:1;min-width:0;overflow:hidden">
-        <div class="vc-make" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${htmlEsc(t.name)}</div>
+        <div class="vc-make" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${htmlEsc(t.name)}${t.archived ? ' · архив' : ''}</div>
         ${t.serial ? `<div class="vc-driver" style="font-family:'Courier New',monospace;letter-spacing:0.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Зав.№ ${htmlEsc(t.serial)}</div>` : ''}
         ${t.object ? `<div class="vc-driver" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Объект: ${htmlEsc(t.object)}</div>` : ''}
         ${t.location ? `<div class="vc-driver" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${htmlEsc(t.location)}</div>` : ''}
@@ -88,6 +104,8 @@ function renderTankList() {
 
 function selectTank(id) {
   selectedTankId = id;
+  const found = tanksAll().find(t => t.id === id);
+  if (found) tankShowArchived = !!found.archived;
   renderTankList();
   const t = tanksAll().find(x => x.id === id);
   if (t) renderTankDetail(t);
@@ -95,7 +113,8 @@ function selectTank(id) {
 
 function renderTankDetail(t) {
   const b = computeTankBalance(t.id);
-  const balColor = b.balance < 0 ? 'var(--red)' : b.balance < (b.capacity*0.1||50) ? 'var(--yellow)' : 'var(--green)';
+  const reserveState = tankReserveState(t, b.balance);
+  const balColor = reserveState.color;
   const incomes = (data.tankIncomes || []).filter(r => r.tankId === t.id).sort((a, b2) => cmpDateDesc(a.date, b2.date));
   const boundGens = (data.generators || []).filter(g => g.tankId === t.id);
   const fmtL = x => (x||0).toLocaleString('ru',{maximumFractionDigits:1});
@@ -122,7 +141,7 @@ function renderTankDetail(t) {
     </tr>`; }).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:14px">Нет записей прихода</td></tr>`;
 
   const boundHtml = boundGens.length ? boundGens.map(g => {
-    const issued = (data.genRecords || []).filter(r => r.generatorId === g.id).reduce((s,r) => s + (r.fuelIssued || 0), 0);
+    const issued = (data.genRecords || []).filter(r => r.generatorId === g.id && genRecordTankId(r) === t.id).reduce((s,r) => s + (r.fuelIssued || 0), 0);
     return `<div style="display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer" onclick="switchGenSubView('generators');selectGenerator(${htmlJs(g.id)})">
       <span>${htmlEsc(g.name)}${g.location ? ` <span style="color:var(--text3)">· ${htmlEsc(g.location)}</span>` : ''}</span>
       <span style="color:var(--red);font-weight:600;white-space:nowrap">−${fmtL(issued)} л</span>
@@ -132,13 +151,12 @@ function renderTankDetail(t) {
   document.getElementById('mainContent').innerHTML = `
     <div class="vehicle-detail-header">
       <div>
-        <h1 style="margin:0">${htmlEsc(t.name)}</h1>
+        <h1 style="margin:0">${htmlEsc(t.name)}${t.archived ? ' · архив' : ''}</h1>
         <div style="color:var(--text3);font-size:13px;margin-top:3px">${TANK_FUEL_LABELS[t.fuel||'diesel']}${t.location ? ' · '+ htmlEsc(t.location) : ''}${t.capacity ? ' · объём '+t.capacity.toLocaleString('ru')+' л' : ''}</div>
         <div style="color:var(--text3);font-size:13px;margin-top:2px">${t.serial ? 'Зав.№ '+ htmlEsc(t.serial) : ''}${t.object ? (t.serial?' · ':'')+'Объект: '+ htmlEsc(t.object) : ''}${t.owner ? ((t.serial||t.object)?' · ':'')+'Собственник: '+ htmlEsc(t.owner) : ''}</div>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" onclick="openAddTankIncome()"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Приход</button>
-        <button class="btn btn-ghost" onclick="openTankTransfer()"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg> Перемещение</button>
+        ${t.archived ? `<button class="btn btn-primary" onclick="restoreTank(${htmlJs(t.id)})">Восстановить из архива</button>` : `<button class="btn btn-primary" onclick="openAddTankIncome()">Приход</button><button class="btn btn-ghost" onclick="openTankTransfer()">Перемещение</button>`}
         <button class="btn btn-ghost" onclick="openEditTank(${htmlJs(t.id)})"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg> Изменить</button>
       </div>
     </div>
@@ -146,6 +164,7 @@ function renderTankDetail(t) {
       <div class="ss-card" style="flex:1;min-width:150px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px">
         <div style="font-size:12px;color:var(--text3)">Остаток</div>
         <div style="font-size:26px;font-weight:800;color:${balColor}">${fmtL(b.balance)} <span style="font-size:14px">л</span></div>
+        <div style="font-size:12px;color:var(--text3);margin-top:6px">${htmlEsc(reserveState.label)}</div>
         ${b.capacity ? `<div style="height:8px;background:var(--border);border-radius:5px;margin-top:8px;overflow:hidden"><div style="height:100%;width:${b.fillPct}%;background:${balColor}"></div></div><div style="font-size:11px;color:var(--text3);margin-top:4px">${b.fillPct}% от ${b.capacity.toLocaleString('ru')} л</div>` : ''}
       </div>
       <div class="ss-card" style="flex:1;min-width:120px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px">
@@ -153,6 +172,7 @@ function renderTankDetail(t) {
         <div style="font-size:20px;font-weight:700">${fmtL(b.init)} л</div>
         <div style="font-size:12px;color:var(--text3);margin-top:10px">Приход всего</div>
         <div style="font-size:18px;font-weight:700;color:var(--green)">+${fmtL(b.income)} л</div>
+        ${b.movements ? `<div style="font-size:12px;color:var(--text3)">Дополнительные движения: ${fmtL(b.movements)} л</div>` : ''}
       </div>
       <div class="ss-card" style="flex:1;min-width:120px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px">
         <div style="font-size:12px;color:var(--text3)">Выдано в ДЭС</div>
@@ -186,7 +206,7 @@ function populateTankObjectList() {
 function populateGenTankSelect(selected) {
   const sel = document.getElementById('gm_tank');
   if (!sel) return;
-  const tanks = tanksAll();
+  const tanks = tanksAll().filter(t => !t.archived || t.id === selected);
   sel.innerHTML = '<option value="">— не привязана —</option>' +
     tanks.map(t => `<option value="${htmlEsc(t.id)}"${t.id === selected ? ' selected' : ''}>${(t.name||'').replace(/</g,'&lt;')}${t.location ? ' ('+ htmlEsc(t.location)+')' : ''}</option>`).join('');
   sel.value = selected || '';
@@ -199,7 +219,7 @@ function openAddTank() {
   document.getElementById('tankDeleteBtn').style.display = 'none';
   ['tk_name','tk_serial','tk_location','tk_object','tk_owner','tk_note'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('tk_fuel').value = 'diesel';
-  ['tk_capacity','tk_balance'].forEach(id => document.getElementById(id).value = '');
+  ['tk_capacity','tk_balance','tk_reserve'].forEach(id => document.getElementById(id).value = '');
   populateTankObjectList();
   openModal('tankModal');
 }
@@ -210,11 +230,14 @@ function openEditTank(id) {
   editingTankId = id;
   document.getElementById('tankModalTitle').textContent = 'Редактировать ёмкость';
   document.getElementById('tankDeleteBtn').style.display = '';
+  document.getElementById('tankDeleteBtn').textContent = t.archived ? 'В архиве' : 'В архив';
+  document.getElementById('tankDeleteBtn').disabled = !!t.archived;
   document.getElementById('tk_name').value     = t.name || '';
   document.getElementById('tk_serial').value   = t.serial || '';
   document.getElementById('tk_fuel').value     = t.fuel || 'diesel';
   document.getElementById('tk_capacity').value = t.capacity ?? '';
   document.getElementById('tk_balance').value  = t.balanceInit ?? '';
+  document.getElementById('tk_reserve').value  = t.reserveLevel ?? '';
   document.getElementById('tk_location').value = t.location || '';
   document.getElementById('tk_object').value   = t.object || '';
   document.getElementById('tk_owner').value    = t.owner || '';
@@ -226,6 +249,7 @@ function openEditTank(id) {
 async function saveTank() {
   const name = document.getElementById('tk_name').value.trim();
   if (!name) { showFieldError('Укажите наименование ёмкости', 'tk_name'); return; }
+  if (!validNonnegativeFields(['tk_capacity', 'tk_balance', 'tk_reserve'])) return;
   if (!data.tanks) data.tanks = [];
   const obj = {
     name,
@@ -233,6 +257,7 @@ async function saveTank() {
     fuel:        document.getElementById('tk_fuel').value,
     capacity:    parseFloat(document.getElementById('tk_capacity').value) || null,
     balanceInit: parseFloat(document.getElementById('tk_balance').value)  || 0,
+    reserveLevel: document.getElementById('tk_reserve').value.trim() === '' ? null : Math.max(0, parseFloat(document.getElementById('tk_reserve').value) || 0),
     location:    document.getElementById('tk_location').value.trim(),
     object:      document.getElementById('tk_object').value.trim(),
     owner:       document.getElementById('tk_owner').value.trim(),
@@ -255,14 +280,10 @@ async function saveTank() {
 async function deleteTank(id) {
   const t = tanksAll().find(x => x.id === id);
   if (!t) return;
-  if ((data.genRecords || []).some(r => genRecordTankId(r) === id && +r.fuelIssued)) { showToast('У ёмкости есть выдачи топлива. Удаление нарушит историю.'); return; }
-  const bound = (data.generators || []).filter(g => g.tankId === id);
-  let msg = 'Удалить ёмкость «' + t.name + '» и весь её журнал прихода?';
-  if (bound.length) msg += '\n\nПривязка у ' + bound.length + ' ДЭС будет снята.';
-  if (!await confirmAction(msg)) return;
-  data.tanks = (data.tanks || []).filter(x => x.id !== id);
-  data.tankIncomes = (data.tankIncomes || []).filter(r => r.tankId !== id);
-  (data.generators || []).forEach(g => { if (g.tankId === id) g.tankId = null; });
+  if (t.archived) return;
+  if (!await confirmAction('Переместить ёмкость «' + t.name + '» в архив? Все остатки, приходы, перемещения и связи с ДЭС сохранятся. Для новых операций ёмкость нужно восстановить.')) return;
+  t.archived = true;
+  t.archivedAt = new Date().toISOString();
   if (!await saveData(data)) return;
   closeModal('tankModal');
   selectedTankId = null;
@@ -272,9 +293,22 @@ async function deleteTank(id) {
     <h2>Выберите ёмкость</h2><p>Выберите ёмкость из списка слева или добавьте новую</p></div>`;
 }
 
+async function restoreTank(id) {
+  const t = tanksAll().find(x => x.id === id);
+  if (!t?.archived) return;
+  if (!await confirmAction('Восстановить ёмкость «' + t.name + '» из архива?')) return;
+  t.archived = false;
+  t.restoredAt = new Date().toISOString();
+  if (!await saveData(data)) return;
+  tankShowArchived = false;
+  selectTank(id);
+  showToast('Ёмкость восстановлена');
+}
+
 // ─── TANK INCOME (приход) ────────────────────────────────
 function openAddTankIncome() {
   if (!selectedTankId) return;
+  if (tanksAll().find(t => t.id === selectedTankId)?.archived) { showToast('Восстановите ёмкость для новых операций'); return; }
   editingTankIncomeId = null;
   document.getElementById('tankIncomeModalTitle').textContent = 'Приход топлива';
   document.getElementById('ti_date').value = fmtDate(new Date().toISOString().split('T')[0]);
@@ -300,6 +334,7 @@ function openEditTankIncome(id) {
 }
 
 async function saveTankIncome() {
+  if (tanksAll().find(t => t.id === selectedTankId)?.archived) { showToast('Восстановите ёмкость для изменения операций'); return; }
   const date = parseDate(document.getElementById('ti_date').value.trim());
   const amount = parseFloat(document.getElementById('ti_amount').value);
   if (!date) { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'ti_date'); return; }
@@ -326,6 +361,7 @@ async function saveTankIncome() {
 
 async function deleteTankIncome(id) {
   const r = (data.tankIncomes || []).find(x => x.id === id);
+  if (r && tanksAll().find(t => t.id === r.tankId)?.archived) { showToast('Для изменения истории восстановите ёмкость из архива'); return; }
   // У перемещения две половины: минус на ёмкости-источнике и плюс на приёмнике.
   // Удаляем обе разом, иначе топливо появится или исчезнет из ниоткуда.
   if (r && r.linkId) {
@@ -349,7 +385,8 @@ async function deleteTankIncome(id) {
 
 function openTankTransfer() {
   if (!selectedTankId) return;
-  const others = tanksAll().filter(t => t.id !== selectedTankId);
+  if (tanksAll().find(t => t.id === selectedTankId)?.archived) { showToast('Восстановите ёмкость для новых операций'); return; }
+  const others = tanksAll().filter(t => t.id !== selectedTankId && !t.archived);
   if (!others.length) { alert('Нужна хотя бы ещё одна ёмкость, чтобы переместить топливо.'); return; }
   document.getElementById('tt_date').value = fmtDate(new Date().toISOString().split('T')[0]);
   ['tt_amount','tt_sum','tt_note'].forEach(id => document.getElementById(id).value = '');
@@ -388,7 +425,11 @@ async function saveTankTransfer() {
   const fromId = dir === 'out' ? selectedTankId : otherId;
   const toId   = dir === 'out' ? otherId : selectedTankId;
   const fromT = tanksAll().find(t => t.id === fromId);
-  const bal = computeTankBalance(fromId).balance;
+  const toT = tanksAll().find(t => t.id === toId);
+  if (!fromT || !toT || fromT.archived || toT.archived) { showToast('Для перемещения нужны две действующие ёмкости'); return; }
+  if ((fromT.fuel || 'diesel') !== (toT.fuel || 'diesel')) { showToast('Перемещение между ёмкостями разных видов топлива запрещено'); return; }
+  if (!validNonnegativeFields(['tt_sum'])) return;
+  const bal = typeof wfTankBalanceAt === 'function' ? wfTankBalanceAt(fromId, date) : computeTankBalance(fromId).balance;
   if (amount > bal && !confirm(`На «${fromT.object || fromT.name}» остаток ${bal.toLocaleString('ru')} л, а перемещается ${amount.toLocaleString('ru')} л. Остаток уйдёт в минус. Продолжить?`)) return;
   addTankTransfer({ fromId, toId, date, amount, sum, note });
   if (!await saveData(data)) return;

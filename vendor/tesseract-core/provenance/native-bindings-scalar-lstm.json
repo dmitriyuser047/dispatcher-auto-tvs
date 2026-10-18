@@ -1,0 +1,1417 @@
+{
+  "inspection": "static-js-mapping-and-wasm-export-section",
+  "javascriptEvaluated": false,
+  "wasmInstantiated": false,
+  "cppBindingDefinitions": 234,
+  "emittedJsBindingReferences": 234,
+  "emittedJsMappings": 234,
+  "binaryFunctionExports": 306,
+  "missingDefinitions": [],
+  "missingReferences": [],
+  "mappings": [
+    {
+      "binding": "emscripten_bind_BoolPtr___destroy___0",
+      "exportName": "R",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_BoxPtr___destroy___0",
+      "exportName": "Ec",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Box___destroy___0",
+      "exportName": "xb",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Box_get_h_0",
+      "exportName": "vb",
+      "functionIndex": 415,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Box_get_refcount_0",
+      "exportName": "wb",
+      "functionIndex": 788,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Box_get_w_0",
+      "exportName": "ub",
+      "functionIndex": 510,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Box_get_x_0",
+      "exportName": "sb",
+      "functionIndex": 511,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Box_get_y_0",
+      "exportName": "tb",
+      "functionIndex": 450,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Boxa___destroy___0",
+      "exportName": "cc",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Boxa_get_box_0",
+      "exportName": "bc",
+      "functionIndex": 415,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Boxa_get_n_0",
+      "exportName": "_b",
+      "functionIndex": 511,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Boxa_get_nalloc_0",
+      "exportName": "$b",
+      "functionIndex": 450,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Boxa_get_refcount_0",
+      "exportName": "ac",
+      "functionIndex": 510,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ChoiceIterator_ChoiceIterator_1",
+      "exportName": "Jb",
+      "functionIndex": 2370,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ChoiceIterator_Confidence_0",
+      "exportName": "Mb",
+      "functionIndex": 2337,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ChoiceIterator_GetUTF8Text_0",
+      "exportName": "Lb",
+      "functionIndex": 2348,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ChoiceIterator_Next_0",
+      "exportName": "Kb",
+      "functionIndex": 2359,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ChoiceIterator___destroy___0",
+      "exportName": "Nb",
+      "functionIndex": 1396,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Dawg___destroy___0",
+      "exportName": "Dc",
+      "functionIndex": 561,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_DoublePtr___destroy___0",
+      "exportName": "Cc",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ETEXT_DESC___destroy___0",
+      "exportName": "Sa",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_FloatPtr___destroy___0",
+      "exportName": "Ib",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_IntPtr___destroy___0",
+      "exportName": "Tb",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_LongStarPtr___destroy___0",
+      "exportName": "$",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_OSBestResult___destroy___0",
+      "exportName": "Zb",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_OSBestResult_get_oconfidence_0",
+      "exportName": "Yb",
+      "functionIndex": 2321,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_OSBestResult_get_orientation_id_0",
+      "exportName": "Vb",
+      "functionIndex": 511,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_OSBestResult_get_sconfidence_0",
+      "exportName": "Xb",
+      "functionIndex": 2325,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_OSBestResult_get_script_id_0",
+      "exportName": "Wb",
+      "functionIndex": 450,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_OSResults_OSResults_0",
+      "exportName": "Yd",
+      "functionIndex": 3458,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_OSResults___destroy___0",
+      "exportName": "ae",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_OSResults_get_best_result_0",
+      "exportName": "_d",
+      "functionIndex": 3456,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_OSResults_get_unicharset_0",
+      "exportName": "$d",
+      "functionIndex": 3455,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_OSResults_print_scores_0",
+      "exportName": "Zd",
+      "functionIndex": 3457,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Orientation___destroy___0",
+      "exportName": "Ub",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_Baseline_5",
+      "exportName": "ib",
+      "functionIndex": 1671,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_Begin_0",
+      "exportName": "Ta",
+      "functionIndex": 2105,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_BlockPolygon_0",
+      "exportName": "fb",
+      "functionIndex": 1722,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_BlockType_0",
+      "exportName": "eb",
+      "functionIndex": 1749,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_BoundingBoxInternal_5",
+      "exportName": "cb",
+      "functionIndex": 1794,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_BoundingBox_5",
+      "exportName": "ab",
+      "functionIndex": 1851,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_BoundingBox_6",
+      "exportName": "bb",
+      "functionIndex": 1826,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_Cmp_1",
+      "exportName": "_a",
+      "functionIndex": 1878,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_Empty_1",
+      "exportName": "db",
+      "functionIndex": 1768,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_GetBinaryImage_1",
+      "exportName": "gb",
+      "functionIndex": 1702,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_GetImage_5",
+      "exportName": "hb",
+      "functionIndex": 1691,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_IsAtBeginningOf_1",
+      "exportName": "Ya",
+      "functionIndex": 1934,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_IsAtFinalElement_2",
+      "exportName": "Za",
+      "functionIndex": 1897,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_IsWithinFirstTextlineOfParagraph_0",
+      "exportName": "Va",
+      "functionIndex": 2028,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_Next_1",
+      "exportName": "Xa",
+      "functionIndex": 1964,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_Orientation_4",
+      "exportName": "jb",
+      "functionIndex": 1613,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_ParagraphInfo_4",
+      "exportName": "kb",
+      "functionIndex": 1577,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_RestartParagraph_0",
+      "exportName": "Ua",
+      "functionIndex": 2069,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_RestartRow_0",
+      "exportName": "Wa",
+      "functionIndex": 2001,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator_SetBoundingBoxComponents_2",
+      "exportName": "$a",
+      "functionIndex": 1865,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PageIterator___destroy___0",
+      "exportName": "lb",
+      "functionIndex": 561,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ParagraphJustification___destroy___0",
+      "exportName": "Q",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PixColormap___destroy___0",
+      "exportName": "hc",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PixColormap_get_array_0",
+      "exportName": "dc",
+      "functionIndex": 511,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PixColormap_get_depth_0",
+      "exportName": "ec",
+      "functionIndex": 450,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PixColormap_get_n_0",
+      "exportName": "gc",
+      "functionIndex": 415,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PixColormap_get_nalloc_0",
+      "exportName": "fc",
+      "functionIndex": 510,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PixPtr___destroy___0",
+      "exportName": "Ob",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix___destroy___0",
+      "exportName": "Bc",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix_get_colormap_0",
+      "exportName": "zc",
+      "functionIndex": 2273,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix_get_d_0",
+      "exportName": "qc",
+      "functionIndex": 510,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix_get_data_0",
+      "exportName": "Ac",
+      "functionIndex": 2270,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix_get_h_0",
+      "exportName": "pc",
+      "functionIndex": 450,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix_get_informat_0",
+      "exportName": "wc",
+      "functionIndex": 2301,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix_get_refcount_0",
+      "exportName": "tc",
+      "functionIndex": 1373,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix_get_special_0",
+      "exportName": "xc",
+      "functionIndex": 2290,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix_get_spp_0",
+      "exportName": "rc",
+      "functionIndex": 415,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix_get_text_0",
+      "exportName": "yc",
+      "functionIndex": 2284,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix_get_w_0",
+      "exportName": "oc",
+      "functionIndex": 511,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix_get_wpl_0",
+      "exportName": "sc",
+      "functionIndex": 788,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix_get_xres_0",
+      "exportName": "uc",
+      "functionIndex": 2312,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pix_get_yres_0",
+      "exportName": "vc",
+      "functionIndex": 1002,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_PixaPtr___destroy___0",
+      "exportName": "Hb",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pixa___destroy___0",
+      "exportName": "ge",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pixa_get_boxa_0",
+      "exportName": "fe",
+      "functionIndex": 788,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pixa_get_n_0",
+      "exportName": "be",
+      "functionIndex": 511,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pixa_get_nalloc_0",
+      "exportName": "ce",
+      "functionIndex": 450,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pixa_get_pix_0",
+      "exportName": "ee",
+      "functionIndex": 415,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pixa_get_refcount_0",
+      "exportName": "de",
+      "functionIndex": 510,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pta___destroy___0",
+      "exportName": "nc",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pta_get_n_0",
+      "exportName": "ic",
+      "functionIndex": 511,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pta_get_nalloc_0",
+      "exportName": "jc",
+      "functionIndex": 450,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pta_get_refcount_0",
+      "exportName": "kc",
+      "functionIndex": 510,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pta_get_x_0",
+      "exportName": "lc",
+      "functionIndex": 415,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_Pta_get_y_0",
+      "exportName": "mc",
+      "functionIndex": 788,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_Baseline_5",
+      "exportName": "ta",
+      "functionIndex": 1671,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_Begin_0",
+      "exportName": "ca",
+      "functionIndex": 2105,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_BlockPolygon_0",
+      "exportName": "qa",
+      "functionIndex": 1722,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_BlockType_0",
+      "exportName": "pa",
+      "functionIndex": 1749,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_BoundingBoxInternal_5",
+      "exportName": "na",
+      "functionIndex": 1794,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_BoundingBox_5",
+      "exportName": "la",
+      "functionIndex": 1851,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_BoundingBox_6",
+      "exportName": "ma",
+      "functionIndex": 1826,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_Cmp_1",
+      "exportName": "ja",
+      "functionIndex": 1878,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_Confidence_1",
+      "exportName": "Ba",
+      "functionIndex": 2478,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_Empty_1",
+      "exportName": "oa",
+      "functionIndex": 1768,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_EquivalentToTruth_1",
+      "exportName": "Ja",
+      "functionIndex": 2463,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_GetBinaryImage_1",
+      "exportName": "ra",
+      "functionIndex": 1702,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_GetImage_5",
+      "exportName": "sa",
+      "functionIndex": 1691,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_GetUTF8Text_1",
+      "exportName": "ya",
+      "functionIndex": 2601,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_HasBlamerInfo_0",
+      "exportName": "Ha",
+      "functionIndex": 2467,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_HasTruthString_0",
+      "exportName": "Ia",
+      "functionIndex": 2466,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_IsAtBeginningOf_1",
+      "exportName": "ha",
+      "functionIndex": 1934,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_IsAtFinalElement_2",
+      "exportName": "ia",
+      "functionIndex": 1897,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_IsWithinFirstTextlineOfParagraph_0",
+      "exportName": "ea",
+      "functionIndex": 2028,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_Next_1",
+      "exportName": "ga",
+      "functionIndex": 1964,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_Orientation_4",
+      "exportName": "va",
+      "functionIndex": 1613,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_ParagraphInfo_4",
+      "exportName": "wa",
+      "functionIndex": 1577,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_ParagraphIsLtr_0",
+      "exportName": "xa",
+      "functionIndex": 2647,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_RestartParagraph_0",
+      "exportName": "da",
+      "functionIndex": 2069,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_RestartRow_0",
+      "exportName": "fa",
+      "functionIndex": 2001,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_ResultIterator_1",
+      "exportName": "ba",
+      "functionIndex": 3600,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_RowAttributes_3",
+      "exportName": "ua",
+      "functionIndex": 2709,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_SetBoundingBoxComponents_2",
+      "exportName": "ka",
+      "functionIndex": 1865,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_SetLineSeparator_1",
+      "exportName": "za",
+      "functionIndex": 2564,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_SetParagraphSeparator_1",
+      "exportName": "Aa",
+      "functionIndex": 2494,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_SymbolIsDropcap_0",
+      "exportName": "Pa",
+      "functionIndex": 2428,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_SymbolIsSubscript_0",
+      "exportName": "Oa",
+      "functionIndex": 2433,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_SymbolIsSuperscript_0",
+      "exportName": "Na",
+      "functionIndex": 2440,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_WordDirection_0",
+      "exportName": "Ea",
+      "functionIndex": 2472,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_WordFontAttributes_8",
+      "exportName": "Ca",
+      "functionIndex": 2477,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_WordIsFromDictionary_0",
+      "exportName": "Fa",
+      "functionIndex": 2471,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_WordIsNumeric_0",
+      "exportName": "Ga",
+      "functionIndex": 2468,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_WordLattice_1",
+      "exportName": "Ma",
+      "functionIndex": 2446,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_WordNormedUTF8Text_0",
+      "exportName": "La",
+      "functionIndex": 2454,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_WordRecognitionLanguage_0",
+      "exportName": "Da",
+      "functionIndex": 2475,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator_WordTruthUTF8Text_0",
+      "exportName": "Ka",
+      "functionIndex": 2458,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_ResultIterator___destroy___0",
+      "exportName": "Qa",
+      "functionIndex": 561,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_AdaptToWordStr_2",
+      "exportName": "Md",
+      "functionIndex": 3472,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_AllWordConfidences_0",
+      "exportName": "Ld",
+      "functionIndex": 3473,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_AnalyseLayout_0",
+      "exportName": "xd",
+      "functionIndex": 3525,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_AnalyseLayout_1",
+      "exportName": "yd",
+      "functionIndex": 3521,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_ClearAdaptiveClassifier_0",
+      "exportName": "ed",
+      "functionIndex": 3577,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_ClearPersistentCache_0",
+      "exportName": "Pd",
+      "functionIndex": 3468,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_Clear_0",
+      "exportName": "Nd",
+      "functionIndex": 3471,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_DetectOS_1",
+      "exportName": "Sd",
+      "functionIndex": 3464,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_End_0",
+      "exportName": "Od",
+      "functionIndex": 3469,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_FindLines_0",
+      "exportName": "md",
+      "functionIndex": 3561,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetBoolVariable_2",
+      "exportName": "Rc",
+      "functionIndex": 2234,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetBoxText_1",
+      "exportName": "Hd",
+      "functionIndex": 3488,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetComponentImages_4",
+      "exportName": "ud",
+      "functionIndex": 3537,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetComponentImages_7",
+      "exportName": "vd",
+      "functionIndex": 3530,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetConnectedComponents_1",
+      "exportName": "td",
+      "functionIndex": 3541,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetDatapath_0",
+      "exportName": "Mc",
+      "functionIndex": 2254,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetDawg_1",
+      "exportName": "Ud",
+      "functionIndex": 3462,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetDoubleVariable_2",
+      "exportName": "Sc",
+      "functionIndex": 2224,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetGradient_0",
+      "exportName": "nd",
+      "functionIndex": 3559,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetHOCRText_1",
+      "exportName": "Ed",
+      "functionIndex": 3497,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetInitLanguagesAsString_0",
+      "exportName": "Zc",
+      "functionIndex": 2160,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetInputImage_0",
+      "exportName": "Kc",
+      "functionIndex": 2256,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetInputName_0",
+      "exportName": "Ic",
+      "functionIndex": 2258,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetIntVariable_2",
+      "exportName": "Qc",
+      "functionIndex": 2236,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetIterator_0",
+      "exportName": "Cd",
+      "functionIndex": 3502,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetJSONText_1",
+      "exportName": "Fd",
+      "functionIndex": 3492,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetOsdText_1",
+      "exportName": "Jd",
+      "functionIndex": 3478,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetPageSegMode_0",
+      "exportName": "cd",
+      "functionIndex": 3588,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetRegions_1",
+      "exportName": "od",
+      "functionIndex": 3557,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetSourceYResolution_0",
+      "exportName": "Lc",
+      "functionIndex": 2255,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetStringVariable_1",
+      "exportName": "Tc",
+      "functionIndex": 2216,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetStrips_2",
+      "exportName": "rd",
+      "functionIndex": 3549,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetTSVText_1",
+      "exportName": "Gd",
+      "functionIndex": 3491,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetTextlines_2",
+      "exportName": "pd",
+      "functionIndex": 3556,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetTextlines_5",
+      "exportName": "qd",
+      "functionIndex": 3553,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetThresholdedImageScaleFactor_0",
+      "exportName": "wd",
+      "functionIndex": 3528,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetThresholdedImage_0",
+      "exportName": "kd",
+      "functionIndex": 3563,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetUNLVText_0",
+      "exportName": "Id",
+      "functionIndex": 3485,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetUTF8Text_0",
+      "exportName": "Dd",
+      "functionIndex": 3501,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetUnichar_1",
+      "exportName": "Td",
+      "functionIndex": 3463,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_GetWords_1",
+      "exportName": "sd",
+      "functionIndex": 3546,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_InitForAnalysePage_0",
+      "exportName": "_c",
+      "functionIndex": 2150,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_Init_2",
+      "exportName": "Wc",
+      "functionIndex": 2191,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_Init_3",
+      "exportName": "Xc",
+      "functionIndex": 2181,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_Init_4",
+      "exportName": "Yc",
+      "functionIndex": 2170,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_IsValidCharacter_1",
+      "exportName": "Rd",
+      "functionIndex": 3465,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_IsValidWord_1",
+      "exportName": "Qd",
+      "functionIndex": 3467,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_MeanTextConf_0",
+      "exportName": "Kd",
+      "functionIndex": 3474,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_NumDawgs_0",
+      "exportName": "Vd",
+      "functionIndex": 3460,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_ProcessPage_6",
+      "exportName": "Bd",
+      "functionIndex": 3505,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_ProcessPages_4",
+      "exportName": "Ad",
+      "functionIndex": 3507,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_ReadConfigFile_1",
+      "exportName": "$c",
+      "functionIndex": 2141,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_ReadDebugConfigFile_1",
+      "exportName": "ad",
+      "functionIndex": 3599,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_Recognize_1",
+      "exportName": "zd",
+      "functionIndex": 3514,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_RestoreParameters_1",
+      "exportName": "Vc",
+      "functionIndex": 2200,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_SaveParameters_1",
+      "exportName": "Uc",
+      "functionIndex": 2207,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_SetDebugVariable_2",
+      "exportName": "Pc",
+      "functionIndex": 2239,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_SetImageFile_1",
+      "exportName": "hd",
+      "functionIndex": 3570,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_SetImage_1",
+      "exportName": "fd",
+      "functionIndex": 3574,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_SetImage_5",
+      "exportName": "gd",
+      "functionIndex": 3572,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_SetInputImage_1",
+      "exportName": "Jc",
+      "functionIndex": 2257,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_SetInputName_1",
+      "exportName": "Hc",
+      "functionIndex": 2259,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_SetOutputName_1",
+      "exportName": "Nc",
+      "functionIndex": 2251,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_SetPageSegMode_1",
+      "exportName": "bd",
+      "functionIndex": 3595,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_SetRectangle_4",
+      "exportName": "jd",
+      "functionIndex": 3565,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_SetSourceResolution_1",
+      "exportName": "id",
+      "functionIndex": 3568,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_SetVariable_2",
+      "exportName": "Oc",
+      "functionIndex": 2246,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_TessBaseAPI_0",
+      "exportName": "Fc",
+      "functionIndex": 2265,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_TesseractRect_7",
+      "exportName": "dd",
+      "functionIndex": 3581,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_Version_0",
+      "exportName": "Gc",
+      "functionIndex": 2262,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_WriteImage_0",
+      "exportName": "ld",
+      "functionIndex": 3562,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI___destroy___0",
+      "exportName": "Xd",
+      "functionIndex": 561,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessBaseAPI_oem_0",
+      "exportName": "Wd",
+      "functionIndex": 3459,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessPDFRenderer_AddImage_1",
+      "exportName": "Ab",
+      "functionIndex": 1614,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessPDFRenderer_BeginDocument_1",
+      "exportName": "zb",
+      "functionIndex": 1852,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessPDFRenderer_EndDocument_0",
+      "exportName": "Bb",
+      "functionIndex": 1436,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessPDFRenderer_TessPDFRenderer_3",
+      "exportName": "yb",
+      "functionIndex": 2381,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessPDFRenderer___destroy___0",
+      "exportName": "Gb",
+      "functionIndex": 561,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessPDFRenderer_file_extension_0",
+      "exportName": "Db",
+      "functionIndex": 415,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessPDFRenderer_happy_0",
+      "exportName": "Cb",
+      "functionIndex": 798,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessPDFRenderer_imagenum_0",
+      "exportName": "Fb",
+      "functionIndex": 1002,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessPDFRenderer_title_0",
+      "exportName": "Eb",
+      "functionIndex": 1359,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessResultRenderer_AddImage_1",
+      "exportName": "T",
+      "functionIndex": 1614,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessResultRenderer_BeginDocument_1",
+      "exportName": "S",
+      "functionIndex": 1852,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessResultRenderer_EndDocument_0",
+      "exportName": "U",
+      "functionIndex": 1436,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessResultRenderer___destroy___0",
+      "exportName": "Z",
+      "functionIndex": 561,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessResultRenderer_file_extension_0",
+      "exportName": "W",
+      "functionIndex": 415,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessResultRenderer_happy_0",
+      "exportName": "V",
+      "functionIndex": 798,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessResultRenderer_imagenum_0",
+      "exportName": "Y",
+      "functionIndex": 1002,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TessResultRenderer_title_0",
+      "exportName": "X",
+      "functionIndex": 1359,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_TextlineOrder___destroy___0",
+      "exportName": "Ra",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_UNICHARSET___destroy___0",
+      "exportName": "Sb",
+      "functionIndex": 2327,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_UNICHARSET_get_script_from_script_id_1",
+      "exportName": "Pb",
+      "functionIndex": 2334,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_UNICHARSET_get_script_id_from_name_1",
+      "exportName": "Qb",
+      "functionIndex": 2332,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_UNICHARSET_get_script_table_size_0",
+      "exportName": "Rb",
+      "functionIndex": 1373,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_VoidPtr___destroy___0",
+      "exportName": "aa",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_WordChoiceIterator_Confidence_0",
+      "exportName": "qb",
+      "functionIndex": 2419,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_WordChoiceIterator_GetUTF8Text_0",
+      "exportName": "pb",
+      "functionIndex": 2420,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_WordChoiceIterator_Next_0",
+      "exportName": "ob",
+      "functionIndex": 2424,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_WordChoiceIterator_WordChoiceIterator_1",
+      "exportName": "nb",
+      "functionIndex": 2425,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_WordChoiceIterator___destroy___0",
+      "exportName": "rb",
+      "functionIndex": 1396,
+      "wasmExportsObject": "wasmExports"
+    },
+    {
+      "binding": "emscripten_bind_WritingDirection___destroy___0",
+      "exportName": "mb",
+      "functionIndex": 143,
+      "wasmExportsObject": "wasmExports"
+    }
+  ]
+}

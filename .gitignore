@@ -1,5 +1,13 @@
 node_modules/
 dist/
+.builder-cache/
+.builder-stage-*/
+.builder-stage-config.json
+.native-ocr/
+.recovery/
+audit/
+outputs/
+.builder-afterpack.cjs
 *.log
 .DS_Store
 Thumbs.db
@@ -12,3 +20,4 @@ audit/gsm-cross-*.html
 # докачивается из интернета при первом запуске и не работает без сети.
 !rus.traineddata
 !eng.traineddata
+!assets/ocr/models/**/*.traineddata

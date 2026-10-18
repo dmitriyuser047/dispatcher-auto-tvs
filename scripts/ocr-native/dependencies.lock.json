@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "coreRepository": "naptha/tesseract.js-core",
+  "coreCommit": "acffef2b66eb44a31df297e11d905f4b39001068",
+  "pinSource": "https://api.github.com/repos/naptha/tesseract.js-core/git/trees/acffef2b66eb44a31df297e11d905f4b39001068?recursive=1",
+  "sources": [
+    {
+      "name": "giflib",
+      "repository": "mirrorer/giflib",
+      "upstreamModuleUrl": "https://github.com/mirrorer/giflib.git",
+      "commit": "fa37672085ce4b3d62c51627ab3c8cf2dda8009a",
+      "archiveUrl": "https://codeload.github.com/mirrorer/giflib/zip/fa37672085ce4b3d62c51627ab3c8cf2dda8009a",
+      "archiveBytes": 803029,
+      "archiveSha256": "d7efd1b5bd4514c6537cd754a4292bb6454542c8cfb8b5651c58b2f1645702f5"
+    },
+    {
+      "name": "leptonica",
+      "repository": "DanBloomberg/leptonica",
+      "upstreamModuleUrl": "https://github.com/DanBloomberg/leptonica.git",
+      "commit": "4af068b56a9674da915debea4ed7e1b9885b17e8",
+      "archiveUrl": "https://codeload.github.com/DanBloomberg/leptonica/zip/4af068b56a9674da915debea4ed7e1b9885b17e8",
+      "archiveBytes": 13727787,
+      "archiveSha256": "b69fc6acb41ef50b4de9d41c723bf2decb6c878f6bd3adf80edc1eacefdfab76"
+    },
+    {
+      "name": "libjpeg",
+      "repository": "LuaDist/libjpeg",
+      "upstreamModuleUrl": "https://github.com/LuaDist/libjpeg.git",
+      "commit": "6c0fcb8ddee365e7abc4d332662b06900612e923",
+      "archiveUrl": "https://codeload.github.com/LuaDist/libjpeg/zip/6c0fcb8ddee365e7abc4d332662b06900612e923",
+      "archiveBytes": 1118495,
+      "archiveSha256": "2dc1a1203fcadbf63d6c381a82f77159a51c5b6d8dcf446b33963ca9ad780d6b"
+    },
+    {
+      "name": "libpng",
+      "repository": "glennrp/libpng",
+      "upstreamModuleUrl": "https://github.com/glennrp/libpng.git",
+      "commit": "a37d4836519517bdce6cb9d956092321eca3e73b",
+      "archiveUrl": "https://codeload.github.com/glennrp/libpng/zip/a37d4836519517bdce6cb9d956092321eca3e73b",
+      "archiveBytes": 1807148,
+      "archiveSha256": "cf06b902892649469c9da6abf5465e34e5f49ecacedf4be2588fefa27da49f84"
+    },
+    {
+      "name": "libtiff",
+      "repository": "libsdl-org/libtiff",
+      "upstreamModuleUrl": "https://gitlab.com/libtiff/libtiff.git",
+      "commit": "b51bb157123264e26d34c09cc673d213aea61fc7",
+      "archiveUrl": "https://codeload.github.com/libsdl-org/libtiff/zip/b51bb157123264e26d34c09cc673d213aea61fc7",
+      "archiveBytes": 2884540,
+      "archiveSha256": "92d6035149139e33891a302c3ea44649d2968dea16d548078f32f1a255f0228c"
+    },
+    {
+      "name": "libwebp",
+      "repository": "webmproject/libwebp",
+      "upstreamModuleUrl": "https://github.com/webmproject/libwebp.git",
+      "commit": "20ef03ee351d4ff03fc5ff3ec4804a879d1b9d5c",
+      "archiveUrl": "https://codeload.github.com/webmproject/libwebp/zip/20ef03ee351d4ff03fc5ff3ec4804a879d1b9d5c",
+      "archiveBytes": 3867802,
+      "archiveSha256": "457e69dbc49953c4f0b18bcb16550240d5ee7ae12fca64b21786f27480da5f5e"
+    },
+    {
+      "name": "openlibm",
+      "repository": "JuliaMath/openlibm",
+      "upstreamModuleUrl": "https://github.com/JuliaMath/openlibm.git",
+      "commit": "ae2d91698508701c83cab83714d42a1146dccf85",
+      "archiveUrl": "https://codeload.github.com/JuliaMath/openlibm/zip/ae2d91698508701c83cab83714d42a1146dccf85",
+      "archiveBytes": 754516,
+      "archiveSha256": "3abebbec331679e92085d0e15631120a5ea59c7b2193bbd7fa25027cea7b303a"
+    },
+    {
+      "name": "zlib",
+      "repository": "madler/zlib",
+      "upstreamModuleUrl": "https://github.com/madler/zlib.git",
+      "commit": "21767c654d31d2dccdde4330529775c6c5fd5389",
+      "archiveUrl": "https://codeload.github.com/madler/zlib/zip/21767c654d31d2dccdde4330529775c6c5fd5389",
+      "archiveBytes": 1692581,
+      "archiveSha256": "b860a877983100f28c7bcf2f3bb7abbca8833e7ce3af79edfda21358441435d3"
+    }
+  ],
+  "recipes": [
+    {
+      "path": "build-scripts/build-giflib.sh",
+      "gitBlobSha1": "86aba69ffe2465612e626f8ad9eb7c0d5b8d6b1d",
+      "bytes": 515
+    },
+    {
+      "path": "build-scripts/build-leptonica.sh",
+      "gitBlobSha1": "ea99d1b49b1c065ac4bdda7997cf3a6a46bd8be2",
+      "bytes": 1029
+    },
+    {
+      "path": "build-scripts/build-libjpeg.sh",
+      "gitBlobSha1": "c46ceecb03ac1c4c507dee31ceaec1840abc2ed9",
+      "bytes": 544
+    },
+    {
+      "path": "build-scripts/build-libpng.sh",
+      "gitBlobSha1": "ec1ea99965d18668f2f318eaabaf1582911e9014",
+      "bytes": 560
+    },
+    {
+      "path": "build-scripts/build-libtiff.sh",
+      "gitBlobSha1": "28879b41bff5fe658da18cf16e9998770a331f4c",
+      "bytes": 514
+    },
+    {
+      "path": "build-scripts/build-libwebp.sh",
+      "gitBlobSha1": "1cc8cdc3a9fc2cbe8e5d10e2ad8301540bd2d05f",
+      "bytes": 1227
+    },
+    {
+      "path": "build-scripts/build-openlibm.sh",
+      "gitBlobSha1": "f2b06811bcd17deff091a4d94bc7ff3990c8ddea",
+      "bytes": 229
+    },
+    {
+      "path": "build-scripts/build-tesseract.sh",
+      "gitBlobSha1": "78c16dab4ae438f22f49f99777c1ba4d6f885f78",
+      "bytes": 1707
+    },
+    {
+      "path": "build-scripts/build-zlib.sh",
+      "gitBlobSha1": "139128a867ba49721cf05217c9b263f0e709add6",
+      "bytes": 641
+    },
+    {
+      "path": "build-scripts/install-deps.sh",
+      "gitBlobSha1": "c961dba86160ff071c70c32039270db8dcdce9d8",
+      "bytes": 387
+    },
+    {
+      "path": "build-scripts/var.sh",
+      "gitBlobSha1": "557f0bc2701486467e82c92b3c10162bb7698eb6",
+      "bytes": 2054
+    }
+  ]
+}

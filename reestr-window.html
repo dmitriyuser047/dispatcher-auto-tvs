@@ -150,6 +150,8 @@
     border-radius: 50%; animation: spin .7s linear infinite;
   }
 </style>
+<link rel="stylesheet" href="assets/css/experience.css">
+<link rel="stylesheet" href="assets/css/recognition.css">
 </head>
 <body>
 
@@ -187,6 +189,7 @@
         <th style="min-width:180px">Статья БДДС</th>
         <th style="width:140px">Тип оплаты</th>
         <th style="min-width:160px">Договор</th>
+        <th style="width:100px">Проверка</th>
         <th style="width:36px"></th>
       </tr></thead>
       <tbody id="tbody"></tbody>
@@ -206,6 +209,7 @@
   </div>
 </div>
 
+<script src="assets/js/40-recognition-ui.js"></script>
 <script>
 const theme = localStorage.getItem('theme');
 if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
@@ -572,6 +576,18 @@ function renderTable() {
     tdDog.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
     tdDog.appendChild(buildDropdownPicker(row.dog, contractItems, '— договор —', (val) => { rows[i].dog = val; }));
     tr.appendChild(tdDog);
+
+    // Read the preserved source without changing edited registry values.
+    const tdSource = document.createElement('td');
+    tdSource.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
+    const sourceBtn = document.createElement('button');
+    sourceBtn.type = 'button';
+    sourceBtn.className = 'btn btn-ghost rx-source-trigger';
+    sourceBtn.textContent = 'Источник';
+    sourceBtn.title = row.recognition ? 'Реквизиты и исходные строки документа' : 'Проверить наличие сохранённого источника';
+    sourceBtn.addEventListener('click', () => rxShowSource(row));
+    tdSource.appendChild(sourceBtn);
+    tr.appendChild(tdSource);
 
     // Удалить
     const tdDel = document.createElement('td');

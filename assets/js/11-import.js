@@ -2,13 +2,60 @@
 // Выделено из index.html
 
 // ─── IMPORT FROM XLS ────────────────────────────────────
+function importPlanFingerprint(db) { return JSON.stringify(['vehicles','records','fuelPurchases','fuelImports','fuelCards','fuelPeriods'].map(name => db[name] || [])); }
+async function importArchiveSource(file) {
+  if (!window.electronAPI?.archiveImportSource) return { available:false, reason:'Архив исходников недоступен в этом режиме' };
+  const result=await window.electronAPI.archiveImportSource({name:file.name,bytes:Array.from(new Uint8Array(await file.arrayBuffer()))});
+  if (!result?.ok) return {available:false,reason:result?.error || 'Архив исходников на сервере недоступен'};
+  return {available:true,id:result.id,sha256:result.sha256,size:result.size,name:result.name};
+}
+function importConfirmPlan(title,body,buttonText) {
+  return new Promise(resolve => {
+    if (typeof wfShowDialog !== 'function') { alert('Предварительный просмотр недоступен. Перезапустите программу.'); resolve(false); return; }
+    wfShowDialog(title,body,'<button class="btn btn-ghost" id="importPlanCancel">Отмена</button><button class="btn btn-primary" id="importPlanCommit">'+fpEsc(buttonText || 'Применить план')+'</button>');
+    const modal=document.getElementById('wfModal'); let finished=false;
+    const finish=value => { if (finished) return; finished=true; observer.disconnect(); document.removeEventListener('keydown',onKey,true); if(modal.isConnected && document.getElementById('wfModal') === modal) closeModal('wfModal'); resolve(value); };
+    const onKey=event => { if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); finish(false); } };
+    const observer=new MutationObserver(() => { if (!modal.isConnected || !modal.classList.contains('open')) finish(false); });
+    observer.observe(document.body,{childList:true}); observer.observe(modal,{attributes:true,attributeFilter:['class']});
+    document.addEventListener('keydown',onKey,true);
+    document.getElementById('importPlanCancel').onclick=() => finish(false);
+    document.getElementById('importPlanCommit').onclick=() => finish(true);
+    const close=modal.querySelector('.modal-header .icon-btn'); if(close) close.onclick=() => finish(false);
+  });
+}
+function fuelImportKeyV2(tx) {
+  const text=value => String(value || '').trim().replace(/\s+/g,' ').toLocaleLowerCase('ru');
+  const provider=text(tx.provider || (typeof fcGuessProvider === 'function' ? fcGuessProvider(String(tx.cardNo || '').replace(/\D/g,'')) : '') || 'не указан');
+  return 'v2:' + JSON.stringify(tx.supplierTransactionId ? [provider,tx.operationKind || 'purchase','id',text(tx.supplierTransactionId)] :
+    [provider,tx.operationKind || 'purchase','row',tx.date,tx.time || '',String(tx.cardNo || '').replace(/\D/g,''),text(tx.fuel),fuelImportRoundLitres(tx.qty),plateKey(tx.plate),text(tx.comment)]);
+}
+function fuelImportRecognizedGrade(product) {
+  const text=String(product || '').toUpperCase().replace(/Ё/g,'Е');
+  if (/ПРИСАД|АНТИГЕЛ|МАСЛ|МОЙК|ОМЫВ|ADBLUE|АДБЛЮ|КАРБАМИД|КОМИСС|СЕРВИС/.test(text)) return '';
+  const grade=parseFuelGrade(text);
+  if (/^АИ-/.test(grade) && !/АИ|A[IИ]|БЕНЗ|G[ -]?DRIVE|ULTIMATE|PULSAR|ЭКТО|ATUM|РЕГУЛЯР|ПРЕМИУМ|СУПЕР|REGULAR|PREMIUM|SUPER/.test(text) && !/^\s*(92|95|98|100)\s*$/.test(text)) return '';
+  if (grade === 'Газ' && !/(?:^|\s)ГАЗ(?:\s|$)|ГБО|ПРОПАН|МЕТАН|СУГ|LPG|CNG/.test(text)) return '';
+  return grade;
+}
+function fuelImportStampSource(purchase,tx,sourceArchive) {
+  const source={date:tx.date,time:tx.time || '',qty:tx.qty,sum:tx.sum,product:tx.fuel || '',provider:tx.provider || '',supplierTransactionId:tx.supplierTransactionId || '',sourceRow:tx.sourceRow};
+  if (!purchase.sourceTransaction && (fuelImportRoundLitres(purchase.qty) !== fuelImportRoundLitres(tx.qty) || purchase.grade && fuelImportRecognizedGrade(tx.fuel) && purchase.grade !== fuelImportRecognizedGrade(tx.fuel))) purchase.sourceChanged=true;
+  if (purchase.sourceTransaction && JSON.stringify(purchase.sourceTransaction) !== JSON.stringify(source)) {
+    const values=['date','time','qty','sum','product'].some(field => purchase.sourceTransaction[field] !== source[field]);
+    if (values) { purchase.sourceChanged=true; (purchase.sourceVersions || (purchase.sourceVersions=[])).push({at:new Date().toISOString(),values:source}); }
+  }
+  if (!purchase.sourceTransaction) purchase.sourceTransaction=source;
+  Object.assign(purchase,{importKeyV2:tx.importKeyV2,supplierTransactionId:tx.supplierTransactionId || '',sourceRow:tx.sourceRow});
+  if (sourceArchive?.available) purchase.sourceArchive=sourceArchive;
+}
 function importVehiclesFromXls(input) {
   const file = input.files[0];
   if (!file) return;
   input.value = '';
 
   const reader = new FileReader();
-  reader.onload = function(e) {
+  reader.onload = async function(e) {
     try {
       const wb = XLSX.read(e.target.result, { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
@@ -47,10 +94,12 @@ function importVehiclesFromXls(input) {
         fuelcard:      col(['топливн', 'карт']),
       };
 
+      const fingerprint=importPlanFingerprint(data), newVehicles=[], decisions=[];
+      const knownPlates=new Set((data.vehicles || []).map(vehicle => plateKey(vehicle.plate)).filter(Boolean));
       let added = 0, skipped = 0;
       const dataRows = rows.slice(headerRow + 1);
 
-      dataRows.forEach(row => {
+      dataRows.forEach((row,index) => {
         const get = (field) => {
           const i = colMap[field];
           return i !== null && i !== undefined ? String(row[i] ?? '').trim() : '';
@@ -61,12 +110,15 @@ function importVehiclesFromXls(input) {
         if (!make && !plate) return; // пустая строка
 
         // Проверяем дубликат по госномеру
-        if (plate && data.vehicles.some(v => v.plate.toLowerCase() === plate.toLowerCase())) {
+        const key=plateKey(plate);
+        if (key && knownPlates.has(key)) {
           skipped++;
+          decisions.push({row:index+headerRow+2,make,plate,status:'Совпадающий госномер: пропустить'});
           return;
         }
+        if (key) knownPlates.add(key);
 
-        data.vehicles.push({
+        newVehicles.push({
           id:            'v_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
           make,
           plate,
@@ -80,7 +132,9 @@ function importVehiclesFromXls(input) {
           fuel:          'diesel',
           norm:          null,
           note:          '',
+          importRow:     index+headerRow+2,
         });
+        decisions.push({row:index+headerRow+2,make,plate,status:plate ? 'Добавить новую машину' : 'Добавить без номера: проверьте карточку'});
         added++;
       });
 
@@ -89,11 +143,21 @@ function importVehiclesFromXls(input) {
         return;
       }
 
-      saveData(data);
+      const body='<p>Новых машин: <b>'+added+'</b>; совпадающих номеров: '+skipped+'. Существующие карточки сохраняются. Номера сравниваются с учётом пробелов и одинаковых русских/латинских букв.</p><div class="table-scroll" style="max-height:60vh"><table class="data-table"><thead><tr><th>Строка</th><th>Марка</th><th>Госномер</th><th>Действие</th></tr></thead><tbody>'+decisions.map(item => '<tr><td>'+item.row+'</td><td>'+fpEsc(item.make)+'</td><td>'+fpEsc(item.plate)+'</td><td>'+fpEsc(item.status)+'</td></tr>').join('')+'</tbody></table></div>';
+      if (!await importConfirmPlan('Проверка импорта машин: '+file.name,body,'Добавить '+added+' машин')) return;
+      const sourceArchive=await importArchiveSource(file);
+      if (importPlanFingerprint(data) !== fingerprint) { alert('База изменилась во время проверки. Повторите импорт и проверьте новый план.'); return; }
+      const importId='vi_'+Date.now(), next=JSON.parse(JSON.stringify(data));
+      newVehicles.forEach(vehicle => { vehicle.importSource={importId,fileName:file.name,sourceArchive,row:vehicle.importRow}; });
+      next.vehicles.push(...newVehicles);
+      (next.appMeta || (next.appMeta=[])).push({id:importId,kind:'vehicle-import',at:new Date().toISOString(),fileName:file.name,sourceArchive,added,skipped,decisions});
+      data=next;
+      if (!await saveData(data,{noMerge:true})) return;
       renderVehicleList();
 
       let msg = `Импорт завершён: добавлено ${added} ТС.`;
       if (skipped > 0) msg += `\nПропущено дубликатов (по госномеру): ${skipped}.`;
+      if (!sourceArchive.available) msg+='\n'+sourceArchive.reason;
       alert(msg);
     } catch(err) {
       alert('Ошибка при чтении файла: ' + err.message);
@@ -114,6 +178,7 @@ function importFuelFromXls(input, mode = 'fuel') {
 
   const reader = new FileReader();
   reader.onload = async function(e) {
+    let dryRunBase=null;
     try {
       const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
@@ -146,10 +211,14 @@ function importFuelFromXls(input, mode = 'fuel') {
       const cDate    = col(['дата транзакц', 'дата']);
       const cType    = col(['тип транзакц', 'тип операции']);
       const cQty     = col(['количество']);
-      const cFuel    = col(['товар']);
+      const cFuel    = col(['товар','продукт','наименование топлива']);
       const cComment = col(['комментар', 'местонахождение']);
       const cCard    = col(['номер карт']);
       const cVehicle = col(['закреплена', 'тс', 'транспорт', 'авто']);
+      const cProvider = col(['поставщик карт','оператор карт','эмитент','поставщик']);
+      const cTransactionId = headers.findIndex(header => !/исходн|original/.test(header) && (/^(id|идентификатор)$/.test(header) || ['номер транзакции','№ транзакции','идентификатор транзакции','id транзакции','номер операции','№ операции'].some(name => header.includes(name))));
+      const cOriginalId = col(['исходная транзакция','исходной транзакции','исходной операции','original']);
+      const cTime = col(['время транзакции','время операции','время']);
       // Цена и сумма клиента — то, что платит компания. ГПН: «Цена клиента»,
       // «Сумма к оплате»; офисные карты: «Цена клиента, руб.», «Сумма клиента, руб.».
       const cPrice   = col(['цена клиента']) !== -1 ? col(['цена клиента']) : col(['цена']);
@@ -215,15 +284,18 @@ function importFuelFromXls(input, mode = 'fuel') {
         normalizeText(tx.comment).toLowerCase(),
       ].join('|');
 
-      const transactions = [];
+      const transactions = [], corrections=[], quarantined=[], rejectedRows=[];
       for (let i = headerRow + 1; i < rows.length; i++) {
         const row = rows[i];
         const typeVal = cType !== -1 ? String(row[cType] || '').trim() : '';
         if (cType !== -1 && !typeVal) continue;
-        if (typeVal && !typeVal.toLowerCase().includes('покуп')) continue;
+        const correctionType=/возврат|сторно|отмен|коррект/i.test(typeVal);
+        if (typeVal && !typeVal.toLowerCase().includes('покуп') && !correctionType) { rejectedRows.push({sourceRow:i+1,sourceOperation:typeVal,reason:'Тип операции не распознан; требуется сверка'}); continue; }
 
-        const qty = parseFloat(String(row[cQty] || '0').replace(',', '.'));
-        if (!qty || qty <= 0) continue;
+        const rawQty = parseFloat(String(row[cQty] || '0').replace(/\s/g,'').replace(',', '.'));
+        const correction=correctionType || rawQty < 0;
+        const qty=Math.abs(rawQty || 0);
+        if ((!qty && !correction) || !Number.isFinite(rawQty)) continue;
 
         let dateVal = row[cDate];
         if (!dateVal) continue;
@@ -255,7 +327,11 @@ function importFuelFromXls(input, mode = 'fuel') {
             if (m2) parsedDate = m2[3] + '-' + m2[2] + '-' + m2[1];
           }
         }
-        if (!parsedDate) continue;
+        if (!parsedDate || !fqDate(parsedDate)) { rejectedRows.push({sourceRow:i+1,rawDate:String(dateVal),reason:'Некорректная дата'}); continue; }
+        if (cTime !== -1 && row[cTime] !== '') {
+          const timeMatch=/(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(row[cTime]));
+          if (timeMatch) parsedTime=hhmm(timeMatch[1],timeMatch[2])+(timeMatch[3] ? ':'+timeMatch[3] : '');
+        }
 
         const commentParts = [];
         if (cComment !== -1) commentParts.push(String(row[cComment] || '').trim());
@@ -286,8 +362,9 @@ function importFuelFromXls(input, mode = 'fuel') {
         const plate = extractPlate(vehicleText) || extractPlate(cComment !== -1 ? row[cComment] : '');
 
         const num = c => c === -1 ? 0 : (parseFloat(String(row[c] ?? '').replace(/\s/g, '').replace(',', '.')) || 0);
-        const price = num(cPrice);
-        const sum = Math.abs(num(cSum)) || fuelImportRoundMoney(qty * price);
+        const optionalNum=c => c === -1 || String(row[c] ?? '').trim() === '' ? null : fqValue(String(row[c]).replace(/\s/g,'').replace(',','.'));
+        const price = optionalNum(cPrice), sourceSum=optionalNum(cSum);
+        const sum = sourceSum != null ? Math.abs(sourceSum) : price != null ? fuelImportRoundMoney(qty * price) : null;
 
         // Регион АЗС — для проверки заправок вне своего региона
         const cRegion = col(['регион азс', 'регион']);
@@ -295,12 +372,21 @@ function importFuelFromXls(input, mode = 'fuel') {
         const region = [cRegion !== -1 ? String(row[cRegion] || '').trim() : '', cCity !== -1 ? String(row[cCity] || '').trim() : '']
           .filter(x => x && x.toLowerCase() !== 'null').join(', ');
 
-        const tx = { sourceRow: i + 1, date: parsedDate, time: parsedTime, qty, plate, cardNo, fuel, comment, vehicleText, price, sum, azs, region };
+        const provider=cProvider !== -1 ? String(row[cProvider] || '').trim() : '';
+        const supplierTransactionId=cTransactionId !== -1 ? String(row[cTransactionId] || '').trim() : '';
+        const originalTransactionId=cOriginalId !== -1 ? String(row[cOriginalId] || '').trim() : '';
+        const tx = { sourceRow: i + 1, date: parsedDate, time: parsedTime, qty, plate, cardNo, fuel, comment, vehicleText, price, sum, azs, region,provider,supplierTransactionId,originalTransactionId,operationKind:correction ? 'correction' : 'purchase',sourceOperation:typeVal };
         tx.importKey = importKeyFor({ ...tx, plate: extractPlate(comment + ' ' + vehicleText) });
-        transactions.push(tx);
+        tx.importKeyV2=fuelImportKeyV2(tx);
+        if (correction) {
+          const reversal=/сторно|возврат|отмен/i.test(typeVal) || rawQty < 0;
+          corrections.push({...tx,kind:reversal ? 'reversal' : 'supplier-adjustment',rawQty,rawSum:num(cSum),qtyDelta:reversal ? -qty : null,sumDelta:reversal || num(cSum) < 0 ? -Math.abs(sum) : null,status:'needs-reconciliation',ledgerApplied:false});
+        }
+        else if (!fuelImportRecognizedGrade(fuel)) quarantined.push({...tx,status:'unknown-product',reason:'Товар не распознан как топливо; автоматическая выдача отключена'});
+        else transactions.push(tx);
       }
 
-      if (!transactions.length) {
+      if (!transactions.length && !corrections.length && !quarantined.length && !rejectedRows.length) {
         alert('В файле «' + importTitle + '» не найдено операций типа «Покупка» с ненулевым количеством.');
         return;
       }
@@ -330,13 +416,17 @@ function importFuelFromXls(input, mode = 'fuel') {
       // Покупки из выписок хранятся в разделе «Заправки». Строка, которая там уже
       // есть, в журнал второй раз не идёт — даже если её перенесли на другую
       // машину, поправили или удалили. У неё только уточняются цена и время.
+      const importFingerprint=importPlanFingerprint(data);
+      dryRunBase=data; data=JSON.parse(JSON.stringify(data));
       if (!data.fuelPurchases) data.fuelPurchases = [];
       if (typeof fpRestoreFromJournal === 'function') fpRestoreFromJournal();
       const importId = 'fi_' + Date.now();
       // Одинаковые покупки за день по одной карте имеют одинаковый ключ —
       // каждая строка выписки забирает свою покупку
       const knownByKey = new Map();
+      const knownByV2 = new Map(), usedKnown=new Set();
       data.fuelPurchases.forEach(p => {
+        if (p.importKeyV2) { if (!knownByV2.has(p.importKeyV2)) knownByV2.set(p.importKeyV2,[]); knownByV2.get(p.importKeyV2).push(p); }
         if (!p.importKey) return;
         if (!knownByKey.has(p.importKey)) knownByKey.set(p.importKey, []);
         knownByKey.get(p.importKey).push(p);
@@ -345,8 +435,9 @@ function importFuelFromXls(input, mode = 'fuel') {
       // Строки закрытых месяцев не трогаем вовсе
       const closedTx = transactions.filter(tx => typeof fuelMonthClosed === 'function' && fuelMonthClosed(tx.date));
       const freshTx = transactions.filter(tx => !closedTx.includes(tx)).filter(tx => {
-        const p = (knownByKey.get(tx.importKey) || []).shift();
+        const p = (knownByV2.get(tx.importKeyV2) || []).find(row => !usedKnown.has(row)) || (knownByKey.get(tx.importKey) || []).find(row => !row.importKeyV2 && !usedKnown.has(row));
         if (!p) return true;
+        usedKnown.add(p); fuelImportStampSource(p,tx);
         fpRefreshFromTx(p, tx);
         knownTx.push({ tx, p });
         return false;
@@ -374,6 +465,7 @@ function importFuelFromXls(input, mode = 'fuel') {
             price: tx.price,
             fuel: tx.fuel,
             importKey: tx.importKey,
+            importKeyV2:tx.importKeyV2,provider:tx.provider,supplierTransactionId:tx.supplierTransactionId,
             cardNo: tx.cardNo,
             vehicleText: tx.vehicleText,
             comment: tx.comment,
@@ -384,7 +476,7 @@ function importFuelFromXls(input, mode = 'fuel') {
         }
         // Разные виды топлива за один день — разные записи: АИ-95 и ДТ
         // в одной строке журнала смешались бы в отчётах по видам топлива.
-        const grade = parseFuelGrade(tx.fuel) || vehicleFuelGrade(v);
+        const grade = fuelImportRecognizedGrade(tx.fuel);
         const key = v.id + '|' + tx.date + '|' + grade;
         if (!groupedByVehicleDate[key]) {
           groupedByVehicleDate[key] = { v, date: tx.date, grade, totalQty: 0, totalSum: 0, fuels: [], importKeys: [], transactions: [] };
@@ -416,7 +508,7 @@ function importFuelFromXls(input, mode = 'fuel') {
         const existing = sameDay.find(r => grp.importKeys.some(k => String(r.note || '').includes(k))) ||
           sameDay.find(r => recordFuelGrade(r, grp.v) === grp.grade);
         const noteText = String(existing?.note || '');
-        const hasImportedKey = grp.importKeys.some(k => noteText.includes(k));
+        const hasImportedKey = grp.importKeys.some(k => noteText.includes(k)) && !data.fuelPurchases.some(purchase => grp.importKeys.includes(purchase.importKey));
         const importMarker = 'импорт заправок: ' + grp.importKeys.join(' | ');
         const fuelNote = 'заправка: ' + grp.fuels.join(', ');
 
@@ -493,9 +585,15 @@ function importFuelFromXls(input, mode = 'fuel') {
       sumBackfill.forEach((sum, rec) => { rec.fuelSum = sum; backfilledSums++; });
 
       // Новые строки — в раздел «Заправки», со ссылкой на запись журнала
-      reportRows.forEach(row => row.transactions.forEach(tx =>
-        fpCreate(tx, { importId, vehicleId: row.vehicleId, recordId: row.recordId, grade: row.grade, date: row.date })));
-      unmatchedRows.forEach(row => fpCreate(row, { importId, date: row.date }));
+      reportRows.forEach(row => row.transactions.forEach(tx => {
+        const purchase=fpCreate(tx, { importId, vehicleId: row.vehicleId, recordId: row.recordId, grade: row.grade, date: row.date });
+        fuelImportStampSource(purchase,tx);
+      }));
+      unmatchedRows.forEach(row => { const purchase=fpCreate(row,{importId,date:row.date}); fuelImportStampSource(purchase,row); });
+      reportRows.forEach(row => {
+        const record=(data.records || []).find(item => item.id === row.recordId);
+        if (record && fqValue(record.fuelSum) == null && row.transactions.length && row.transactions.every(tx => fqValue(tx.sum) === 0)) record.fuelSum=0;
+      });
 
       // Строки, которые уже есть в разделе: в отчёте — как «уже было»,
       // а если покупка до сих пор без машины — среди несопоставленных
@@ -510,20 +608,42 @@ function importFuelFromXls(input, mode = 'fuel') {
         const pv = data.vehicles.find(x => x.id === p.vehicleId);
         reportRows.push(fuelImportReportRow({ v: pv || { id: p.vehicleId }, date: p.date, grade: p.grade,
           totalQty: tx.qty, totalSum: tx.sum, transactions: [tx] }, 'duplicate',
-          null, null, 'Уже в разделе «Заправки»', p.recordId));
+          null, null, p.sourceChanged ? 'Источник отличается от сохранённой операции: требуется сверка' : 'Уже в разделе «Заправки»', p.recordId));
       });
 
       if (!data.fuelImports) data.fuelImports = [];
-      data.fuelImports.push({
+      const knownCorrectionKeys=new Set(data.fuelImports.flatMap(batch => (batch.corrections || []).map(row => row.importKeyV2)));
+      corrections.forEach((row,index) => { row.id=importId+'_correction_'+index; if(knownCorrectionKeys.has(row.importKeyV2)) row.status='already-recorded'; else knownCorrectionKeys.add(row.importKeyV2); });
+      const batch={
         id: importId, at: new Date().toISOString(), fileName: file.name, mode,
-        rows: transactions.length,
+        rows: transactions.length+corrections.length+quarantined.length+rejectedRows.length,
         litres: fuelImportRoundLitres(transactions.reduce((s, tx) => s + tx.qty, 0)),
         sum: fuelImportRoundMoney(transactions.reduce((s, tx) => s + (tx.sum || 0), 0)),
         added: freshTx.length - unmatchedRows.filter(r => !r.purchaseId).length,
         duplicates: knownTx.length, skipped: unmatchedRows.length,
-      });
+        corrections,quarantined,rejectedRows,keyVersion:2,
+      };
+      data.fuelImports.push(batch);
 
-      const saved = await saveData(data);
+      const plannedRows=transactions.map(tx => {
+        const detail=reportRows.find(row => row.sourceRows.includes(tx.sourceRow)), unknown=unmatchedRows.some(row => row.sourceRow === tx.sourceRow);
+        return {...tx,decision:closedTx.includes(tx) ? 'Закрытый месяц: пропустить' : detail ? detail.statusText : unknown ? 'Сохранить покупку без машины, журнал не менять' : 'Проверить строку'};
+      }).concat(corrections.map(row => ({...row,decision:row.status === 'already-recorded' ? 'Корректировка уже зарегистрирована' : 'Корректировка: сохранить на сверку; журнал не менять'})),quarantined.map(row => ({...row,decision:row.reason})),rejectedRows.map(row => ({...row,decision:row.reason})));
+      batch.decisions=plannedRows.map(row => ({sourceRow:row.sourceRow,decision:row.decision}));
+      const candidate=data;
+      data=dryRunBase; dryRunBase=null; rebuildIndex();
+      const preview='<p>Покупок топлива: <b>'+transactions.length+'</b> · новых/добавленных дневных строк: '+(added+updated)+' · на сверку: '+reportRows.filter(row => row.action === 'review').length+' · корректировок: '+corrections.length+' · неизвестных товаров: '+quarantined.length+'.</p><p>Возвраты и сторно сохраняются отдельными корректировками на сверку. До проверки исходной операции они не меняют выдачу и остатки. Неизвестный товар не становится топливом машины.</p><div class="table-scroll" style="max-height:60vh"><table class="data-table"><thead><tr><th>Строка</th><th>Дата / время</th><th>Карта / ID</th><th>Товар</th><th>Количество</th><th>Сумма</th><th>План</th></tr></thead><tbody>'+plannedRows.sort((a,b) => a.sourceRow-b.sourceRow).map(row => '<tr><td>'+row.sourceRow+'</td><td>'+fpEsc((row.date || row.rawDate || '')+' '+(row.time || ''))+'</td><td>'+fpEsc(row.cardNo || '')+'<div>'+fpEsc(row.supplierTransactionId || '')+'</div></td><td>'+fpEsc(row.fuel || row.sourceOperation || '')+'</td><td>'+(row.qty == null ? '—' : fpNum(row.qty,2))+'</td><td>'+(row.sum == null ? '—' : fpNum(row.sum,2))+'</td><td>'+fpEsc(row.decision)+'</td></tr>').join('')+'</tbody></table></div>';
+      if (!await importConfirmPlan('План импорта: '+file.name,preview,'Применить проверенный план')) return;
+      const sourceArchive=await importArchiveSource(file);
+      if (importPlanFingerprint(data) !== importFingerprint) { alert('База изменилась во время проверки. Повторите импорт: план должен быть построен по актуальной базе.'); return; }
+      batch.sourceArchive=sourceArchive;
+      candidate.fuelPurchases.filter(purchase => purchase.importId === importId || knownTx.some(item => item.p.id === purchase.id)).forEach(purchase => {
+        purchase.lastImportArchive=sourceArchive;
+        if (sourceArchive.available) { purchase.sourceArchive=sourceArchive; const archives=purchase.sourceArchives || (purchase.sourceArchives=[]); if(!archives.some(archive => archive.id === sourceArchive.id)) archives.push(sourceArchive); }
+      });
+      data=candidate;
+
+      const saved = await saveData(data,{noMerge:true});
       if (!saved) {
         alert('Заправки обработаны, но сохранить изменения не удалось. Проверьте соединение с сервером и повторите импорт.');
         return;
@@ -532,6 +652,7 @@ function importFuelFromXls(input, mode = 'fuel') {
       if (v) renderDetail(v);
 
       showFuelImportReport({
+        importId,
         fileName: importTitle + ': ' + file.name,
         transactionsCount: transactions.length,
         sourceLitres: transactions.reduce((s, tx) => s + tx.qty, 0),
@@ -550,6 +671,7 @@ function importFuelFromXls(input, mode = 'fuel') {
         unmatched: [...unmatched],
       });
     } catch(err) {
+      if (dryRunBase) { data=dryRunBase; rebuildIndex(); }
       alert('Ошибка при чтении файла: ' + err.message);
     }
   };
@@ -587,6 +709,7 @@ function fuelImportReportRow(grp, action, beforeIssued, afterIssued, statusText,
       price: tx.price,
       fuel: tx.fuel,
       importKey: tx.importKey,
+      importKeyV2:tx.importKeyV2,provider:tx.provider,supplierTransactionId:tx.supplierTransactionId,
       cardNo: tx.cardNo,
       vehicleText: tx.vehicleText,
       comment: tx.comment,
@@ -843,6 +966,30 @@ async function assignFuelImportUnmatchedVehicle(unmatchedIndex) {
   showFuelImportReport(report);
 }
 
+function fuelImportExceptionHtml(id) {
+  const batch=(data.fuelImports || []).find(row => row.id === id); if(!batch) return '';
+  const corrections=batch.corrections || [], quarantined=batch.quarantined || [], rejected=batch.rejectedRows || [], archive=batch.sourceArchive;
+  const archiveHtml=archive?.available ? '<div>Исходник сохранён: '+fpEsc(archive.name || batch.fileName)+' · SHA256 '+fpEsc(archive.sha256)+'</div>' : '<div style="color:var(--amber)">'+fpEsc(archive?.reason || 'Архив исходного файла не был сохранён')+'</div>';
+  const exceptions=corrections.length+quarantined.length+rejected.length;
+  return '<div class="gsm-status">'+archiveHtml+(exceptions ? '<b>Особые строки: '+exceptions+'</b><div>Корректировки и неизвестные товары не изменяют обычную выдачу. Результаты сверки сохраняются в истории.</div>' : '')+'</div>'+
+    (corrections.length ? '<details open><summary>Возвраты / сторно / корректировки: '+corrections.length+'</summary><table class="data-table"><thead><tr><th>Строка / дата</th><th>Операция</th><th>Изменение литров</th><th>Изменение суммы</th><th>Исходная транзакция</th><th>Статус</th><th></th></tr></thead><tbody>'+corrections.map((row,index) => '<tr><td>'+row.sourceRow+' · '+fpEsc(row.date)+'</td><td>'+fpEsc(row.sourceOperation || row.kind)+'</td><td>'+(row.qtyDelta == null ? 'направление требует сверки' : fpNum(row.qtyDelta,2))+'</td><td>'+(row.sumDelta == null ? 'направление требует сверки' : fpNum(row.sumDelta,2))+'</td><td>'+fpEsc(row.originalTransactionId || 'не указана')+'</td><td>'+fpEsc(row.status === 'already-recorded' ? 'Уже зарегистрирована ранее' : row.status === 'reviewed' ? 'Сверена: '+(row.reviewNote || '') : 'Требуется сверка; в учёт не проведена')+'</td><td>'+(row.status === 'already-recorded' ? '' : '<button class="btn btn-ghost btn-sm" onclick="fuelImportReviewCorrection('+fpEsc(JSON.stringify(id))+','+index+')">Результат сверки</button>')+'</td></tr>').join('')+'</tbody></table></details>' : '')+
+    (quarantined.length ? '<details open><summary>Товары без распознанной марки топлива: '+quarantined.length+'</summary><p>Уточните товар в исходном файле и повторите импорт; эти строки не включены в выдачу и остатки.</p><table class="data-table"><thead><tr><th>Строка</th><th>Дата</th><th>Товар</th><th>Количество</th><th>Карта</th></tr></thead><tbody>'+quarantined.map(row => '<tr><td>'+row.sourceRow+'</td><td>'+fpEsc(row.date)+'</td><td>'+fpEsc(row.fuel || 'пустой товар')+'</td><td>'+fpNum(row.qty,2)+'</td><td>'+fpEsc(row.cardNo)+'</td></tr>').join('')+'</tbody></table></details>' : '')+
+    (rejected.length ? '<details><summary>Остальные строки на проверку: '+rejected.length+'</summary>'+rejected.map(row => '<p>Строка '+row.sourceRow+': '+fpEsc(row.reason)+' · '+fpEsc(row.sourceOperation || row.rawDate || '')+'</p>').join('')+'</details>' : '');
+}
+function fuelImportOpenBatch(id) {
+  const batch=(data.fuelImports || []).find(row => row.id === id); if (!batch) return;
+  wfShowDialog('Проверка загрузки: '+batch.fileName,fuelImportExceptionHtml(id)+'<details><summary>Решения по исходным строкам</summary>'+(batch.decisions || []).map(row => '<p>Строка '+row.sourceRow+': '+fpEsc(row.decision)+'</p>').join('')+'</details>');
+}
+function fuelImportReviewCorrection(id,index) {
+  const batch=(data.fuelImports || []).find(row => row.id === id), correction=batch?.corrections?.[index]; if(!correction) return;
+  wfShowDialog('Результат сверки корректировки','<p>Операция не проводит отрицательную выдачу автоматически. Укажите исходный документ и как отражено исправление.</p><form id="fuelCorrectionReview"><label>Основание / результат<textarea id="fuelCorrectionNote" required minlength="5">'+fpEsc(correction.reviewNote || '')+'</textarea></label><button class="btn btn-primary">Зафиксировать сверку</button></form>');
+  document.getElementById('fuelCorrectionReview').onsubmit=async event => {
+    event.preventDefault(); const note=document.getElementById('fuelCorrectionNote').value.trim(); if(note.length < 5) return;
+    const current=(data.fuelImports || []).find(row => row.id === id)?.corrections?.[index]; if(!current || current.id !== correction.id) { showToast('Загрузка изменилась. Откройте её заново.'); return; }
+    Object.assign(current,{status:'reviewed',reviewNote:note,reviewedAt:new Date().toISOString(),ledgerApplied:false});
+    if(await saveData(data,{noMerge:true})) fuelImportOpenBatch(id);
+  };
+}
 function showFuelImportReport(report) {
   _fuelImportLastReport = report;
   (report.reportRows || []).forEach((r, i) => { r._reportIndex = i; });
@@ -1015,7 +1162,7 @@ function showFuelImportReport(report) {
     </div>
   `;
 
-  const html = `
+  const html = fuelImportExceptionHtml(report.importId) + `
     <div style="font-size:13px;color:var(--text3);margin-bottom:12px">
       Файл: <b style="color:var(--text1)">${esc(report.fileName || '—')}</b>
     </div>

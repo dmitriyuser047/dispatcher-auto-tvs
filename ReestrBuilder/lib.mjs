@@ -4,44 +4,71 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { deflateSync } from 'node:zlib';
+import { fileURLToPath } from "url";
 import AdmZip from "adm-zip";
 import { createExtractorFromData } from "node-unrar-js";
 import ExcelJS from "exceljs";
 import iconv from "iconv-lite";
 import pkg from "pdfjs-dist/build/pdf.js";
-const { getDocument } = pkg;
-import Tesseract from "tesseract.js";
+const { getDocument, OPS, ImageKind } = pkg;
+import ocrRuntimeModule from "../electron/ocr-runtime.cjs";
 
 // ═══════════════════════════════════════════════════════════════════
 //  БАЗА ЗНАНИЙ — самообучение на основе истории счетов
 // ═══════════════════════════════════════════════════════════════════
 
 const KNOWLEDGE_FILE = 'knowledge.json';
+let knowledgeDirectory = null;
+
+export function configureKnowledgePath(directory) {
+  if (!directory || !path.isAbsolute(directory)) throw new Error('Для базы распознавания нужен абсолютный путь пользовательской папки');
+  knowledgeDirectory = path.resolve(directory);
+}
 
 function getKnowledgePath() {
-  const candidates = [
-    path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), KNOWLEDGE_FILE),
-    path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..', 'ReestrBuilder', KNOWLEDGE_FILE),
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-  return candidates[0];
+  const directory = knowledgeDirectory || process.env.DISPATCHER_KNOWLEDGE_DIR || path.join(os.homedir(), 'Documents', 'ДиспетчеризацияАвто_ТВС', 'reestr-knowledge');
+  if (!path.isAbsolute(directory)) throw new Error('Путь базы распознавания должен быть абсолютным');
+  return path.join(directory, KNOWLEDGE_FILE);
 }
 
 export function loadKnowledge() {
+  const target = getKnowledgePath();
+  // The old source-tree file is read only for migration; all writes go to user data.
+  const legacy = path.join(path.dirname(fileURLToPath(import.meta.url)), KNOWLEDGE_FILE);
+  const source = fs.existsSync(target) ? target : fs.existsSync(legacy) ? legacy : null;
+  if (!source) return { contractors: {}, invoices: [] };
   try {
-    const p = getKnowledgePath();
-    if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8'));
-  } catch {}
-  return { contractors: {}, invoices: [] };
+    const kb = JSON.parse(fs.readFileSync(source, 'utf-8'));
+    if (!kb || !kb.contractors || typeof kb.contractors !== 'object' || Array.isArray(kb.contractors) || !Array.isArray(kb.invoices) || Object.values(kb.contractors).some(value => !value || typeof value !== 'object' || Array.isArray(value))) throw new Error('неверный формат');
+    return kb;
+  } catch (e) { throw new Error('Не удалось прочитать базу распознавания: ' + e.message); }
 }
 
 export function saveKnowledge(kb) {
+  const target = getKnowledgePath(), temporary = target + '.' + process.pid + '.' + Date.now() + '.tmp';
   try {
-    const p = getKnowledgePath();
-    fs.writeFileSync(p, JSON.stringify(kb, null, 2), 'utf-8');
-  } catch {}
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const fd = fs.openSync(temporary, 'wx');
+    try { fs.writeFileSync(fd, JSON.stringify(kb, null, 2), 'utf-8'); fs.fsyncSync(fd); }
+    finally { fs.closeSync(fd); }
+    fs.renameSync(temporary, target);
+  } catch (e) {
+    try { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch {}
+    throw new Error('Не удалось сохранить базу распознавания в пользовательской папке: ' + e.message);
+  }
+}
+
+function invoiceIdentityKey(row) {
+  if (!row || !row.osn || !Number.isFinite(Number(row.sum))) return null;
+  const supplierText = String(row.supplier || '');
+  const inn = String(row.supplierInn || row.inn || supplierText.match(/ИНН\s*[:.]?\s*(\d{10,12})/i)?.[1] || '').replace(/\D/g, '');
+  const supplier = /^(\d{10}|\d{12})$/.test(inn) ? 'inn:' + inn : supplierText.toLocaleLowerCase('ru').replace(/[«»"'\s]/g, '');
+  const rawDate = String(row.date || '').trim();
+  const date = /^\d{4}-\d{2}-\d{2}/.test(rawDate) ? rawDate.slice(0, 10) : rawDate.replace(/^(\d{2})\.(\d{2})\.(\d{4})$/, '$3-$2-$1');
+  // Missing supplier or document date is insufficient evidence of a duplicate.
+  if (!supplier || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  return [supplier, String(row.osn).trim().toLocaleLowerCase('ru').replace(/\s+/g, ' '), date, Number(row.sum).toFixed(2)].join('|');
 }
 
 export function learnFromRows(rows) {
@@ -63,24 +90,25 @@ export function learnFromRows(rows) {
     const key = cleanSupplier.replace(/[«»"'"'\s]/g, '').toLowerCase();
     if (!key || key.length < 3) continue;
 
-    const existing = kb.contractors[key] || { name: cleanSupplier, count: 0, lastStatya: '', lastObj: '', lastCategory: '' };
+    const existing = Object.hasOwn(kb.contractors, key) ? kb.contractors[key] : { name: cleanSupplier, count: 0, lastStatya: '', lastObj: '', lastCategory: '' };
     existing.count = (existing.count || 0) + 1;
     existing.name = cleanSupplier;
     if (row['statья']) existing.lastStatya = row['statья'];
     if (row.obj) existing.lastObj = row.obj;
     if (row.category) existing.lastCategory = row.category;
     existing.lastDate = row.date || new Date().toLocaleDateString('ru-RU');
-    kb.contractors[key] = existing;
+    Object.defineProperty(kb.contractors, key, { value: existing, writable: true, enumerable: true, configurable: true });
 
     if (row.osn) {
-      const invKey = `${row.osn}|${row.sum}`;
-      if (!kb.invoices.some(inv => inv.key === invKey)) {
+      const invKey = invoiceIdentityKey(row);
+      if (invKey && !kb.invoices.some(inv => invoiceIdentityKey(inv) === invKey)) {
         kb.invoices.push({
           key: invKey,
           osn: row.osn,
           sum: row.sum,
           date: row.date,
           supplier: row.supplier,
+          supplierInn: row.supplierInn || row.inn || '',
           addedAt: new Date().toISOString(),
         });
         if (kb.invoices.length > 5000) kb.invoices = kb.invoices.slice(-5000);
@@ -94,7 +122,6 @@ export function learnFromRows(rows) {
 
 export function applyKnowledge(rows) {
   const kb = loadKnowledge();
-  if (!kb.contractors || !Object.keys(kb.contractors).length) return { rows, duplicates: [] };
 
   const duplicates = [];
 
@@ -111,7 +138,7 @@ export function applyKnowledge(rows) {
         .replace(/[,;.\s]+$/, '')
         .trim() || row.supplier;
       const key = cleanSup.replace(/[«»"'"'\s]/g, '').toLowerCase();
-      const known = kb.contractors[key];
+      const known = Object.hasOwn(kb.contractors, key) ? kb.contractors[key] : null;
       if (known) {
         if (!row['statья'] || row['statья'] === 'ПРОЧИЕ РАСХОДЫ' || row['statья'].includes('Прочие расходы по операционной деятельности')) {
           if (known.lastStatya) row['statья'] = known.lastStatya;
@@ -127,10 +154,10 @@ export function applyKnowledge(rows) {
       }
     }
 
-    // Дубликаты: проверяем по номеру счёта + сумме
+    // A number and amount alone can coincide for unrelated suppliers.
     if (row.osn && kb.invoices) {
-      const invKey = `${row.osn}|${row.sum}`;
-      const dup = kb.invoices.find(inv => inv.key === invKey);
+      const invKey = invoiceIdentityKey(row);
+      const dup = invKey && kb.invoices.find(inv => invoiceIdentityKey(inv) === invKey);
       if (dup) {
         duplicates.push({
           rowIndex: i,
@@ -149,10 +176,10 @@ export function applyKnowledge(rows) {
 }
 
 export function getAnalytics(rows) {
-  const bySupplier = {};
-  const byObject = {};
-  const byCategory = {};
-  const byMonth = {};
+  const bySupplier = Object.create(null);
+  const byObject = Object.create(null);
+  const byCategory = Object.create(null);
+  const byMonth = Object.create(null);
   let totalSum = 0;
 
   for (const row of rows) {
@@ -251,7 +278,7 @@ async function extractZip(buffer, destDir) {
   for (const entry of zip.getEntries()) {
     if (entry.isDirectory) continue;
     const fixedName = fixEntryName(entry);
-    const outPath = path.join(destDir, fixedName.replace(/\\/g, "/"));
+    const outPath = safeArchivePath(destDir, fixedName);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, entry.getData());
   }
@@ -263,10 +290,19 @@ async function extractRar(buffer, destDir) {
   const extracted = extractor.extract({ files: list });
   for (const f of extracted.files) {
     if (!f.extraction) continue;
-    const outPath = path.join(destDir, f.fileHeader.name);
+    const outPath = safeArchivePath(destDir, f.fileHeader.name);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, Buffer.from(f.extraction));
   }
+}
+
+function safeArchivePath(directory, entryName) {
+  const name = String(entryName).replace(/\\/g, '/');
+  if (!name || name.includes('\0') || /^(?:\/|[a-z]:)/i.test(name)) throw new Error('Недопустимый путь в архиве: ' + entryName);
+  const target = path.resolve(directory, name);
+  const relative = path.relative(path.resolve(directory), target);
+  if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) throw new Error('Путь выходит из папки архива: ' + entryName);
+  return target;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -401,7 +437,7 @@ function detectTableRegion(lines) {
 
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const t = lines[i].text.trim().toLowerCase();
-    if (/^итого\b|^всего\b|всего к оплате|^в том числе ндс/i.test(t)) {
+    if (/^(?:итого|всего)(?=\s|:|$)|всего к оплате|^в том числе ндс/i.test(t)) {
       endIdx = i;
       break;
     }
@@ -453,162 +489,98 @@ function extractMoneyFromLine(line) {
 //  OCR для сканированных PDF (изображения без текстового слоя)
 // ═══════════════════════════════════════════════════════════════════
 
-let ocrWorker = null;
-
-function findLangPath() {
-  const candidates = [
-    path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..'),
-    path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..', 'resources', 'app'),
-    path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..', 'resources', 'app.asar.unpacked'),
-  ];
-  for (const dir of candidates) {
-    if (fs.existsSync(path.join(dir, 'rus.traineddata'))) return dir;
-  }
-  return null;
+function getOcrRuntime() {
+  const rootDir=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+  return ocrRuntimeModule.getSharedOcrRuntime({rootDir,workerPath:path.join(rootDir,'vendor','tesseract-worker','index.cjs'),maxWorkers:2});
 }
 
-async function getOcrWorker() {
-  if (!ocrWorker) {
-    const langDir = findLangPath();
-    const opts = langDir ? { langPath: langDir, gzip: false } : {};
-    ocrWorker = await Tesseract.createWorker("rus+eng", undefined, opts);
-  }
-  return ocrWorker;
+export async function disposeOcrWorker() { await getOcrRuntime().dispose(); }
+
+function engineEvidence(meta) {
+  return {coreVersion:meta.coreVersion,profile:meta.effectiveModelProfile,decode:meta.decode,runtimeVersion:meta.runtimeVersion,
+    threshold:meta.threshold,bindingPatchVersion:meta.bindingPatchVersion||null,nativeCore:meta.nativeCore?{...meta.nativeCore}:null,modelFiles:meta.modelFiles.map(file=>({language:file.language,sha256:file.sha256}))};
+}
+
+async function recognizeImage(input) {
+  const result=await getOcrRuntime().recognize(input,{language:'rus+eng',profile:'accurate',decode:'document',psm:3,timeoutMs:180000});
+  return {data:{text:result.text,confidence:result.confidence},engine:engineEvidence(result.meta)};
 }
 
 async function extractPageImage(page) {
   const ops = await page.getOperatorList();
+  const images = [];
   for (let i = 0; i < ops.fnArray.length; i++) {
-    if (ops.fnArray[i] === 85 || ops.fnArray[i] === 82) {
+    if (ops.fnArray[i] === OPS.paintImageXObject || ops.fnArray[i] === OPS.paintImageXObjectRepeat) {
       const imgName = ops.argsArray[i][0];
-      const imgData = await page.objs.get(imgName);
-      if (imgData && imgData.data && imgData.width && imgData.height) return imgData;
+      const imgData = await new Promise(resolve => page.objs.get(imgName, resolve));
+      if (imgData?.data && imgData.width && imgData.height) images.push(imgData);
+    } else if (ops.fnArray[i] === OPS.paintInlineImageXObject) {
+      const imgData = ops.argsArray[i][0];
+      if (imgData?.data && imgData.width && imgData.height) images.push(imgData);
     }
   }
-  return null;
+  return images.sort((a, b) => b.width * b.height - a.width * a.height)[0] || null;
 }
 
 function preprocessForOcr(imgData) {
   const { width, height, data } = imgData;
-  const channels = data.length / (width * height);
+  const pixels = width * height;
+  if (!Number.isSafeInteger(pixels) || pixels <= 0 || pixels > 30000000) throw new Error('Размер скана превышает 30 мегапикселей');
+  const channels = data.length / pixels;
   const gray = new Uint8Array(width * height);
   for (let i = 0; i < width * height; i++) {
     const idx = i * channels;
-    gray[i] = Math.round(0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+    if (imgData.kind === ImageKind.GRAYSCALE_1BPP || channels < 1) {
+      const byte = Math.floor(i / width) * Math.ceil(width / 8) + Math.floor((i % width) / 8);
+      gray[i] = data[byte] & (128 >> (i % width % 8)) ? 255 : 0;
+    } else if (channels === 1) gray[i] = data[i];
+    else if (channels === 3 || channels === 4) {
+      const alpha = channels === 4 ? data[idx + 3] / 255 : 1;
+      gray[i] = Math.round((0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]) * alpha + 255 * (1 - alpha));
+    } else throw new Error('Неподдерживаемый формат пикселей скана');
   }
 
-  // Adaptive threshold (Sauvola-like): 15x15 window
-  const winR = 7;
-  const binary = new Uint8Array(width * height);
-  const integral = new Float64Array(width * height);
-  const integralSq = new Float64Array(width * height);
-  for (let y = 0; y < height; y++) {
-    let rowSum = 0, rowSumSq = 0;
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-      const v = gray[idx];
-      rowSum += v;
-      rowSumSq += v * v;
-      integral[idx] = rowSum + (y > 0 ? integral[idx - width] : 0);
-      integralSq[idx] = rowSumSq + (y > 0 ? integralSq[idx - width] : 0);
-    }
-  }
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const x0 = Math.max(0, x - winR) - 1, y0 = Math.max(0, y - winR) - 1;
-      const x1 = Math.min(width - 1, x + winR), y1 = Math.min(height - 1, y + winR);
-      const count = (x1 - x0) * (y1 - y0);
-      let sum = integral[y1 * width + x1];
-      let sumSq = integralSq[y1 * width + x1];
-      if (x0 >= 0) { sum -= integral[y1 * width + x0]; sumSq -= integralSq[y1 * width + x0]; }
-      if (y0 >= 0) { sum -= integral[y0 * width + x1]; sumSq -= integralSq[y0 * width + x1]; }
-      if (x0 >= 0 && y0 >= 0) { sum += integral[y0 * width + x0]; sumSq += integralSq[y0 * width + x0]; }
-      const mean = sum / count;
-      const variance = sumSq / count - mean * mean;
-      const std = Math.sqrt(Math.max(0, variance));
-      const k = 0.2;
-      const threshold = mean * (1 + k * (std / 128 - 1));
-      binary[y * width + x] = gray[y * width + x] > threshold ? 255 : 0;
-    }
-  }
-
-  const outData = new Uint8Array(width * height * 4);
-  for (let i = 0; i < width * height; i++) {
-    outData[i * 4] = outData[i * 4 + 1] = outData[i * 4 + 2] = binary[i];
-    outData[i * 4 + 3] = 255;
-  }
-  return { width, height, data: outData };
+  // Keep grayscale/antialiasing for Tesseract's own thresholding. The previous
+  // unconditional JS binarization allocated two Float64 integral images
+  // (480 MB at the 30 MP limit) and discarded grayscale before the engine.
+  return { width, height, data: gray };
 }
 
-function rgbToBmpBuffer(imgData) {
+const pngCrcTable = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  return value >>> 0;
+});
+
+function pngChunk(type, data) {
+  const name = Buffer.from(type, 'ascii');
+  const chunk = Buffer.alloc(data.length + 12);
+  chunk.writeUInt32BE(data.length, 0);
+  name.copy(chunk, 4); data.copy(chunk, 8);
+  let crc = 0xffffffff;
+  for (let i = 4; i < chunk.length - 4; i++) crc = pngCrcTable[(crc ^ chunk[i]) & 255] ^ (crc >>> 8);
+  chunk.writeUInt32BE((crc ^ 0xffffffff) >>> 0, chunk.length - 4);
+  return chunk;
+}
+
+function grayToPngBuffer(imgData) {
   const { width, height, data } = imgData;
-  const channels = data.length / (width * height);
-  const rowBytes = width * 3;
-  const rowPad = (4 - (rowBytes % 4)) % 4;
-  const paddedRow = rowBytes + rowPad;
-  const pixelDataSize = paddedRow * height;
-  const fileSize = 54 + pixelDataSize;
-  const buf = Buffer.alloc(fileSize);
-  buf.write("BM", 0);
-  buf.writeUInt32LE(fileSize, 2);
-  buf.writeUInt32LE(54, 10);
-  buf.writeUInt32LE(40, 14);
-  buf.writeInt32LE(width, 18);
-  buf.writeInt32LE(-height, 22);
-  buf.writeUInt16LE(1, 26);
-  buf.writeUInt16LE(24, 28);
-  buf.writeUInt32LE(0, 30);
-  buf.writeUInt32LE(pixelDataSize, 34);
-  let offset = 54;
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4);
+  header[8] = 8; // grayscale, 8 bits, no palette/interlacing
+  const scanlines = Buffer.alloc((width + 1) * height);
   for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const srcIdx = (y * width + x) * channels;
-      buf[offset++] = data[srcIdx + 2];
-      buf[offset++] = data[srcIdx + 1];
-      buf[offset++] = data[srcIdx];
-    }
-    for (let p = 0; p < rowPad; p++) buf[offset++] = 0;
+    scanlines.set(data.subarray(y * width, (y + 1) * width), y * (width + 1) + 1);
   }
-  return buf;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', header), pngChunk('IDAT', deflateSync(scanlines)), pngChunk('IEND', Buffer.alloc(0))]);
 }
 
-function isPhotoPage(imgData) {
-  if (!imgData || imgData.width < 400 || imgData.height < 400) return true;
-  const { data, width, height } = imgData;
-  const channels = data.length / (width * height);
-  const step = Math.max(1, Math.floor(width * height / 5000));
-  let darkCount = 0, totalSampled = 0;
-  for (let i = 0; i < width * height; i += step) {
-    const idx = i * channels;
-    const gray = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
-    if (gray < 80) darkCount++;
-    totalSampled++;
-  }
-  const darkRatio = darkCount / totalSampled;
-  return darkRatio > 0.35;
-}
-
-async function ocrPageImage(page, worker) {
+async function ocrPageImage(page) {
   const imgData = await extractPageImage(page);
-  if (!imgData) return "";
-  if (isPhotoPage(imgData)) return "";
+  if (!imgData) return { text: '', confidence: null, warning: 'На странице нет доступного растрового слоя для OCR' };
   const processed = preprocessForOcr(imgData);
-  const bmp = rgbToBmpBuffer(processed);
-  const tmpFile = path.join(os.tmpdir(), `ocr_${Date.now()}_${Math.random().toString(36).slice(2)}.bmp`);
-  try {
-    fs.writeFileSync(tmpFile, bmp);
-    await worker.setParameters({ tessedit_pageseg_mode: '6' });
-    const result = await Promise.race([
-      worker.recognize(tmpFile),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('OCR timeout')), 120000)),
-    ]);
-    return result.data.text || "";
-  } catch (e) {
-    if (e.message === 'OCR timeout') return "";
-    throw e;
-  } finally {
-    try { fs.unlinkSync(tmpFile); } catch {}
-  }
+  const result = await recognizeImage(grayToPngBuffer(processed));
+  return { text: result.data.text || '', confidence: Number.isFinite(result.data.confidence) ? result.data.confidence : null, engine: result.engine };
 }
 
 function cleanOcrText(text) {
@@ -656,31 +628,7 @@ function ocrTextToLines(text) {
 }
 
 async function pdfToLayout(filePathOrBuffer, onOcrPage = () => {}) {
-  const data = typeof filePathOrBuffer === "string"
-    ? new Uint8Array(fs.readFileSync(filePathOrBuffer))
-    : new Uint8Array(filePathOrBuffer);
-  const doc = await getDocument({ data, useSystemFonts: true }).promise;
-  const allLines = [];
-  let hasText = false;
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    const pageLines = buildVisualLines(content.items);
-    if (pageLines.length > 0) hasText = true;
-    allLines.push(...pageLines);
-  }
-  if (hasText || doc.numPages === 0) return allLines;
-
-  const worker = await getOcrWorker();
-  for (let i = 1; i <= doc.numPages; i++) {
-    onOcrPage({ page: i, totalPages: doc.numPages });
-    const page = await doc.getPage(i);
-    const text = await ocrPageImage(page, worker);
-    if (text) {
-      allLines.push(...ocrTextToLines(text));
-    }
-  }
-  return allLines;
+  return (await pdfToPageLayouts(filePathOrBuffer, onOcrPage)).flat();
 }
 
 async function pdfToPageLayouts(filePathOrBuffer, onOcrPage = () => {}) {
@@ -689,25 +637,28 @@ async function pdfToPageLayouts(filePathOrBuffer, onOcrPage = () => {}) {
     : new Uint8Array(filePathOrBuffer);
   const doc = await getDocument({ data, useSystemFonts: true }).promise;
   const pages = [];
-  let hasText = false;
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    const pageLines = buildVisualLines(content.items);
-    if (pageLines.length > 0) hasText = true;
-    pages.push(pageLines);
-  }
-  if (hasText) return pages;
-
-  const worker = await getOcrWorker();
-  const ocrPages = [];
-  for (let i = 1; i <= doc.numPages; i++) {
-    onOcrPage({ page: i, totalPages: doc.numPages });
-    const page = await doc.getPage(i);
-    const text = await ocrPageImage(page, worker);
-    ocrPages.push(text ? ocrTextToLines(text) : []);
-  }
-  return ocrPages;
+  try {
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      let pageLines = buildVisualLines(content.items);
+      let source = { page: i, method: 'text', confidence: null };
+      // A page number or stamp must not suppress OCR of the scanned invoice.
+      const meaningfulCharacters = pageLines.map(l => l.text).join('').replace(/[^A-Za-zА-ЯЁа-яё0-9]/g, '').length;
+      if (meaningfulCharacters < 40) {
+        onOcrPage({ page: i, totalPages: doc.numPages });
+        const result = await ocrPageImage(page);
+        if (result.text.trim()) {
+          pageLines = ocrTextToLines(result.text);
+          source = { page: i, method: 'ocr', confidence: result.confidence, engine: result.engine };
+        } else source.warning = result.warning || 'На странице не удалось распознать текст';
+      }
+      pageLines.forEach(line => { line._source = source; });
+      pages.push(pageLines);
+      page.cleanup();
+    }
+    return pages;
+  } finally { await doc.destroy(); }
 }
 
 function isInvoiceStartPage(pageLines) {
@@ -841,7 +792,11 @@ function visualExtractTotal(lines) {
   for (const re of totalLabels) {
     const found = findLinesWith(lines, re);
     for (const line of found) {
-      const money = extractMoneyFromLine(line);
+      const label = line.text.match(re);
+      // Only the amount after this label belongs to this total. Other totals or
+      // VAT can appear in the same PDF text run.
+      const tail = line.text.slice(label.index + label[0].length);
+      const money = extractMoneyFromLine({ text: tail, cells: [{ text: tail }] });
       if (money) return money;
 
       const idx = lines.indexOf(line);
@@ -888,7 +843,7 @@ function visualExtractDescription(lines) {
   }
   if (headerIdx >= 0) {
     for (let i = headerIdx + 1; i < lineTexts.length; i++) {
-      if (/^\s*(итого|всего|в том числе)\b/i.test(lineTexts[i])) { endIdx = i; break; }
+      if (/^\s*(итого|всего|в том числе)(?=\s|:|$)/i.test(lineTexts[i])) { endIdx = i; break; }
     }
     const items = [];
     for (let i = headerIdx + 1; i < endIdx; i++) {
@@ -1109,7 +1064,7 @@ function segmentDocument(lineTexts, docFullText) {
     )) {
       currentSegment = 'table';
       tableStarted = true;
-    } else if (tableStarted && !tableEnded && /^\s*(итого|всего|в том числе)\b/i.test(line.trim())) {
+    } else if (tableStarted && !tableEnded && /^\s*(итого|всего|в том числе)(?=\s|:|$)/i.test(line.trim())) {
       tableEnded = true;
       currentSegment = 'totals';
     } else if (/(?:руководитель|директор|предприниматель|подпись|м\.?п\.?)/i.test(lower) && tableEnded) {
@@ -1307,11 +1262,41 @@ function smartParseDocument(lines) {
     if (!result.description && structural.description) result.description = structural.description;
     if (!result.total && structural.total) result.total = structural.total;
   }
-
+  const supplierIndex = lines.findIndex(line => /(?:Поставщик|Продавец|Исполнитель|Грузоотправитель)/i.test(line.text));
+  const supplierLines = supplierIndex >= 0 ? lines.slice(supplierIndex).slice(0, 6) : lines;
+  for (const line of supplierLines) {
+    if (/(?:Покупатель|Заказчик)/i.test(line.text)) break;
+    const inn = line.text.match(/ИНН\s*[:.]?\s*(\d(?:[ \t]?\d){9,11})(?!\d)/i);
+    if (inn) { result.supplierInn = inn[1].replace(/\s/g, ''); break; }
+  }
+  if (result.invoiceDate) {
+    const [day, month, year] = result.invoiceDate.split('.').map(Number);
+    const value = new Date(Date.UTC(year, month - 1, day));
+    if (value.getUTCFullYear() !== year || value.getUTCMonth() !== month - 1 || value.getUTCDate() !== day) result.invoiceDate = '';
+  }
+  result._recognition = documentEvidence(lines, result);
   return result;
 }
 
-function parseInvoiceText(text) {
+function documentEvidence(lines, parsed) {
+  const sources = [...new Set(lines.map(line => line._source).filter(Boolean))];
+  const methods = [...new Set(sources.map(source => source.method))];
+  const confidences = sources.filter(source => source.method === 'ocr' && Number.isFinite(source.confidence)).map(source => source.confidence);
+  const fieldValues = { supplier: parsed.supplier || '', supplierInn: parsed.supplierInn || '', number: parsed.invoiceNumber || '', date: parsed.invoiceDate || '', total: parsed.total || '' };
+  const fields = {};
+  for (const [key, value] of Object.entries(fieldValues)) {
+    const compact = String(value).replace(/\s/g, '').replace(',', '.');
+    const matches = value ? lines.filter(line => line.text.replace(/\s/g, '').replace(',', '.').includes(compact)) : [];
+    fields[key] = { value, found: !!value, sourceText: matches.map(line => line.text).join('\n').slice(0, 1600), pages: [...new Set(matches.map(line => line._source?.page).filter(Boolean))] };
+  }
+  const warnings = Object.entries(fieldValues).filter(([, value]) => !value).map(([key]) => ({ code: 'missing_' + key, field: key, message: { supplier: 'Не найден поставщик', supplierInn: 'Не найден ИНН поставщика', number: 'Не найден номер документа', date: 'Не найдена корректная дата документа', total: 'Не найдена сумма к оплате' }[key] }));
+  if (confidences.some(value => value < 75)) warnings.push({ code: 'low_ocr_confidence', message: 'Движок OCR сообщил низкую уверенность. Сверьте реквизиты с оригиналом' });
+  if (methods.includes('ocr')) warnings.push({ code: 'ocr_visual_check', message: 'Сверьте сумму, номер, дату и ИНН с оригиналом: уверенность OCR не гарантирует правильность реквизитов' });
+  if (methods.includes('ocr') && /[A-Za-z]/.test(parsed.invoiceNumber || '') && /[А-ЯЁа-яё]/.test(lines.map(line => line.text).join(' '))) warnings.push({ code: 'number_script_ambiguity', field: 'number', message: 'В номере есть латинские символы. Проверьте похожие русские и латинские буквы' });
+  return { engineRuns: sources.filter(source => source.engine).map(source => ({page:source.page,...source.engine})), method: methods.length > 1 ? 'mixed' : methods[0] || 'text', sourcePages: sources.map(source => source.page), confidence: confidences.length ? Math.round(confidences.reduce((sum, value) => sum + value, 0) / confidences.length) : null, fields, warnings, rawText: lines.map(line => line.text).join('\n').slice(0, 20000) };
+}
+
+export function parseInvoiceText(text) {
   if (Array.isArray(text)) return smartParseDocument(text);
   return smartParseDocument(buildVisualLines(
     text.split(/\n/).map((s, i) => ({ str: s, transform: [1,0,0,1, 0, -i * 12], width: s.length * 6, height: 10 }))
@@ -1350,8 +1335,8 @@ function matchRules(text, rules, fallback) {
 }
 
 function ddmmyyyyToSortable(d) {
-  const [dd, mm, yyyy] = d.split(".");
-  return `${yyyy}${mm}${dd}`;
+  const [dd, mm, yyyy] = String(d || '').split('.');
+  return yyyy && mm && dd ? `${yyyy}${mm}${dd}` : '99999999';
 }
 
 function classifyPdf(filePath) {
@@ -1399,9 +1384,6 @@ async function processArchiveFolder(folder, config, archiveLabel = "") {
     const updLayout = await pdfToLayout(updFile);
     upd = parseUpdText(linesToText(updLayout));
   }
-  if (!upd.updNumber && inv.invoiceNumber) {
-    upd = { updNumber: inv.invoiceNumber, updDate: inv.invoiceDate };
-  }
 
   if (!inv.total) return null;
   if (!inv.description) inv.description = archiveLabel || path.basename(folder);
@@ -1416,15 +1398,17 @@ async function processArchiveFolder(folder, config, archiveLabel = "") {
 
   const totalStr = inv.total || "0,00";
   const updLabel = upd.updNumber
-    ? `УПД (${upd.updNumber} от ${upd.updDate}) на ${totalStr}`
-    : `УПД на ${totalStr}`;
+    ? `УПД (${upd.updNumber} от ${upd.updDate || '?'}) на ${totalStr}`
+    : '';
 
   return {
     sum: parseFloat(extractNumber(totalStr) || 0),
-    date: inv.invoiceDate || new Date().toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }),
+    date: inv.invoiceDate || '',
     category: catRule.category,
     description: inv.description,
     supplier: inv.supplier || '',
+    supplierInn: inv.supplierInn || '',
+    recognition: { ...inv._recognition, sourceFile: archiveLabel || path.basename(folder) },
     obj: objRule.object,
     dog: objRule.contract,
     osn: basisLabel,
@@ -1441,8 +1425,8 @@ function buildRowFromParsed(inv, upd, config, label, baseName, isFromUpd) {
 
   const totalStr = inv.total || "0,00";
   const updLabel = upd.updNumber
-    ? `УПД (${upd.updNumber} от ${upd.updDate}) на ${totalStr}`
-    : `УПД на ${totalStr}`;
+    ? `УПД (${upd.updNumber} от ${upd.updDate || '?'}) на ${totalStr}`
+    : '';
 
   const combinedForObject = `${inv.description} ${label}`;
   const objRule = matchRules(combinedForObject, config.objectRules, { object: "", contract: "" });
@@ -1450,10 +1434,12 @@ function buildRowFromParsed(inv, upd, config, label, baseName, isFromUpd) {
 
   return {
     sum: parseFloat(extractNumber(totalStr) || 0),
-    date: inv.invoiceDate || new Date().toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }),
+    date: inv.invoiceDate || '',
     category: catRule.category,
     description: inv.description,
     supplier: inv.supplier || '',
+    supplierInn: inv.supplierInn || '',
+    recognition: { ...inv._recognition, sourceFile: baseName },
     obj: objRule.object,
     dog: objRule.contract,
     osn: basisLabel,
@@ -1464,7 +1450,7 @@ function buildRowFromParsed(inv, upd, config, label, baseName, isFromUpd) {
 }
 
 async function processSinglePdf(filePath, config, label = "", onOcrPage = () => {}) {
-  const baseName = path.basename(filePath);
+  const baseName = label || path.basename(filePath);
   const type = classifyPdf(filePath);
 
   const pageLayouts = await pdfToPageLayouts(filePath, onOcrPage);
@@ -1479,9 +1465,6 @@ async function processSinglePdf(filePath, config, label = "", onOcrPage = () => 
     const flatText = linesToText(layout);
     let inv = smartParseDocument(layout);
     let upd = parseUpdText(flatText);
-    if (!upd.updNumber && inv.invoiceNumber) {
-      upd = { updNumber: inv.invoiceNumber, updDate: inv.invoiceDate };
-    }
     if (!inv.total) return null;
     if (!inv.description) inv.description = label || baseName;
     const isFromUpd = type === "upd" || !inv.invoiceNumber;
@@ -1493,7 +1476,7 @@ async function processSinglePdf(filePath, config, label = "", onOcrPage = () => 
     const startPage = invoicePageIdxs[g];
     const endPage = g + 1 < invoicePageIdxs.length ? invoicePageIdxs[g + 1] : pageLayouts.length;
 
-    const invoiceLines = pageLayouts[startPage];
+    const invoiceLines = pageLayouts.slice(startPage, endPage).filter(pageLines => !isUpdPage(pageLines)).flat();
     let inv = smartParseDocument(invoiceLines);
 
     let updLines = null;
@@ -1503,9 +1486,6 @@ async function processSinglePdf(filePath, config, label = "", onOcrPage = () => 
 
     let upd = {};
     if (updLines) upd = parseUpdText(linesToText(updLines));
-    if (!upd.updNumber && inv.invoiceNumber) {
-      upd = { updNumber: inv.invoiceNumber, updDate: inv.invoiceDate };
-    }
 
     if (!inv.total) continue;
     if (!inv.description) inv.description = label || baseName;
@@ -1521,38 +1501,27 @@ async function processSinglePdf(filePath, config, label = "", onOcrPage = () => 
 export async function parseInvoices(zipBuffer, config, onLog = () => {}) {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "reestr-"));
   try {
-    const outerZip = new AdmZip(zipBuffer);
-    const subArchives = outerZip.getEntries().filter(e => !e.isDirectory && /\.(zip|rar)$/i.test(e.entryName));
-    onLog({ type: "info", text: `Найдено под-архивов: ${subArchives.length}` });
-
-    const rows = [];
-    for (const entry of subArchives) {
-      const name = fixEntryName(entry);
-      const subDir = path.join(workDir, path.basename(name, path.extname(name)));
-      fs.mkdirSync(subDir, { recursive: true });
-      const data = entry.getData();
-      try {
-        if (/\.rar$/i.test(name)) await extractRar(data, subDir);
-        else await extractZip(data, subDir);
-      } catch (e) {
-        onLog({ type: "warn", text: `Не удалось распаковать «${name}»: ${e.message}` });
-        continue;
-      }
-      try {
-        const row = await processArchiveFolder(subDir, config, name);
-        if (row) {
-          rows.push(row);
-          onLog({ type: "ok", text: `${name} → ${row.sum.toLocaleString("ru-RU")} руб.` });
-        } else {
-          onLog({ type: "warn", text: `${name} — не удалось распознать счёт` });
-        }
-      } catch (e) {
-        onLog({ type: "warn", text: `${name} — ошибка разбора: ${e.message}` });
+    await extractZip(zipBuffer, workDir);
+    const visited = new Set();
+    // Ordinary ZIPs and nested packages use the same multi-document parser.
+    for (let depth = 0; depth < 5; depth++) {
+      const archives = findFilesRecursive(workDir).filter(file => /\.(zip|rar)$/i.test(file) && !visited.has(file));
+      if (!archives.length) break;
+      for (const archive of archives) {
+        visited.add(archive);
+        const output = archive + '.unpacked';
+        fs.mkdirSync(output, { recursive: true });
+        try {
+          const buffer = fs.readFileSync(archive);
+          if (/\.rar$/i.test(archive)) await extractRar(buffer, output);
+          else await extractZip(buffer, output);
+        } catch (error) { onLog({ type: 'warn', text: `Не удалось распаковать «${path.basename(archive)}»: ${error.message}` }); }
       }
     }
-
-    rows.sort((a, b) => ddmmyyyyToSortable(a.date).localeCompare(ddmmyyyyToSortable(b.date)));
-    return rows;
+    if (findFilesRecursive(workDir).some(file => /\.(zip|rar)$/i.test(file) && !visited.has(file))) onLog({ type: 'warn', text: 'Архивы глубже пяти уровней пропущены' });
+    const files = findFilesRecursive(workDir).filter(file => /\.(pdf|jpe?g|png|tiff?|bmp)$/i.test(file));
+    if (!files.length) { onLog({ type: 'warn', text: 'В архиве не найдены PDF или изображения счетов' }); return []; }
+    return await parsePdfFiles(files.map(file => ({ name: path.relative(workDir, file), buffer: fs.readFileSync(file) })), config, onLog);
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }
@@ -1570,8 +1539,9 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgre
     onLog({ type: "info", text: `Загружено файлов: ${pdfFiles.length}` });
 
     const savedPaths = [];
-    for (const f of pdfFiles) {
-      const filePath = path.join(workDir, f.name);
+    for (const [fileIndex, f] of pdfFiles.entries()) {
+      // Original names are labels only. Never let a selected/archive name become a path.
+      const filePath = path.join(workDir, fileIndex + '-' + path.basename(String(f.name).replace(/\\/g, '/')));
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       fs.writeFileSync(filePath, Buffer.from(f.buffer));
       const isImage = IMG_EXTS.test(f.name);
@@ -1582,7 +1552,7 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgre
     const imgSaved = savedPaths.filter(f => f.isImage);
 
     // Разделяем PDF на счета и УПД для попытки объединения в пары
-    const invoices = pdfSaved.filter(f => /счет/i.test(f.name) && !/упд/i.test(f.name));
+    const invoices = pdfSaved.filter(f => /сч[её]т/i.test(f.name) && !/упд/i.test(f.name));
     const upds = pdfSaved.filter(f => /упд/i.test(f.name));
     const others = pdfSaved.filter(f => !invoices.includes(f) && !upds.includes(f));
 
@@ -1594,12 +1564,12 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgre
     // Пробуем объединить счёт + УПД в пары (по похожим именам)
     for (const inv of invoices) {
       // Ищем УПД с похожим именем (убираем «счет» / «упд» и сравниваем остаток)
-      const invBase = inv.name.toLowerCase().replace(/счет[^\s]*/gi, "").replace(/[_\-\s.pdf]+/g, "").trim();
+      const invBase = inv.name.toLowerCase().replace(/\.pdf$/i, '').replace(/сч[её]т(?:\s+на\s+оплату)?/gi, '').replace(/[_\-\s]+/g, '').trim();
       let matchedUpd = null;
       for (const u of upds) {
         if (processedPaths.has(u.path)) continue;
-        const updBase = u.name.toLowerCase().replace(/упд[^\s]*/gi, "").replace(/[_\-\s.pdf]+/g, "").trim();
-        if (invBase && updBase && (invBase.includes(updBase) || updBase.includes(invBase))) {
+        const updBase = u.name.toLowerCase().replace(/\.pdf$/i, '').replace(/упд/gi, '').replace(/[_\-\s]+/g, '').trim();
+        if (invBase && invBase === updBase) {
           matchedUpd = u;
           break;
         }
@@ -1609,8 +1579,8 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgre
         onProgress({ current: doneFiles + 1, total: totalFiles, fileName: inv.name });
         const pairDir = path.join(workDir, `pair_${rows.length}`);
         fs.mkdirSync(pairDir, { recursive: true });
-        fs.copyFileSync(inv.path, path.join(pairDir, inv.name));
-        fs.copyFileSync(matchedUpd.path, path.join(pairDir, matchedUpd.name));
+        fs.copyFileSync(inv.path, path.join(pairDir, 'счет.pdf'));
+        fs.copyFileSync(matchedUpd.path, path.join(pairDir, 'упд.pdf'));
         processedPaths.add(inv.path);
         processedPaths.add(matchedUpd.path);
 
@@ -1674,11 +1644,7 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgre
       onProgress({ current: doneFiles + 1, total: savedPaths.length, fileName: img.name });
       onOcrPage({ page: 1, totalPages: 1 });
       try {
-        const worker = await getOcrWorker();
-        const result = await Promise.race([
-          worker.recognize(img.path),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('OCR timeout')), 120000)),
-        ]);
+        const result = await recognizeImage(img.path);
         const text = (result.data.text || "").trim();
         if (!text) {
           onLog({ type: "warn", text: `${img.name} — не удалось распознать текст` });
@@ -1686,11 +1652,12 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgre
           continue;
         }
         const lines = ocrTextToLines(text);
+        lines.forEach(line => { line._source = { page: 1, method: 'ocr', confidence: Number.isFinite(result.data.confidence) ? result.data.confidence : null, engine: result.engine }; });
         const inv = smartParseDocument(lines);
         if (inv.total) {
           if (!inv.description) inv.description = img.name;
-          const upd = { updNumber: inv.invoiceNumber || "", updDate: inv.invoiceDate || "" };
-          const row = buildRowFromParsed(inv, upd, config, img.name, img.name, false);
+          const upd = parseUpdText(text);
+          const row = buildRowFromParsed(inv, upd, config, img.name, img.name, isUpdPage(lines));
           rows.push(row);
           onLog({ type: "ok", text: `${img.name} → ${row.sum.toLocaleString("ru-RU")} руб.` });
         } else {

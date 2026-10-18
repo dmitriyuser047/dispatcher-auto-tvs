@@ -8,6 +8,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readSection:    (name)    => ipcRenderer.invoke('read-section', name),
   writeSections:  (json)    => ipcRenderer.invoke('write-sections', json),
   getDataPath:    ()        => ipcRenderer.invoke('get-data-path'),
+  getDataHealth:  ()        => ipcRenderer.invoke('get-data-health'),
+  addAttachment:  ()        => ipcRenderer.invoke('add-attachment'),
+  openAttachment:(id)      => ipcRenderer.invoke('open-attachment',id),
+  archiveImportSource:(payload) => ipcRenderer.invoke('archive-import-source',payload),
+  createBackupPackage:()=>ipcRenderer.invoke('create-backup-package'),
+  verifyBackupPackage:()=>ipcRenderer.invoke('verify-backup-package'),
   openDataFolder: ()        => ipcRenderer.invoke('open-data-folder'),
   exportPdf:      (html, defaultFileName) => ipcRenderer.invoke('export-pdf', { html, defaultFileName }),
   importRar:      ()        => ipcRenderer.invoke('import-rar'),
@@ -19,6 +25,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveSettings:      (s)         => ipcRenderer.invoke('save-settings', s),
   switchUser:        (idx)       => ipcRenderer.invoke('switch-user', idx),
   chooseDataFolder:  ()          => ipcRenderer.invoke('choose-data-folder'),
+  chooseCertificate:()=>ipcRenderer.invoke('choose-certificate'),
 
   // Окно реестра
   openReestrWindow: (data) => ipcRenderer.invoke('open-reestr-window', data),

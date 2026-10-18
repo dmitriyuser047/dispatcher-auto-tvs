@@ -3,11 +3,13 @@
 
 // ─── VEHICLE CARDS ──────────────────────────────────────
 let vcSearchQuery = '';
+let vcShowArchive=false,genShowArchive=false;
 function renderVehicleCards() {
   const q = vcSearchQuery.toLowerCase().trim();
   const fuelLabels = { diesel: 'Дизельное', gasoline: 'Бензин', gas: 'Газ' };
 
   const filtered = data.vehicles.filter(v => {
+    if(Boolean(v.archived)!==vcShowArchive)return false;
     if (q) {
       const combined = [v.plate, v.make, v.model, v.driver, v.org, v.object, v.responsible, v.status, v.note, v.vin, v.fuel]
         .map(f => (f || '').toLowerCase()).join(' ');
@@ -67,6 +69,7 @@ function renderVehicleCards() {
   document.getElementById('mainContent').innerHTML = `
     <div style="padding:24px 28px;width:100%;box-sizing:border-box;overflow-y:auto;height:100%">
       <div class="vehicle-cards-toolbar">
+        <label><input type="checkbox" ${vcShowArchive?'checked':''} onchange="vcShowArchive=this.checked;renderVehicleCards()"> Архив ТС</label>
         <input type="text" id="vcSearchInput" placeholder="Поиск по номеру, марке, водителю, объекту..." value="${vcSearchQuery.replace(/"/g, '&quot;')}"
           oninput="vcSearchQuery=this.value;renderVehicleCards()" />
         <button class="btn btn-ghost" onclick="openActGsmModal()" title="Акт на списание ГСМ по транспорту">
@@ -94,6 +97,7 @@ function renderGeneratorCards() {
   const fuelLabels = { diesel: 'Дизель', gasoline: 'Бензин', gas: 'Газ' };
 
   const filtered = gens.filter(g => {
+    if(Boolean(g.archived)!==genShowArchive)return false;
     if (!q) return true;
     return [g.name, g.serial, g.location, g.status, g.note]
       .some(f => (f || '').toLowerCase().includes(q));
@@ -137,7 +141,7 @@ function renderGeneratorCards() {
         <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2"/><path d="M12 12v4m-2-2h4"/></svg>
         <p>${gens.length ? 'Ничего не найдено' : 'Нет дизельных генераторов. Нажмите «Добавить ДЭС»'}</p>
       </div>`;
-  const countHtml = `Всего: ${gens.length} генераторов`;
+  const countHtml = `${genShowArchive?'Архив':'Действующих'}: ${filtered.length} генераторов`;
 
   const existing = document.getElementById('genGridArea');
   if (existing) {
@@ -148,6 +152,7 @@ function renderGeneratorCards() {
   document.getElementById('mainContent').innerHTML = `
     <div style="padding:24px 28px;width:100%;box-sizing:border-box;overflow-y:auto;height:100%">
       <div class="vehicle-cards-toolbar">
+        <label><input type="checkbox" ${genShowArchive?'checked':''} onchange="genShowArchive=this.checked;renderGeneratorCards()"> Архив ДЭС</label>
         <input type="text" id="genSearchInput" placeholder="Поиск по наименованию, серийному №, месту..." value="${genSearchQuery.replace(/"/g, '&quot;')}"
           oninput="genSearchQuery=this.value;renderGeneratorCards()" />
         <button class="btn btn-ghost" onclick="openGenActModal()" title="Акт на списание ГСМ по ДЭС">

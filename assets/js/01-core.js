@@ -108,12 +108,21 @@ function autoDateSep(el) {
 
 // ─── DATA ───────────────────────────────────────────────
 const STORAGE_KEY = 'fuel_tracker_v1';
+let localCacheKey=STORAGE_KEY;
 let _loadWriteBlocked = false;
 let _lastPersisted = null;
 
 async function loadData() {
   let d = null;
   _loadWriteBlocked = false;
+  // Кеш разделён по базе и персональному сетевому доступу: отключение
+  // сервера не должно открывать данные от прежней учётной записи.
+  if(window.electronAPI?.getSettings){try{
+    const s=await window.electronAPI.getSettings(),profile=(s.users||[])[s.activeUser||0]||{};
+    const identity=JSON.stringify(s.networkMode==='client'?['client',s.remoteProtocol||'http:',s.remoteHost,s.remotePort,s.networkKey]:['local',profile.dataDir]);
+    const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(identity));
+    localCacheKey=STORAGE_KEY+':'+Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+  }catch(e){localCacheKey=null;console.warn('[cache] персональный кеш недоступен');}}
   // Снимок с версиями разделов — для синхронизации нескольких пользователей
   if (typeof syncLoad === 'function') {
     try { d = await syncLoad(); } catch (e) { console.warn('[loadData] снимок: ' + e.message); }
@@ -127,7 +136,7 @@ async function loadData() {
     showToast('Основная база недоступна. Открыта резервная копия только для просмотра. Проверьте подключение и файлы базы.');
   }
   if (!d) {
-    try { d = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch {}
+    try { if(localCacheKey)d = JSON.parse(localStorage.getItem(localCacheKey)); } catch {}
   }
   if (d && (!Array.isArray(d.vehicles) || !Array.isArray(d.records))) d = null;
   if (!d) d = { vehicles: [], records: [] };
@@ -146,11 +155,12 @@ async function loadData() {
   if (!d.fuelPurchases) d.fuelPurchases = [];
   if (!d.fuelImports)   d.fuelImports   = [];
   if (!d.fuelCards)     d.fuelCards     = [];
-  if (!d.fuelCards.some(c => /наличк/i.test(c.number) || /наличк/i.test(c.provider)))
+  if ((typeof _sync==='undefined'||!_sync.access||_sync.access.writable.includes('fuelCards'))&&!d.fuelCards.some(c => /наличк/i.test(c.number) || /наличк/i.test(c.provider)))
     d.fuelCards.push({ id: 'fc_cash', number: 'НАЛИЧКА', provider: 'Наличка', org: '', status: 'active', limit: null, assignments: [], note: 'Для учёта наличных закупок топлива' });
   if (!d.fuelPeriods)   d.fuelPeriods   = [];
   if (!d.monthlyFuel)   d.monthlyFuel   = [];
   if (!d.appMeta)       d.appMeta       = [];
+  if (typeof wfInitData === 'function') wfInitData(d);
   _lastPersisted = JSON.stringify(d);
   return d;
 }
@@ -162,13 +172,14 @@ async function loadData() {
 // Повторные вызовы схлопываются — пишется только последнее состояние.
 let _lsPending = null, _lsTimer = null;
 function scheduleLocalBackup(json) {
-  _lsPending = json;
+  if(!localCacheKey)return;
+  _lsPending = {key:localCacheKey,json};
   if (_lsTimer) return;
   _lsTimer = setTimeout(() => {
     _lsTimer = null;
     const payload = _lsPending; _lsPending = null;
     try {
-      localStorage.setItem(STORAGE_KEY, payload);
+      localStorage.setItem(payload.key, payload.json);
     } catch (e) {
       // Чаще всего это переполнение квоты localStorage на больших объёмах.
       // Основные данные уже записаны в файл, поэтому работу не прерываем.
@@ -182,6 +193,7 @@ async function saveData(d = data, options) {
   rebuildIndex();
   try {
     if (_loadWriteBlocked) throw new Error('Основная база не прочитана. Сначала восстановите подключение или базу.');
+    if (typeof wfAppendAudit === 'function') wfAppendAudit(d, _lastPersisted);
     const json = JSON.stringify(d);
     if (window.electronAPI) {
       // По разделам с проверкой версии; на старом сервере — целиком, как раньше

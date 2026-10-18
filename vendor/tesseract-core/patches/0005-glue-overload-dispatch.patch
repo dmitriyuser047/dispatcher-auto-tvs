@@ -1,0 +1,41 @@
+diff --git a/javascript/glue.js b/javascript/glue.js
+index 8138a1d..1c9095f 100644
+--- a/javascript/glue.js
++++ b/javascript/glue.js
+@@ -1464,15 +1464,14 @@ TessBaseAPI.prototype['GetRegions'] = TessBaseAPI.prototype.GetRegions = /** @su
+ };;
+ 
+ TessBaseAPI.prototype['GetTextlines'] = TessBaseAPI.prototype.GetTextlines = /** @suppress {undefinedVars, duplicate} */function(raw_image, raw_padding, pixa, blockids, paraids) {
++  if (arguments.length !== 2 && arguments.length !== 5) throw new TypeError('GetTextlines requires exactly 2 or 5 arguments');
+   var self = this.ptr;
+   if (raw_image && typeof raw_image === 'object') raw_image = raw_image.ptr;
+   if (raw_padding && typeof raw_padding === 'object') raw_padding = raw_padding.ptr;
+   if (pixa && typeof pixa === 'object') pixa = pixa.ptr;
+   if (blockids && typeof blockids === 'object') blockids = blockids.ptr;
+   if (paraids && typeof paraids === 'object') paraids = paraids.ptr;
+-  if (pixa === undefined) { return wrapPointer(_emscripten_bind_TessBaseAPI_GetTextlines_2(self, raw_image, raw_padding), Boxa) }
+-  if (blockids === undefined) { return wrapPointer(_emscripten_bind_TessBaseAPI_GetTextlines_3(self, raw_image, raw_padding, pixa), Boxa) }
+-  if (paraids === undefined) { return wrapPointer(_emscripten_bind_TessBaseAPI_GetTextlines_4(self, raw_image, raw_padding, pixa, blockids), Boxa) }
++  if (arguments.length === 2) { return wrapPointer(_emscripten_bind_TessBaseAPI_GetTextlines_2(self, raw_image, raw_padding), Boxa) }
+   return wrapPointer(_emscripten_bind_TessBaseAPI_GetTextlines_5(self, raw_image, raw_padding, pixa, blockids, paraids), Boxa);
+ };;
+ 
+@@ -1496,6 +1495,7 @@ TessBaseAPI.prototype['GetConnectedComponents'] = TessBaseAPI.prototype.GetConne
+ };;
+ 
+ TessBaseAPI.prototype['GetComponentImages'] = TessBaseAPI.prototype.GetComponentImages = /** @suppress {undefinedVars, duplicate} */function(level, text_only, raw_image, raw_padding, pixa, blockids, paraids) {
++  if (arguments.length !== 4 && arguments.length !== 7) throw new TypeError('GetComponentImages requires exactly 4 or 7 arguments');
+   var self = this.ptr;
+   if (level && typeof level === 'object') level = level.ptr;
+   if (text_only && typeof text_only === 'object') text_only = text_only.ptr;
+@@ -1504,9 +1504,7 @@ TessBaseAPI.prototype['GetComponentImages'] = TessBaseAPI.prototype.GetComponent
+   if (pixa && typeof pixa === 'object') pixa = pixa.ptr;
+   if (blockids && typeof blockids === 'object') blockids = blockids.ptr;
+   if (paraids && typeof paraids === 'object') paraids = paraids.ptr;
+-  if (pixa === undefined) { return wrapPointer(_emscripten_bind_TessBaseAPI_GetComponentImages_4(self, level, text_only, raw_image, raw_padding), Boxa) }
+-  if (blockids === undefined) { return wrapPointer(_emscripten_bind_TessBaseAPI_GetComponentImages_5(self, level, text_only, raw_image, raw_padding, pixa), Boxa) }
+-  if (paraids === undefined) { return wrapPointer(_emscripten_bind_TessBaseAPI_GetComponentImages_6(self, level, text_only, raw_image, raw_padding, pixa, blockids), Boxa) }
++  if (arguments.length === 4) { return wrapPointer(_emscripten_bind_TessBaseAPI_GetComponentImages_4(self, level, text_only, raw_image, raw_padding), Boxa) }
+   return wrapPointer(_emscripten_bind_TessBaseAPI_GetComponentImages_7(self, level, text_only, raw_image, raw_padding, pixa, blockids, paraids), Boxa);
+ };;
+ 

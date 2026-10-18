@@ -1,0 +1,24 @@
+diff --git a/src/api/baseapi.cpp b/src/api/baseapi.cpp
+index 0ec1b1f..856dd42 100644
+--- a/src/api/baseapi.cpp
++++ b/src/api/baseapi.cpp
+@@ -628,11 +628,19 @@ int TessBaseAPI::SetImageFile(int exif, const float angle) {
+     Pix *pix = pixRead(filename1);
+     if (pix == nullptr) {
+       tprintf("Image file %s cannot be read!\n", filename1);
++      // InternalSetImage clears results, but keeps the previous input pix.
++      // A failed decoder must not leave a recognisable image from another page.
++      Clear();
+       return 1;
+     }
+     if (pixGetSpp(pix) == 4 && pixGetInputFormat(pix) == IFF_PNG) {
+       // remove alpha channel from png
+       Pix *p1 = pixRemoveAlpha(pix);
++      if (p1 == nullptr) {
++        pixDestroy(&pix);
++        Clear();
++        return 1;
++      }
+       pixSetSpp(p1, 3);
+       (void)pixCopy(pix, p1);
+       pixDestroy(&p1);

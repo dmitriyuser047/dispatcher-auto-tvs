@@ -5,7 +5,7 @@
 function renderGenDetail(g) {
   const recs       = genRecsFor(g.id);
   const totalHours = recs.reduce((s, r) => s + (r.hours || 0), 0);
-  const totalFuel  = recs.reduce((s, r) => s + (r.fuelActual || 0), 0);
+  const totalFuel  = recs.reduce((s, r) => s + genActualSpent(g,r), 0);
   const avgConsumption = totalHours > 0 && totalFuel > 0 ? totalFuel / totalHours : 0;
 
   const fuelLabels  = { diesel: 'Дизельное', gasoline: 'Бензин', gas: 'Газ (ГБО)' };
@@ -17,7 +17,7 @@ function renderGenDetail(g) {
   }).sort((a,b) => cmpDateAsc(a.date, b.date));
 
   const monthHours = monthRecs.reduce((s, r) => s + (r.hours || 0), 0);
-  const monthFuel  = monthRecs.reduce((s, r) => s + (r.fuelActual || 0), 0);
+  const monthFuel  = monthRecs.reduce((s, r) => s + genActualSpent(g,r), 0);
 
   // Month tabs
   const months = getMonthsForGenerator(g.id);
@@ -53,7 +53,7 @@ function renderGenDetail(g) {
     monthRecs.forEach(r => {
       const dayName = DAYS_RU[new Date(r.date).getDay()];
       const normLh  = g.norm || null;
-      const factLh  = r.fuelActual && r.hours > 0 ? r.fuelActual / r.hours : null;
+      const factLh  = r.fuelActualSource!=='estimate' && fqValue(r.fuelActual)!=null && r.hours>0 ? Number(r.fuelActual)/r.hours : null;
       const factDev = factLh !== null && normLh !== null ? factLh - normLh : null;
       const factDevHtml = factDev !== null
         ? ` <span style="font-size:11px;color:${factDev>0?'var(--red)':'var(--green)'};font-weight:600">${factDev>0?'+':''}${factDev.toFixed(1)}</span>`
@@ -67,7 +67,7 @@ function renderGenDetail(g) {
         <td class="td-num" style="cursor:pointer" title="Изменить нагрузку" onclick="event.stopPropagation();openEditGenRecord(${htmlJs(r.id)})">${r.load!=null?r.load.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
         <td class="td-num">${r.fuelIssued!=null?r.fuelIssued.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
         <td class="td-num">${r.fuelUsed!=null?r.fuelUsed.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
-        <td class="td-num">${r.fuelActual!=null?r.fuelActual.toLocaleString('ru',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+        <td class="td-num">${r.fuelActual!=null?Number(r.fuelActual).toLocaleString('ru',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}<small style="display:block;color:var(--text3)">${r.fuelActualSource==='estimate'?'Оценка по нагрузке':r.fuelActualSource==='manual'?'Введено вручную':r.fuelActual!=null?'Источник не указан':''}</small></td>
         <td class="td-num" style="color:${balColor};font-weight:600">${bal!=null?bal.toLocaleString('ru',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
         <td class="td-num">${normLh!==null?normLh.toFixed(1):'—'}</td>
         <td class="td-num">${factLh!==null?factLh.toFixed(1)+factDevHtml:'—'}</td>
@@ -111,9 +111,10 @@ function renderGenDetail(g) {
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           Изменить
         </button>
-        <button class="btn btn-danger btn-sm" onclick="deleteGenerator(${htmlJs(g.id)})">
+        <button class="btn btn-ghost btn-sm" onclick="wfTimeline(${htmlJs('g:'+g.id)})">История</button>
+        <button class="btn btn-danger btn-sm" onclick="${g.archived?'restoreGenerator':'deleteGenerator'}(${htmlJs(g.id)})">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
-          Удалить
+          ${g.archived?'Восстановить':'В архив'}
         </button>
       </div>
     </div>
@@ -132,7 +133,7 @@ function renderGenDetail(g) {
       <div class="stat-card accent-yellow">
         <div class="stat-label">Расход топлива</div>
         <div class="stat-value">${totalFuel.toLocaleString('ru',{maximumFractionDigits:1})} <span class="stat-unit">л</span></div>
-        <div class="stat-sub">Фактический, всего</div>
+        <div class="stat-sub">Для баланса: факт и оценка</div>
       </div>
       <div class="stat-card accent-green">
         <div class="stat-label">Ср. расход</div>
@@ -189,7 +190,7 @@ function toRecsFor(gid) {
 
 function renderToSection(gid, currentHours) {
   const recs = toRecsFor(gid);
-  const last = recs[recs.length - 1];
+  const last = recs.filter(r=>!r.planned).at(-1);
 
   // Статус следующего ТО
   let statusHtml = '';
@@ -235,7 +236,8 @@ function renderToSection(gid, currentHours) {
         <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.performer || '—')}</td>
         <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.note || '—')}</td>
         <td class="td-actions">
-          <button class="icon-btn" onclick="openEditToRecord(${htmlJs(r.id)})">
+          ${r.planned?`<button class="btn btn-primary btn-sm" onclick="tssCompletePlan(${htmlJs(r.id)},'toRecords')">Выполнить план</button>`:''}
+          <button class="icon-btn" onclick="${r.planned?'tssEditRecord':'openEditToRecord'}(${htmlJs(r.id)}${r.planned?",'toRecords'":''})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
           <button class="icon-btn del" onclick="deleteToRecord(${htmlJs(r.id)})">
@@ -356,11 +358,11 @@ function computeGenFuelBalances(gid) {
   if (_genBalCache[gid]) return _genBalCache[gid];
   const gen  = (data.generators || []).find(g => g.id === gid);
   const recs = genRecsFor(gid).slice().sort((a,b) => cmpDateAsc(a.date, b.date));
-  let balance = gen ? (gen.fuelBalance || 0) : 0;
+  let balance = fqValue(gen?.fuelBalance)||0;
   const balMap = {};
   recs.forEach(r => {
     const spent = genActualSpent(gen, r);
-    balance += (r.fuelIssued || 0) - spent;
+    balance += (fqValue(r.fuelIssued)||0) - spent;
     balMap[r.id] = +balance.toFixed(2);
   });
   _genBalCache[gid] = balMap;
@@ -422,7 +424,8 @@ function computeTankBalanceAt(tankId, boundary, inclusive) {
   const okDate = d => !boundary || (inclusive ? d <= boundary : d < boundary);
   const income = (data.tankIncomes || []).filter(r => r.tankId === tankId && okDate(r.date)).reduce((s, r) => s + (r.amount || 0), 0);
   const issued = (data.genRecords || []).filter(r => genRecordTankId(r) === tankId && okDate(r.date)).reduce((s, r) => s + (r.fuelIssued || 0), 0);
-  return +((t.balanceInit || 0) + income - issued).toFixed(2);
+  const movements=(data.fuelMovements||[]).filter(r=>!r.cancelled&&okDate(r.date)).reduce((s,r)=>s+(r.toTankId===tankId?(+r.qty||0):0)-(r.fromTankId===tankId?(+r.qty||0):0),0);
+  return +((t.balanceInit || 0) + income - issued + movements).toFixed(2);
 }
 
 function genRecordTankId(r) {
@@ -438,16 +441,18 @@ function genPreserveTankHistory(g) {
 // нормой при 50% и нормой при 100% (кривая расхода дизель-генератора не
 // пропорциональна напрямую нагрузке от нуля, поэтому одной нормы100 мало).
 function genFuelRate(g, load) {
-  if (!g.norm100 || !g.power) return null;
-  const loadPct = (load / g.power) * 100;
-  if (g.norm50 != null) {
-    if (loadPct <= 50 && g.normIdle != null) {
-      return g.normIdle + (g.norm50 - g.normIdle) * loadPct / 50;
+  const n100=fqValue(g.norm100),power=fqValue(g.power),n50=fqValue(g.norm50),idle=fqValue(g.normIdle);
+  if(n100==null||!(power>0)||fqValue(load)==null)return null;
+  const loadPct = (Number(load)/power)*100;
+  if (n50 != null) {
+    if (loadPct <= 50 && idle != null) {
+      return Math.max(0,idle+(n50-idle)*loadPct/50);
     }
-    return g.norm50 + (g.norm100 - g.norm50) * (loadPct - 50) / 50;
+    return Math.max(0,n50+(n100-n50)*(loadPct-50)/50);
   }
-  return g.norm100 * (loadPct / 100);
+  return Math.max(0,n100*(loadPct/100));
 }
+function genNormKnown(g,r){return !!g&&!!r&&(fqValue(r.fuelUsed)!=null||fqValue(g.norm)!=null||fqValue(g.norm100)!=null);}
 
 // ─── ЕДИНЫЙ РАСЧЁТ РАСХОДА ДЭС ──────────────────────────
 // Раньше расход считался в трёх местах по-разному: остаток ёмкости брал
@@ -461,6 +466,7 @@ function genFuelRate(g, load) {
 //             записи проставлен фактический расход вручную, берётся он.
 function genNormSpent(g, r) {
   if (!g || !r) return 0;
+  if(fqValue(r.fuelUsed)!=null)return Number(r.fuelUsed);
   const hours = +r.hours || 0;
   if (!hours) return 0;
   // Норма для фактического режима: расход при указанной нагрузке × моточасы.
@@ -493,8 +499,8 @@ function computeGenBalanceAt(gid, boundary, inclusive) {
   const okDate = d => !boundary || (inclusive ? d <= boundary : d < boundary);
   const recs = (data.genRecords || []).filter(r => r.generatorId === gid && okDate(r.date))
     .slice().sort((a,b) => cmpDateAsc(a.date, b.date));
-  let bal = g.fuelBalance || 0;
-  recs.forEach(r => { bal += (r.fuelIssued || 0) - genActualSpent(g, r); });
+  let bal = fqValue(g.fuelBalance)||0;
+  recs.forEach(r => { bal += (fqValue(r.fuelIssued)||0) - genActualSpent(g, r); });
   return +bal.toFixed(2);
 }
 

@@ -260,13 +260,14 @@ function renderDetail(v) {
         ${v.justification ? `<div style="margin-top:8px;font-size:12px;color:var(--text2);background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;max-width:600px"><span style="color:var(--text3);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Обоснование: </span>${htmlEsc(v.justification)}</div>` : ''}
       </div>
       <div class="vdh-actions">
+        <button class="btn btn-ghost btn-sm" onclick="wfTimeline(${htmlJs('v:'+v.id)})">История</button>
         <button class="btn btn-ghost btn-sm" onclick="openEditVehicle(${htmlJs(v.id)})">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           Изменить
         </button>
         <button class="btn btn-danger btn-sm" onclick="deleteVehicle(${htmlJs(v.id)})">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
-          Удалить
+          ${v.archived?'Восстановить':'В архив'}
         </button>
       </div>
     </div>`;

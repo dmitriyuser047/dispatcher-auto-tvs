@@ -1,0 +1,76 @@
+diff --git a/javascript/src/glue.cpp b/javascript/src/glue.cpp
+index dbae36d..e418347 100644
+--- a/javascript/src/glue.cpp
++++ b/javascript/src/glue.cpp
+@@ -780,7 +780,12 @@ char* EMSCRIPTEN_KEEPALIVE emscripten_bind_TessBaseAPI_TesseractRect_7(TessBaseA
+ }
+ 
+ void EMSCRIPTEN_KEEPALIVE emscripten_bind_TessBaseAPI_ClearAdaptiveClassifier_0(TessBaseAPI* self) {
++#ifdef DISABLED_LEGACY_ENGINE
++  EM_ASM({ throw new Error('TVS_LSTM_LEGACY_UNAVAILABLE: ClearAdaptiveClassifier requires a legacy-enabled core'); });
++  return;
++#else
+   self->ClearAdaptiveClassifier();
++#endif
+ }
+ 
+ void EMSCRIPTEN_KEEPALIVE emscripten_bind_TessBaseAPI_SetImage_1(TessBaseAPI* self, Pix* imagedata, int exif, const float angle) {
+@@ -904,7 +909,12 @@ char* EMSCRIPTEN_KEEPALIVE emscripten_bind_TessBaseAPI_GetUNLVText_0(TessBaseAPI
+ }
+ 
+ char* EMSCRIPTEN_KEEPALIVE emscripten_bind_TessBaseAPI_GetOsdText_1(TessBaseAPI* self, int page_number) {
++#ifdef DISABLED_LEGACY_ENGINE
++  EM_ASM({ throw new Error('TVS_LSTM_LEGACY_UNAVAILABLE: GetOsdText requires a legacy-enabled core'); });
++  return nullptr;
++#else
+   return self->GetOsdText(page_number);
++#endif
+ }
+ 
+ int EMSCRIPTEN_KEEPALIVE emscripten_bind_TessBaseAPI_MeanTextConf_0(TessBaseAPI* self) {
+@@ -915,11 +925,14 @@ IntPtr* EMSCRIPTEN_KEEPALIVE emscripten_bind_TessBaseAPI_AllWordConfidences_0(Te
+   return self->AllWordConfidences();
+ }
+ 
+-// This function does not exist in LSTM-only build so causes errors.
+-// Eliminating it completely to avoid confusion.
+-// bool EMSCRIPTEN_KEEPALIVE emscripten_bind_TessBaseAPI_AdaptToWordStr_2(TessBaseAPI* self, PageSegMode mode, const char* wordstr) {
+-//   return self->AdaptToWordStr(mode, wordstr);
+-// }
++bool EMSCRIPTEN_KEEPALIVE emscripten_bind_TessBaseAPI_AdaptToWordStr_2(TessBaseAPI* self, PageSegMode mode, const char* wordstr) {
++#ifdef DISABLED_LEGACY_ENGINE
++  EM_ASM({ throw new Error('TVS_LSTM_LEGACY_UNAVAILABLE: AdaptToWordStr requires a legacy-enabled core'); });
++  return false;
++#else
++  return self->AdaptToWordStr(mode, wordstr);
++#endif
++}
+ 
+ void EMSCRIPTEN_KEEPALIVE emscripten_bind_TessBaseAPI_Clear_0(TessBaseAPI* self) {
+   self->Clear();
+@@ -942,7 +955,12 @@ bool EMSCRIPTEN_KEEPALIVE emscripten_bind_TessBaseAPI_IsValidCharacter_1(TessBas
+ }
+ 
+ bool EMSCRIPTEN_KEEPALIVE emscripten_bind_TessBaseAPI_DetectOS_1(TessBaseAPI* self, OSResults* osr) {
++#ifdef DISABLED_LEGACY_ENGINE
++  EM_ASM({ throw new Error('TVS_LSTM_LEGACY_UNAVAILABLE: DetectOS requires a legacy-enabled core'); });
++  return false;
++#else
+   return self->DetectOS(osr);
++#endif
+ }
+ 
+ const char* EMSCRIPTEN_KEEPALIVE emscripten_bind_TessBaseAPI_GetUnichar_1(TessBaseAPI* self, int unichar_id) {
+@@ -972,7 +990,12 @@ OSResults* EMSCRIPTEN_KEEPALIVE emscripten_bind_OSResults_OSResults_0() {
+ }
+ 
+ void EMSCRIPTEN_KEEPALIVE emscripten_bind_OSResults_print_scores_0(OSResults* self) {
++#ifdef DISABLED_LEGACY_ENGINE
++  EM_ASM({ throw new Error('TVS_LSTM_LEGACY_UNAVAILABLE: OSResults.print_scores requires a legacy-enabled core'); });
++  return;
++#else
+   self->print_scores();
++#endif
+ }
+ 
+ OSBestResult* EMSCRIPTEN_KEEPALIVE emscripten_bind_OSResults_get_best_result_0(OSResults* self) {

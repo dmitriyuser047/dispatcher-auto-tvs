@@ -1,150 +1,70 @@
-// Отчёты (оборотка)
-// Выделено из index.html
-
-// ─── ОТЧЁТЫ (ОБОРОТКА) ──────────────────────────────────
-let reportPeriod = 'all';
-let reportGroupBy = 'category';
-let reportKind = 'fuel';   // 'fuel' — отчёт по топливу, 'payments' — оборотка
-
+// Финансовая ведомость: единая семантика частичных оплат и стабильных связей.
+let reportPeriod='all',reportGroupBy='category',reportKind='fuel';
+let reportOrg='',reportObject='',reportCategory='',reportSettlement='',reportExpandedKey=null;
+const REPORT_GROUPS={category:'По статьям',vehicle:'По ТС',contragent:'По контрагентам',org:'По организациям',object:'По объектам',month:'По месяцам'};
+function reportsFilteredPayments() {
+  return (data.payments||[]).filter(p=>{
+    if(reportPeriod!=='all'&&String(p.date||'').slice(0,7)!==reportPeriod)return false;
+    if(reportOrg&&finNameKey(finPaymentOrg(p))!==finNameKey(reportOrg))return false;
+    if(reportObject&&finNameKey(finPaymentObject(p))!==finNameKey(reportObject))return false;
+    if(reportCategory&&finNameKey(p.category)!==finNameKey(reportCategory))return false;
+    if(reportSettlement==='paid'&&finDebt(p)>0.005)return false;
+    if(reportSettlement==='debt'&&finDebt(p)<=0.005)return false;
+    if(reportSettlement==='partial'&&!(finPaidAmount(p)>0&&finDebt(p)>0.005))return false;
+    if(reportSettlement==='overdue'&&!finOverdue(p))return false;
+    return true;
+  });
+}
+function reportsPaymentGroup(p) {
+  if(reportGroupBy==='vehicle') {
+    const v=(data.vehicles||[]).find(v=>v.id===p.vehicleId);
+    return {key:p.vehicleId?'vehicle:'+p.vehicleId:'unassigned:vehicle',name:v?[v.plate,v.make].filter(Boolean).join(' · '):p.vehicleId?'ТС удалено из справочника':'Без ТС'};
+  }
+  if(reportGroupBy==='month') {
+    const month=/^\d{4}-\d{2}/.test(p.date||'')?p.date.slice(0,7):'';
+    return {key:month||'unassigned:date',name:month?new Date(Number(month.slice(0,4)),Number(month.slice(5,7))-1,1).toLocaleDateString('ru',{month:'long',year:'numeric'}):'Без даты'};
+  }
+  return finBudgetGroup(p,false,reportGroupBy);
+}
+function reportsPaymentGroups(payments) {
+  const groups=new Map();
+  payments.forEach(p=>{
+    const group=reportsPaymentGroup(p);
+    if(!groups.has(group.key))groups.set(group.key,{...group,count:0,sum:0,paid:0,debt:0,overdue:0});
+    const out=groups.get(group.key);out.count++;out.sum+=finNumber(p.sum);out.paid+=finPaidAmount(p);out.debt+=finDebt(p);if(finOverdue(p))out.overdue+=finDebt(p);
+  });
+  return [...groups.values()].sort((a,b)=>b.sum-a.sum||a.name.localeCompare(b.name,'ru'));
+}
+function reportsSelectOptions(dimension,current) {
+  const values=new Set((data.payments||[]).map(p=>dimension==='org'?finPaymentOrg(p):dimension==='object'?finPaymentObject(p):p.category||'').filter(Boolean));
+  if(current)values.add(current);
+  return '<option value="">Все</option>'+[...values].sort((a,b)=>a.localeCompare(b,'ru')).map(value=>`<option value="${htmlEsc(value)}" ${current===value?'selected':''}>${htmlEsc(value)}</option>`).join('');
+}
+function reportsToggleDetail(key) {reportExpandedKey=reportExpandedKey===key?null:key;renderReportsSection();}
+function reportsOpenPayment(id) {switchSection('finances');openEditPayment(id);}
 function renderReportsSection() {
-  if (reportKind === 'fuel') { renderFuelReport(); return; }
-  const payments = data.payments || [];
-  const vehicles = data.vehicles || [];
-  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-
-  const months = new Set();
-  payments.forEach(p => {
-    if (p.date) {
-      const d = new Date(p.date);
-      if (!isNaN(d)) months.add(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));
-    }
-  });
-  const sortedMonths = [...months].sort().reverse();
-
-  let filtered = payments;
-  if (reportPeriod !== 'all') {
-    filtered = payments.filter(p => {
-      if (!p.date) return false;
-      const d = new Date(p.date);
-      return (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')) === reportPeriod;
-    });
-  }
-
-  const totalSum = filtered.reduce((s,p)=>s+(p.sum||0),0);
-  const paidSum = filtered.filter(p=>p.paid).reduce((s,p)=>s+(p.sum||0),0);
-  const unpaidSum = totalSum - paidSum;
-
-  const periodTabs = `<button class="mtab ${reportPeriod==='all'?'active':''}" onclick="reportPeriod='all';renderReportsSection()">Все</button>` +
-    sortedMonths.map(m => {
-      const [y,mo] = m.split('-');
-      return `<button class="mtab ${reportPeriod===m?'active':''}" onclick="reportPeriod='${m}';renderReportsSection()">${monthNames[parseInt(mo)-1]} ${y}</button>`;
-    }).join('');
-
-  const groupBtns = [['category','По статьям'],['vehicle','По ТС'],['contragent','По контрагентам'],['month','По месяцам']].map(([k,l]) =>
-    `<button class="mtab ${reportGroupBy===k?'active':''}" onclick="reportGroupBy='${k}';renderReportsSection()">${l}</button>`
-  ).join('');
-
-  const vMap = {};
-  vehicles.forEach(v => vMap[v.id] = v.plate || v.make || v.id);
-
-  const groups = {};
-  filtered.forEach(p => {
-    let key;
-    if (reportGroupBy === 'category') key = p.category || 'Без категории';
-    else if (reportGroupBy === 'vehicle') key = p.vehicleId ? (vMap[p.vehicleId]||p.vehicleId) : 'Без ТС';
-    else if (reportGroupBy === 'contragent') key = p.contragent || 'Без контрагента';
-    else if (reportGroupBy === 'month') {
-      if (!p.date) { key = 'Без даты'; }
-      else { const d = new Date(p.date); key = monthNames[d.getMonth()] + ' ' + d.getFullYear(); }
-    }
-    if (!groups[key]) groups[key] = { count:0, sum:0, paid:0, unpaid:0 };
-    groups[key].count++;
-    groups[key].sum += (p.sum||0);
-    if (p.paid) groups[key].paid += (p.sum||0);
-    else groups[key].unpaid += (p.sum||0);
-  });
-
-  const sorted = Object.entries(groups).sort((a,b)=>b[1].sum-a[1].sum);
-  const pctBar = (val, max) => max > 0 ? `<div style="background:var(--border);border-radius:4px;height:6px;width:100px;display:inline-block;vertical-align:middle;margin-left:8px"><div style="background:#4f46e5;border-radius:4px;height:6px;width:${Math.round(val/max*100)}%"></div></div>` : '';
-
-  const tableRows = sorted.map(([name, g]) => `<tr>
-    <td style="font-weight:600">${htmlEsc(name)}</td>
-    <td class="num">${htmlEsc(g.count)}</td>
-    <td class="num">${g.sum.toLocaleString('ru-RU')} ₽ ${pctBar(g.sum, totalSum)}</td>
-    <td class="num" style="color:#16a34a">${g.paid.toLocaleString('ru-RU')} ₽</td>
-    <td class="num" style="color:#dc2626">${g.unpaid.toLocaleString('ru-RU')} ₽</td>
-    <td class="num">${totalSum>0 ? (g.sum/totalSum*100).toFixed(1)+'%' : '—'}</td>
-  </tr>`).join('');
-
-  document.getElementById('mainContent').innerHTML = `
-    <div style="padding:24px 28px;width:100%;box-sizing:border-box">
-      ${reportsKindSwitchHtml('payments')}
-      <h3 style="margin:0 0 16px;font-size:18px;font-weight:700">Оборотно-сальдовая ведомость</h3>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">
-        <div class="stat-card"><div class="stat-value counter" data-target="${totalSum}">${totalSum}</div><div class="stat-label">Итого расходов ₽</div></div>
-        <div class="stat-card"><div class="stat-value counter" data-target="${paidSum}">${paidSum}</div><div class="stat-label" style="color:#16a34a">Оплачено ₽</div></div>
-        <div class="stat-card"><div class="stat-value counter" data-target="${unpaidSum}">${unpaidSum}</div><div class="stat-label" style="color:#dc2626">Не оплачено ₽</div></div>
-        <div class="stat-card"><div class="stat-value counter" data-target="${filtered.length}">${filtered.length}</div><div class="stat-label">Документов</div></div>
-      </div>
-      <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <span style="font-weight:600;font-size:13px;color:var(--text3)">Период:</span>${periodTabs}
-      </div>
-      <div style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <span style="font-weight:600;font-size:13px;color:var(--text3)">Группировка:</span>${groupBtns}
-      </div>
-      ${sorted.length ? `<div style="overflow-x:auto"><table class="data-table" style="width:100%">
-        <thead><tr><th>${reportGroupBy==='category'?'Статья':reportGroupBy==='vehicle'?'ТС':reportGroupBy==='contragent'?'Контрагент':'Период'}</th><th>Кол-во</th><th>Сумма</th><th>Оплачено</th><th>Не оплач.</th><th>Доля</th></tr></thead>
-        <tbody>${tableRows}
-          <tr style="font-weight:700;border-top:2px solid var(--border)">
-            <td>ИТОГО</td><td class="num">${filtered.length}</td>
-            <td class="num">${totalSum.toLocaleString('ru-RU')} ₽</td>
-            <td class="num" style="color:#16a34a">${paidSum.toLocaleString('ru-RU')} ₽</td>
-            <td class="num" style="color:#dc2626">${unpaidSum.toLocaleString('ru-RU')} ₽</td>
-            <td class="num">100%</td>
-          </tr>
-        </tbody>
-      </table></div>` : `<div class="welcome"><h2>Нет данных</h2><p>Добавьте платежи в разделе «Финансы»</p></div>`}
-      <div style="margin-top:20px;text-align:right">
-        <button class="primary-btn" onclick="exportReportXlsx()">Экспорт в Excel</button>
-      </div>
-    </div>`;
+  if(reportKind==='fuel'){renderFuelReport();return;}
+  const filtered=reportsFilteredPayments(),groups=reportsPaymentGroups(filtered),money=n=>n.toLocaleString('ru',{maximumFractionDigits:2});
+  const totals=filtered.reduce((out,p)=>{out.sum+=finNumber(p.sum);out.paid+=finPaidAmount(p);out.debt+=finDebt(p);if(finOverdue(p))out.overdue+=finDebt(p);out.overpaid+=Math.max(0,finPaidAmount(p)-finNumber(p.sum));return out;},{sum:0,paid:0,debt:0,overdue:0,overpaid:0});
+  const periods=[...new Set((data.payments||[]).map(p=>String(p.date||'').slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort().reverse();
+  const periodTabs='<button class="mtab '+(reportPeriod==='all'?'active':'')+'" onclick="reportPeriod=\'all\';reportExpandedKey=null;renderReportsSection()">Все</button>'+periods.map(m=>`<button class="mtab ${reportPeriod===m?'active':''}" onclick="reportPeriod='${m}';reportExpandedKey=null;renderReportsSection()">${new Date(Number(m.slice(0,4)),Number(m.slice(5,7))-1,1).toLocaleDateString('ru',{month:'long',year:'numeric'})}</button>`).join('');
+  const groupButtons=Object.entries(REPORT_GROUPS).map(([key,label])=>`<button class="mtab ${reportGroupBy===key?'active':''}" onclick="reportGroupBy='${key}';reportExpandedKey=null;renderReportsSection()">${label}</button>`).join('');
+  const rows=groups.map(g=>`<tr><td><button class="btn btn-ghost btn-sm" onclick="reportsToggleDetail(${htmlJs(g.key)})">${htmlEsc(g.name)}</button></td><td class="num">${g.count}</td><td class="num">${money(g.sum)}</td><td class="num">${money(g.paid)}</td><td class="num">${money(g.debt)}</td><td class="num" style="color:${g.overdue?'var(--red)':'inherit'}">${money(g.overdue)}</td><td class="num">${totals.sum>0?(g.sum/totals.sum*100).toFixed(1)+'%':'—'}</td></tr>`).join('');
+  const expanded=reportExpandedKey===null?null:groups.find(g=>g.key===reportExpandedKey);
+  const details=expanded?`<section style="margin-top:24px"><h3>${htmlEsc(expanded.name)} · исходные документы</h3><div style="overflow:auto"><table class="tbl" style="width:100%;min-width:850px"><thead><tr><th>Дата расхода</th><th>Описание</th><th>Контрагент</th><th>Расход</th><th>Оплачено</th><th>Долг</th><th>Срок оплаты</th></tr></thead><tbody>${filtered.filter(p=>reportsPaymentGroup(p).key===reportExpandedKey).slice().sort((a,b)=>cmpDateDesc(a.date,b.date)).map(p=>`<tr><td>${htmlEsc(p.date?fmtDate(p.date):'—')}</td><td><button class="btn btn-ghost btn-sm" onclick="reportsOpenPayment(${htmlJs(p.id)})">${htmlEsc(p.description||'Без описания')}</button></td><td>${htmlEsc(finContragentName(p)||'—')}</td><td class="num">${money(finNumber(p.sum))}</td><td class="num">${money(finPaidAmount(p))}</td><td class="num">${money(finDebt(p))}</td><td style="color:${finOverdue(p)?'var(--red)':'inherit'}">${htmlEsc(p.dueDate?fmtDate(p.dueDate):'Не задан')}</td></tr>`).join('')}</tbody></table></div></section>`:'';
+  const cards=[['Расходы',totals.sum],['Оплачено по этим расходам',totals.paid],['Долг',totals.debt],['Просроченный долг',totals.overdue]];
+  if(totals.overpaid>0.005)cards.push(['Переплата',totals.overpaid]);
+  const statusOptions=[['','Все статусы'],['paid','Оплачено'],['debt','Есть долг'],['partial','Частичная оплата'],['overdue','Просрочено']].map(([key,label])=>`<option value="${key}" ${reportSettlement===key?'selected':''}>${label}</option>`).join('');
+  document.getElementById('mainContent').innerHTML=`<div style="padding:24px 28px;width:100%;box-sizing:border-box;overflow:auto;height:100%">${reportsKindSwitchHtml('payments')}<h3>Ведомость расходов и оплат</h3><p style="font-size:12px;color:var(--text3)">Период определён датой расхода. Оплаты включают частичные и могут относиться к другим датам; это не отчёт о движении денег за период. Долг и просрочка считаются по каждому документу. Нажмите строку для раскрытия.</p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px">${cards.map(([label,value])=>`<div class="stat-card"><div class="stat-value">${money(value)} ₽</div><div class="stat-label">${label}</div></div>`).join('')}</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${periodTabs}</div><div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px"><label>Организация <select onchange="reportOrg=this.value;reportExpandedKey=null;renderReportsSection()">${reportsSelectOptions('org',reportOrg)}</select></label><label>Объект <select onchange="reportObject=this.value;reportExpandedKey=null;renderReportsSection()">${reportsSelectOptions('object',reportObject)}</select></label><label>Статья <select onchange="reportCategory=this.value;reportExpandedKey=null;renderReportsSection()">${reportsSelectOptions('category',reportCategory)}</select></label><select aria-label="Статус оплаты" onchange="reportSettlement=this.value;reportExpandedKey=null;renderReportsSection()">${statusOptions}</select></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">${groupButtons}</div><div style="overflow:auto"><table class="data-table" style="width:100%;min-width:800px"><thead><tr><th>Группа</th><th>Документов</th><th>Расходы, ₽</th><th>Оплачено, ₽</th><th>Долг, ₽</th><th>Просрочено, ₽</th><th>Доля</th></tr></thead><tbody>${rows||'<tr><td colspan="7">Нет данных по выбранным условиям</td></tr>'}</tbody><tfoot><tr><th>Итого</th><th>${filtered.length}</th><th>${money(totals.sum)}</th><th>${money(totals.paid)}</th><th>${money(totals.debt)}</th><th>${money(totals.overdue)}</th><th>${totals.sum>0?'100%':'—'}</th></tr></tfoot></table></div>${details}<div style="margin-top:20px;text-align:right"><button class="primary-btn" onclick="exportReportXlsx()">Экспорт в Excel</button></div></div>`;
 }
-
 function exportReportXlsx() {
-  if (typeof XLSX === 'undefined') { alert('Библиотека XLSX не загружена'); return; }
-  const payments = data.payments || [];
-  const vehicles = data.vehicles || [];
-  const vMap = {};
-  vehicles.forEach(v => vMap[v.id] = v.plate || v.make || v.id);
-
-  let filtered = payments;
-  if (reportPeriod !== 'all') {
-    filtered = payments.filter(p => {
-      if (!p.date) return false;
-      const d = new Date(p.date);
-      return (d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')) === reportPeriod;
-    });
-  }
-
-  const rows = [['Дата','Сумма','Категория','Описание','Контрагент','ТС','Оплачено']];
-  filtered.sort((a, b) => cmpDateAsc(a.date, b.date)).forEach(p => {
-    rows.push([
-      p.date ? fmtDate(p.date) : '',
-      p.sum||0,
-      p.category||'',
-      p.description||'',
-      p.contragent||'',
-      p.vehicleId ? (vMap[p.vehicleId]||'') : '',
-      p.paid ? 'Да' : 'Нет'
-    ]);
-  });
-  rows.push([]);
-  rows.push(['ИТОГО', filtered.reduce((s,p)=>s+(p.sum||0),0)]);
-
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [{wch:12},{wch:12},{wch:14},{wch:30},{wch:20},{wch:16},{wch:10}];
-  XLSX.utils.book_append_sheet(wb, ws, 'Оборотка');
-  XLSX.writeFile(wb, `Оборотка_${new Date().toISOString().slice(0,10)}.xlsx`);
+  if(typeof XLSX==='undefined'){showToast('Библиотека Excel не загружена');return;}
+  const filtered=reportsFilteredPayments().slice().sort((a,b)=>cmpDateAsc(a.date,b.date)),groups=reportsPaymentGroups(filtered);
+  const details=[['Дата расхода','Расход, ₽','Статья','Описание','Контрагент','ID контрагента','Организация','Объект','ТС','Оплачено, ₽','Долг, ₽','Срок оплаты','Просроченный долг, ₽','Дата оплаты','Счёт','Источник','ID источника']];
+  filtered.forEach(p=>{const vehicle=(data.vehicles||[]).find(v=>v.id===p.vehicleId);details.push([p.date||'',finNumber(p.sum),p.category||'',p.description||'',finContragentName(p),p.contragentId||finResolveContragent(p)?.id||'',finPaymentOrg(p),finPaymentObject(p),vehicle?.plate||p.vehicleId||'',finPaidAmount(p),finDebt(p),p.dueDate||'',finOverdue(p)?finDebt(p):0,p.paidDate||'',p.invoiceNo||'',p.source||'',p.sourceId||'']);});
+  const summary=[['Группа','Документов','Расходы','Оплачено','Долг','Просрочено'],...groups.map(g=>[g.name,g.count,g.sum,g.paid,g.debt,g.overdue])];
+  const conditions=[['Период по дате расхода',reportPeriod==='all'?'Все':reportPeriod],['Организация',reportOrg||'Все'],['Объект',reportObject||'Все'],['Статья',reportCategory||'Все'],['Статус оплаты',reportSettlement||'Все'],['Группировка',REPORT_GROUPS[reportGroupBy]],['Примечание','Оплаты включают частичные, относятся к выбранным расходам, а не к датам движения денег.']];
+  const wb=XLSX.utils.book_new();
+  [['Документы',details],['Сводка',summary],['Условия',conditions]].forEach(([name,rows])=>{const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=rows[0].map((_,i)=>({wch:i===3?40:22}));XLSX.utils.book_append_sheet(wb,ws,name);});
+  XLSX.writeFile(wb,'Расходы_и_оплаты_'+finToday()+'.xlsx');
 }
-

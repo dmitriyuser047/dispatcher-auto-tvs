@@ -102,10 +102,9 @@ async function saveVehicle() {
 }
 
 async function deleteVehicle(id) {
-  if (!fuelEditAllowed(...data.records.filter(r => r.vehicleId === id).map(r => r.date))) return;
-  if (!await confirmAction('Удалить это ТС и все его записи?')) return;
-  data.vehicles = data.vehicles.filter(v => v.id !== id);
-  data.records = data.records.filter(r => r.vehicleId !== id);
+  const vehicle=data.vehicles.find(v=>v.id===id);if(!vehicle)return;
+  if (!await confirmAction(vehicle.archived?'Восстановить ТС из архива?':'Перевести ТС в архив? История, топливо и документы сохранятся.')) return;
+  vehicle.archived=!vehicle.archived;vehicle.archivedAt=vehicle.archived?new Date().toISOString():null;
   if (!await saveData(data)) return;
   selectedVehicleId = null;
   populateOrgSelect();
@@ -133,6 +132,7 @@ function recFillCardSelect(selectedNum, useDefault) {
 }
 
 function openAddRecord() {
+  if(data.vehicles.find(v=>v.id===selectedVehicleId)?.archived){showToast('Для новой записи восстановите ТС из архива');return;}
   editingRecordId = null;
   recordEditingState = null;
   document.getElementById('recordModalTitle').textContent = 'Добавить запись';
@@ -159,6 +159,7 @@ function openAddRecord() {
 function openEditRecord(id) {
   const r = data.records.find(x => x.id === id);
   if (!r) return;
+  if(r.fuelMovementId){showToast('Выдача связана с движением топлива. Корректировка выполняется отдельным движением.');return;}
   editingRecordId = id;
   document.getElementById('recordModalTitle').textContent = 'Редактировать запись';
   document.getElementById('rec_date').value = fmtDate(r.date);

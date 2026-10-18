@@ -1,0 +1,590 @@
+{
+  "schemaVersion": 1,
+  "manifestVersion": "2026.10.16-1",
+  "generatedAt": "2026-10-18T15:48:31.033Z",
+  "description": "Pinned offline Tesseract language data and explicit decoder variants. Storage precision is not a measured accuracy score.",
+  "models": [
+    {
+      "id": "balanced-rus",
+      "language": "rus",
+      "path": "rus.traineddata",
+      "bytes": 5053706,
+      "sha256": "eb9be824435f6bb0f993925acb85fd842c8418d6db7613c818e749e619a1ad6d",
+      "precision": "integer",
+      "trainingFlags": 65,
+      "version": "4.00.00alpha:rus:synth20170629:[1,36,0,1Ct3,3,16Mp3,3Lfys64Lfx96Lrx96Lfx512O1c1]",
+      "architecture": "[1,36,0,1Ct3,3,16Mp3,3Lfys64Lfx96Lrx96Lfx512O1c1]",
+      "components": [
+        {
+          "id": 17,
+          "name": "lstm",
+          "bytes": 1494393,
+          "sha256": "23fcda0e09b9022991862946bc3abb3fb1ee3fc185b502f4ec2ad8b33d240801"
+        },
+        {
+          "id": 18,
+          "name": "lstm-punc-dawg",
+          "bytes": 5154,
+          "sha256": "e1b126759194a48a9cf88eae172b7bb882db848c1c9c5f8169c37a9b4899cb8c"
+        },
+        {
+          "id": 19,
+          "name": "lstm-word-dawg",
+          "bytes": 3543106,
+          "sha256": "f654613136533c9aa009089b5733277a3b1de989f4e737f48b094d5b955707eb"
+        },
+        {
+          "id": 20,
+          "name": "lstm-number-dawg",
+          "bytes": 2066,
+          "sha256": "581a3de4d55dba2a2175f9576dca6e51ea26bc27c980f1f98fd2806af3804834"
+        },
+        {
+          "id": 21,
+          "name": "lstm-unicharset",
+          "bytes": 7582,
+          "sha256": "d6f6ad3f86fe3b9a216ea27d32c325a0b7e15d300b60decdfeb74a4a5a4c1e88"
+        },
+        {
+          "id": 22,
+          "name": "lstm-recoder",
+          "bytes": 1129,
+          "sha256": "29773b94afbeb00ea10abc2e10d50a0135cd62397093020f95e76949a52d6dc8"
+        },
+        {
+          "id": 23,
+          "name": "version",
+          "bytes": 80,
+          "sha256": "38ba601a17a6feb4092627cfee28ca262c19a9e7481887738424e79cc68bade4"
+        }
+      ],
+      "provenance": {
+        "kind": "official-tesseractjs-distribution",
+        "repository": "naptha/tessdata",
+        "commit": "806cd9adc8c6e8abc11c782db1818c990576bebc",
+        "url": "https://raw.githubusercontent.com/naptha/tessdata/806cd9adc8c6e8abc11c782db1818c990576bebc/4.0.0_best_int/rus.traineddata.gz",
+        "upstreamSha256": "f51f5edc992249ff9b70a227b22f242dfa47b2b1bbc7ae0ea74908640c101f6a",
+        "gitBlobSha1": "4d59d01e7731f97a1de1605ec1a212b67a9c9ce4",
+        "gzipSha256": "f51f5edc992249ff9b70a227b22f242dfa47b2b1bbc7ae0ea74908640c101f6a",
+        "sourceEncoding": "gzip",
+        "comparison": "Exact SHA256 match after source decoding. Existing file preserved.",
+        "license": "Apache-2.0",
+        "fetchedAt": "2026-10-18T15:47:37.929Z",
+        "decodedSha256": "eb9be824435f6bb0f993925acb85fd842c8418d6db7613c818e749e619a1ad6d",
+        "decodedGitBlobSha1": "ec0813a6622dd03f07ca764e7a0ca0245c240b71"
+      }
+    },
+    {
+      "id": "balanced-eng",
+      "language": "eng",
+      "path": "eng.traineddata",
+      "bytes": 23466654,
+      "sha256": "daa0c97d651c19fba3b25e81317cd697e9908c8208090c94c3905381c23fc047",
+      "precision": "integer",
+      "trainingFlags": 65,
+      "version": "4.00.00alpha:eng:synth20170629:[1,36,0,1Ct3,3,16Mp3,3Lfys64Lfx96Lrx96Lfx512O1c1]",
+      "architecture": "[1,36,0,1Ct3,3,16Mp3,3Lfys64Lfx96Lrx96Lfx512O1c1]",
+      "components": [
+        {
+          "id": 1,
+          "name": "unicharset",
+          "bytes": 7477,
+          "sha256": "c55602aa6fcff8461491ef52362a176bacc9950ad9b6eb4ccf8b78e46f504179"
+        },
+        {
+          "id": 2,
+          "name": "unicharambigs",
+          "bytes": 1047,
+          "sha256": "b04528554af633a1d4f720278ac9778655f584ec19c3b7fa807f0af312e65ee8"
+        },
+        {
+          "id": 3,
+          "name": "inttemp",
+          "bytes": 976552,
+          "sha256": "7e2c15773947ab47008392ca6e0076d1959c95736564fed5ebe89d3f59b2e031"
+        },
+        {
+          "id": 4,
+          "name": "pffmtable",
+          "bytes": 844,
+          "sha256": "df24ec0427bde082c1a48dda3248021351ec0a059f20020e5a3a8a9f7c4284e5"
+        },
+        {
+          "id": 5,
+          "name": "normproto",
+          "bytes": 13408,
+          "sha256": "ae59b6c6a504295e0ee7f337cba5518c1a6715e1c8d6691fd7ca79465fc3688d"
+        },
+        {
+          "id": 6,
+          "name": "punc-dawg",
+          "bytes": 4322,
+          "sha256": "e48aec85f2c269a32d4fc04538bb5cce3f4adbb6e360b65383fab6406d4bde36"
+        },
+        {
+          "id": 7,
+          "name": "word-dawg",
+          "bytes": 1082890,
+          "sha256": "3df1e86fe74b3895604bb5e123eb34e95a82f0564fcb07c0d4de185dce21d150"
+        },
+        {
+          "id": 8,
+          "name": "number-dawg",
+          "bytes": 6426,
+          "sha256": "8724569cac8373ae3ec9e6aeff74af8465836bf477aaf0ea875191428b5ea7c0"
+        },
+        {
+          "id": 9,
+          "name": "freq-dawg",
+          "bytes": 1410,
+          "sha256": "52275ef5ff076ad866ccb4d3923603dfa3ea5fe6625872b45fc7ccb5f741e118"
+        },
+        {
+          "id": 13,
+          "name": "shapetable",
+          "bytes": 63346,
+          "sha256": "0380a63f6cba88acd32efa1fc7c274a16d736281775f0f0d67d8b2c802aa47ab"
+        },
+        {
+          "id": 14,
+          "name": "bigram-dawg",
+          "bytes": 16109842,
+          "sha256": "681a4fc77f67435448bd235bba4bf2150a399b0f7429a270b68b8227e4fc596e"
+        },
+        {
+          "id": 17,
+          "name": "lstm",
+          "bytes": 1487588,
+          "sha256": "6edfcdad64131a85686318f861da56bb62651a1f1449dbeb7e7c2dfa032ba73b"
+        },
+        {
+          "id": 18,
+          "name": "lstm-punc-dawg",
+          "bytes": 4322,
+          "sha256": "c3e90e22c6bfc25365e5f5cdf09397e9e3fd58e07903b6d1f76a4450893601bf"
+        },
+        {
+          "id": 19,
+          "name": "lstm-word-dawg",
+          "bytes": 3694794,
+          "sha256": "a5dabb1725487e85b364a49b095b5a9af5cc2720ef29c962189e4cf5294fc81c"
+        },
+        {
+          "id": 20,
+          "name": "lstm-number-dawg",
+          "bytes": 4738,
+          "sha256": "7104fc60ebd9093f2ebfefd5bd27347a68fe9b6ce03be3135c8cbdabcdd99994"
+        },
+        {
+          "id": 21,
+          "name": "lstm-unicharset",
+          "bytes": 6360,
+          "sha256": "3a18fb4e5d2df0ffa66092609a4b07434c23160c90c2b9a315e3992e389a95fa"
+        },
+        {
+          "id": 22,
+          "name": "lstm-recoder",
+          "bytes": 1012,
+          "sha256": "a481e4cb27c2b832269a0578a1438c243a13228a70f9556162b7f06131d2e664"
+        },
+        {
+          "id": 23,
+          "name": "version",
+          "bytes": 80,
+          "sha256": "ed5d7a9fb300e22e52a742a84c8e700733065cb85c4f71f29460c27a4f6b740e"
+        }
+      ],
+      "provenance": {
+        "kind": "official",
+        "repository": "tesseract-ocr/tessdata",
+        "commit": "ced78752cc61322fb554c280d13360b35b8684e4",
+        "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata/ced78752cc61322fb554c280d13360b35b8684e4/eng.traineddata",
+        "upstreamSha256": "daa0c97d651c19fba3b25e81317cd697e9908c8208090c94c3905381c23fc047",
+        "gitBlobSha1": "f4744c201359d02ced6914c77f0de68ee9bbdd74",
+        "sourceEncoding": "identity",
+        "comparison": "Exact SHA256 match after source decoding. Existing file preserved.",
+        "license": "Apache-2.0",
+        "fetchedAt": "2026-10-18T15:47:37.929Z"
+      }
+    },
+    {
+      "id": "accurate-rus",
+      "language": "rus",
+      "path": "assets/ocr/models/accurate/rus.traineddata",
+      "bytes": 15301764,
+      "sha256": "b617eb6830ffabaaa795dd87ea7fd251adfe9cf0efe05eb9a2e8128b7728d6b6",
+      "precision": "float",
+      "trainingFlags": 64,
+      "version": "4.00.00alpha:rus:synth20170629:[1,36,0,1Ct3,3,16Mp3,3Lfys64Lfx96Lrx96Lfx512O1c1]",
+      "architecture": "[1,36,0,1Ct3,3,16Mp3,3Lfys64Lfx96Lrx96Lfx512O1c1]",
+      "components": [
+        {
+          "id": 17,
+          "name": "lstm",
+          "bytes": 11742451,
+          "sha256": "573d784865f1809222bd267702315cac9f046f748a5e94a9d7c1f7ac8e4f4054"
+        },
+        {
+          "id": 18,
+          "name": "lstm-punc-dawg",
+          "bytes": 5154,
+          "sha256": "e1b126759194a48a9cf88eae172b7bb882db848c1c9c5f8169c37a9b4899cb8c"
+        },
+        {
+          "id": 19,
+          "name": "lstm-word-dawg",
+          "bytes": 3543106,
+          "sha256": "f654613136533c9aa009089b5733277a3b1de989f4e737f48b094d5b955707eb"
+        },
+        {
+          "id": 20,
+          "name": "lstm-number-dawg",
+          "bytes": 2066,
+          "sha256": "581a3de4d55dba2a2175f9576dca6e51ea26bc27c980f1f98fd2806af3804834"
+        },
+        {
+          "id": 21,
+          "name": "lstm-unicharset",
+          "bytes": 7582,
+          "sha256": "d6f6ad3f86fe3b9a216ea27d32c325a0b7e15d300b60decdfeb74a4a5a4c1e88"
+        },
+        {
+          "id": 22,
+          "name": "lstm-recoder",
+          "bytes": 1129,
+          "sha256": "29773b94afbeb00ea10abc2e10d50a0135cd62397093020f95e76949a52d6dc8"
+        },
+        {
+          "id": 23,
+          "name": "version",
+          "bytes": 80,
+          "sha256": "38ba601a17a6feb4092627cfee28ca262c19a9e7481887738424e79cc68bade4"
+        }
+      ],
+      "provenance": {
+        "kind": "official",
+        "repository": "tesseract-ocr/tessdata_best",
+        "commit": "e12c65a915945e4c28e237a9b52bc4a8f39a0cec",
+        "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/e12c65a915945e4c28e237a9b52bc4a8f39a0cec/rus.traineddata",
+        "upstreamSha256": "b617eb6830ffabaaa795dd87ea7fd251adfe9cf0efe05eb9a2e8128b7728d6b6",
+        "gitBlobSha1": "702e3c43c863cf3325002c9d2cc38045e01314a9",
+        "license": "Apache-2.0",
+        "fetchedAt": "2026-10-18T15:47:37.929Z"
+      }
+    },
+    {
+      "id": "accurate-eng",
+      "language": "eng",
+      "path": "assets/ocr/models/accurate/eng.traineddata",
+      "bytes": 15400601,
+      "sha256": "8280aed0782fe27257a68ea10fe7ef324ca0f8d85bd2fd145d1c2b560bcb66ba",
+      "precision": "float",
+      "trainingFlags": 64,
+      "version": "4.00.00alpha:eng:synth20170629:[1,36,0,1Ct3,3,16Mp3,3Lfys64Lfx96Lrx96Lfx512O1c1]",
+      "architecture": "[1,36,0,1Ct3,3,16Mp3,3Lfys64Lfx96Lrx96Lfx512O1c1]",
+      "components": [
+        {
+          "id": 17,
+          "name": "lstm",
+          "bytes": 11689099,
+          "sha256": "6b134d2386fc322b24df1f9d6bd768fe481a8c9c7657e31f4cfc6de3bf540cbc"
+        },
+        {
+          "id": 18,
+          "name": "lstm-punc-dawg",
+          "bytes": 4322,
+          "sha256": "c3e90e22c6bfc25365e5f5cdf09397e9e3fd58e07903b6d1f76a4450893601bf"
+        },
+        {
+          "id": 19,
+          "name": "lstm-word-dawg",
+          "bytes": 3694794,
+          "sha256": "a5dabb1725487e85b364a49b095b5a9af5cc2720ef29c962189e4cf5294fc81c"
+        },
+        {
+          "id": 20,
+          "name": "lstm-number-dawg",
+          "bytes": 4738,
+          "sha256": "7104fc60ebd9093f2ebfefd5bd27347a68fe9b6ce03be3135c8cbdabcdd99994"
+        },
+        {
+          "id": 21,
+          "name": "lstm-unicharset",
+          "bytes": 6360,
+          "sha256": "3a18fb4e5d2df0ffa66092609a4b07434c23160c90c2b9a315e3992e389a95fa"
+        },
+        {
+          "id": 22,
+          "name": "lstm-recoder",
+          "bytes": 1012,
+          "sha256": "a481e4cb27c2b832269a0578a1438c243a13228a70f9556162b7f06131d2e664"
+        },
+        {
+          "id": 23,
+          "name": "version",
+          "bytes": 80,
+          "sha256": "ed5d7a9fb300e22e52a742a84c8e700733065cb85c4f71f29460c27a4f6b740e"
+        }
+      ],
+      "provenance": {
+        "kind": "official",
+        "repository": "tesseract-ocr/tessdata_best",
+        "commit": "e12c65a915945e4c28e237a9b52bc4a8f39a0cec",
+        "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/e12c65a915945e4c28e237a9b52bc4a8f39a0cec/eng.traineddata",
+        "upstreamSha256": "8280aed0782fe27257a68ea10fe7ef324ca0f8d85bd2fd145d1c2b560bcb66ba",
+        "gitBlobSha1": "176dc3220de7db34d3b3aecbfa42043a6038348b",
+        "license": "Apache-2.0",
+        "fetchedAt": "2026-10-18T15:47:37.929Z"
+      }
+    },
+    {
+      "id": "codes-rus",
+      "language": "rus",
+      "path": "assets/ocr/models/codes/rus.traineddata",
+      "bytes": 11751438,
+      "sha256": "8a6450c559d60ca04a7ff3cc1c6622b78729702061ba83996288422b1e845ad0",
+      "precision": "float",
+      "trainingFlags": 64,
+      "version": "4.00.00alpha:rus:synth20170629:[1,36,0,1Ct3,3,16Mp3,3Lfys64Lfx96Lrx96Lfx512O1c1]",
+      "architecture": "[1,36,0,1Ct3,3,16Mp3,3Lfys64Lfx96Lrx96Lfx512O1c1]",
+      "components": [
+        {
+          "id": 17,
+          "name": "lstm",
+          "bytes": 11742451,
+          "sha256": "573d784865f1809222bd267702315cac9f046f748a5e94a9d7c1f7ac8e4f4054"
+        },
+        {
+          "id": 21,
+          "name": "lstm-unicharset",
+          "bytes": 7582,
+          "sha256": "d6f6ad3f86fe3b9a216ea27d32c325a0b7e15d300b60decdfeb74a4a5a4c1e88"
+        },
+        {
+          "id": 22,
+          "name": "lstm-recoder",
+          "bytes": 1129,
+          "sha256": "29773b94afbeb00ea10abc2e10d50a0135cd62397093020f95e76949a52d6dc8"
+        },
+        {
+          "id": 23,
+          "name": "version",
+          "bytes": 80,
+          "sha256": "38ba601a17a6feb4092627cfee28ca262c19a9e7481887738424e79cc68bade4"
+        }
+      ],
+      "provenance": {
+        "kind": "derived",
+        "derivedFromModelId": "accurate-rus",
+        "derivedFromSha256": "b617eb6830ffabaaa795dd87ea7fd251adfe9cf0efe05eb9a2e8128b7728d6b6",
+        "repository": "tesseract-ocr/tessdata_best",
+        "commit": "e12c65a915945e4c28e237a9b52bc4a8f39a0cec",
+        "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/e12c65a915945e4c28e237a9b52bc4a8f39a0cec/rus.traineddata",
+        "upstreamSha256": "b617eb6830ffabaaa795dd87ea7fd251adfe9cf0efe05eb9a2e8128b7728d6b6",
+        "removedComponents": [
+          {
+            "id": 18,
+            "name": "lstm-punc-dawg",
+            "bytes": 5154,
+            "sha256": "e1b126759194a48a9cf88eae172b7bb882db848c1c9c5f8169c37a9b4899cb8c"
+          },
+          {
+            "id": 19,
+            "name": "lstm-word-dawg",
+            "bytes": 3543106,
+            "sha256": "f654613136533c9aa009089b5733277a3b1de989f4e737f48b094d5b955707eb"
+          },
+          {
+            "id": 20,
+            "name": "lstm-number-dawg",
+            "bytes": 2066,
+            "sha256": "581a3de4d55dba2a2175f9576dca6e51ea26bc27c980f1f98fd2806af3804834"
+          }
+        ],
+        "preservedComponents": [
+          17,
+          21,
+          22,
+          23
+        ],
+        "reason": "Decode codes and amounts without DAWG dictionaries. This fork does not copy the three load_*_dawg settings into the newly created LSTM dictionary; removing the components is effective regardless of those flags.",
+        "engineReference": "https://github.com/Balearica/tesseract/blob/2a9c1c49c360462733c386d2a44fcd22c4e21411/src/lstm/lstmrecognizer.cpp#L205-L231",
+        "trained": false,
+        "warning": "Not a trained or fine-tuned model. The neural weights, charset, recoder and version are unchanged. Dictionary removal changes decoding and can reduce ordinary prose accuracy.",
+        "license": "Apache-2.0"
+      }
+    },
+    {
+      "id": "codes-eng",
+      "language": "eng",
+      "path": "assets/ocr/models/codes/eng.traineddata",
+      "bytes": 11696747,
+      "sha256": "9edabc84f0474cee0add7300f958b9da45c1410fff9c6c385fe04981a065c5ca",
+      "precision": "float",
+      "trainingFlags": 64,
+      "version": "4.00.00alpha:eng:synth20170629:[1,36,0,1Ct3,3,16Mp3,3Lfys64Lfx96Lrx96Lfx512O1c1]",
+      "architecture": "[1,36,0,1Ct3,3,16Mp3,3Lfys64Lfx96Lrx96Lfx512O1c1]",
+      "components": [
+        {
+          "id": 17,
+          "name": "lstm",
+          "bytes": 11689099,
+          "sha256": "6b134d2386fc322b24df1f9d6bd768fe481a8c9c7657e31f4cfc6de3bf540cbc"
+        },
+        {
+          "id": 21,
+          "name": "lstm-unicharset",
+          "bytes": 6360,
+          "sha256": "3a18fb4e5d2df0ffa66092609a4b07434c23160c90c2b9a315e3992e389a95fa"
+        },
+        {
+          "id": 22,
+          "name": "lstm-recoder",
+          "bytes": 1012,
+          "sha256": "a481e4cb27c2b832269a0578a1438c243a13228a70f9556162b7f06131d2e664"
+        },
+        {
+          "id": 23,
+          "name": "version",
+          "bytes": 80,
+          "sha256": "ed5d7a9fb300e22e52a742a84c8e700733065cb85c4f71f29460c27a4f6b740e"
+        }
+      ],
+      "provenance": {
+        "kind": "derived",
+        "derivedFromModelId": "accurate-eng",
+        "derivedFromSha256": "8280aed0782fe27257a68ea10fe7ef324ca0f8d85bd2fd145d1c2b560bcb66ba",
+        "repository": "tesseract-ocr/tessdata_best",
+        "commit": "e12c65a915945e4c28e237a9b52bc4a8f39a0cec",
+        "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/e12c65a915945e4c28e237a9b52bc4a8f39a0cec/eng.traineddata",
+        "upstreamSha256": "8280aed0782fe27257a68ea10fe7ef324ca0f8d85bd2fd145d1c2b560bcb66ba",
+        "removedComponents": [
+          {
+            "id": 18,
+            "name": "lstm-punc-dawg",
+            "bytes": 4322,
+            "sha256": "c3e90e22c6bfc25365e5f5cdf09397e9e3fd58e07903b6d1f76a4450893601bf"
+          },
+          {
+            "id": 19,
+            "name": "lstm-word-dawg",
+            "bytes": 3694794,
+            "sha256": "a5dabb1725487e85b364a49b095b5a9af5cc2720ef29c962189e4cf5294fc81c"
+          },
+          {
+            "id": 20,
+            "name": "lstm-number-dawg",
+            "bytes": 4738,
+            "sha256": "7104fc60ebd9093f2ebfefd5bd27347a68fe9b6ce03be3135c8cbdabcdd99994"
+          }
+        ],
+        "preservedComponents": [
+          17,
+          21,
+          22,
+          23
+        ],
+        "reason": "Decode codes and amounts without DAWG dictionaries. This fork does not copy the three load_*_dawg settings into the newly created LSTM dictionary; removing the components is effective regardless of those flags.",
+        "engineReference": "https://github.com/Balearica/tesseract/blob/2a9c1c49c360462733c386d2a44fcd22c4e21411/src/lstm/lstmrecognizer.cpp#L205-L231",
+        "trained": false,
+        "warning": "Not a trained or fine-tuned model. The neural weights, charset, recoder and version are unchanged. Dictionary removal changes decoding and can reduce ordinary prose accuracy.",
+        "license": "Apache-2.0"
+      }
+    }
+  ],
+  "profiles": {
+    "balanced": {
+      "label": "Сбалансированный",
+      "relativeDirectory": ".",
+      "modelIds": [
+        "balanced-rus",
+        "balanced-eng"
+      ],
+      "languages": [
+        "rus",
+        "eng"
+      ],
+      "oem": 1,
+      "gzip": false,
+      "dictionaryPolicy": "bundled",
+      "benchmarkStatus": "not-measured"
+    },
+    "accurate": {
+      "label": "Точный · tessdata_best",
+      "relativeDirectory": "assets/ocr/models/accurate",
+      "modelIds": [
+        "accurate-rus",
+        "accurate-eng"
+      ],
+      "languages": [
+        "rus",
+        "eng"
+      ],
+      "oem": 1,
+      "gzip": false,
+      "dictionaryPolicy": "bundled",
+      "benchmarkStatus": "not-measured",
+      "warning": "Float tessdata_best is slower and larger. Improvement on a particular document is not guaranteed."
+    },
+    "codes": {
+      "label": "Коды и суммы · без словарей",
+      "relativeDirectory": "assets/ocr/models/codes",
+      "modelIds": [
+        "codes-rus",
+        "codes-eng"
+      ],
+      "languages": [
+        "rus",
+        "eng"
+      ],
+      "oem": 1,
+      "gzip": false,
+      "dictionaryPolicy": "components-removed",
+      "removedComponents": [
+        18,
+        19,
+        20
+      ],
+      "benchmarkStatus": "not-measured",
+      "trainingPerformed": false,
+      "warning": "For code/amount regions only. No vocabulary correction; arbitrary identifiers and ordinary prose still require review."
+    }
+  },
+  "licenses": [
+    {
+      "spdx": "Apache-2.0",
+      "path": "assets/ocr/LICENSE-tessdata_best.txt",
+      "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+      "sourceUrl": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/e12c65a915945e4c28e237a9b52bc4a8f39a0cec/LICENSE"
+    },
+    {
+      "notice": "assets/ocr/NOTICE.txt"
+    }
+  ],
+  "references": [
+    {
+      "title": "Official traineddata families: integer vs float, speed/accuracy trade-off, LSTM engine requirement",
+      "url": "https://github.com/tesseract-ocr/tessdoc/blob/main/Data-Files.md"
+    },
+    {
+      "title": "Official best model metadata and limits of version-string network descriptions",
+      "url": "https://github.com/tesseract-ocr/tessdoc/blob/main/Data-Files-in-tessdata_best.md"
+    },
+    {
+      "title": "Container offsets and component serialization",
+      "url": "https://github.com/tesseract-ocr/tesseract/blob/4.1.0/src/ccutil/tessdatamanager.cpp"
+    },
+    {
+      "title": "LSTM recognizer serialization and training flags",
+      "url": "https://github.com/tesseract-ocr/tesseract/blob/4.1.0/src/lstm/lstmrecognizer.cpp"
+    },
+    {
+      "title": "Tesseract.js model distribution",
+      "url": "https://github.com/naptha/tessdata/blob/806cd9adc8c6e8abc11c782db1818c990576bebc/README.md"
+    },
+    {
+      "title": "WASM fork LoadDictionary and dictionary-free operation",
+      "url": "https://github.com/Balearica/tesseract/blob/2a9c1c49c360462733c386d2a44fcd22c4e21411/src/lstm/lstmrecognizer.cpp"
+    }
+  ]
+}

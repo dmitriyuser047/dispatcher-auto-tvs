@@ -1,0 +1,133 @@
+{
+  "coreCommit": "acffef2b66eb44a31df297e11d905f4b39001068",
+  "source": "https://api.github.com/repos/naptha/tesseract.js-core/git/trees/acffef2b66eb44a31df297e11d905f4b39001068?recursive=1",
+  "dependencies": [
+    {
+      "path": "third_party/giflib",
+      "mode": "160000",
+      "type": "commit",
+      "sha": "fa37672085ce4b3d62c51627ab3c8cf2dda8009a"
+    },
+    {
+      "path": "third_party/leptonica",
+      "mode": "160000",
+      "type": "commit",
+      "sha": "4af068b56a9674da915debea4ed7e1b9885b17e8"
+    },
+    {
+      "path": "third_party/libjpeg",
+      "mode": "160000",
+      "type": "commit",
+      "sha": "6c0fcb8ddee365e7abc4d332662b06900612e923"
+    },
+    {
+      "path": "third_party/libpng",
+      "mode": "160000",
+      "type": "commit",
+      "sha": "a37d4836519517bdce6cb9d956092321eca3e73b"
+    },
+    {
+      "path": "third_party/libtiff",
+      "mode": "160000",
+      "type": "commit",
+      "sha": "b51bb157123264e26d34c09cc673d213aea61fc7"
+    },
+    {
+      "path": "third_party/libwebp",
+      "mode": "160000",
+      "type": "commit",
+      "sha": "20ef03ee351d4ff03fc5ff3ec4804a879d1b9d5c"
+    },
+    {
+      "path": "third_party/openlibm",
+      "mode": "160000",
+      "type": "commit",
+      "sha": "ae2d91698508701c83cab83714d42a1146dccf85"
+    },
+    {
+      "path": "third_party/zlib",
+      "mode": "160000",
+      "type": "commit",
+      "sha": "21767c654d31d2dccdde4330529775c6c5fd5389"
+    }
+  ],
+  "recipes": [
+    {
+      "path": "build-scripts/build-giflib.sh",
+      "mode": "100755",
+      "type": "blob",
+      "sha": "86aba69ffe2465612e626f8ad9eb7c0d5b8d6b1d",
+      "size": 515
+    },
+    {
+      "path": "build-scripts/build-leptonica.sh",
+      "mode": "100755",
+      "type": "blob",
+      "sha": "ea99d1b49b1c065ac4bdda7997cf3a6a46bd8be2",
+      "size": 1029
+    },
+    {
+      "path": "build-scripts/build-libjpeg.sh",
+      "mode": "100755",
+      "type": "blob",
+      "sha": "c46ceecb03ac1c4c507dee31ceaec1840abc2ed9",
+      "size": 544
+    },
+    {
+      "path": "build-scripts/build-libpng.sh",
+      "mode": "100755",
+      "type": "blob",
+      "sha": "ec1ea99965d18668f2f318eaabaf1582911e9014",
+      "size": 560
+    },
+    {
+      "path": "build-scripts/build-libtiff.sh",
+      "mode": "100755",
+      "type": "blob",
+      "sha": "28879b41bff5fe658da18cf16e9998770a331f4c",
+      "size": 514
+    },
+    {
+      "path": "build-scripts/build-libwebp.sh",
+      "mode": "100755",
+      "type": "blob",
+      "sha": "1cc8cdc3a9fc2cbe8e5d10e2ad8301540bd2d05f",
+      "size": 1227
+    },
+    {
+      "path": "build-scripts/build-openlibm.sh",
+      "mode": "100755",
+      "type": "blob",
+      "sha": "f2b06811bcd17deff091a4d94bc7ff3990c8ddea",
+      "size": 229
+    },
+    {
+      "path": "build-scripts/build-tesseract.sh",
+      "mode": "100755",
+      "type": "blob",
+      "sha": "78c16dab4ae438f22f49f99777c1ba4d6f885f78",
+      "size": 1707
+    },
+    {
+      "path": "build-scripts/build-zlib.sh",
+      "mode": "100755",
+      "type": "blob",
+      "sha": "139128a867ba49721cf05217c9b263f0e709add6",
+      "size": 641
+    },
+    {
+      "path": "build-scripts/install-deps.sh",
+      "mode": "100755",
+      "type": "blob",
+      "sha": "c961dba86160ff071c70c32039270db8dcdce9d8",
+      "size": 387
+    },
+    {
+      "path": "build-scripts/var.sh",
+      "mode": "100755",
+      "type": "blob",
+      "sha": "557f0bc2701486467e82c92b3c10162bb7698eb6",
+      "size": 2054
+    }
+  ]
+}

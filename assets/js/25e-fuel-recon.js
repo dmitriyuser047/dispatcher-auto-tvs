@@ -19,32 +19,34 @@ let fgOpen = '';          // машина с раскрытыми днями
 function fgRows(month) {
   return (data.vehicles || []).map(v => {
     if (fgNoOffice && fpIsOffice(v)) return null;
-    const recs = recsFor(v.id).filter(r => !month || month === 'all' || r.date.startsWith(month));
-    const withKm = recs.filter(r => +r.km > 0);
-    if (!withKm.length) return null;
-    const both = recs.filter(r => r.kmGlonass != null && r.kmGlonass !== '' && (+r.km > 0 || +r.kmGlonass > 0));
-    const km = both.reduce((s, r) => s + (+r.km || 0), 0);
-    const gl = both.reduce((s, r) => s + (+r.kmGlonass || 0), 0);
-    const bad = both.filter(r => {
-      const d = (+r.km || 0) - (+r.kmGlonass || 0);
-      return Math.abs(d) >= FG_DIFF_KM && (!+r.kmGlonass || Math.abs(d) / +r.kmGlonass * 100 >= FG_DIFF_PCT);
-    }).sort((a, b) => cmpDateAsc(a.date, b.date));
-    // Расход по датчику ГЛОНАСС — только дни, где датчик дал данные
-    const sens = recs.filter(r => r.glonassFuel != null && r.glonassFuel !== '' && +r.kmGlonass > 0);
-    const sensL = sens.reduce((s, r) => s + (+r.glonassFuel || 0), 0);
-    const sensKm = sens.reduce((s, r) => s + (+r.kmGlonass || 0), 0);
-    const sens100 = sensKm >= 50 ? sensL / sensKm * 100 : null;
-    const sensDev = sens100 != null && v.norm ? (sens100 - v.norm) / v.norm * 100 : null;
-    return { v, sensL, sensKm, sens100, sensDev, sensDays: sens.length,
-             days: withKm.length, both: both.length, noGl: withKm.length - both.filter(r => +r.km > 0).length,
-             km, gl, diff: km - gl, pct: gl ? (km - gl) / gl * 100 : null, bad,
-             totalKm: withKm.reduce((s, r) => s + (+r.km || 0), 0) };
-  }).filter(Boolean).sort((a, b) => b.diff - a.diff);
+    const grouped=new Map();
+    recsFor(v.id).filter(r => !month || month === 'all' || String(r.date || '').startsWith(month)).forEach(r => {
+      if (!grouped.has(r.date)) grouped.set(r.date,[]); grouped.get(r.date).push(r);
+    });
+    const days=[...grouped].map(([date,records]) => {
+      const telemetry=records.filter(r => fqValue(r.kmGlonass) != null || fqValue(r.glonassFuel) != null);
+      const canonical=telemetry.find(r => r.glonassCanonical) || telemetry.slice().sort((a,b) => (fqValue(b.kmGlonass) || 0)-(fqValue(a.kmGlonass) || 0))[0];
+      return {date,km:records.reduce((sum,r) => sum+(fqValue(r.km) || 0),0),kmGlonass:canonical ? fqValue(canonical.kmGlonass) : null,
+        glonassFuel:canonical ? fqValue(canonical.glonassFuel) : null,glonassFuelKm:canonical ? fqValue(canonical.glonassFuelKm) : null,
+        driver:[...new Set(records.map(r => r.driver).filter(Boolean))].join(', '),
+        ambiguous:!telemetry.some(r => r.glonassCanonical) && telemetry.length > 1 && new Set(telemetry.map(r => JSON.stringify([r.kmGlonass,r.glonassFuel]))).size > 1};
+    }).filter(day => day.km > 0 || day.kmGlonass != null || day.glonassFuel != null);
+    if (!days.length) return null;
+    const withKm=days.filter(day => day.km > 0), both=days.filter(day => day.kmGlonass != null);
+    const km=both.reduce((sum,day) => sum+day.km,0), gl=both.reduce((sum,day) => sum+day.kmGlonass,0);
+    const bad=both.filter(day => {const difference=Math.abs(day.km-day.kmGlonass); return difference >= FG_DIFF_KM && (!day.kmGlonass || difference/day.kmGlonass*100 >= FG_DIFF_PCT);}).sort((a,b) => a.date.localeCompare(b.date));
+    const sensors=days.filter(day => day.glonassFuel != null && (day.glonassFuelKm ?? day.kmGlonass) > 0);
+    const sensL=sensors.reduce((sum,day) => sum+day.glonassFuel,0), sensKm=sensors.reduce((sum,day) => sum+(day.glonassFuelKm ?? day.kmGlonass),0);
+    const sens100=sensKm >= 50 ? sensL/sensKm*100 : null, sensDev=sens100 != null && v.norm ? (sens100-v.norm)/v.norm*100 : null;
+    return {v,sensL,sensKm,sens100,sensDev,sensDays:sensors.length,days:withKm.length,both:both.length,
+      noGl:withKm.filter(day => day.kmGlonass == null).length,km,gl,diff:km-gl,pct:gl ? (km-gl)/gl*100 : null,bad,
+      ambiguous:days.filter(day => day.ambiguous).length,overDays:bad.filter(day => day.km > day.kmGlonass).length,
+      totalKm:withKm.reduce((sum,day) => sum+day.km,0),sensorCoverage:gl > 0 ? Math.min(100,sensKm/gl*100) : null};
+  }).filter(Boolean).sort((a,b) => b.diff-a.diff);
 }
-
 function fgHtml() {
   const rows = fgRows(fpMonth);
-  const over = rows.filter(r => r.diff >= FG_DIFF_KM && r.pct != null && r.pct >= FG_DIFF_PCT);
+  const over = rows.filter(r => r.overDays > 0);
   const noGl = rows.filter(r => !r.both);
   const f = (x, d) => x == null ? '—' : fpNum(x, d);
   const body = rows.map(r => {
@@ -59,8 +61,8 @@ function fgHtml() {
       <td style="text-align:right">${f(r.gl, 0)}</td>
       <td style="text-align:right;${cls}">${r.both ? (r.diff > 0 ? '+' : '') + fpNum(r.diff, 0) : '—'}</td>
       <td style="text-align:right;${cls}">${r.pct == null ? '—' : (r.pct > 0 ? '+' : '') + fpNum(r.pct, 1) + '%'}</td>
-      <td style="text-align:right">${r.bad.length || '—'}</td>
-      <td style="text-align:right">${r.sensDays ? fpNum(r.sensL, 1) + '<div style="font-size:11px;color:var(--text3)">' + r.sensDays + ' дн.</div>' : '—'}</td>
+      <td style="text-align:right">${r.bad.length || '—'}${r.ambiguous ? '<div style="color:var(--red)">старые показания неоднозначны: ' + r.ambiguous + '</div>' : ''}</td>
+      <td style="text-align:right">${r.sensDays ? fpNum(r.sensL, 1) + '<div style="font-size:11px;color:var(--text3)">' + r.sensDays + ' дн. · покрытие ' + (r.sensorCoverage == null ? '—' : fpNum(r.sensorCoverage, 0) + '%') + '</div>' : '—'}</td>
       <td style="text-align:right;font-weight:700;${r.sensDev != null && r.sensDev >= 10 ? 'color:var(--red)' : ''}">${r.sens100 != null ? fpNum(r.sens100, 1) : '—'}${r.v.norm ? '<div style="font-size:11px;color:var(--text3);font-weight:400">норма ' + fpNum(r.v.norm, 1) + '</div>' : ''}</td>
       <td style="text-align:right;${r.sensDev != null && r.sensDev >= 10 ? 'color:var(--red);font-weight:700' : r.sensDev != null && r.sensDev <= -10 ? 'color:#d97706' : ''}">${r.sensDev == null ? '—' : (r.sensDev > 0 ? '+' : '') + fpNum(r.sensDev, 1) + '%'}</td>
       <td style="font-size:12px;color:var(--text3)">${open ? '▲' : r.bad.length ? '▼ дни' : ''}</td>
@@ -77,6 +79,7 @@ function fgHtml() {
       <label style="font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer">
         <input type="checkbox" ${fgNoOffice ? 'checked' : ''} onchange="fgNoOffice=this.checked;renderFuelPurchases()"> без офисных машин</label>
       <button class="btn btn-primary" style="margin-left:auto" onclick="importGlonassTrips()">Загрузить отчёт ГЛОНАСС</button>
+      <button class="btn btn-ghost" onclick="fgHistoryDialog()">История исходных отчётов</button>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
       ${fkCard('Пробег в журнале больше ГЛОНАСС', over.length + ' машин', 'от ' + FG_DIFF_PCT + '% и ' + FG_DIFF_KM + ' км', over.length ? '#dc2626' : '#16a34a')}
@@ -92,7 +95,7 @@ function fgHtml() {
         <tbody>${body || '<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:16px">Нет данных</td></tr>'}</tbody>
       </table></div></div>
     <div style="font-size:12px;color:var(--text3);margin-top:10px">
-      Сравниваются дни, где в журнале заполнены и пробег, и «Пробег по Глонассу». Пробег в журнале больше ГЛОНАСС — красным:
+      Сравниваются дневные суммы журнала и ГЛОНАСС, включая нулевой пробег журнала. Телеметрия не складывается повторно между строками одного дня. Пробег в журнале больше ГЛОНАСС — красным:
       по норме за такой пробег списывается лишнее топливо. Меньше — оранжевым. День считается расхождением от ${FG_DIFF_KM} км и ${FG_DIFF_PCT}%.
       Нажмите на машину, чтобы увидеть дни. «Датчик ГЛОНАСС» — расход по датчику уровня топлива из отчёта «Рейсы» за дни, где датчик дал данные;
       сравнивается с нормой из карточки машины, превышение от 10% — красным.
@@ -105,7 +108,7 @@ let frcMonth = '';
 
 function frcProvider(p) {
   const c = fcByNumber(p.cardNo);
-  return (c && c.provider) || fcGuessProvider(fcNorm(p.cardNo)) || 'Прочие карты';
+  return p.sourceProvider || (c && c.provider) || fcGuessProvider(fcNorm(p.cardNo)) || 'Прочие карты';
 }
 
 function frcData(month) {
@@ -113,88 +116,60 @@ function frcData(month) {
   fpLive().filter(p => (p.date || '').startsWith(month)).forEach(p => {
     const k = frcProvider(p);
     const x = by.get(k) || { litres: 0, sum: 0, n: 0, noSum: 0 };
-    x.litres += +p.qty || 0; x.sum += +p.sum || 0; x.n++; if (!+p.sum) x.noSum++;
+    x.litres += fqValue(p.qty) || 0; x.sum += fqValue(p.sum) || 0; x.n++; if (fqValue(p.sum) == null) x.noSum++;
     by.set(k, x);
   });
   return by;
 }
 
-function frcHtml() {
-  const months = [...new Set([...fpMonthsList(), ...fpCmpMonths()])].sort().reverse();
-  if (!frcMonth || !months.includes(frcMonth)) frcMonth = months[0] || '';
-  if (!frcMonth) return '<div class="welcome" style="padding:60px 0"><p>Нет данных</p></div>';
-  const per = fuelPeriod(frcMonth) || {};
-  const recon = per.recon || {};
-  const closed = fuelMonthClosed(frcMonth);
-  const by = frcData(frcMonth);
-  const providers = [...new Set([...by.keys(), ...Object.keys(recon)])].sort((a, b) => a.localeCompare(b, 'ru'));
-  const journal = (data.records || []).filter(r => r.date.startsWith(frcMonth)).reduce((s, r) => s + (+r.fuelIssued || 0), 0);
-
-  const dif = (a, b, d) => {
-    if (a == null || b == null || b === '') return '<span style="color:var(--text3)">—</span>';
-    const x = a - b;
-    return `<span style="font-weight:700;color:${Math.abs(x) < (d ? 1 : 0.5) ? 'var(--green)' : 'var(--red)'}">${x > 0 ? '+' : ''}${fpNum(x, d ? 2 : 1)}</span>`;
-  };
-  const inp = (prov, field, val, step) => `<input type="number" step="${step}" value="${val ?? ''}" ${closed ? 'disabled' : ''}
-      style="width:110px;text-align:right" onchange="frcSet('${frcMonth}', ${JSON.stringify(prov).replace(/"/g, '&quot;')}, '${field}', this.value)">`;
-
-  let tS = { l: 0, s: 0 }, t1 = { l: 0, s: 0, has: false };
-  const rows = providers.map(prov => {
-    const s = by.get(prov) || { litres: 0, sum: 0, n: 0, noSum: 0 };
-    const r = recon[prov] || {};
-    tS.l += s.litres; tS.s += s.sum;
-    if (r.litres != null && r.litres !== '') { t1.l += +r.litres; t1.has = true; }
-    if (r.sum != null && r.sum !== '') { t1.s += +r.sum; t1.has = true; }
-    return `<tr>
-      <td><b>${fpEsc(prov)}</b><div style="font-size:12px;color:var(--text3)">${s.n} покупок${s.noSum ? ', без суммы: ' + s.noSum : ''}</div></td>
-      <td style="text-align:right">${fpNum(s.litres, 1)}</td>
-      <td style="text-align:right">${fpNum(s.sum)}</td>
-      <td style="text-align:right">${inp(prov, 'litres', r.litres, '0.01')}</td>
-      <td style="text-align:right">${inp(prov, 'sum', r.sum, '0.01')}</td>
-      <td style="text-align:right">${dif(s.litres, r.litres === '' ? null : r.litres, false)}</td>
-      <td style="text-align:right">${dif(s.sum, r.sum === '' ? null : r.sum, true)}</td>
-      <td><input type="text" value="${fpEsc(r.note || '')}" ${closed ? 'disabled' : ''} style="width:100%"
-        onchange="frcSet('${frcMonth}', ${JSON.stringify(prov).replace(/"/g, '&quot;')}, 'note', this.value)"></td>
-    </tr>`;
-  }).join('');
-
-  return `
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
-      <select class="fsel" onchange="frcMonth=this.value;renderFuelPurchases()">
-        ${months.map(m => `<option value="${m}"${m === frcMonth ? ' selected' : ''}>${fpMonthLabel(m)}${fuelMonthClosed(m) ? ' — закрыт' : ''}</option>`).join('')}
-      </select>
-      ${closed ? '<span style="color:var(--text3)">месяц закрыт — цифры 1С не правятся</span>' : ''}
-    </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-      ${fkCard('Выдано по журналу', fpNum(journal, 1) + ' л', 'все заправки машин за месяц', '#64748b')}
-      ${fkCard('По выпискам', fpNum(tS.l, 1) + ' л', fpNum(tS.s) + ' ₽', '#2563eb')}
-      ${fkCard('В 1С', t1.has ? fpNum(t1.l, 1) + ' л' : 'не внесено', t1.has ? fpNum(t1.s) + ' ₽' : '', t1.has ? '#16a34a' : '#d97706')}
-      ${fkCard('Журнал без выписок', fpNum(journal - tS.l, 1) + ' л', 'внесено вручную или по картам без выписки', Math.abs(journal - tS.l) > 1 ? '#d97706' : '#16a34a')}
-    </div>
-    <div class="table-wrap"><div class="table-scroll" style="overflow-x:auto">
-      <table class="data-table" style="width:100%">
-        <thead><tr><th>Поставщик карт</th><th style="text-align:right">Выписки, л</th><th style="text-align:right">Выписки, ₽</th>
-          <th style="text-align:right">1С, л</th><th style="text-align:right">1С, ₽</th><th style="text-align:right">Разница, л</th><th style="text-align:right">Разница, ₽</th><th>Примечание</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:16px">За месяц нет покупок по выпискам</td></tr>'}
-          <tr style="border-top:2px solid var(--border);font-weight:700"><td>ИТОГО</td><td style="text-align:right">${fpNum(tS.l, 1)}</td><td style="text-align:right">${fpNum(tS.s)}</td>
-            <td style="text-align:right">${t1.has ? fpNum(t1.l, 1) : '—'}</td><td style="text-align:right">${t1.has ? fpNum(t1.s) : '—'}</td>
-            <td style="text-align:right">${t1.has ? dif(tS.l, t1.l, false) : '—'}</td><td style="text-align:right">${t1.has ? dif(tS.s, t1.s, true) : '—'}</td><td></td></tr>
-        </tbody>
-      </table></div></div>
-    <div style="font-size:12px;color:var(--text3);margin-top:10px">
-      В колонки «1С» внесите литры и сумму, проведённые в 1С по поставщику за месяц (оборотка по счёту 10.03 или акты поставщика).
-      Суммы выписок — как в выписке («Сумма к оплате» / «Сумма клиента»). Разница выделяется красным, если больше 0,5 л или 1 ₽.
-      Покупки без суммы (загружены до версии 2.0.66) сумму не дают — загрузите выписку повторно.
-    </div>`;
+function frcHas(value) { return fqValue(value) != null; }
+function frcCompleteness(month) {
+  const by=frcData(month), recon=(fuelPeriod(month) || {}).recon || {}, providers=[...new Set([...by.keys(),...Object.keys(recon)])];
+  const result={providers:providers.length,litresKnown:0,moneyKnown:0,statementMoneyKnown:0,litres:0,money:0,statementLitres:0,statementMoney:0};
+  providers.forEach(provider => {
+    const values=recon[provider] || {}, statement=by.get(provider) || {litres:0,sum:0,n:0,noSum:0};
+    result.statementLitres+=statement.litres; result.statementMoney+=statement.sum;
+    if (frcHas(values.litres)) { result.litresKnown++; result.litres+=Number(values.litres); }
+    if (frcHas(values.sum)) { result.moneyKnown++; result.money+=Number(values.sum); }
+    if (!statement.noSum) result.statementMoneyKnown++;
+  });
+  result.litresComplete=providers.length > 0 && result.litresKnown === providers.length;
+  result.moneyComplete=providers.length > 0 && result.moneyKnown === providers.length;
+  result.statementMoneyComplete=providers.length > 0 && result.statementMoneyKnown === providers.length;
+  return result;
 }
-
-let _frcSaveTimer = null;
-function frcSet(month, provider, field, value) {
-  if (fuelMonthClosed(month)) return;
-  let p = fuelPeriod(month);
-  if (!p) { p = { month, history: [] }; fuelPeriods().push(p); }
-  const r = (p.recon || (p.recon = {}))[provider] || (p.recon[provider] = {});
-  r[field] = field === 'note' ? String(value || '').trim() : (value === '' ? '' : +value);
+function frcHtml() {
+  const months=[...new Set([...fpMonthsList(),...fpCmpMonths(),...fuelPeriods().filter(period => period.recon).map(period => period.month)])].sort().reverse();
+  if (!frcMonth || !months.includes(frcMonth)) frcMonth=months[0] || '';
+  if (!frcMonth) return '<div class="welcome"><p>Нет данных</p></div>';
+  const recon=(fuelPeriod(frcMonth) || {}).recon || {}, closed=fuelMonthClosed(frcMonth), by=frcData(frcMonth), providers=[...new Set([...by.keys(),...Object.keys(recon)])].sort((a,b) => a.localeCompare(b,'ru'));
+  const total=frcCompleteness(frcMonth), journal=(data.records || []).filter(r => String(r.date || '').startsWith(frcMonth)).reduce((sum,r) => sum+(fqValue(r.fuelIssued) || 0),0);
+  const difference=(a,b,money) => {
+    if (!frcHas(a) || !frcHas(b)) return '—'; const delta=Number(a)-Number(b), tolerance=money ? 1 : 0.5;
+    return '<span style="font-weight:700;color:'+(Math.abs(delta) <= tolerance ? 'var(--green)' : 'var(--red)')+'">'+(delta > 0 ? '+' : '')+fpNum(delta,money ? 2 : 1)+'</span>';
+  };
+  const input=(provider,field,value) => '<input type="number" step="0.01" value="'+(frcHas(value) ? value : '')+'" '+(closed ? 'disabled' : '')+' style="width:115px;text-align:right" onchange="frcSet('+fpEsc(JSON.stringify(frcMonth))+','+fpEsc(JSON.stringify(provider))+',\''+field+'\',this.value)">';
+  const rows=providers.map(provider => {
+    const s=by.get(provider) || {litres:0,sum:0,n:0,noSum:0}, r=recon[provider] || {};
+    return '<tr><td><b>'+fpEsc(provider)+'</b><div>'+s.n+' операций'+(s.noSum ? ' · без суммы: '+s.noSum : '')+'</div></td><td>'+fpNum(s.litres,1)+'</td><td>'+fpNum(s.sum,2)+(s.noSum ? ' (частично)' : '')+'</td><td>'+input(provider,'litres',r.litres)+'</td><td>'+input(provider,'sum',r.sum)+'</td><td>'+difference(s.litres,r.litres,false)+'</td><td>'+(s.noSum ? 'нужны суммы выписки' : difference(s.sum,r.sum,true))+'</td><td><input type="text" value="'+fpEsc(r.note || '')+'" '+(closed ? 'disabled' : '')+' onchange="frcSet('+fpEsc(JSON.stringify(frcMonth))+','+fpEsc(JSON.stringify(provider))+',\'note\',this.value)"></td></tr>';
+  }).join('');
+  const partial=(value,known) => known ? fpNum(value,2)+(known < total.providers ? ' (частично: '+known+'/'+total.providers+')' : '') : 'не внесено';
+  return '<div style="display:flex;gap:12px;align-items:center;margin-bottom:12px"><select class="fsel" onchange="frcMonth=this.value;renderFuelPurchases()">'+months.map(month => '<option value="'+month+'"'+(month === frcMonth ? ' selected' : '')+'>'+fpMonthLabel(month)+(fuelMonthClosed(month) ? ' — закрыт' : '')+'</option>').join('')+'</select>'+(closed ? 'Месяц закрыт' : '')+'</div>'+
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'+fkCard('Выписки',fpNum(total.statementLitres,1)+' л',fpNum(total.statementMoney,2)+' ₽'+(total.statementMoneyComplete ? '' : ' · стоимость неполная'),'#2563eb')+
+    fkCard('Литры 1С',partial(total.litres,total.litresKnown),'Заполнено поставщиков: '+total.litresKnown+' из '+total.providers,total.litresComplete ? '#16a34a' : '#d97706')+
+    fkCard('Стоимость 1С',partial(total.money,total.moneyKnown),'Заполнено поставщиков: '+total.moneyKnown+' из '+total.providers,total.moneyComplete ? '#16a34a' : '#d97706')+
+    fkCard('Журнал без выписок',fpNum(journal-total.statementLitres,1)+' л','Выдано по журналу: '+fpNum(journal,1)+' л','#64748b')+'</div>'+
+    '<div class="table-scroll"><table class="data-table"><thead><tr><th>Поставщик</th><th>Выписка, л</th><th>Выписка, ₽</th><th>1С, л</th><th>1С, ₽</th><th>Разница, л</th><th>Разница, ₽</th><th>Примечание</th></tr></thead><tbody>'+rows+
+    '<tr style="font-weight:700"><td>Итого</td><td>'+fpNum(total.statementLitres,1)+'</td><td>'+fpNum(total.statementMoney,2)+(total.statementMoneyComplete ? '' : ' (частично)')+'</td><td>'+partial(total.litres,total.litresKnown)+'</td><td>'+partial(total.money,total.moneyKnown)+'</td><td>'+(total.litresComplete ? difference(total.statementLitres,total.litres,false) : 'неполные данные')+'</td><td>'+(total.moneyComplete && total.statementMoneyComplete ? difference(total.statementMoney,total.money,true) : 'неполные данные')+'</td><td></td></tr></tbody></table></div>'+
+    '<div style="font-size:12px;color:var(--text3);margin-top:12px">Литры и стоимость проверяются независимо. Пустое поле означает отсутствие данных; введённый ноль учитывается. Общая разница появляется только после заполнения всех поставщиков по соответствующему показателю; для стоимости также нужны суммы всех операций выписки. Допуск: 0,5 л и 1 ₽. Данные 1С пока вносятся вручную.</div>';
+}
+let _frcSaveTimer=null;
+function frcSet(month,provider,field,value) {
+  if (fuelMonthClosed(month) || !['litres','sum','note'].includes(field)) return;
+  if (field !== 'note' && value !== '' && fqValue(value) == null) { showToast('Укажите число или оставьте поле пустым'); return; }
+  let period=fuelPeriod(month); if (!period) { period={month,history:[]}; fuelPeriods().push(period); }
+  const values=(period.recon || (period.recon={}))[provider] || (period.recon[provider]={});
+  values[field]=field === 'note' ? String(value || '').trim() : value === '' ? '' : Number(value);
   clearTimeout(_frcSaveTimer);
-  _frcSaveTimer = setTimeout(async () => { await saveData(data); renderFuelPurchases(); }, 300);
+  _frcSaveTimer=setTimeout(async () => { const saved=await saveData(data,{noMerge:true}); if (saved) renderFuelPurchases(); },300);
 }
