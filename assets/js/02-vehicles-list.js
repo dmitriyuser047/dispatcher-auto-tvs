@@ -334,8 +334,8 @@ function renderDetail(v) {
         <!-- Журнал пробега -->
         <div class="vd-journal-card" onclick="openVehicleJournal('journal')">
           <div class="vd-journal-card-header">
-            <div class="vd-journal-card-icon" style="background:#dbeafe">
-              <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#2563eb" stroke-width="2">
+            <div class="vd-journal-card-icon" style="background:var(--ws-accent-soft)">
+              <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2">
                 <path d="M12 20V10M6 20V4M18 20v-4"/>
               </svg>
             </div>

@@ -171,6 +171,7 @@
     padding: 4px 16px; font-size: 11px; color: var(--text3); flex-shrink: 0;
   }
 </style>
+<link rel="stylesheet" href="assets/css/document-workspace.css">
 </head>
 <body>
 
@@ -252,13 +253,12 @@
 
 <div class="status-bar" id="statusBar">Загрузка…</div>
 
-<script src="./node_modules/pdfjs-dist/build/pdf.min.js"></script>
 <script src="./node_modules/pdf-lib/dist/pdf-lib.min.js"></script>
 <script>
 const theme = localStorage.getItem('theme');
 if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = './node_modules/pdfjs-dist/build/pdf.worker.min.js';
+let pdfjsLib;
 
 let pdfBytes = null;
 let pdfDoc = null;
@@ -319,14 +319,18 @@ function getDrawPaths(p) {
 }
 
 async function init() {
+  pdfjsLib = await import('./node_modules/pdfjs-dist/build/pdf.mjs');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = './node_modules/pdfjs-dist/build/pdf.worker.mjs';
   const d = await window.pdfEditor.getData();
+  if (d?.theme) document.documentElement.setAttribute('data-theme', d.theme);
+  window.pdfEditor.onThemeChanged?.(theme => document.documentElement.setAttribute('data-theme', theme));
   if (!d) { status('Ошибка загрузки'); return; }
   pdfBytes = Uint8Array.from(atob(d.pdfBase64), c => c.charCodeAt(0));
   filePath = d.filePath;
   document.getElementById('fileName').textContent = d.fileName;
   document.title = 'PDF-редактор — ' + d.fileName;
 
-  pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
+  pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(), isEvalSupported: false, standardFontDataUrl: new URL('./node_modules/pdfjs-dist/standard_fonts/', location.href).href, cMapUrl: new URL('./node_modules/pdfjs-dist/cmaps/', location.href).href, wasmUrl: new URL('./node_modules/pdfjs-dist/wasm/', location.href).href }).promise;
   totalPages = pdfDoc.numPages;
   status('Страниц: ' + totalPages);
   renderThumbs();
@@ -1079,7 +1083,7 @@ async function deleteCurrentPage() {
     }
   }
   pageEdits = newEdits; drawPaths = newDraw; pageRotations = newRot;
-  pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
+  pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(), isEvalSupported: false, standardFontDataUrl: new URL('./node_modules/pdfjs-dist/standard_fonts/', location.href).href, cMapUrl: new URL('./node_modules/pdfjs-dist/cmaps/', location.href).href, wasmUrl: new URL('./node_modules/pdfjs-dist/wasm/', location.href).href }).promise;
   totalPages = pdfDoc.numPages;
   if (currentPage > totalPages) currentPage = totalPages;
   renderThumbs();
@@ -1102,7 +1106,7 @@ async function mergePdfFiles() {
   }
   const saved = await mainDoc.save();
   pdfBytes = new Uint8Array(saved);
-  pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
+  pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(), isEvalSupported: false, standardFontDataUrl: new URL('./node_modules/pdfjs-dist/standard_fonts/', location.href).href, cMapUrl: new URL('./node_modules/pdfjs-dist/cmaps/', location.href).href, wasmUrl: new URL('./node_modules/pdfjs-dist/wasm/', location.href).href }).promise;
   totalPages = pdfDoc.numPages;
   renderThumbs();
   renderPage(currentPage);
@@ -1332,7 +1336,7 @@ async function savePdfAs() {
   } catch (e) { status('Ошибка: ' + e.message); console.error(e); }
 }
 
-init();
+init().catch(error => status('Ошибка открытия PDF: ' + error.message));
 </script>
 </body>
 </html>

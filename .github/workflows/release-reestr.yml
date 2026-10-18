@@ -15,6 +15,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require release commit on main
+        shell: pwsh
+        run: |
+          git fetch --no-tags origin main
+          if ($LASTEXITCODE -ne 0) { throw "Cannot verify main" }
+          git merge-base --is-ancestor HEAD origin/main
+          if ($LASTEXITCODE -ne 0) { throw "Prototype/unmerged commits cannot be released" }
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

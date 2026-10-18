@@ -144,7 +144,7 @@ async function saveRepair() {
   if (editingRepairId) {
     Object.assign(data.repairs.find(x => x.id === editingRepairId), obj);
   } else {
-    obj.id = 'rp_' + Date.now();
+    obj.id = newId('rp');
     data.repairs.push(obj);
   }
   if (!await saveData(data)) return;

@@ -53,7 +53,7 @@ function fpRecordFor(vehicleId, date, grade, create) {
   const v = (data.vehicles || []).find(x => x.id === vehicleId);
   let rec = (data.records || []).find(r => r.vehicleId === vehicleId && r.date === date && recordFuelGrade(r, v) === grade);
   if (!rec && create) {
-    rec = { id: 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+    rec = { id: newId('r') + '_' + Math.random().toString(36).slice(2, 7),
             vehicleId, date, km: 0, fuelIssued: 0, fuelGrade: grade, note: '' };
     (data.records || (data.records = [])).push(rec);
   }
@@ -119,7 +119,7 @@ function fpUpdate(p, changes) {
 
 function fpCreate(tx, opts) {
   const p = {
-    id: 'fp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+    id: newId('fp') + '_' + Math.random().toString(36).slice(2, 7),
     importId: opts.importId || null,
     importKey: tx.importKey || null,
     date: opts.date || tx.date,
@@ -477,7 +477,7 @@ function fpRenderVehicle() {
         <button class="btn btn-ghost btn-sm" onclick="selectVehicleFromFp('${v.id}')">Журнал пробега</button>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-        ${card('По выпискам', fpNum(litres, 1) + ' л', list.length + ' заправ.', '#2563eb')}
+        ${card('По выпискам', fpNum(litres, 1) + ' л', list.length + ' заправ.', 'var(--accent)')}
         ${card('Сумма', sum ? fpNum(sum) + ' ₽' : '—', sumL ? 'ср. цена ' + fpNum(sum / sumL) + ' ₽/л' : '', '#16a34a')}
         ${card('В журнале пробега', fpNum(journal, 1) + ' л', Math.abs(diff) > 0.05 ? (diff > 0 ? '+' : '') + fpNum(diff, 1) + ' л к выпискам' : 'совпадает с выписками', Math.abs(diff) > 0.05 ? '#d97706' : '#94a3b8')}
       </div>
@@ -793,7 +793,7 @@ function fpDoublesHtml(all) {
 
   return `
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-      ${card('Случаев', all.length, cars + ' машин', '#2563eb')}
+      ${card('Случаев', all.length, cars + ' машин', 'var(--accent)')}
       ${card('Литров в эти дни', fpNum(litres, 1) + ' л', sum ? fpNum(sum) + ' ₽' : '', '#16a34a')}
       ${card('С отметками', flagged, flagged ? 'стоит проверить' : 'вопросов нет', flagged ? '#d97706' : '#94a3b8')}
     </div>
@@ -1027,7 +1027,7 @@ function fpCompareHtml() {
     <div class="month-tabs" style="margin-bottom:14px">${metricBtns}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
       ${card('Машин с ростом от ' + FP_CMP_ALERT + '%', up.length, 'из ' + all.filter(r => r.pct != null).length + ' сравнимых', up.length ? '#dc2626' : '#16a34a')}
-      ${card('Расход по парку, л/100 км', f(fleetB, 2), 'было ' + f(fleetA, 2) + (fleetPct != null ? ' · ' + (fleetPct > 0 ? '+' : '') + fpNum(fleetPct, 1) + '%' : ''), '#2563eb')}
+      ${card('Расход по парку, л/100 км', f(fleetB, 2), 'было ' + f(fleetA, 2) + (fleetPct != null ? ' · ' + (fleetPct > 0 ? '+' : '') + fpNum(fleetPct, 1) + '%' : ''), 'var(--accent)')}
       ${card('Факт. расход по парку', fpNum(totActB, 0) + ' л', 'было ' + fpNum(totActA, 0) + ' л', '#64748b')}
       ${card('Пробег по парку', fpNum(totKmB, 0) + ' км', 'было ' + fpNum(totKmA, 0) + ' км', '#64748b')}
     </div>
@@ -1254,7 +1254,7 @@ function fpExportNegative() {
   ws['!rows'] = [{ hpt: 22 }, {}, { hpt: 40 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Минус по остатку');
-  XLSX.writeFile(wb, 'Отрицательный_остаток_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+  XLSX.writeFile(wb, 'Отрицательный_остаток_' + todayIso() + '.xlsx');
 }
 
 // ─── Вкладка «Итого за месяц» ───────────────────────────
@@ -1402,7 +1402,7 @@ function mfFindOrCreate(vid, month, mfId) {
     const existing = data.monthlyFuel.find(m => m.id === mfId);
     if (existing) return existing;
   }
-  const rec = { id: 'mf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), vehicleId: vid, month };
+  const rec = { id: newId('mf') + '_' + Math.random().toString(36).slice(2, 6), vehicleId: vid, month };
   data.monthlyFuel.push(rec);
   return rec;
 }
@@ -1452,7 +1452,7 @@ async function mfAddCardRow(vid, month) {
   if (!fuelEditAllowed(month)) return;
   if (!data.monthlyFuel) data.monthlyFuel = [];
   data.monthlyFuel.push({
-    id: 'mf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    id: newId('mf') + '_' + Math.random().toString(36).slice(2, 6),
     vehicleId: vid, month, liters: null, sum: null, cardNumber: null
   });
   await saveData(data);

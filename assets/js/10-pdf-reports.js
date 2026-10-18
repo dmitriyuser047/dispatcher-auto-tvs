@@ -312,7 +312,7 @@ function exportAllGensToPdf(dateFrom, dateTo){
 
 // Акт использует тот же расчёт, что журнал и общие бочки.
 function actGsmCardOrg(cardNumber, date) {
-  return gsmCardAt(data, cardNumber, date || new Date().toISOString().slice(0, 10)).org;
+  return gsmCardAt(data, cardNumber, date || todayIso()).org;
 }
 function actGsmVehicleOrg(v) { return (v.org || '').trim() || GSM_UNKNOWN_ORG; }
 function actGsmVehicleOrgs(v, dateFrom, dateTo) {

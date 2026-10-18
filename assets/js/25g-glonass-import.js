@@ -181,7 +181,7 @@ function fgApplyTrips(trips) {
     if (!rec && !(d.km > 0)) { report.push({ d, action: 'skip' }); return; }
     let action = 'updated';
     if (!rec) {
-      rec = { id: 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), vehicleId: d.v.id, date: d.date,
+      rec = { id: newId('r') + '_' + Math.random().toString(36).slice(2, 7), vehicleId: d.v.id, date: d.date,
               km: r2(d.km), odoStart: d.odoStart, odoEnd: d.odoEnd,
               fuelUsed: d.v.norm ? r2(d.km * d.v.norm / 100) : null, fuelGrade: vehicleFuelGrade(d.v),
               note: 'пробег из ГЛОНАСС' };

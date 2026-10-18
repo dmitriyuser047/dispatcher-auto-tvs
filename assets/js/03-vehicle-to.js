@@ -168,7 +168,7 @@ async function saveVehicleTo() {
   if (editingVehicleToId) {
     Object.assign(data.vehicleTo.find(x => x.id === editingVehicleToId), obj);
   } else {
-    obj.id = 'vto_' + Date.now();
+    obj.id = newId('vto');
     data.vehicleTo.push(obj);
   }
   if (!await saveData(data)) return;

@@ -70,8 +70,12 @@ function readRevisions(dataDir) {
 
 function readRows(dataDir, name) {
   const rows = readJson(sectionFile(dataDir, name));
-  if (!Array.isArray(rows)) throw new Error('Раздел ' + name + ' должен содержать массив');
+  validateRows(name, rows);
   return rows;
+}
+
+function validateRows(name, rows) {
+  if (!Array.isArray(rows) || rows.some(row => !row || typeof row !== 'object' || Array.isArray(row))) throw new Error('Раздел ' + name + ' должен содержать массив объектов');
 }
 
 // Revisions are the commit point. Before that point a failed or interrupted
@@ -148,6 +152,7 @@ function migrate(dataDir) {
   const sections = {};
   SECTIONS.forEach(name => {
     const arr = existing.includes(name) ? readRows(dataDir, name) : data && Array.isArray(data[name]) ? data[name] : [];
+    validateRows(name, arr);
     sections[name] = arr;
     revisions[name] = existing.length ? Date.now() : 1;
     records += arr.length;
@@ -178,7 +183,7 @@ function readAll(dataDir) {
  */
 function writeAll(dataDir, data) {
   if (!data || !Array.isArray(data.vehicles) || !Array.isArray(data.records)) throw new Error('Неполная база: нужны vehicles и records');
-  SECTIONS.forEach(n => { if (n in data && !Array.isArray(data[n])) throw new Error('Некорректный раздел ' + n); });
+  SECTIONS.forEach(n => { if (n in data) validateRows(n, data[n]); });
   const previous = readAll(dataDir);
   checkClosedPeriods(previous, data);
   if (!isSplit(dataDir)) migrate(dataDir);
@@ -224,6 +229,7 @@ function writeSections(dataDir, payload) {
   const sections = (payload && payload.sections) || {};
   const names = Object.keys(sections);
   if (names.some(n => !SECTIONS.includes(n) || !Array.isArray(sections[n]))) throw new Error('Некорректные разделы');
+  names.forEach(n => validateRows(n, sections[n]));
   const revisions = readRevisions(dataDir);
   const conflicts = names.filter(n => (revisions[n] || 0) !== (base[n] || 0));
   if (conflicts.length) return { ok: false, conflicts, revisions };
@@ -248,7 +254,7 @@ function writeSections(dataDir, payload) {
 /** Ежедневная резервная копия: складываем разделы обратно в один файл */
 function makeDailyBackup(dataDir, backupDir, keepDays) {
   if (!isSplit(dataDir)) return null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDate();
   const dest = path.join(backupDir, 'data_' + today + '.json');
   if (fs.existsSync(dest)) return null;
   fs.mkdirSync(backupDir, { recursive: true });
@@ -264,8 +270,20 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
   return dest;
 }
 
+function localDate(now = new Date()) {
+  return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+}
+
+function makeManualBackup(dataDir, backupDir) {
+  const data = readAll(dataDir);
+  fs.mkdirSync(backupDir, { recursive: true });
+  const dest = path.join(backupDir, 'manual_' + localDate() + '_' + require('crypto').randomUUID() + '.json');
+  writeJsonAtomic(dest, data);
+  return dest;
+}
+
 module.exports = {
   SECTIONS, sectionsDir, sectionFile, revisionsFile,
   isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup,
-  readSection, writeSections,
+  readSection, writeSections, makeManualBackup, validateRows,
 };

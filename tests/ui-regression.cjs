@@ -49,6 +49,136 @@ async function fillManualReceipt(date = '2026-10-03', qty = '45.5') {
   await page.getByRole('spinbutton', { name: 'Литры 1', exact: true }).fill(qty);
 }
 async function reviewManualReceipt() { await page.locator('#fpBody').getByRole('button', { name: 'Заправить', exact: true }).click(); }
+test('persistent navigation opens sections and exposes one current page to keyboard users', async () => {
+  for (const section of ['home', 'vehicles', 'generators', 'tanks', 'fuelPurchases', 'toSchedule', 'finances', 'reestr', 'contragents', 'reports', 'fuelReport', 'printForms']) {
+    await page.locator('#workspaceNav [data-section="' + section + '"]').click();
+    assert.equal(await page.evaluate(() => activeSection), section);
+    assert.equal(await page.locator('#workspaceNav [aria-current="page"]').count(), 1);
+    assert.equal(await page.locator('#workspaceNav [data-section="' + section + '"]').getAttribute('aria-current'), 'page');
+  }
+});
+
+test('fleet search, table/card switch and slash shortcut preserve working data', async () => {
+  const original = await page.evaluate(() => JSON.stringify(data));
+  await page.keyboard.press('/');
+  assert.equal(await page.locator('#vcSearchInput').evaluate(el => document.activeElement === el), true);
+  await page.locator('#vcSearchInput').fill('not-present');
+  assert.match(await page.locator('#vcGridArea').innerText(), /Ничего не найдено/);
+  await page.locator('#vcSearchInput').fill('Нива');
+  assert.equal(await page.locator('#vcGridArea table tbody tr').count(), 1);
+  await page.locator('[data-fleet-view="vehicles"][data-view="cards"]').click();
+  assert.equal(await page.locator('#vcGridArea button.vehicle-card').count(), 1);
+  await page.locator('#vcGridArea button.vehicle-card').focus(); await page.keyboard.press('Enter');
+  assert.equal(await page.evaluate(() => selectedVehicleId), 'v');
+  assert.equal(await page.evaluate(() => JSON.stringify(data)), original);
+});
+
+test('overview derives its figures from the database without changing accounting data', async () => {
+  const result = await page.evaluate(() => {
+    const original = JSON.stringify(data), view = workspaceOverview();
+    switchSection('home');
+    return { same: original === JSON.stringify(data), vehicles: view.vehicleCount, km: view.km, payable: view.payable, metrics: document.querySelectorAll('.workspace-metric').length };
+  });
+  assert.deepEqual(result, { same: true, vehicles: 1, km: 150, payable: 0, metrics: 4 });
+});
+
+test('light and dark workspaces stay within the viewport at laptop sizes', async () => {
+  for (const size of [{ width: 1280, height: 900 }, { width: 960, height: 700 }]) {
+    await page.setViewportSize(size);
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(theme => applyTheme(theme), theme);
+      for (const section of ['home', 'vehicles', 'generators', 'fuelPurchases', 'finances']) {
+        await page.evaluate(section => switchSection(section), section);
+        const bounds = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth, nav: document.getElementById('workspaceNav').getBoundingClientRect().right, content: document.getElementById('mainContent').getBoundingClientRect().left }));
+        assert.ok(bounds.scroll <= bounds.width + 1, theme + ' ' + section + ' at ' + size.width);
+        assert.ok(bounds.content >= bounds.nav - 1);
+      }
+    }
+  }
+});
+
+test('all application sections render with an empty and a populated database', async () => {
+  await page.evaluate(async () => {
+    const original = JSON.parse(JSON.stringify(data));
+    for (const populated of [false, true]) {
+      data = populated ? original : Object.fromEntries(Object.keys(original).map(k => [k, []]));
+      rebuildIndex();
+      for (const section of ['home', 'vehicles', 'generators', 'tanks', 'reestr', 'toSchedule', 'repairs', 'finances', 'contragents', 'reports', 'printForms', 'fuelReport', 'fuelPurchases']) {
+        switchSection(section);
+        if (!document.getElementById('mainContent').textContent.trim()) throw Error('Empty section: ' + section);
+      }
+    }
+  });
+});
+
+test('double save waits for one disk write and creates exactly one journal record', async () => {
+  const result = await page.evaluate(async () => {
+    let writes = 0, release;
+    window.electronAPI.writeData = json => { writes++; return new Promise(resolve => { release = () => { window.__disk = json; resolve(true); }; }); };
+    openAddRecord(); document.getElementById('rec_date').value = '03.10.2026'; document.getElementById('rec_km').value = '10';
+    const first = saveRecord(), second = saveRecord();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const same = first === second;
+    release(); await Promise.all([first, second]);
+    return { same, writes, count: data.records.filter(r => r.date === '2026-10-03').length };
+  });
+  assert.deepEqual(result, { same: true, writes: 1, count: 1 });
+});
+
+test('same-field network conflicts keep the form and do not overwrite the server value', async () => {
+  const result = await page.evaluate(async () => {
+    _sync.enabled = true; _sync.revs = { records: 1 };
+    SYNC_SECTIONS.forEach(n => _sync.synced[n] = JSON.stringify(data[n] || []));
+    const remote = data.records.map(r => r.id === 'r1' ? { ...r, note: 'Remote note' } : r);
+    let writes = 0;
+    window.electronAPI.writeSections = async () => { writes++; return { ok: false, conflicts: ['records'] }; };
+    window.electronAPI.readSection = async () => ({ rows: remote, rev: 2 });
+    openEditRecord('r1'); document.getElementById('rec_note').value = 'Local note'; await saveRecord();
+    _sync.enabled = false;
+    return { writes, note: document.getElementById('rec_note').value, open: document.getElementById('recordModal').classList.contains('open'), remote: remote[0].note };
+  });
+  assert.deepEqual(result, { writes: 1, note: 'Local note', open: true, remote: 'Remote note' });
+});
+
+test('offline mode uses the scoped native cache, shows read-only state and blocks writes', async () => {
+  const result = await page.evaluate(async () => {
+    const snapshot = JSON.stringify(data); let writes = 0;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ vehicles: [{ id: 'wrong-profile' }], records: [] }));
+    window.electronAPI.readData = async () => null;
+    window.electronAPI.readCachedData = async () => snapshot;
+    window.electronAPI.writeData = async () => { writes++; return true; };
+    data = await loadData();
+    const first = data.vehicles[0].id;
+    const saved = await saveData(data);
+    window.electronAPI.readCachedData = async () => null;
+    data = await loadData();
+    return { first, saved, writes, visible: !document.getElementById('databaseBanner').hidden, count: data.vehicles.length };
+  });
+  assert.deepEqual(result, { first: 'v', saved: false, writes: 0, visible: true, count: 0 });
+});
+
+test('vehicle negative norms are refused and an explicit zero norm survives editing', async () => {
+  const result = await page.evaluate(async () => {
+    openEditVehicle('v'); document.getElementById('vm_norm').value = '-1'; await saveVehicle();
+    const refused = data.vehicles[0].norm === 10;
+    document.getElementById('vm_norm').value = '0'; await saveVehicle();
+    return { refused, norm: data.vehicles[0].norm };
+  });
+  assert.deepEqual(result, { refused: true, norm: 0 });
+});
+
+test('settings render imported names literally and diagnostics do not mutate data', async () => {
+  const result = await page.evaluate(async () => {
+    const before = JSON.stringify(data);
+    window.__xss = 0;
+    _appSettings = { networkMode: 'local', activeUser: 0, users: [{ name: '<img src=x onerror="window.__xss=1">', dataDir: 'C:/example' }] };
+    window.electronAPI.databaseHealth = async () => ({ ok: true, path: '<unsafe path>', counts: { vehicles: 1 }, issues: [], backupCount: 1, lastBackup: '2026-10-18T10:00:00Z' });
+    await renderSettingsBody(); await settingsCheckHealth();
+    return { images: document.getElementById('settingsBody').querySelectorAll('img').length, same: before === JSON.stringify(data), text: document.getElementById('databaseHealthResult').textContent.includes('<unsafe path>') };
+  });
+  assert.deepEqual(result, { images: 0, same: true, text: true });
+});
+
 test('text drag outside a form keeps it open; a genuine backdrop click closes it', async () => {
   await page.evaluate(() => { openEditRecord('r1'); document.getElementById('rec_note').value = 'Unsaved selected text'; });
   const f = await page.locator('#rec_note').boundingBox(), m = await page.locator('#recordModal .modal').boundingBox();

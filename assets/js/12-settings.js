@@ -10,6 +10,16 @@ async function openPdfEditor() {
 
 // ─── НАСТРОЙКИ / ПОЛЬЗОВАТЕЛИ ────────────────────────────
 let _appSettings = null;
+async function persistAppSettings() {
+  if (_activeSaves) { showToast('Дождитесь сохранения перед изменением настроек'); return false; }
+  try { await window.electronAPI.saveSettings(_appSettings); return true; }
+  catch (e) {
+    _appSettings = await window.electronAPI.getSettings();
+    showToast('Настройки не применены: ' + e.message);
+    await renderSettingsBody();
+    return false;
+  }
+}
 
 async function openSettingsModal() {
   if (!window.electronAPI || !window.electronAPI.getSettings) {
@@ -52,7 +62,7 @@ async function renderSettingsBody() {
   if (mode === 'client') {
     clientStatusHtml = `<div style="margin-top:8px">
       <div style="display:flex;gap:6px;align-items:center">
-        <input type="text" id="set_remote_host" value="${s.remoteHost || ''}" placeholder="IP-адрес сервера (напр. 192.168.1.10)" style="flex:1;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font-family:inherit">
+        <input type="text" id="set_remote_host" value="${htmlEsc(s.remoteHost || '')}" placeholder="IP-адрес сервера (напр. 192.168.1.10)" style="flex:1;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font-family:inherit">
         <input type="number" id="set_remote_port" value="${s.remotePort || 3377}" style="width:70px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font-family:inherit" placeholder="Порт">
         <button class="btn btn-primary btn-sm" onclick="settingsTestConnection()" style="font-size:11px;white-space:nowrap">Проверить</button>
       </div>
@@ -99,10 +109,10 @@ async function renderSettingsBody() {
       <div class="settings-section-title">Пользователи</div>
       ${users.map((u, i) => `
         <div class="settings-user-card ${i === activeIdx ? 'active' : ''}" onclick="settingsSwitchUser(${i})">
-          <div class="settings-user-avatar">${(u.name || 'П')[0].toUpperCase()}</div>
+          <div class="settings-user-avatar">${htmlEsc((u.name || 'П')[0].toUpperCase())}</div>
           <div style="flex:1;min-width:0">
-            <div class="settings-user-name">${u.name || 'Без имени'}</div>
-            <div class="settings-user-path" title="${u.dataDir || ''}">${u.dataDir || 'путь не задан'}</div>
+            <div class="settings-user-name">${htmlEsc(u.name || 'Без имени')}</div>
+            <div class="settings-user-path" title="${htmlEsc(u.dataDir || '')}">${htmlEsc(u.dataDir || 'путь не задан')}</div>
           </div>
           <div class="settings-actions">
             <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();settingsEditUser(${i})" title="Редактировать" style="font-size:11px;padding:3px 8px">
@@ -124,12 +134,43 @@ async function renderSettingsBody() {
         <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--text3);flex-shrink:0">
           <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
         </svg>
-        <span class="settings-path-text">${users[activeIdx].dataDir || 'не задан'}</span>
+        <span class="settings-path-text">${htmlEsc(users[activeIdx].dataDir || 'не задан')}</span>
         <button class="btn btn-ghost btn-sm" onclick="settingsChooseFolder()" style="font-size:11px;padding:3px 10px;white-space:nowrap">Изменить</button>
         <button class="btn btn-ghost btn-sm" onclick="window.electronAPI.openDataFolder()" style="font-size:11px;padding:3px 10px;white-space:nowrap">Открыть</button>
       </div>
     </div>` : ''}
+    <div class="settings-section"><div class="settings-section-title">Состояние и резервная копия базы</div>
+      <div id="databaseHealthResult" style="font-size:12px;overflow-wrap:anywhere">Нажмите «Проверить базу», чтобы проверить структуру и связи.</div>
+      <div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="settingsCheckHealth()">Проверить базу</button>
+      <button id="settingsBackupBtn" class="btn btn-primary btn-sm" onclick="settingsCreateBackup()">Создать резервную копию</button></div>
+    </div>
   `;
+}
+
+async function settingsCheckHealth() {
+  const box = document.getElementById('databaseHealthResult');
+  if (!box || !window.electronAPI.databaseHealth) return;
+  box.textContent = 'Проверка базы…';
+  try {
+    const result = await window.electronAPI.databaseHealth();
+    if (!box.isConnected) return;
+    if (!result.ok) { box.textContent = 'База недоступна: ' + result.error; return; }
+    const labels = { vehicles: 'ТС', records: 'Пробег', generators: 'ДЭС', genRecords: 'Наработка', fuelPurchases: 'Заправки', payments: 'Платежи', savedReestrs: 'Реестры' };
+    box.innerHTML = `<div>${htmlEsc(result.path)}</div><div style="margin-top:6px">${Object.entries(labels).map(([key, label]) => label + ': <b>' + (result.counts[key] || 0) + '</b>').join(' · ')}</div>
+      <div style="margin-top:6px">Резервных копий: ${result.backupCount}. Последняя: ${result.lastBackup ? htmlEsc(new Date(result.lastBackup).toLocaleString('ru-RU')) : 'ещё нет'}.</div>
+      <div style="margin-top:6px">${result.issues.length ? result.issues.map(item => htmlEsc(item.message)).join('<br>') : 'Структура и связи проверены, замечаний нет.'}</div>`;
+  } catch (e) { if (box.isConnected) box.textContent = 'Ошибка проверки: ' + e.message; }
+}
+
+async function settingsCreateBackup() {
+  const button = document.getElementById('settingsBackupBtn');
+  if (button) button.disabled = true;
+  try {
+    const result = await window.electronAPI.createBackup();
+    showToast(result.ok ? 'Копия базы сохранена: ' + result.filePath : 'Копия не создана: ' + result.error);
+    await settingsCheckHealth();
+  } catch (e) { showToast('Копия не создана: ' + e.message); }
+  finally { if (button?.isConnected) button.disabled = false; }
 }
 
 let _settingsPromptCallback = null;
@@ -148,17 +189,12 @@ function settingsPromptOk() {
 }
 
 async function settingsSwitchUser(idx) {
+  if (_activeSaves) { showToast('Дождитесь сохранения перед сменой базы'); return; }
   if (!_appSettings || idx === _appSettings.activeUser) return;
-  await window.electronAPI.switchUser(idx);
+  try { await window.electronAPI.switchUser(idx); }
+  catch (e) { showToast('Не удалось переключить базу: ' + e.message); return; }
   _appSettings.activeUser = idx;
-  data = await loadData();
-  rebuildIndex();
-  populateOrgSelect();
-  updateFilterUI();
-  renderVehicleList();
-  renderSettingsBody();
-  updateSidebarDataPath();
-  showToast('Пользователь: ' + (_appSettings.users[idx].name || 'Без имени'));
+  location.reload();
 }
 
 function settingsAddUser() {
@@ -167,7 +203,7 @@ function settingsAddUser() {
     const folderResult = await window.electronAPI.chooseDataFolder();
     if (!folderResult.ok) return;
     _appSettings.users.push({ name: name.trim(), dataDir: folderResult.path });
-    await window.electronAPI.saveSettings(_appSettings);
+    if (!await persistAppSettings()) return;
     renderSettingsBody();
   };
   showSettingsPrompt('Имя нового пользователя:', '');
@@ -179,7 +215,7 @@ function settingsEditUser(idx) {
   _settingsPromptCallback = async (name) => {
     if (name === null) return;
     u.name = name.trim() || 'Пользователь';
-    await window.electronAPI.saveSettings(_appSettings);
+    if (!await persistAppSettings()) return;
     renderSettingsBody();
     updateSidebarDataPath();
   };
@@ -194,14 +230,8 @@ async function settingsDeleteUser(idx) {
   _appSettings.users.splice(idx, 1);
   if (wasActive === idx) _appSettings.activeUser = 0;
   else if (wasActive > idx) _appSettings.activeUser = wasActive - 1;
-  await window.electronAPI.saveSettings(_appSettings);
-  data = await loadData();
-  rebuildIndex();
-  populateOrgSelect();
-  updateFilterUI();
-  renderVehicleList();
-  renderSettingsBody();
-  updateSidebarDataPath();
+  if (!await persistAppSettings()) return;
+  location.reload();
 }
 
 async function settingsChooseFolder() {
@@ -209,34 +239,15 @@ async function settingsChooseFolder() {
   if (!result.ok) return;
   const idx = _appSettings.activeUser || 0;
   _appSettings.users[idx].dataDir = result.path;
-  await window.electronAPI.saveSettings(_appSettings);
-  data = await loadData();
-  rebuildIndex();
-  populateOrgSelect();
-  updateFilterUI();
-  renderVehicleList();
-  renderSettingsBody();
-  updateSidebarDataPath();
-  showToast('Путь данных изменён');
+  if (!await persistAppSettings()) return;
+  location.reload();
 }
 
 async function settingsSetMode(mode) {
+  if (_activeSaves) { showToast('Дождитесь сохранения перед сменой базы'); return; }
   _appSettings.networkMode = mode;
-  if (mode === 'server') {
-    await window.electronAPI.saveSettings(_appSettings);
-    await settingsStartServer();
-  } else if (mode === 'client') {
-    await window.electronAPI.serverStop();
-    await window.electronAPI.saveSettings(_appSettings);
-  } else {
-    await window.electronAPI.serverStop();
-    await window.electronAPI.saveSettings(_appSettings);
-    data = await loadData();
-    rebuildIndex();
-    renderVehicleList();
-  }
-  renderSettingsBody();
-  updateSidebarDataPath();
+  if (!await persistAppSettings()) return;
+  location.reload();
 }
 
 async function settingsStartServer() {
@@ -262,14 +273,14 @@ async function settingsStopServer() {
 }
 
 async function settingsUpdatePort(val) {
-  const port = parseInt(val) || 3377;
+  const port = Number(val);
   _appSettings.serverPort = port;
-  await window.electronAPI.saveSettings(_appSettings);
+  if (!await persistAppSettings()) return;
 }
 
 async function settingsTestConnection() {
   const host = document.getElementById('set_remote_host').value.trim();
-  const port = parseInt(document.getElementById('set_remote_port').value) || 3377;
+  const port = Number(document.getElementById('set_remote_port').value);
   const el = document.getElementById('connectionTestResult');
   if (!host) { el.innerHTML = '<span style="color:var(--danger,#ef4444)">Введите IP-адрес сервера</span>'; return; }
   el.innerHTML = '<span style="color:var(--text3)">Проверка соединения...</span>';
@@ -278,7 +289,7 @@ async function settingsTestConnection() {
   const key = document.getElementById('set_network_key').value.trim();
   if (key.length < 16) { el.textContent = 'Укажите ключ сети с компьютера-сервера'; return; }
   _appSettings.networkKey = key;
-  await window.electronAPI.saveSettings(_appSettings);
+  if (!await persistAppSettings()) return;
   const result = await window.electronAPI.serverPing(host, port);
   if (result && result.ok) {
     el.innerHTML = '<span style="color:#22c55e;font-weight:600">Подключено! Сервер: ' + htmlEsc(result.name || host) + '</span>';
@@ -289,8 +300,10 @@ async function settingsTestConnection() {
     renderVehicleList();
     updateSidebarDataPath();
     showToast('Подключено к серверу ' + host + ':' + port);
+    location.reload();
   } else {
-    el.innerHTML = '<span style="color:var(--danger,#ef4444)">Не удалось подключиться к ' + host + ':' + port + '</span>';
+    el.innerHTML = '<span style="color:var(--danger,#ef4444)">Не удалось подключиться к ' + htmlEsc(host) + ':' + port + '</span>';
+    location.reload();
   }
 }
 

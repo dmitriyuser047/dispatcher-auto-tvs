@@ -8,6 +8,7 @@ let _dataDir   = null;
 let _backupFn  = null;
 let _writeLock = false;
 let _clientKey = '';
+let _generation = 0;
 function configureKey(key) { _clientKey = String(key || ''); }
 function authHeaders() { return { Authorization: 'Bearer ' + _clientKey }; }
 
@@ -25,10 +26,11 @@ function readBody(req) {
   });
 }
 
-async function writeRequest(req, res, full) {
+async function writeRequest(req, res, full, generation) {
   const dataDir = _dataDir, backup = _backupFn;
   try {
     const payload = await readBody(req);
+    if (generation !== _generation) throw new Error('Сервер переключён на другую базу. Подключитесь заново.');
     if (_writeLock) { res.writeHead(423); res.end(JSON.stringify({ error: 'Повторите сохранение' })); return; }
     _writeLock = true;
     try {
@@ -57,6 +59,7 @@ function start({ port, dataDir, backupFn, serverName, key }) {
   if (!key || String(key).length < 16) return { ok: false, error: 'Нужен ключ сети длиной от 16 знаков' };
   _dataDir  = dataDir;
   _backupFn = backupFn;
+  const generation = ++_generation;
 
   _server = http.createServer((req, res) => {
     const supplied = Buffer.from(String(req.headers.authorization || ''));
@@ -118,7 +121,7 @@ function start({ port, dataDir, backupFn, serverName, key }) {
 
     // Запись только изменившихся разделов с проверкой версии
     if (req.method === 'POST' && req.url === '/api/sections') {
-      void writeRequest(req, res, false);
+      void writeRequest(req, res, false, generation);
       return;
     }
 
@@ -134,7 +137,7 @@ function start({ port, dataDir, backupFn, serverName, key }) {
     }
 
     if (req.method === 'POST' && req.url === '/api/data') {
-      void writeRequest(req, res, true);
+      void writeRequest(req, res, true, generation);
       return;
     }
 
@@ -157,10 +160,12 @@ function start({ port, dataDir, backupFn, serverName, key }) {
 }
 
 function stop() {
-  if (!_server) return;
-  _server.close();
+  ++_generation;
+  if (!_server) return Promise.resolve();
+  const instance = _server;
   _server = null;
   _writeLock = false;
+  return new Promise(resolve => { instance.close(resolve); instance.closeAllConnections(); });
 }
 
 function isRunning() { return !!_server; }

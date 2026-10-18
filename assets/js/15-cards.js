@@ -1,169 +1,161 @@
 // Плитки ТС и ДЭС, список и выбор ДЭС
 // Выделено из index.html
 
-// ─── VEHICLE CARDS ──────────────────────────────────────
+// ─── FLEET WORKSPACE ────────────────────────────────────
 let vcSearchQuery = '';
+let genSearchQuery = '';
+const fleetViewModes = { vehicles: 'table', generators: 'table' };
+try {
+  for (const section of Object.keys(fleetViewModes)) {
+    if (localStorage.getItem('dispatcher.fleetView.' + section) === 'cards') fleetViewModes[section] = 'cards';
+  }
+} catch (_) { /* View preferences are optional when browser storage is unavailable. */ }
+
+function setFleetView(section, view) {
+  if (!Object.prototype.hasOwnProperty.call(fleetViewModes, section)) return;
+  fleetViewModes[section] = view === 'cards' ? 'cards' : 'table';
+  try { localStorage.setItem('dispatcher.fleetView.' + section, fleetViewModes[section]); } catch (_) {}
+  if (section === 'vehicles') renderVehicleCards(); else renderGeneratorCards();
+  document.querySelectorAll('[data-fleet-view="' + section + '"]').forEach(button => {
+    const active = button.dataset.view === fleetViewModes[section];
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+function fleetStatusBadge(status) {
+  const variant = ['На ходу', 'В работе'].includes(status) ? 'is-success'
+    : ['В ремонте', 'После ДТП', 'Неисправен'].includes(status) ? 'is-danger'
+    : !status || ['В резерве', 'Резерв'].includes(status) ? 'is-neutral' : 'is-warning';
+  return `<span class="workspace-badge ${variant}">${htmlEsc(status || 'Не указан')}</span>`;
+}
+
+function fleetViewSwitch(section) {
+  return `<div class="fleet-view-switch" role="group" aria-label="Вид списка">
+    ${[['table', 'table', 'Таблица'], ['cards', 'grid', 'Карточки']].map(([view, icon, label]) =>
+      `<button type="button" class="${fleetViewModes[section] === view ? 'active' : ''}" data-fleet-view="${section}" data-view="${view}" aria-pressed="${fleetViewModes[section] === view}" onclick="setFleetView('${section}','${view}')">${workspaceIcon(icon)}<span>${label}</span></button>`).join('')}
+  </div>`;
+}
+
+function fleetEmptyHtml(hasData, noun, icon) {
+  return `<div class="fleet-empty">${workspaceIcon(icon)}
+    <strong>${hasData ? 'Ничего не найдено' : 'Добавьте ' + noun}</strong>
+    <p>${hasData ? 'Измените поисковый запрос или сбросьте фильтры.' : 'Здесь появятся техника, её состояние и данные журналов.'}</p>
+  </div>`;
+}
+
 function renderVehicleCards() {
   const q = vcSearchQuery.toLowerCase().trim();
-  const fuelLabels = { diesel: 'Дизельное', gasoline: 'Бензин', gas: 'Газ' };
-
-  const filtered = data.vehicles.filter(v => {
-    if (q) {
-      const combined = [v.plate, v.make, v.model, v.driver, v.org, v.object, v.responsible, v.status, v.note, v.vin, v.fuel]
-        .map(f => (f || '').toLowerCase()).join(' ');
-      const words = q.split(/\s+/);
-      if (!words.every(w => combined.includes(w))) return false;
-    }
-    if (filterStatus && !(v.status || '').toLowerCase().includes(filterStatus)) return false;
+  const vehicles = data.vehicles || [];
+  const filtered = vehicles.filter(v => {
+    const combined = [v.plate, v.make, v.model, v.driver, v.org, v.object, v.responsible, v.status, v.note, v.vin, v.fuel]
+      .map(value => String(value || '').toLowerCase()).join(' ');
+    if (q && !q.split(/\s+/).every(word => combined.includes(word))) return false;
+    if (filterStatus && !String(v.status || '').toLowerCase().includes(filterStatus)) return false;
     if (filterFuel && v.fuel !== filterFuel) return false;
     if (filterOrg && (v.org || '') !== filterOrg) return false;
     return true;
   });
-
-  const statusStyle = (s) => {
-    if (!s) return '';
-    const bg = s === 'На ходу' ? '#dcfce7' : s === 'В резерве' ? '#dbeafe'
-      : (s === 'В ремонте' || s === 'После ДТП') ? '#fee2e2' : '#fef9c3';
-    const color = s === 'На ходу' ? '#16a34a' : s === 'В резерве' ? '#2563eb'
-      : (s === 'В ремонте' || s === 'После ДТП') ? '#dc2626' : '#a16207';
-    const border = s === 'На ходу' ? 'rgba(22,163,74,0.2)' : s === 'В резерве' ? 'rgba(37,99,235,0.2)'
-      : (s === 'В ремонте' || s === 'После ДТП') ? 'rgba(220,38,38,0.2)' : 'rgba(161,98,7,0.2)';
-    return `background:${bg};color:${color};border:1px solid ${border}`;
-  };
-
-  const cards = filtered.map(v => {
-    const recs = recsFor(v.id);
-    const totalKm = recs.reduce((s, r) => s + (r.km || 0), 0);
-    const lastRec = recs.length ? recs.sort((a,b) => cmpDateDesc(a.date, b.date))[0] : null;
-    const accentColor = v.status === 'На ходу' ? '#16a34a' : (v.status === 'В ремонте' || v.status === 'После ДТП') ? '#dc2626' : v.status === 'В резерве' ? '#2563eb' : v.status ? '#d97706' : 'transparent';
-    return `<div class="vehicle-card" onclick="selectVehicle(${htmlJs(v.id)})">
-      <div class="vc-accent-bar" style="background:${accentColor}"></div>
-      <div class="vc-plate">${htmlEsc(v.plate)}</div>
-      <div class="vc-make">${htmlEsc(v.make || '—')}</div>
-      <div class="vc-driver">${v.driver ? '<svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ' + htmlEsc(v.driver) : ''}</div>
-      ${v.status ? `<span class="vc-status" style="${statusStyle(v.status)}"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0"></span>${htmlEsc(v.status)}</span>` : ''}
-      <div class="vc-meta">
-        <span class="fuel-tag ${fuelTypeFromGrade(vehicleFuelGrade(v))}" style="font-size:10px;padding:1px 6px">${vehicleFuelGrade(v)}</span>
-        ${totalKm > 0 ? '<span><svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg> ' + totalKm.toLocaleString('ru') + ' км</span>' : ''}
-        ${v.org ? '<span>' + htmlEsc(v.org) + '</span>' : ''}
-      </div>
-    </div>`;
-  }).join('');
-
-  const gridHtml = filtered.length
-    ? `<div class="vehicle-cards-grid">${cards}</div>`
-    : `<div class="welcome" style="padding:60px 0">
-        <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><path d="M1 17l2-6h18l2 6M5 11l1-4h12l1 4"/></svg>
-        <p>${data.vehicles.length ? 'Ничего не найдено' : 'Нет транспортных средств. Нажмите «Добавить ТС»'}</p>
-      </div>`;
-  const countHtml = `${filtered.length} из ${data.vehicles.length} ТС`;
-
+  const entries = filtered.map(v => ({ v, km: recsFor(v.id).reduce((sum, r) => sum + (Number(r.km) || 0), 0) }));
+  let gridHtml;
+  if (!filtered.length) {
+    gridHtml = fleetEmptyHtml(vehicles.length > 0, 'первое транспортное средство', 'vehicles');
+  } else if (fleetViewModes.vehicles === 'cards') {
+    gridHtml = `<div class="vehicle-cards-grid">${entries.map(({v, km}) => `
+      <button type="button" class="vehicle-card fleet-card" onclick="selectVehicle(${htmlJs(v.id)})" aria-label="${htmlEsc('Открыть ' + (v.plate || v.make || 'ТС'))}">
+        <span class="fleet-card-heading"><span class="vc-plate">${htmlEsc(v.plate || 'Без номера')}</span>${fleetStatusBadge(v.status)}</span>
+        <span class="vc-make">${htmlEsc([v.make, v.model].filter(Boolean).join(' ') || 'Марка не указана')}</span>
+        <span class="fleet-card-label">Водитель</span><span>${htmlEsc(v.driver || 'Не назначен')}</span>
+        <span class="fleet-card-label">Организация · объект</span><span>${htmlEsc([v.org, v.object].filter(Boolean).join(' · ') || 'Не указаны')}</span>
+        <span class="fleet-card-metrics"><span class="workspace-badge is-neutral">${htmlEsc(vehicleFuelGrade(v) || 'Топливо не указано')}</span><span class="fleet-number">${km.toLocaleString('ru')} км</span></span>
+      </button>`).join('')}</div>`;
+  } else {
+    gridHtml = `<div class="workspace-table-wrap"><table class="workspace-table fleet-table">
+      <thead><tr><th scope="col">Транспортное средство</th><th scope="col">Водитель</th><th scope="col">Организация / объект</th><th scope="col">Статус</th><th scope="col">Топливо</th><th scope="col">Пробег по журналу</th><th scope="col"><span class="sr-only">Действия</span></th></tr></thead>
+      <tbody>${entries.map(({v, km}) => `<tr>
+        <td><span class="fleet-table-primary">${htmlEsc(v.plate || 'Без номера')}</span><span class="fleet-table-secondary">${htmlEsc([v.make, v.model].filter(Boolean).join(' ') || 'Марка не указана')}</span></td>
+        <td>${htmlEsc(v.driver || 'Не назначен')}</td>
+        <td><span>${htmlEsc(v.org || '—')}</span><span class="fleet-table-secondary">${htmlEsc(v.object || 'Объект не указан')}</span></td>
+        <td>${fleetStatusBadge(v.status)}</td><td><span class="workspace-badge is-neutral">${htmlEsc(vehicleFuelGrade(v) || '—')}</span></td>
+        <td class="fleet-number">${km.toLocaleString('ru')} <span class="fleet-card-label">км</span></td>
+        <td><button type="button" class="btn btn-ghost btn-sm" onclick="selectVehicle(${htmlJs(v.id)})" aria-label="${htmlEsc('Открыть ' + (v.plate || v.make || 'ТС'))}">Открыть ${workspaceIcon('arrow-right')}</button></td>
+      </tr>`).join('')}</tbody></table></div>`;
+  }
+  const countHtml = `Показано ${filtered.length} из ${vehicles.length} ТС`;
   const existing = document.getElementById('vcGridArea');
   if (existing) {
     existing.innerHTML = gridHtml;
     document.getElementById('vcCountArea').textContent = countHtml;
     return;
   }
-  document.getElementById('mainContent').innerHTML = `
-    <div style="padding:24px 28px;width:100%;box-sizing:border-box;overflow-y:auto;height:100%">
-      <div class="vehicle-cards-toolbar">
-        <input type="text" id="vcSearchInput" placeholder="Поиск по номеру, марке, водителю, объекту..." value="${vcSearchQuery.replace(/"/g, '&quot;')}"
-          oninput="vcSearchQuery=this.value;renderVehicleCards()" />
-        <button class="btn btn-ghost" onclick="openActGsmModal()" title="Акт на списание ГСМ по транспорту">
-          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
-          Акт ГСМ
-        </button>
-        <button class="btn btn-primary" onclick="openAddVehicle()">
-          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Добавить ТС
-        </button>
-      </div>
-      <div id="vcGridArea">${gridHtml}</div>
-      <div id="vcCountArea" style="text-align:center;margin-top:16px;font-size:13px;color:var(--text3)">
-        ${countHtml}
-      </div>
-    </div>
-  `;
+  document.getElementById('mainContent').innerHTML = `<div class="fleet-page">
+    <div class="workspace-page-intro"><div><span class="workspace-eyebrow">Управление парком</span><h1 class="workspace-page-title">Транспорт</h1><p class="workspace-page-subtitle">Автомобили, водители и состояние автопарка</p></div>
+      <div class="workspace-page-actions">${workspaceFleetTools('vehicles')}<button type="button" class="btn btn-ghost" onclick="openActGsmModal()">${workspaceIcon('file')} Акт ГСМ</button><button type="button" class="btn btn-primary" onclick="openAddVehicle()">${workspaceIcon('plus')} Добавить ТС</button></div></div>
+    <div class="fleet-summary"><div><span>Всего в парке</span><strong>${vehicles.length}<small> ТС</small></strong></div><div><span>На ходу</span><strong>${vehicles.filter(v => v.status === 'На ходу').length}<small> ТС</small></strong></div><div><span>В ремонте / после ДТП</span><strong>${vehicles.filter(v => ['В ремонте', 'После ДТП'].includes(v.status)).length}<small> ТС</small></strong></div></div>
+    <section class="workspace-panel" aria-label="Список транспорта"><div class="fleet-list-toolbar">
+      <label class="fleet-search">${workspaceIcon('search')}<input type="search" id="vcSearchInput" aria-label="Поиск транспорта" placeholder="Номер, марка, водитель или объект" value="${htmlEsc(vcSearchQuery)}" oninput="vcSearchQuery=this.value;renderVehicleCards()"></label>
+      ${fleetViewSwitch('vehicles')}
+    </div><div id="vcGridArea">${gridHtml}</div><div id="vcCountArea" class="fleet-count" role="status">${countHtml}</div></section>
+  </div>`;
 }
 
-// ─── GENERATOR CARDS (tile view like vehicles) ──────────
-let genSearchQuery = '';
 function renderGeneratorCards() {
   const q = genSearchQuery.toLowerCase().trim();
-  const gens = (data.generators || []);
-  const fuelLabels = { diesel: 'Дизель', gasoline: 'Бензин', gas: 'Газ' };
-
+  const gens = data.generators || [];
   const filtered = gens.filter(g => {
-    if (!q) return true;
-    return [g.name, g.serial, g.location, g.status, g.note]
-      .some(f => (f || '').toLowerCase().includes(q));
+    const text = [g.name, g.serial, g.location, g.status, g.note].map(value => String(value || '').toLowerCase()).join(' ');
+    return !q || q.split(/\s+/).every(word => text.includes(word));
   });
-
-  const cards = filtered.map(g => {
-    const gRecs = genRecsFor(g.id);
-    const totalHours = gRecs.reduce((s, r) => s + (r.hours || 0), 0);
-    let fuelBal;
-    if (g.tankId) {
-      fuelBal = computeTankBalance(g.tankId).balance;
-    } else {
-      const balMap = computeGenFuelBalances(g.id);
-      const sorted = gRecs.slice().sort((a,b) => cmpDateAsc(a.date, b.date));
-      const lastRec = sorted[sorted.length - 1];
-      fuelBal = lastRec ? (balMap[lastRec.id] ?? (g.fuelBalance || 0)) : (g.fuelBalance || 0);
+  const entries = filtered.map(g => {
+    const records = genRecsFor(g.id);
+    const hours = records.reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
+    let balance;
+    if (g.tankId) balance = computeTankBalance(g.tankId).balance;
+    else {
+      const balances = computeGenFuelBalances(g.id);
+      const last = records.slice().sort((a, b) => cmpDateAsc(a.date, b.date)).pop();
+      balance = last ? balances[last.id] ?? g.fuelBalance ?? 0 : g.fuelBalance || 0;
     }
-    const stColor = g.status === 'В работе' ? '#22c55e' : g.status === 'Резерв' ? '#3b82f6' : g.status ? '#ef4444' : 'transparent';
-    const stBg = g.status === 'В работе' ? '#dcfce7' : g.status === 'Резерв' ? '#dbeafe' : g.status ? '#fee2e2' : '';
-    const stBorder = g.status === 'В работе' ? 'rgba(22,163,74,0.2)' : g.status === 'Резерв' ? 'rgba(37,99,235,0.2)' : g.status ? 'rgba(220,38,38,0.2)' : '';
-    const balColor = fuelBal < 0 ? 'var(--red)' : fuelBal < 50 ? 'var(--yellow)' : 'var(--green)';
-
-    return `<div class="vehicle-card" onclick="openGeneratorDetail(${htmlJs(g.id)})" style="min-height:120px">
-      <div class="vc-accent-bar" style="background:${stColor}"></div>
-      <div class="vc-plate">${htmlEsc(g.name)}</div>
-      <div class="vc-make">${htmlEsc(g.location || '—')}</div>
-      <div class="vc-driver">${g.serial ? '<svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> С/н: ' + htmlEsc(g.serial) : ''}</div>
-      ${g.status ? `<span class="vc-status" style="background:${stBg};color:${stColor};border:1px solid ${stBorder}"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0"></span>${htmlEsc(g.status)}</span>` : ''}
-      <div class="vc-meta">
-        ${g.power != null ? '<span><svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> ' + g.power + ' кВт</span>' : ''}
-        <span style="font-variant-numeric:tabular-nums">${totalHours.toLocaleString('ru',{maximumFractionDigits:1})} мтч</span>
-        <span style="color:${balColor};font-variant-numeric:tabular-nums">${fuelBal.toLocaleString('ru',{maximumFractionDigits:1})} л</span>
-        ${g.fuel ? '<span>' + htmlEsc(fuelLabels[g.fuel] || g.fuel) + '</span>' : ''}
-      </div>
-    </div>`;
-  }).join('');
-
-  const gridHtml = filtered.length
-    ? `<div class="vehicle-cards-grid">${cards}</div>`
-    : `<div class="welcome" style="padding:60px 0">
-        <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-4 0v2"/><path d="M12 12v4m-2-2h4"/></svg>
-        <p>${gens.length ? 'Ничего не найдено' : 'Нет дизельных генераторов. Нажмите «Добавить ДЭС»'}</p>
-      </div>`;
-  const countHtml = `Всего: ${gens.length} генераторов`;
-
+    return { g, hours, balance: Number(balance) || 0 };
+  });
+  const formatNumber = value => value.toLocaleString('ru', { maximumFractionDigits: 1 });
+  const balanceBadge = balance => `<span class="workspace-badge ${balance < 0 ? 'is-danger' : balance < 50 ? 'is-warning' : 'is-success'} fleet-number">${formatNumber(balance)} л</span>`;
+  let gridHtml;
+  if (!filtered.length) gridHtml = fleetEmptyHtml(gens.length > 0, 'первую ДЭС', 'generators');
+  else if (fleetViewModes.generators === 'cards') {
+    gridHtml = `<div class="vehicle-cards-grid">${entries.map(({g, hours, balance}) => `
+      <button type="button" class="vehicle-card fleet-card" onclick="openGeneratorDetail(${htmlJs(g.id)})" aria-label="${htmlEsc('Открыть ' + (g.name || 'ДЭС'))}">
+        <span class="fleet-card-heading"><span class="vc-plate">${htmlEsc(g.name || 'Без названия')}</span>${fleetStatusBadge(g.status)}</span>
+        <span class="vc-make">${htmlEsc(g.location || 'Место не указано')}</span><span class="fleet-card-label">Серийный номер</span><span>${htmlEsc(g.serial || 'Не указан')}</span>
+        <span class="fleet-card-label">Мощность</span><span>${g.power != null ? htmlEsc(g.power) + ' кВт' : 'Не указана'}</span>
+        <span class="fleet-card-metrics"><span class="fleet-number">${formatNumber(hours)} мтч</span>${balanceBadge(balance)}</span>
+      </button>`).join('')}</div>`;
+  } else {
+    gridHtml = `<div class="workspace-table-wrap"><table class="workspace-table fleet-table">
+      <thead><tr><th scope="col">Дизельная электростанция</th><th scope="col">Серийный номер</th><th scope="col">Местонахождение</th><th scope="col">Статус</th><th scope="col">Наработка по журналу</th><th scope="col">Остаток топлива</th><th scope="col"><span class="sr-only">Действия</span></th></tr></thead>
+      <tbody>${entries.map(({g, hours, balance}) => `<tr>
+        <td><span class="fleet-table-primary">${htmlEsc(g.name || 'Без названия')}</span><span class="fleet-table-secondary">${g.power != null ? htmlEsc(g.power) + ' кВт' : 'Мощность не указана'}</span></td>
+        <td>${htmlEsc(g.serial || '—')}</td><td>${htmlEsc(g.location || 'Не указано')}</td><td>${fleetStatusBadge(g.status)}</td>
+        <td class="fleet-number">${formatNumber(hours)} <span class="fleet-card-label">мтч</span></td><td>${balanceBadge(balance)}</td>
+        <td><button type="button" class="btn btn-ghost btn-sm" onclick="openGeneratorDetail(${htmlJs(g.id)})" aria-label="${htmlEsc('Открыть ' + (g.name || 'ДЭС'))}">Открыть ${workspaceIcon('arrow-right')}</button></td>
+      </tr>`).join('')}</tbody></table></div>`;
+  }
+  const countHtml = `Показано ${filtered.length} из ${gens.length} ДЭС`;
   const existing = document.getElementById('genGridArea');
   if (existing) {
     existing.innerHTML = gridHtml;
     document.getElementById('genCountArea').textContent = countHtml;
     return;
   }
-  document.getElementById('mainContent').innerHTML = `
-    <div style="padding:24px 28px;width:100%;box-sizing:border-box;overflow-y:auto;height:100%">
-      <div class="vehicle-cards-toolbar">
-        <input type="text" id="genSearchInput" placeholder="Поиск по наименованию, серийному №, месту..." value="${genSearchQuery.replace(/"/g, '&quot;')}"
-          oninput="genSearchQuery=this.value;renderGeneratorCards()" />
-        <button class="btn btn-ghost" onclick="openGenActModal()" title="Акт на списание ГСМ по ДЭС">
-          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
-          Акт ГСМ
-        </button>
-        <button class="btn btn-primary" onclick="openAddGenerator()">
-          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Добавить ДЭС
-        </button>
-      </div>
-      <div id="genGridArea">${gridHtml}</div>
-      <div id="genCountArea" style="text-align:center;margin-top:16px;font-size:13px;color:var(--text3)">
-        ${countHtml}
-      </div>
-    </div>`;
+  document.getElementById('mainContent').innerHTML = `<div class="fleet-page">
+    <div class="workspace-page-intro"><div><span class="workspace-eyebrow">Энергетическое оборудование</span><h1 class="workspace-page-title">Дизельные электростанции</h1><p class="workspace-page-subtitle">Состояние, наработка и топливо на каждом объекте</p></div>
+      <div class="workspace-page-actions">${workspaceFleetTools('generators')}<button type="button" class="btn btn-ghost" onclick="openGenActModal()">${workspaceIcon('file')} Акт ГСМ</button><button type="button" class="btn btn-primary" onclick="openAddGenerator()">${workspaceIcon('plus')} Добавить ДЭС</button></div></div>
+    <div class="fleet-summary"><div><span>Всего электростанций</span><strong>${gens.length}<small> ДЭС</small></strong></div><div><span>В работе</span><strong>${gens.filter(g => g.status === 'В работе').length}<small> ДЭС</small></strong></div><div><span>В резерве</span><strong>${gens.filter(g => g.status === 'Резерв').length}<small> ДЭС</small></strong></div></div>
+    <section class="workspace-panel" aria-label="Список ДЭС"><div class="fleet-list-toolbar">
+      <label class="fleet-search">${workspaceIcon('search')}<input type="search" id="genSearchInput" aria-label="Поиск ДЭС" placeholder="Название, серийный номер или объект" value="${htmlEsc(genSearchQuery)}" oninput="genSearchQuery=this.value;renderGeneratorCards()"></label>
+      ${fleetViewSwitch('generators')}
+    </div><div id="genGridArea">${gridHtml}</div><div id="genCountArea" class="fleet-count" role="status">${countHtml}</div></section>
+  </div>`;
 }
 
 function openGeneratorDetail(id) {

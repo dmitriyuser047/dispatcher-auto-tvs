@@ -36,30 +36,43 @@ function syncKey(row) { return row && typeof row === 'object' ? (row.id ?? row.m
 // изменения относительно base.
 function syncMerge(base, local, remote) {
   base = base || []; local = local || []; remote = remote || [];
-  const keyed = a => a.every(r => syncKey(r) != null);
+  const keyed = a => a.every(r => syncKey(r) != null) && new Set(a.map(syncKey)).size === a.length;
   if (!keyed(base) || !keyed(local) || !keyed(remote)) {
-    // Без ключей по записям слить нельзя: если мы меняли раздел — берём своё
-    return JSON.stringify(local) !== JSON.stringify(base) ? local : remote;
+    if (JSON.stringify(local) === JSON.stringify(base)) return remote;
+    if (JSON.stringify(remote) === JSON.stringify(base) || JSON.stringify(local) === JSON.stringify(remote)) return local;
+    throw new Error('Раздел изменён двумя пользователями, но записи не имеют уникальных ключей. Обновите данные и сверьте изменения.');
   }
   const bMap = new Map(base.map(r => [syncKey(r), r]));
   const lMap = new Map(local.map(r => [syncKey(r), r]));
   const out = new Map(remote.map(r => [syncKey(r), r]));
   lMap.forEach((l, k) => {
     const b = bMap.get(k);
-    if (!b) { out.set(k, l); return; }                        // добавили мы
+    if (!b) {
+      if (out.has(k) && JSON.stringify(out.get(k)) !== JSON.stringify(l)) throw new Error('Совпали идентификаторы двух новых записей. Обновите данные перед повтором.');
+      out.set(k, l); return;
+    }
     if (JSON.stringify(l) === JSON.stringify(b)) return;       // не трогали
     const r = out.get(k);
-    if (!r) { out.set(k, l); return; }                         // у них удалили, у нас правили — оставляем
+    if (!r) throw new Error('Запись удалена другим пользователем. Откройте раздел заново и сверьте изменения.');
     const m = Object.assign({}, r);                            // правили оба — наши поля поверх
     new Set([...Object.keys(l), ...Object.keys(b)]).forEach(f => {
+      if (JSON.stringify(l[f]) !== JSON.stringify(b[f]) && JSON.stringify(r[f]) !== JSON.stringify(b[f]) && JSON.stringify(l[f]) !== JSON.stringify(r[f])) {
+        throw new Error('Одно и то же поле изменено двумя пользователями (' + f + '). Откройте запись заново и сверьте изменения.');
+      }
       if (JSON.stringify(l[f]) !== JSON.stringify(b[f])) { if (f in l) m[f] = l[f]; else delete m[f]; }
     });
     out.set(k, m);
   });
-  bMap.forEach((b, k) => { if (!lMap.has(k)) out.delete(k); }); // удалили мы
+  bMap.forEach((b, k) => {
+    if (!lMap.has(k)) {
+      if (out.has(k) && JSON.stringify(out.get(k)) !== JSON.stringify(b)) throw new Error('Удаляемая запись изменена другим пользователем. Обновите раздел перед удалением.');
+      out.delete(k);
+    }
+  });
   // Порядок: как на сервере, новые наши — в конце, в своём порядке
   const order = remote.map(syncKey).filter(k => out.has(k));
-  local.forEach(r => { const k = syncKey(r); if (!order.includes(k) && out.has(k)) order.push(k); });
+  const seen = new Set(order);
+  local.forEach(r => { const k = syncKey(r); if (!seen.has(k) && out.has(k)) { order.push(k); seen.add(k); } });
   return order.map(k => out.get(k));
 }
 
@@ -145,6 +158,7 @@ async function syncSaveNow(d, options) {
 
 // Подтянуть чужие изменения
 async function syncPoll() {
+  if (_activeSaves) return;
   if (!_sync.enabled || !window.electronAPI.getRevisions) return;
   if (document.querySelector('.modal-overlay.open')) return;
   if (_sync.needRefresh.length) syncRefreshView([]);

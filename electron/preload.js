@@ -2,6 +2,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   readData:       ()        => ipcRenderer.invoke('read-data'),
+  readCachedData: ()        => ipcRenderer.invoke('read-cached-data'),
+  databaseHealth: ()        => ipcRenderer.invoke('database-health'),
+  createBackup:   ()        => ipcRenderer.invoke('create-backup'),
   writeData:      (json)    => ipcRenderer.invoke('write-data', json),
   readSnapshot:   ()        => ipcRenderer.invoke('read-snapshot'),
   getRevisions:   ()        => ipcRenderer.invoke('get-revisions'),
@@ -16,6 +19,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Настройки / пользователи
   getSettings:       ()          => ipcRenderer.invoke('get-settings'),
+  getTheme:          ()          => ipcRenderer.invoke('get-theme'),
+  setTheme:          (theme)     => ipcRenderer.invoke('set-theme', theme),
+  onThemeChanged:    (cb)        => ipcRenderer.on('workspace-theme-changed', (_event, theme) => cb(theme)),
   saveSettings:      (s)         => ipcRenderer.invoke('save-settings', s),
   switchUser:        (idx)       => ipcRenderer.invoke('switch-user', idx),
   chooseDataFolder:  ()          => ipcRenderer.invoke('choose-data-folder'),

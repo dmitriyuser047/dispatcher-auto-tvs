@@ -68,7 +68,7 @@ function fcSeed() {
     const top = declared.length === 1 ? declared[0] : '';
     const shared = (fromVehicles.get(n) || []).length > 1;
     fcList().push({
-      id: 'fc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+      id: newId('fc') + '_' + Math.random().toString(36).slice(2, 7),
       number: n, provider: fcGuessProvider(n), status: 'active', limit: null,
       assignments: top ? [{ vehicleId: top, from: '', to: '' }] : [],
       note: shared ? 'номер записан в карточках нескольких машин; укажите организацию карты' : top ? '' : 'владелец не определён; укажите организацию карты',
@@ -172,7 +172,7 @@ function fcEdit(id) {
       <div class="form-group"><label>Поставщик</label><input type="text" id="fc_provider" value="${fpEsc(c ? c.provider : '')}" placeholder="Газпромнефть, Лукойл..."></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Организация карты</label><input type="text" id="fc_org" value="${fpEsc(c ? gsmCardAt(data, c.number, new Date().toISOString().slice(0, 10)).org : '')}" placeholder="ООО «...»" list="fc_org_list">
+      <div class="form-group"><label>Организация карты</label><input type="text" id="fc_org" value="${fpEsc(c ? gsmCardAt(data, c.number, todayIso()).org : '')}" placeholder="ООО «...»" list="fc_org_list">
         <datalist id="fc_org_list">${[...new Set((data.vehicles||[]).map(v=>(v.org||'').trim()).filter(Boolean))].sort().map(o=>'<option value="'+fpEsc(o)+'">').join('')}</datalist></div>
     </div>
     <div class="form-row">
@@ -203,7 +203,7 @@ async function fcSave(id) {
   if (fromRaw && (!from || !gsmValidDate(from))) { showFieldError('Дата в формате ДД.ММ.ГГГГ', 'fc_from'); return; }
   const org = document.getElementById('fc_org').value.trim();
   if (!org) { showFieldError('Укажите организацию карты', 'fc_org'); return; }
-  const effective = from || new Date().toISOString().slice(0, 10);
+  const effective = from || todayIso();
   const ownerPeriod = c && (c.orgHistory || []).filter(h => !h.to).pop();
   if (ownerPeriod && ownerPeriod.org !== org && ownerPeriod.from && effective <= ownerPeriod.from) { showFieldError('Дата должна быть позже начала действующей организации', 'fc_from'); return; }
   const before = JSON.stringify(data);
@@ -221,7 +221,7 @@ async function fcSave(id) {
   if (!c) {
     if (number.length < 6) { showFieldError('Укажите номер карты', 'fc_number'); return; }
     if (fcByNumber(number)) { alert('Такая карта уже есть в справочнике'); return; }
-    c = { id: 'fc_' + Date.now(), number, assignments: [] };
+    c = { id: newId('fc'), number, assignments: [] };
     fcList().push(c);
   }
   c.provider = document.getElementById('fc_provider').value.trim();

@@ -167,7 +167,7 @@ function frcHtml() {
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
       ${fkCard('Выдано по журналу', fpNum(journal, 1) + ' л', 'все заправки машин за месяц', '#64748b')}
-      ${fkCard('По выпискам', fpNum(tS.l, 1) + ' л', fpNum(tS.s) + ' ₽', '#2563eb')}
+      ${fkCard('По выпискам', fpNum(tS.l, 1) + ' л', fpNum(tS.s) + ' ₽', 'var(--accent)')}
       ${fkCard('В 1С', t1.has ? fpNum(t1.l, 1) + ' л' : 'не внесено', t1.has ? fpNum(t1.s) + ' ₽' : '', t1.has ? '#16a34a' : '#d97706')}
       ${fkCard('Журнал без выписок', fpNum(journal - tS.l, 1) + ' л', 'внесено вручную или по картам без выписки', Math.abs(journal - tS.l) > 1 ? '#d97706' : '#16a34a')}
     </div>

@@ -30,6 +30,7 @@ function toggleTheme() {
   const next = cur === 'dark' ? 'light' : 'dark';
   localStorage.setItem('theme', next);
   applyTheme(next);
+  if (window.electronAPI?.setTheme) window.electronAPI.setTheme(next).catch(error => console.warn('[theme] ' + error.message));
 }
 // Раннее применение — до отрисовки, чтобы не было мигания
 try { applyTheme(localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'); } catch (e) {}
@@ -40,6 +41,7 @@ document.addEventListener('keydown', (e) => {
   const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
   // Esc — закрыть любое открытое модальное окно
   if (e.key === 'Escape') {
+    if (_activeSaves) { showToast('Дождитесь завершения сохранения'); return; }
     if (document.getElementById('confirmModal')?.classList.contains('open')) return;
     const open = document.querySelectorAll('.modal-overlay.open');
     if (open.length) { open.forEach(m => m.classList.remove('open')); e.preventDefault(); }
@@ -47,9 +49,9 @@ document.addEventListener('keydown', (e) => {
   }
   // "/" — фокус на активное поле поиска
   if (e.key === '/' && !typing) {
-    const id = (typeof activeSection !== 'undefined' && activeSection === 'generators' && genSubView === 'generators')
-      ? 'searchGenInput'
-      : (typeof activeSection === 'undefined' || activeSection === 'vehicles') ? 'searchInput' : null;
+    const id = activeSection === 'generators' && genSubView === 'generators'
+      ? (document.getElementById('genSearchInput') ? 'genSearchInput' : 'searchGenInput')
+      : activeSection === 'vehicles' ? (document.getElementById('vcSearchInput') ? 'vcSearchInput' : 'searchInput') : null;
     const el = id && document.getElementById(id);
     if (el && el.offsetParent !== null) { e.preventDefault(); el.focus(); el.select(); }
   }
@@ -110,10 +112,16 @@ function autoDateSep(el) {
 const STORAGE_KEY = 'fuel_tracker_v1';
 let _loadWriteBlocked = false;
 let _lastPersisted = null;
+function validDatabase(value) {
+  if (!value || !Array.isArray(value.vehicles) || !Array.isArray(value.records)) return false;
+  const sections = typeof SYNC_SECTIONS !== 'undefined' ? SYNC_SECTIONS : ['vehicles', 'records', 'generators', 'genRecords'];
+  return sections.every(name => !(name in value) || Array.isArray(value[name]) && value[name].every(row => row && typeof row === 'object' && !Array.isArray(row)));
+}
 
 async function loadData() {
   let d = null;
   _loadWriteBlocked = false;
+  if (typeof _sync !== 'undefined') { _sync.enabled = false; _sync.revs = {}; _sync.synced = {}; }
   // Снимок с версиями разделов — для синхронизации нескольких пользователей
   if (typeof syncLoad === 'function') {
     try { d = await syncLoad(); } catch (e) { console.warn('[loadData] снимок: ' + e.message); }
@@ -121,15 +129,18 @@ async function loadData() {
   if (!d && window.electronAPI) {
     try { const raw = await window.electronAPI.readData(); if (raw) d = JSON.parse(raw); } catch {}
   }
-  if (d && (!Array.isArray(d.vehicles) || !Array.isArray(d.records))) d = null;
+  if (d && !validDatabase(d)) d = null;
   if (!d && window.electronAPI) {
     _loadWriteBlocked = true;
     showToast('Основная база недоступна. Открыта резервная копия только для просмотра. Проверьте подключение и файлы базы.');
   }
-  if (!d) {
+  if (!d && window.electronAPI?.readCachedData) {
+    try { d = JSON.parse(await window.electronAPI.readCachedData()); } catch {}
+  }
+  if (!d && !window.electronAPI) {
     try { d = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch {}
   }
-  if (d && (!Array.isArray(d.vehicles) || !Array.isArray(d.records))) d = null;
+  if (d && !validDatabase(d)) d = null;
   if (!d) d = { vehicles: [], records: [] };
   if (!d.generators)  d.generators  = [];
   if (!d.genRecords)  d.genRecords   = [];
@@ -152,7 +163,39 @@ async function loadData() {
   if (!d.monthlyFuel)   d.monthlyFuel   = [];
   if (!d.appMeta)       d.appMeta       = [];
   _lastPersisted = JSON.stringify(d);
+  updateDatabaseBanner();
+  if (typeof workspaceUpdateStatus === 'function') workspaceUpdateStatus(_loadWriteBlocked ? 'offline' : 'ready');
   return d;
+}
+
+function updateDatabaseBanner() {
+  let banner = document.getElementById('databaseBanner');
+  if (!banner) {
+    banner = document.createElement('div'); banner.id = 'databaseBanner'; banner.setAttribute('role', 'status');
+    document.body.appendChild(banner);
+  }
+  banner.hidden = !_loadWriteBlocked;
+  banner.textContent = 'База недоступна · резервная копия открыта только для просмотра. Проверьте подключение в настройках.';
+}
+
+function todayIso(now = new Date()) {
+  return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+}
+
+function newId(prefix) {
+  return prefix + '_' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + '_' + Math.random().toString(36).slice(2));
+}
+
+function singleFlightAction(action) {
+  let pending = null;
+  return function (...args) {
+    if (pending) return pending;
+    pending = Promise.resolve().then(() => {
+      if (_activeSaves) { showToast('Дождитесь завершения сохранения'); return false; }
+      return action.apply(this, args);
+    }).finally(() => { pending = null; });
+    return pending;
+  };
 }
 // Резервная копия в localStorage. Основное хранилище — файл data.json через
 // electronAPI, а localStorage нужен только чтобы не остаться без данных, если
@@ -177,10 +220,13 @@ function scheduleLocalBackup(json) {
   }, 0);
 }
 
+let _activeSaves = 0;
 async function saveData(d = data, options) {
+  _activeSaves++;
+  if (typeof workspaceUpdateStatus === 'function') workspaceUpdateStatus('saving');
   showProgress();
-  rebuildIndex();
   try {
+    rebuildIndex();
     if (_loadWriteBlocked) throw new Error('Основная база не прочитана. Сначала восстановите подключение или базу.');
     const json = JSON.stringify(d);
     if (window.electronAPI) {
@@ -192,6 +238,7 @@ async function saveData(d = data, options) {
     }
     _lastPersisted = JSON.stringify(d);
     scheduleLocalBackup(_lastPersisted);
+    if (typeof workspaceUpdateStatus === 'function') workspaceUpdateStatus('saved');
     return true;
   } catch (e) {
     if (d === data && _lastPersisted) {
@@ -203,43 +250,45 @@ async function saveData(d = data, options) {
       rebuildIndex();
     }
     showToast('Ошибка сохранения: ' + (e.message || e));
+    if (typeof workspaceUpdateStatus === 'function') workspaceUpdateStatus(_loadWriteBlocked ? 'offline' : 'error');
     return false;
   } finally {
+    _activeSaves--;
     setTimeout(hideProgress, 300);
   }
 }
 
 let data = { vehicles: [], records: [], generators: [], genRecords: [] };
-let recsByVid = {};
-let genRecsByGid = {};
-let vehicleToByVid = {};
-let repairsByVid = {};
+let recsByVid = Object.create(null);
+let genRecsByGid = Object.create(null);
+let vehicleToByVid = Object.create(null);
+let repairsByVid = Object.create(null);
 // Кэши балансов (сбрасываются при любом изменении данных через rebuildIndex)
-let _fuelBalCache = {};
-let _genBalCache = {};
+let _fuelBalCache = Object.create(null);
+let _genBalCache = Object.create(null);
 function rebuildIndex() {
-  recsByVid = {};
+  recsByVid = Object.create(null);
   data.records.forEach(r => {
     if (!recsByVid[r.vehicleId]) recsByVid[r.vehicleId] = [];
     recsByVid[r.vehicleId].push(r);
   });
-  genRecsByGid = {};
+  genRecsByGid = Object.create(null);
   (data.genRecords || []).forEach(r => {
     if (!genRecsByGid[r.generatorId]) genRecsByGid[r.generatorId] = [];
     genRecsByGid[r.generatorId].push(r);
   });
-  vehicleToByVid = {};
+  vehicleToByVid = Object.create(null);
   (data.vehicleTo || []).forEach(r => {
     if (!vehicleToByVid[r.vehicleId]) vehicleToByVid[r.vehicleId] = [];
     vehicleToByVid[r.vehicleId].push(r);
   });
-  repairsByVid = {};
+  repairsByVid = Object.create(null);
   (data.repairs || []).forEach(r => {
     if (!repairsByVid[r.vehicleId]) repairsByVid[r.vehicleId] = [];
     repairsByVid[r.vehicleId].push(r);
   });
-  _fuelBalCache = {};
-  _genBalCache = {};
+  _fuelBalCache = Object.create(null);
+  _genBalCache = Object.create(null);
 }
 function recsFor(vid) { return recsByVid[vid] || []; }
 function genRecsFor(gid) { return genRecsByGid[gid] || []; }

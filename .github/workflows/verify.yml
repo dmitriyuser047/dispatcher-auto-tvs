@@ -1,0 +1,29 @@
+name: Verify
+on:
+  pull_request:
+  push:
+    branches: [main, 'codex/**']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Install isolated browser tools
+        run: npm install --prefix "${{ runner.temp }}/tvs-ui-tools" --no-save --package-lock=false playwright@1.62.1
+      - name: Install Chromium
+        run: node "${{ runner.temp }}/tvs-ui-tools/node_modules/playwright/cli.js" install chromium
+      - run: npm run test:ui
+        env:
+          TVS_PLAYWRIGHT_MODULES: ${{ runner.temp }}/tvs-ui-tools/node_modules
+      - run: npm run test:electron
+        env:
+          TVS_PLAYWRIGHT_MODULES: ${{ runner.temp }}/tvs-ui-tools/node_modules

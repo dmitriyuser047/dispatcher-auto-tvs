@@ -15,8 +15,8 @@ function renderPrintFormsSection() {
 
         <div class="card" style="padding:24px;cursor:default">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-            <div style="width:44px;height:44px;border-radius:10px;background:#dbeafe;display:flex;align-items:center;justify-content:center">
-              <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="#2563eb" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <div style="width:44px;height:44px;border-radius:10px;background:var(--ws-accent-soft);display:flex;align-items:center;justify-content:center">
+              <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             </div>
             <div><div style="font-weight:700;font-size:15px">Путевой лист</div><div style="font-size:12px;color:var(--text3)">Форма для выезда ТС</div></div>
           </div>
@@ -29,7 +29,7 @@ function renderPrintFormsSection() {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
             <div>
               <label style="font-size:12px;color:var(--text3);font-weight:600">Дата выезда</label>
-              <input type="date" id="pfDate" value="${new Date().toISOString().slice(0,10)}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
+              <input type="date" id="pfDate" value="${todayIso()}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
             </div>
             <div>
               <label style="font-size:12px;color:var(--text3);font-weight:600">Маршрут</label>
@@ -55,7 +55,7 @@ function renderPrintFormsSection() {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
             <div>
               <label style="font-size:12px;color:var(--text3);font-weight:600">Дата</label>
-              <input type="date" id="pfFuelDate" value="${new Date().toISOString().slice(0,10)}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
+              <input type="date" id="pfFuelDate" value="${todayIso()}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
             </div>
             <div>
               <label style="font-size:12px;color:var(--text3);font-weight:600">Объём (л)</label>
@@ -90,7 +90,7 @@ function renderPrintFormsSection() {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
             <div>
               <label style="font-size:12px;color:var(--text3);font-weight:600">Дата</label>
-              <input type="date" id="pfActDate" value="${new Date().toISOString().slice(0,10)}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
+              <input type="date" id="pfActDate" value="${todayIso()}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
             </div>
             <div>
               <label style="font-size:12px;color:var(--text3);font-weight:600">Номер акта</label>
@@ -117,7 +117,7 @@ function generateWaybill() {
   if (!vid) { alert('Выберите транспортное средство'); return; }
   const v = data.vehicles.find(x=>x.id===vid);
   if (!v) return;
-  const date = document.getElementById('pfDate').value || new Date().toISOString().slice(0,10);
+  const date = document.getElementById('pfDate').value || todayIso();
   const route = document.getElementById('pfRoute').value.trim() || '—';
   const fuelLabel = {diesel:'Дизельное',gasoline:'Бензин',gas:'Газ'}[v.fuel]||v.fuel||'—';
   const org = v.org || 'ООО «Технрайз Велл Сервис»';
@@ -171,7 +171,7 @@ function generateFuelRequest() {
   if (!vid) { alert('Выберите транспортное средство'); return; }
   const v = data.vehicles.find(x=>x.id===vid);
   if (!v) return;
-  const date = document.getElementById('pfFuelDate').value || new Date().toISOString().slice(0,10);
+  const date = document.getElementById('pfFuelDate').value || todayIso();
   const amount = document.getElementById('pfFuelAmount').value || '___';
   const fuelType = document.getElementById('pfFuelType').value;
   const org = v.org || 'ООО «Технрайз Велл Сервис»';
@@ -220,7 +220,7 @@ function generateActPdf() {
   if (!vid) { alert('Выберите транспортное средство'); return; }
   const v = data.vehicles.find(x=>x.id===vid);
   if (!v) return;
-  const date = document.getElementById('pfActDate').value || new Date().toISOString().slice(0,10);
+  const date = document.getElementById('pfActDate').value || todayIso();
   const actNum = document.getElementById('pfActNumber').value.trim() || '___';
   const desc = document.getElementById('pfActDesc').value.trim() || '—';
   const sum = document.getElementById('pfActSum').value || '0';

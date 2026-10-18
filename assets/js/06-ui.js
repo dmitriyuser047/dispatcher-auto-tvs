@@ -89,7 +89,7 @@ async function saveRecord() {
     if (!r) { showToast('Запись уже удалена. Откройте журнал заново.'); return; }
     Object.assign(r, obj);
   } else {
-    obj.id = 'r_' + Date.now();
+    obj.id = newId('r');
     data.records.push(obj);
   }
   // update selected month to record's month
@@ -142,6 +142,7 @@ async function recDeleteSelected() {
 // ─── MODALS ──────────────────────────────────────────────
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) {
+  if (_activeSaves) { showToast('Дождитесь завершения сохранения'); return; }
   document.getElementById(id).classList.remove('open');
   if (id === 'confirmModal' && _confirmResolve) { const resolve = _confirmResolve; _confirmResolve = null; resolve(false); }
   if (id === 'paymentModal' && typeof closePayCategoryDrop === 'function') closePayCategoryDrop();

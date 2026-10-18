@@ -9,15 +9,16 @@
     "build": "electron-builder --win --x64"
   },
   "dependencies": {
-    "adm-zip": "^0.5.0",
+    "adm-zip": "0.6.1",
     "exceljs": "^4.4.0",
     "iconv-lite": "^0.7.3",
     "node-unrar-js": "^2.0.2",
-    "pdfjs-dist": "^3.0.0"
+    "pdfjs-dist": "6.4.299",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
-    "electron": "^28.0.0",
-    "electron-builder": "^24.0.0"
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3"
   },
   "build": {
     "appId": "com.tvs.reestr-builder",
@@ -33,6 +34,7 @@
       "electron/**",
       "public/**",
       "lib.mjs",
+      "archive-safety.mjs",
       "config.json",
       "statyi.json",
       "package.json"
@@ -45,12 +47,12 @@
         }
       ],
       "icon": "build/icon.ico",
-      "signingHashAlgorithms": null,
-      "sign": null
+      "signExecutable": false
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
-  }
+  },
+  "overrides": { "uuid": "^11.1.1" }
 }

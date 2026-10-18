@@ -15,6 +15,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require release commit on main
+        shell: pwsh
+        run: |
+          git fetch --no-tags origin main
+          if ($LASTEXITCODE -ne 0) { throw "Cannot verify main" }
+          git merge-base --is-ancestor HEAD origin/main
+          if ($LASTEXITCODE -ne 0) { throw "Prototype/unmerged commits cannot be released" }
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -24,6 +34,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Check release tag matches package version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag and package version differ" }
 
       - name: Test fuel accounting
         run: npm test
@@ -38,6 +54,14 @@ jobs:
         env:
           TVS_PLAYWRIGHT_MODULES: ${{ runner.temp }}/tvs-ui-tools/node_modules
         run: npm run test:ui
+
+      - name: Test native Electron windows, storage, network switching and PDF
+        env:
+          TVS_PLAYWRIGHT_MODULES: ${{ runner.temp }}/tvs-ui-tools/node_modules
+        run: npm run test:electron
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Build Electron app
         run: npx electron-builder --win --x64 --publish never
@@ -68,6 +92,16 @@ jobs:
           files: dist/Dispatcher-Setup-${{ steps.pkg.outputs.version }}.exe
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Hash installer
+        shell: pwsh
+        run: |
+          $installer = "dist/Dispatcher-Setup-${{ steps.pkg.outputs.version }}.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path -Leaf $installer)" | Set-Content -Encoding ascii SHA256SUMS.txt
+          gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Commit & push version.json
         shell: pwsh
         run: |
@@ -81,11 +115,14 @@ jobs:
           $repo = "${{ github.repository }}"
           $url  = "https://github.com/$repo/releases/download/$tag/Dispatcher-Setup-$v.exe"
           $date = Get-Date -Format "yyyy-MM-dd"
+          $installer = "dist/Dispatcher-Setup-$v.exe"
           $json = [ordered]@{
             version = $v
             date    = $date
             notes   = "Что нового:`n" + [System.IO.File]::ReadAllText("release-notes.txt") + "`n`nНажмите «Скачать обновление»."
             url     = $url
+            sha256  = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant()
+            size    = (Get-Item -LiteralPath $installer).Length
           } | ConvertTo-Json
           [System.IO.File]::WriteAllText("version.json", $json, [System.Text.UTF8Encoding]::new($false))
           git add version.json

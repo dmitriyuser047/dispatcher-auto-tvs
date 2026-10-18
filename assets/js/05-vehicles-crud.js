@@ -50,6 +50,7 @@ function openEditVehicle(id) {
 }
 
 async function saveVehicle() {
+  if (!validNonnegativeFields(['vm_norm','vm_norm_city','vm_norm_highway','vm_norm_idle','vm_odometer','vm_tank_volume','vm_to_km','vm_to_months'])) return;
   const make = document.getElementById('vm_make').value.trim();
   const plate = document.getElementById('vm_plate').value.trim();
   const driver = document.getElementById('vm_driver').value.trim();
@@ -65,15 +66,15 @@ async function saveVehicle() {
     fuelGrade: document.getElementById('vm_fuel_grade').value === 'Бензин' ? '' : document.getElementById('vm_fuel_grade').value,
     fuel: fuelTypeFromGrade(document.getElementById('vm_fuel_grade').value),
     supplier: document.getElementById('vm_supplier').value,
-    norm: parseFloat(document.getElementById('vm_norm').value) || null,
-    normCity: parseFloat(document.getElementById('vm_norm_city').value) || null,
-    normHighway: parseFloat(document.getElementById('vm_norm_highway').value) || null,
-    normIdle: parseFloat(document.getElementById('vm_norm_idle').value) || null,
-    odometer: parseFloat(document.getElementById('vm_odometer').value) || null,
+    norm: optionalNumber('vm_norm'),
+    normCity: optionalNumber('vm_norm_city'),
+    normHighway: optionalNumber('vm_norm_highway'),
+    normIdle: optionalNumber('vm_norm_idle'),
+    odometer: optionalNumber('vm_odometer'),
     fuelBalance: parseFloat(document.getElementById('vm_fuel_balance').value) || 0,
-    tankVolume: parseFloat(document.getElementById('vm_tank_volume').value) || null,
-    toIntervalKm: parseFloat(document.getElementById('vm_to_km').value) || null,
-    toIntervalMonths: parseFloat(document.getElementById('vm_to_months').value) || null,
+    tankVolume: optionalNumber('vm_tank_volume'),
+    toIntervalKm: optionalNumber('vm_to_km'),
+    toIntervalMonths: optionalNumber('vm_to_months'),
     responsible: document.getElementById('vm_responsible').value.trim(),
     fuelcard: document.getElementById('vm_fuelcard').value.trim(),
     status: document.getElementById('vm_status').value.trim(),
@@ -89,7 +90,7 @@ async function saveVehicle() {
     if (typeof gsmPreserveVehicleHistory === 'function' && v.org !== obj.org) gsmPreserveVehicleHistory(data, v);
     Object.assign(v, obj);
   } else {
-    obj.id = 'v_' + Date.now();
+    obj.id = newId('v');
     data.vehicles.push(obj);
     selectedVehicleId = obj.id;
   }
@@ -102,6 +103,10 @@ async function saveVehicle() {
 }
 
 async function deleteVehicle(id) {
+  if ((data.fuelPurchases || []).some(p => p.vehicleId === id) || (data.monthlyFuel || []).some(r => r.vehicleId === id) ||
+      (data.repairs || []).some(r => r.vehicleId === id) || (data.vehicleTo || []).some(r => r.vehicleId === id) || (data.payments || []).some(r => r.vehicleId === id)) {
+    showToast('У ТС есть связанные заправки, ТО или финансовые документы. Сохраните историю: измените статус в карточке ТС.'); return;
+  }
   if (!fuelEditAllowed(...data.records.filter(r => r.vehicleId === id).map(r => r.date))) return;
   if (!await confirmAction('Удалить это ТС и все его записи?')) return;
   data.vehicles = data.vehicles.filter(v => v.id !== id);

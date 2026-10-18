@@ -8,20 +8,30 @@ import AdmZip from "adm-zip";
 import { createExtractorFromData } from "node-unrar-js";
 import ExcelJS from "exceljs";
 import iconv from "iconv-lite";
-import pkg from "pdfjs-dist/build/pdf.js";
-const { getDocument } = pkg;
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import Tesseract from "tesseract.js";
+import { safeArchivePath, checkArchiveSize } from './archive-safety.mjs';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+const PDF_ASSETS = path.dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json'));
+const PDF_OPTIONS = { useSystemFonts: true, isEvalSupported: false,
+  standardFontDataUrl: path.join(PDF_ASSETS, 'standard_fonts') + path.sep,
+  cMapUrl: path.join(PDF_ASSETS, 'cmaps') + path.sep,
+  wasmUrl: path.join(PDF_ASSETS, 'wasm') + path.sep };
 
 // ═══════════════════════════════════════════════════════════════════
 //  БАЗА ЗНАНИЙ — самообучение на основе истории счетов
 // ═══════════════════════════════════════════════════════════════════
 
 const KNOWLEDGE_FILE = 'knowledge.json';
+let knowledgeDir = null;
+export function setKnowledgeDir(dir) { knowledgeDir = dir; fs.mkdirSync(dir, { recursive: true }); }
 
 function getKnowledgePath() {
+  if (knowledgeDir) return path.join(knowledgeDir, KNOWLEDGE_FILE);
   const candidates = [
-    path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), KNOWLEDGE_FILE),
-    path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..', 'ReestrBuilder', KNOWLEDGE_FILE),
+    path.join(path.dirname(fileURLToPath(import.meta.url)), KNOWLEDGE_FILE),
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ReestrBuilder', KNOWLEDGE_FILE),
   ];
   for (const p of candidates) {
     if (fs.existsSync(p)) return p;
@@ -246,24 +256,29 @@ function fixEntryName(entry) {
   return name;
 }
 
-async function extractZip(buffer, destDir) {
+async function extractZip(buffer, destDir, budget) {
   const zip = new AdmZip(buffer);
-  for (const entry of zip.getEntries()) {
-    if (entry.isDirectory) continue;
+  const entries = zip.getEntries().filter(entry => !entry.isDirectory);
+  checkArchiveSize(entries.map(entry => entry.header.size));
+  budget.push(...entries.map(entry => entry.header.size)); checkArchiveSize(budget);
+  for (const entry of entries) {
     const fixedName = fixEntryName(entry);
-    const outPath = path.join(destDir, fixedName.replace(/\\/g, "/"));
+    const outPath = safeArchivePath(destDir, fixedName);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, entry.getData());
   }
 }
 
-async function extractRar(buffer, destDir) {
+async function extractRar(buffer, destDir, budget) {
   const extractor = await createExtractorFromData({ data: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) });
-  const list = [...extractor.getFileList().fileHeaders].filter(h => !h.flags.directory).map(h => h.name);
+  const headers = [...extractor.getFileList().fileHeaders].filter(h => !h.flags.directory);
+  checkArchiveSize(headers.map(h => h.unpSize));
+  budget.push(...headers.map(h => h.unpSize)); checkArchiveSize(budget);
+  const list = headers.map(h => { safeArchivePath(destDir, h.name); return h.name; });
   const extracted = extractor.extract({ files: list });
   for (const f of extracted.files) {
     if (!f.extraction) continue;
-    const outPath = path.join(destDir, f.fileHeader.name);
+    const outPath = safeArchivePath(destDir, f.fileHeader.name);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, Buffer.from(f.extraction));
   }
@@ -659,7 +674,7 @@ async function pdfToLayout(filePathOrBuffer, onOcrPage = () => {}) {
   const data = typeof filePathOrBuffer === "string"
     ? new Uint8Array(fs.readFileSync(filePathOrBuffer))
     : new Uint8Array(filePathOrBuffer);
-  const doc = await getDocument({ data, useSystemFonts: true }).promise;
+  const doc = await getDocument({ data, ...PDF_OPTIONS }).promise;
   const allLines = [];
   let hasText = false;
   for (let i = 1; i <= doc.numPages; i++) {
@@ -687,7 +702,7 @@ async function pdfToPageLayouts(filePathOrBuffer, onOcrPage = () => {}) {
   const data = typeof filePathOrBuffer === "string"
     ? new Uint8Array(fs.readFileSync(filePathOrBuffer))
     : new Uint8Array(filePathOrBuffer);
-  const doc = await getDocument({ data, useSystemFonts: true }).promise;
+  const doc = await getDocument({ data, ...PDF_OPTIONS }).promise;
   const pages = [];
   let hasText = false;
   for (let i = 1; i <= doc.numPages; i++) {
@@ -1523,17 +1538,19 @@ export async function parseInvoices(zipBuffer, config, onLog = () => {}) {
   try {
     const outerZip = new AdmZip(zipBuffer);
     const subArchives = outerZip.getEntries().filter(e => !e.isDirectory && /\.(zip|rar)$/i.test(e.entryName));
+    checkArchiveSize(subArchives.map(entry => entry.header.size));
     onLog({ type: "info", text: `Найдено под-архивов: ${subArchives.length}` });
 
     const rows = [];
+    const extractionBudget = [];
     for (const entry of subArchives) {
       const name = fixEntryName(entry);
-      const subDir = path.join(workDir, path.basename(name, path.extname(name)));
+      const subDir = fs.mkdtempSync(path.join(workDir, 'invoice-'));
       fs.mkdirSync(subDir, { recursive: true });
       const data = entry.getData();
       try {
-        if (/\.rar$/i.test(name)) await extractRar(data, subDir);
-        else await extractZip(data, subDir);
+        if (/\.rar$/i.test(name)) await extractRar(data, subDir, extractionBudget);
+        else await extractZip(data, subDir, extractionBudget);
       } catch (e) {
         onLog({ type: "warn", text: `Не удалось распаковать «${name}»: ${e.message}` });
         continue;
@@ -1570,8 +1587,9 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgre
     onLog({ type: "info", text: `Загружено файлов: ${pdfFiles.length}` });
 
     const savedPaths = [];
+    checkArchiveSize(pdfFiles.map(f => Buffer.byteLength(f.buffer)));
     for (const f of pdfFiles) {
-      const filePath = path.join(workDir, f.name);
+      const filePath = safeArchivePath(workDir, f.name);
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       fs.writeFileSync(filePath, Buffer.from(f.buffer));
       const isImage = IMG_EXTS.test(f.name);

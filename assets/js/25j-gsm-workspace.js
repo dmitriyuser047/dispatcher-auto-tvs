@@ -1,4 +1,4 @@
-let gsmOrg = '', gsmFuel = '', gsmActNo = '', gsmActDate = new Date().toISOString().slice(0, 10);
+let gsmOrg = '', gsmFuel = '', gsmActNo = '', gsmActDate = todayIso();
 const GSM_MAIN_VIEWS = [['receipts', 'Выписка'], ['manual', 'Добавить вручную'], ['journal', 'Журнал и остатки'], ['writeoff', 'Списание']];
 const GSM_EXTRA_VIEWS = [['fcards', 'Топливные карты'], ['cards', 'По машинам'], ['doubles', 'Повторные заправки'], ['checks', 'Проверки'],
   ['measures', 'Замеры'], ['compare', 'Сравнение месяцев'], ['negative', 'Отрицательные остатки'], ['recon', 'Сверка с 1С'],
@@ -127,7 +127,7 @@ function gsmEditRecord(id) {
   openEditRecord(id);
 }
 function gsmAddReceipt() {
-  openGenericModal('Новая заправка', '<div class="form-row"><div class="form-group"><label>Дата</label><input id="gsm_new_date" type="date" value="' + new Date().toISOString().slice(0, 10) + '"></div>' +
+  openGenericModal('Новая заправка', '<div class="form-row"><div class="form-group"><label>Дата</label><input id="gsm_new_date" type="date" value="' + todayIso() + '"></div>' +
     '<div class="form-group"><label>Машина</label><select id="gsm_new_vehicle">' + fuelImportVehicleOptions('', true) + '</select></div></div>' +
     '<div class="form-row"><div class="form-group"><label>Карта</label><select id="gsm_new_card"><option value="">Без карты</option>' + fcList().filter(c => c.status !== 'blocked').map(c => '<option value="' + fpEsc(c.number) + '">' + fpEsc(fcFormat(c.number) + ' / ' + (c.org || 'по закреплению')) + '</option>').join('') + '</select></div>' +
     '<div class="form-group"><label>Организация (если без карты)</label><input id="gsm_new_org" value="' + fpEsc(gsmOrg) + '"></div></div>' +

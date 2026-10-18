@@ -334,7 +334,7 @@ async function saveToRecord() {
   if (editingToId) {
     Object.assign(data.toRecords.find(x => x.id === editingToId), obj);
   } else {
-    obj.id = 'to_' + Date.now();
+    obj.id = newId('to');
     data.toRecords.push(obj);
   }
   if (!await saveData(data)) return;
@@ -407,7 +407,7 @@ function doExportGenAct() {
   }
   const opts = {
     actNo:  document.getElementById('ga2_no').value.trim(),
-    actDate: parseDate(document.getElementById('ga2_date').value.trim()) || new Date().toISOString().split('T')[0],
+    actDate: parseDate(document.getElementById('ga2_date').value.trim()) || todayIso(),
     loc:    document.getElementById('ga2_loc').value,
     owner:  document.getElementById('ga2_owner').value.trim(),
   };

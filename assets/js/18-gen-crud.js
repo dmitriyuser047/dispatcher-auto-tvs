@@ -37,6 +37,7 @@ function openEditGenerator(id) {
 }
 
 async function saveGenerator() {
+  if (!validNonnegativeFields(['gm_norm','gm_norm100','gm_norm50','gm_norm_idle','gm_power','gm_hours_init','gm_cost'])) return;
   const name     = document.getElementById('gm_name').value.trim();
   const location = document.getElementById('gm_location').value.trim();
   if (!name)     { showFieldError('Укажите наименование ДЭС', 'gm_name'); return; }
@@ -46,15 +47,15 @@ async function saveGenerator() {
     name, location,
     serial:      document.getElementById('gm_serial').value.trim(),
     responsible: document.getElementById('gm_responsible').value.trim(),
-    power:       parseFloat(document.getElementById('gm_power').value)        || null,
+    power:       optionalNumber('gm_power'),
     fuel:        document.getElementById('gm_fuel').value,
-    norm:        parseFloat(document.getElementById('gm_norm').value)         || null,
-    norm100:     parseFloat(document.getElementById('gm_norm100').value)      || null,
-    norm50:      parseFloat(document.getElementById('gm_norm50').value)       || null,
-    normIdle:    parseFloat(document.getElementById('gm_norm_idle').value)    || null,
+    norm:        optionalNumber('gm_norm'),
+    norm100:     optionalNumber('gm_norm100'),
+    norm50:      optionalNumber('gm_norm50'),
+    normIdle:    optionalNumber('gm_norm_idle'),
     hoursInit:   parseFloat(document.getElementById('gm_hours_init').value)   || 0,
     fuelBalance: parseFloat(document.getElementById('gm_fuel_balance').value) || 0,
-    cost:        parseFloat(document.getElementById('gm_cost').value)         || null,
+    cost:        optionalNumber('gm_cost'),
     status:      document.getElementById('gm_status').value.trim(),
     note:        document.getElementById('gm_note').value.trim(),
     tankId:      document.getElementById('gm_tank').value || null,
@@ -65,7 +66,7 @@ async function saveGenerator() {
     if (g.tankId !== obj.tankId) genPreserveTankHistory(g);
     Object.assign(g, obj);
   } else {
-    obj.id = 'g_' + Date.now();
+    obj.id = newId('g');
     data.generators.push(obj);
     selectedGeneratorId = obj.id;
   }
@@ -77,6 +78,9 @@ async function saveGenerator() {
 }
 
 async function deleteGenerator(id) {
+  if ((data.genRecords || []).some(r => r.generatorId === id && +r.fuelIssued > 0)) {
+    showToast('У ДЭС есть выдачи топлива. Удаление изменит остатки ёмкостей; измените статус в карточке ДЭС.'); return;
+  }
   if (!await confirmAction('Удалить этот ДЭС и все его записи?')) return;
   data.generators = (data.generators || []).filter(g => g.id !== id);
   data.genRecords  = (data.genRecords  || []).filter(r => r.generatorId !== id);
@@ -149,7 +153,7 @@ async function saveGenRecord() {
     Object.assign(old, obj);
   } else {
     obj.tankId = ((data.generators || []).find(g => g.id === selectedGeneratorId) || {}).tankId || null;
-    obj.id = 'gr_' + Date.now();
+    obj.id = newId('gr');
     data.genRecords.push(obj);
   }
   const d = new Date(date);

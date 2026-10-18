@@ -3,6 +3,7 @@
 
 // ─── SECTION SWITCHER ────────────────────────────────────
 function switchSection(section) {
+  if (_activeSaves) { showToast('Дождитесь завершения сохранения'); return; }
   showProgress();
   activeSection = section;
   const isHome = section === 'home';
@@ -93,10 +94,12 @@ function switchSection(section) {
     renderFuelPurchases();
   }
   hideProgress();
+  if (typeof workspaceRefresh === 'function') workspaceRefresh();
   setTimeout(() => animateCounters(), 50);
 }
 
 function renderMainMenu() {
+  if (typeof renderWorkspaceDashboard === 'function') { renderWorkspaceDashboard(); return; }
   const vCount = (data.vehicles || []).length;
   const gCount = (data.generators || []).length;
   const tCount = (data.tanks || []).length;

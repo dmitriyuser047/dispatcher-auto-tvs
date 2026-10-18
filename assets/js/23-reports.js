@@ -145,6 +145,6 @@ function exportReportXlsx() {
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = [{wch:12},{wch:12},{wch:14},{wch:30},{wch:20},{wch:16},{wch:10}];
   XLSX.utils.book_append_sheet(wb, ws, 'Оборотка');
-  XLSX.writeFile(wb, `Оборотка_${new Date().toISOString().slice(0,10)}.xlsx`);
+  XLSX.writeFile(wb, `Оборотка_${todayIso()}.xlsx`);
 }
 

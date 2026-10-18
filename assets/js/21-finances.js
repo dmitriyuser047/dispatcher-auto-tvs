@@ -111,7 +111,7 @@ function renderFinancesSection() {
         </button>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">
-        <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;border-left:4px solid #2563eb">
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;border-left:4px solid var(--accent)">
           <div style="font-size:20px;font-weight:700">${totalSum.toLocaleString('ru')} ₽</div>
           <div style="font-size:12px;color:var(--text3)">Всего расходов</div>
         </div>
@@ -238,7 +238,7 @@ function renderBudgetHtml() {
     return `<tr>
       <td style="padding:6px 10px;font-weight:500;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${comp}">${comp}</td>
       ${cells}
-      <td style="text-align:right;padding:6px 8px;font-weight:700;background:rgba(37,99,235,.04)">${rowTotal.toLocaleString('ru')}</td>
+      <td style="text-align:right;padding:6px 8px;font-weight:700;background:var(--ws-accent-soft)">${rowTotal.toLocaleString('ru')}</td>
       <td style="text-align:center;padding:4px">
         <button class="icon-btn" title="Удалить компанию" onclick="deleteBudgetCompany('${comp.replace(/'/g, "\\'")}')">
           <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#dc2626" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -296,7 +296,7 @@ function renderBudgetHtml() {
           ${companies.length ? `<tfoot><tr style="border-top:2px solid var(--border)">
             <td style="padding:6px 10px;font-weight:700">ИТОГО</td>
             ${totalCells}
-            <td style="text-align:right;padding:6px 8px;font-weight:700;font-size:14px;background:rgba(37,99,235,.06)">${grandTotal.toLocaleString('ru')}</td>
+            <td style="text-align:right;padding:6px 8px;font-weight:700;font-size:14px;background:var(--ws-accent-soft)">${grandTotal.toLocaleString('ru')}</td>
             <td></td>
           </tr></tfoot>` : ''}
         </table>
@@ -309,9 +309,9 @@ async function addBudgetEntry() {
   const month = parseInt(document.getElementById('budg_month').value);
   const sum = parseFloat(document.getElementById('budg_sum').value);
   if (!company) return alert('Укажите компанию');
-  if (!sum || sum <= 0) return alert('Укажите сумму');
+  if (!Number.isFinite(sum) || sum <= 0) return alert('Укажите положительную конечную сумму');
   if (!data.budget) data.budget = [];
-  data.budget.push({ id: 'bg_' + Date.now(), company, month, year: budgetYear, sum });
+  data.budget.push({ id: newId('bg'), company, month, year: budgetYear, sum });
   if (!await saveData(data)) return;
   document.getElementById('budg_sum').value = '';
   renderFinancesSection();
@@ -503,7 +503,7 @@ async function savePayment() {
   const sum = parseFloat(document.getElementById('pay_sum').value);
   const category = document.getElementById('pay_category').value;
   const description = document.getElementById('pay_description').value.trim();
-  if (!dateRaw || isNaN(sum) || !description) {
+  if (!dateRaw || !Number.isFinite(sum) || sum < 0 || !description) {
     alert('Заполните обязательные поля: дата, сумма, описание');
     return;
   }
@@ -511,7 +511,7 @@ async function savePayment() {
   if (!isoDate) { showFieldError('Укажите действительную дату', 'pay_date'); return; }
 
   const obj = {
-    id: editingPaymentId || ('pay_' + Date.now()),
+    id: editingPaymentId || (newId('pay')),
     date: isoDate,
     sum: sum,
     category: category,
@@ -559,9 +559,9 @@ async function importPaymentsFromJournals() {
   (data.repairs || []).forEach(r => {
     if ((r.cost || 0) > 0 && !existingSourceIds.has(r.id)) {
       const parts = (r.invoiceDate || '').split('.');
-      const isoDate = parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : (r.invoiceDate || new Date().toISOString().slice(0,10));
+      const isoDate = parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : (r.invoiceDate || todayIso());
       data.payments.push({
-        id: 'pay_' + Date.now() + '_r' + imported,
+        id: newId('pay') + '_r' + imported,
         date: isoDate,
         sum: r.cost,
         category: 'Ремонт',
@@ -582,8 +582,8 @@ async function importPaymentsFromJournals() {
   (data.vehicleTo || []).forEach(t => {
     if ((t.cost || 0) > 0 && !existingSourceIds.has(t.id)) {
       data.payments.push({
-        id: 'pay_' + Date.now() + '_t' + imported,
-        date: t.date || new Date().toISOString().slice(0,10),
+        id: newId('pay') + '_t' + imported,
+        date: t.date || todayIso(),
         sum: t.cost,
         category: 'ТО',
         description: t.toType ? ('ТО: ' + t.toType) : 'Техническое обслуживание',

@@ -150,6 +150,7 @@
     border-radius: 50%; animation: spin .7s linear infinite;
   }
 </style>
+<link rel="stylesheet" href="assets/css/document-workspace.css">
 </head>
 <body>
 
@@ -160,6 +161,7 @@
   <span class="toolbar-spacer"></span>
   <button class="btn btn-ghost" id="addRowBtn">+ Строка</button>
   <button class="btn btn-green" id="saveBtn">Сохранить</button>
+  <span id="saveStatus" role="status" style="font-size:12px;max-width:420px"></span>
   <button class="btn btn-primary" id="buildBtn">
     <span class="spinner" id="buildSpinner"></span>
     <span id="buildBtnLabel">Сформировать реестр</span>
@@ -260,6 +262,8 @@ function matchContract(objText) {
 
 async function init() {
   const d = await window.reestrWindow.getData();
+  if (d?.theme) document.documentElement.setAttribute('data-theme', d.theme);
+  window.reestrWindow.onThemeChanged?.(theme => document.documentElement.setAttribute('data-theme', theme));
   rows = d.rows || [];
   statyi = d.statyi || [];
   contracts = d.contracts || [];
@@ -600,10 +604,16 @@ document.getElementById('addRowBtn').addEventListener('click', () => {
 
 document.getElementById('saveBtn').addEventListener('click', async () => {
   if (window.reestrWindow && window.reestrWindow.saveRows) {
-    await window.reestrWindow.saveRows(rows);
     const btn = document.getElementById('saveBtn');
-    btn.textContent = 'Сохранено';
-    setTimeout(() => { btn.textContent = 'Сохранить'; }, 1500);
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const status = document.getElementById('saveStatus'); status.textContent = 'Сохранение…';
+    try {
+      const result = await window.reestrWindow.saveRows(rows);
+      if (!result?.ok) throw new Error(result?.error || 'Реестр не сохранён');
+      status.textContent = 'Сохранено';
+    } catch (e) { status.textContent = 'Не сохранено: ' + e.message; }
+    finally { btn.disabled = false; }
   }
 });
 

@@ -79,7 +79,7 @@ function fkMeasuresHtml() {
         <input type="checkbox" ${fkMeasNoOffice ? 'checked' : ''} onchange="fkMeasNoOffice=this.checked;renderFuelPurchases()"> без офисных машин</label>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-      ${fkCard('Периодов между замерами', periods.length, month ? 'заканчиваются в ' + fpMonthLabel(month).toLowerCase() : 'за всё время', '#2563eb')}
+      ${fkCard('Периодов между замерами', periods.length, month ? 'заканчиваются в ' + fpMonthLabel(month).toLowerCase() : 'за всё время', 'var(--accent)')}
       ${fkCard('Перерасход от ' + FK_ALERT_PCT + '%', over.length, over.length ? 'стоит разобраться' : 'нет', over.length ? '#dc2626' : '#16a34a')}
       ${month ? fkCard('Ездили без замера', noMeasure.length + ' машин', 'за ' + fpMonthLabel(month).toLowerCase(), noMeasure.length ? '#d97706' : '#16a34a') : ''}
     </div>

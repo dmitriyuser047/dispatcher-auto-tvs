@@ -8,7 +8,7 @@ function importVehiclesFromXls(input) {
   input.value = '';
 
   const reader = new FileReader();
-  reader.onload = function(e) {
+  reader.onload = async function(e) {
     try {
       const wb = XLSX.read(e.target.result, { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
@@ -67,7 +67,7 @@ function importVehiclesFromXls(input) {
         }
 
         data.vehicles.push({
-          id:            'v_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+          id:            newId('v') + '_' + Math.random().toString(36).slice(2, 7),
           make,
           plate,
           driver:        get('driver'),
@@ -89,7 +89,7 @@ function importVehiclesFromXls(input) {
         return;
       }
 
-      saveData(data);
+      if (!await saveData(data)) return;
       renderVehicleList();
 
       let msg = `Импорт завершён: добавлено ${added} ТС.`;
@@ -332,7 +332,7 @@ function importFuelFromXls(input, mode = 'fuel') {
       // машину, поправили или удалили. У неё только уточняются цена и время.
       if (!data.fuelPurchases) data.fuelPurchases = [];
       if (typeof fpRestoreFromJournal === 'function') fpRestoreFromJournal();
-      const importId = 'fi_' + Date.now();
+      const importId = newId('fi');
       // Одинаковые покупки за день по одной карте имеют одинаковый ключ —
       // каждая строка выписки забирает свою покупку
       const knownByKey = new Map();
@@ -473,7 +473,7 @@ function importFuelFromXls(input, mode = 'fuel') {
         } else {
           if (!data.records) data.records = [];
           const newRecord = {
-            id: 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+            id: newId('r') + '_' + Math.random().toString(36).slice(2, 7),
             vehicleId: grp.v.id,
             date: grp.date,
             km: 0,
@@ -656,7 +656,7 @@ function fuelImportApplyFuelToVehicle(vehicleId, date, qty, transactions, extraN
   const created = !record;
   if (!record) {
     record = {
-      id: 'r_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+      id: newId('r') + '_' + Math.random().toString(36).slice(2, 7),
       vehicleId,
       date,
       km: 0,
@@ -1024,7 +1024,7 @@ function showFuelImportReport(report) {
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">
       ${card('Транзакций в Excel', String(report.transactionsCount), num(report.sourceLitres) + ' л' + (report.sourceSum ? ' · ' + num(report.sourceSum) + ' ₽' : ''), '#64748b')}
-      ${card('Дневных записей', String(report.groupedCount), report.mergedTransactions ? 'объединено покупок: ' + report.mergedTransactions : 'без объединений', '#2563eb')}
+      ${card('Дневных записей', String(report.groupedCount), report.mergedTransactions ? 'объединено покупок: ' + report.mergedTransactions : 'без объединений', 'var(--accent)')}
       ${card('Загружено/изменено', String(changedRows.length), num(loadedLitres) + ' л', '#16a34a')}
       ${card('Уже было', String(report.duplicates), num(report.duplicateLitres) + ' л', '#94a3b8')}
       ${reviewRows.length ? card('На сверку с журналом', String(reviewRows.length), num(reviewRows.reduce((s,r) => s + r.qty, 0)) + ' л; ручной журнал не изменён', '#b45309') : ''}
@@ -1325,7 +1325,7 @@ function normPlate(s) {
   return (s || '').replace(/[\s\-]/g, '').toUpperCase();
 }
 
-function doSvodkaImport() {
+async function doSvodkaImport() {
   if (!_svodkaParsed || !_svodkaParsed.length) return;
   const checked = new Set();
   document.querySelectorAll('.svodka-chk:checked').forEach(el => checked.add(+el.dataset.idx));
@@ -1344,7 +1344,7 @@ function doSvodkaImport() {
 
     if (!v) {
       v = {
-        id: 'v_' + Date.now() + '_' + idx,
+        id: newId('v') + '_' + idx,
         plate: r.plate,
         make: r.make,
         driver: r.driver || '',
@@ -1375,7 +1375,7 @@ function doSvodkaImport() {
       if (!alreadyExists) {
         const routes = r.route ? r.route.replace(/^\d{2}\.\d{2}\.\d{4}:\s*/, '').split(/;\s*/).filter(Boolean) : [];
         data.records.push({
-          id: 'r_' + Date.now() + '_' + idx,
+          id: newId('r') + '_' + idx,
           vehicleId: v.id,
           date: r.date,
           km: r.km,
@@ -1393,7 +1393,7 @@ function doSvodkaImport() {
     }
   });
 
-  saveData(data);
+  if (!await saveData(data)) return;
   closeModal('svodkaImportModal');
   populateOrgSelect();
   renderVehicleList();
@@ -1468,7 +1468,7 @@ function showImportPreview(res) {
   openModal('rarImportModal');
 }
 
-function doRarMerge() {
+async function doRarMerge() {
   if (!_rarImport) return;
   const includeBackups = document.getElementById('rarIncludeBackups').checked;
   RAR_KEYS.forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
@@ -1495,7 +1495,7 @@ function doRarMerge() {
   mergeSrc(_rarImport.main);
   if (includeBackups) mergeSrc(_rarImport.backupExtra);
 
-  saveData(data);
+  if (!await saveData(data)) return;
   populateOrgSelect();
   updateFilterUI();
   renderVehicleList();

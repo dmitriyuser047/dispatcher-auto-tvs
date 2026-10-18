@@ -224,6 +224,7 @@ function openEditTank(id) {
 }
 
 async function saveTank() {
+  if (!validNonnegativeFields(['tk_capacity'])) return;
   const name = document.getElementById('tk_name').value.trim();
   if (!name) { showFieldError('Укажите наименование ёмкости', 'tk_name'); return; }
   if (!data.tanks) data.tanks = [];
@@ -231,7 +232,7 @@ async function saveTank() {
     name,
     serial:      document.getElementById('tk_serial').value.trim(),
     fuel:        document.getElementById('tk_fuel').value,
-    capacity:    parseFloat(document.getElementById('tk_capacity').value) || null,
+    capacity:    optionalNumber('tk_capacity'),
     balanceInit: parseFloat(document.getElementById('tk_balance').value)  || 0,
     location:    document.getElementById('tk_location').value.trim(),
     object:      document.getElementById('tk_object').value.trim(),
@@ -241,7 +242,7 @@ async function saveTank() {
   if (editingTankId) {
     Object.assign(data.tanks.find(x => x.id === editingTankId), obj);
   } else {
-    obj.id = 't_' + Date.now();
+    obj.id = newId('t');
     data.tanks.push(obj);
     selectedTankId = obj.id;
   }
@@ -277,7 +278,7 @@ function openAddTankIncome() {
   if (!selectedTankId) return;
   editingTankIncomeId = null;
   document.getElementById('tankIncomeModalTitle').textContent = 'Приход топлива';
-  document.getElementById('ti_date').value = fmtDate(new Date().toISOString().split('T')[0]);
+  document.getElementById('ti_date').value = fmtDate(todayIso());
   ['ti_amount','ti_source','ti_note','ti_sum'].forEach(id => document.getElementById(id).value = '');
   openModal('tankIncomeModal');
 }
@@ -314,7 +315,7 @@ async function saveTankIncome() {
   if (editingTankIncomeId) {
     Object.assign(data.tankIncomes.find(x => x.id === editingTankIncomeId), obj);
   } else {
-    obj.id = 'ti_' + Date.now();
+    obj.id = newId('ti');
     data.tankIncomes.push(obj);
   }
   if (!await saveData(data)) return;
@@ -351,7 +352,7 @@ function openTankTransfer() {
   if (!selectedTankId) return;
   const others = tanksAll().filter(t => t.id !== selectedTankId);
   if (!others.length) { alert('Нужна хотя бы ещё одна ёмкость, чтобы переместить топливо.'); return; }
-  document.getElementById('tt_date').value = fmtDate(new Date().toISOString().split('T')[0]);
+  document.getElementById('tt_date').value = fmtDate(todayIso());
   ['tt_amount','tt_sum','tt_note'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('tt_dir').value = 'out';
   document.getElementById('tt_counter').innerHTML = others.map(t =>
@@ -402,7 +403,7 @@ async function saveTankTransfer() {
 // Создаёт пару записей. Вынесено отдельно, чтобы можно было переносить перемещения и из импорта.
 function addTankTransfer({ fromId, toId, date, amount, sum, note }) {
   if (!data.tankIncomes) data.tankIncomes = [];
-  const link = 'tr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  const link = newId('tr') + '_' + Math.random().toString(36).slice(2, 7);
   const nameOf = id => { const q = tanksAll().find(x => x.id === id); return q ? (q.object || q.name) : ''; };
   data.tankIncomes.push({
     id: link + '_out', linkId: link, kind: 'out', tankId: fromId, counterTankId: toId,

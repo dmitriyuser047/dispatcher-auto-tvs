@@ -89,7 +89,7 @@ async function saveContragent() {
   const name = document.getElementById('caName').value.trim();
   if (!name) { showFieldError('Укажите название', 'caName'); return; }
   const obj = {
-    id: editingContragentId || ('ca_' + Date.now()),
+    id: editingContragentId || (newId('ca')),
     name,
     inn: document.getElementById('caInn').value.trim(),
     contact: document.getElementById('caContact').value.trim(),

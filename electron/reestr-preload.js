@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('reestrAPI', {
 
 contextBridge.exposeInMainWorld('reestrWindow', {
   getData: () => ipcRenderer.invoke('reestr-window-data'),
+  onThemeChanged: (cb) => ipcRenderer.on('workspace-theme-changed', (_event, theme) => cb(theme)),
   toRepair: (rowData) => ipcRenderer.send('reestr-to-repair', rowData),
   saveRows: (rows) => ipcRenderer.invoke('reestr-save-rows', rows),
 });

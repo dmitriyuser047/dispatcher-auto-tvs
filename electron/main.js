@@ -7,28 +7,45 @@ const updater = require('./updater');
 const server  = require('./server');
 const { createExtractorFromData } = require('node-unrar-js');
 const storage = require('./storage');
+const { writeAtomic, validateSettings, databaseIdentity } = require('./settings');
+const { trustedPage, canInvoke, staticFile } = require('./security');
+const { pathToFileURL } = require('node:url');
+const requestedProfile = app.commandLine.getSwitchValue('user-data-dir');
+if (requestedProfile) app.setPath('userData', path.resolve(requestedProfile));
+
+// A second writer must not open the same transaction journal in another process.
+if (!app.requestSingleInstanceLock()) { app.exit(0); }
+app.on('second-instance', () => {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
+});
 
 const DEFAULT_DATA_DIR = path.join(os.homedir(), 'Documents', 'ДиспетчеризацияАвто_ТВС');
 const SETTINGS_FILE   = path.join(app.getPath('userData'), 'settings.json');
 
 function loadSettings() {
-  try {
-    if (fs.existsSync(SETTINGS_FILE)) return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-  } catch {}
-  return {
-    users: [{ name: 'Пользователь', dataDir: DEFAULT_DATA_DIR }],
-    activeUser: 0,
-    networkMode: 'local',
-    serverPort: 3377,
-    remoteHost: '',
-    remotePort: 3377,
+  const defaults = {
+    users: [{ name: 'Пользователь', dataDir: DEFAULT_DATA_DIR }], activeUser: 0,
+    networkMode: 'local', serverPort: 3377, remoteHost: '', remotePort: 3377,
   };
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      const checked = validateSettings({ ...defaults, ...saved, networkKey: saved.networkKey || require('crypto').randomBytes(24).toString('hex') });
+      if (!saved.networkKey) saveSettings(checked);
+      return checked;
+    }
+  } catch (e) {
+    dialog.showErrorBox('Не прочитаны настройки', 'Файл настроек повреждён. Сохраните его и восстановите корректную копию:\n' + SETTINGS_FILE + '\n' + e.message);
+    app.exit(1);
+  }
+  return defaults;
 }
 
 function saveSettings(s) {
   const dir = path.dirname(SETTINGS_FILE);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2), 'utf8');
+  writeAtomic(SETTINGS_FILE, JSON.stringify(s, null, 2));
 }
 
 let settings = loadSettings();
@@ -46,6 +63,65 @@ function getActiveUser() {
 function getDataDir()   { return getActiveUser().dataDir || DEFAULT_DATA_DIR; }
 function getDataFile()  { return path.join(getDataDir(), 'data.json'); }
 function getBackupDir() { return path.join(getDataDir(), 'backups'); }
+function getCacheFile() { return path.join(app.getPath('userData'), 'cache', databaseIdentity(settings) + '.json'); }
+function rememberSnapshot(json, file = getCacheFile()) {
+  try {
+    const snapshot = JSON.parse(json);
+    if (!Array.isArray(snapshot.vehicles) || !Array.isArray(snapshot.records)) throw new Error('Некорректный снимок базы');
+    storage.SECTIONS.forEach(name => { if (name in snapshot) storage.validateRows(name, snapshot[name]); });
+    writeAtomic(file, json);
+  }
+  catch (e) { console.warn('[cache] ' + e.message); }
+  return json;
+}
+function rememberSections(sections, file = getCacheFile()) {
+  try {
+    const cached = JSON.parse(fs.readFileSync(file, 'utf8'));
+    rememberSnapshot(JSON.stringify({ ...cached, ...sections }), file);
+  } catch (e) { console.warn('[cache] ' + e.message); }
+}
+
+let settingsChain = Promise.resolve();
+function queueSettings(next) {
+  const operation = settingsChain.then(() => applySettings(next));
+  settingsChain = operation.catch(() => {});
+  return operation;
+}
+async function applySettings(next) {
+  const checked = validateSettings(next);
+  const changed = databaseIdentity(settings) !== databaseIdentity(checked) || settings.networkMode !== checked.networkMode ||
+    settings.serverPort !== checked.serverPort || settings.networkKey !== checked.networkKey;
+  const restart = checked.networkMode === 'server' && (server.isRunning() || settings.networkMode !== 'server');
+  if (changed) await server.stop();
+  saveSettings(checked);
+  settings = checked;
+  server.configureKey(settings.networkKey);
+  if (settings.networkMode !== 'client') ensureDirs();
+  if (changed && restart) {
+    const result = await startDataServer();
+    if (!result.ok) throw new Error('Настройки сохранены, но сервер не запущен: ' + result.error);
+  }
+}
+
+function startDataServer() {
+  const dir = getDataDir();
+  return server.start({ port: settings.serverPort || 3377, dataDir: dir,
+    backupFn: () => storage.makeDailyBackup(dir, path.join(dir, 'backups'), 30),
+    serverName: getActiveUser().name || os.hostname(), key: settings.networkKey });
+}
+
+// Check both the frame and the individual IPC capability before native access.
+const handle = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, listener) => handle(channel, (event, ...args) => {
+  const page = trustedPage(event.senderFrame?.url, path.join(__dirname, '..'), app._localServerPort);
+  if (event.senderFrame !== event.sender.mainFrame || !canInvoke(page, channel)) throw new Error('Недоверенный источник запроса');
+  return listener(event, ...args);
+});
+app.on('web-contents-created', (_event, contents) => {
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  contents.on('will-navigate', (event, url) => { if (url !== contents.getURL()) event.preventDefault(); });
+  contents.on('will-attach-webview', event => event.preventDefault());
+});
 
 function ensureDirs() {
   const dd = getDataDir();
@@ -114,6 +190,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
   win.setMenuBarVisibility(false);
@@ -128,17 +205,14 @@ function createWindow() {
   const mime = { '.html':'text/html', '.js':'application/javascript', '.css':'text/css', '.json':'application/json', '.png':'image/png', '.ico':'image/x-icon', '.svg':'image/svg+xml' };
   if (!app._localServer) {
     app._localServer = http.createServer((req, res) => {
-      const url = req.url === '/' ? '/index.html' : req.url.split('?')[0];
-      let filePath;
-      try { filePath = path.resolve(rootDir, '.' + decodeURIComponent(url)); }
-      catch { res.writeHead(400); res.end(); return; }
-      const relative = path.relative(rootDir, filePath);
-      if (relative.startsWith('..') || path.isAbsolute(relative)) { res.writeHead(403); res.end(); return; }
+      const filePath = staticFile(rootDir, req.url);
+      if (!filePath || !['GET', 'HEAD'].includes(req.method)) { res.writeHead(403); res.end(); return; }
       fs.readFile(filePath, (err, data) => {
         if (err) { res.writeHead(404); res.end(); return; }
         const ext = path.extname(filePath).toLowerCase();
-        res.writeHead(200, { 'Content-Type': mime[ext] || 'application/octet-stream' });
-        res.end(data);
+        res.writeHead(200, { 'Content-Type': mime[ext] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'" });
+        res.end(req.method === 'HEAD' ? undefined : data);
       });
     });
     app._localServer.listen(0, '127.0.0.1', () => {
@@ -154,26 +228,29 @@ function createWindow() {
   win.webContents.once('did-finish-load', () => {
     setTimeout(async () => {
       const info = await updater.checkForUpdate();
-      if (info) win.webContents.send('update-available', info);
+      if (info && !win.isDestroyed()) win.webContents.send('update-available', info);
     }, 5000);
   });
 
   // Периодическая проверка каждые 3 минуты
-  setInterval(async () => {
+  const updateTimer = setInterval(async () => {
     const info = await updater.checkForUpdate();
-    if (info) win.webContents.send('update-available', info);
+    if (info && !win.isDestroyed()) win.webContents.send('update-available', info);
   }, 3 * 60 * 1000);
+  win.once('closed', () => clearInterval(updateTimer));
 
   // Проверка при показе/разворачивании окна
   win.on('show', async () => {
     const info = await updater.checkForUpdate();
-    if (info) win.webContents.send('update-available', info);
+    if (info && !win.isDestroyed()) win.webContents.send('update-available', info);
   });
 
   return win;
 }
 
 app.whenReady().then(() => {
+  session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  session.defaultSession.setPermissionCheckHandler(() => false);
   ensureDirs();
   applyBundledDataSeedOnce();
 
@@ -181,32 +258,68 @@ app.whenReady().then(() => {
   // открываем файл сразу после сохранения, чтобы не искать его в "Загрузках".
   session.defaultSession.on('will-download', (_event, item) => {
     item.once('done', (_e, state) => {
-      if (state === 'completed') shell.openPath(item.getSavePath());
+      if (state === 'completed' && /\.(xlsx?|pdf|json)$/i.test(item.getSavePath())) shell.openPath(item.getSavePath());
     });
   });
 
-  function isClientMode() { return settings.networkMode === 'client' && settings.remoteHost; }
+  function isClientMode() { return settings.networkMode === 'client'; }
 
   ipcMain.handle('read-data', async () => {
+    const cacheFile = getCacheFile();
     if (isClientMode()) {
       try {
-        return await server.fetchData(settings.remoteHost, settings.remotePort || 3377);
+        return rememberSnapshot(await server.fetchData(settings.remoteHost, settings.remotePort || 3377), cacheFile);
       } catch (e) {
         return null;
       }
     }
     try {
-      return JSON.stringify(storage.readAll(getDataDir()));
+      return rememberSnapshot(JSON.stringify(storage.readAll(getDataDir())));
     } catch (e) {
       console.error('[read-data] ' + e.message);
       return null;
     }
   });
 
+  ipcMain.handle('read-cached-data', () => {
+    try { return fs.readFileSync(getCacheFile(), 'utf8'); } catch { return null; }
+  });
+
+  ipcMain.handle('database-health', async () => {
+    try {
+      const { inspectData } = require('./database-health');
+      const data = isClientMode()
+        ? (await server.getJson(settings.remoteHost, settings.remotePort, '/api/snapshot', 15000)).data
+        : storage.readAll(getDataDir());
+      const dir = isClientMode() ? path.join(app.getPath('userData'), 'client-backups', databaseIdentity(settings)) : getBackupDir();
+      const backups = fs.existsSync(dir) ? fs.readdirSync(dir).filter(name => /^(data_|manual_).*\.json$/.test(name)) : [];
+      const latest = backups.map(name => ({ name, date: fs.statSync(path.join(dir, name)).mtime.toISOString() })).sort((a, b) => b.date.localeCompare(a.date))[0];
+      return { ok: true, ...inspectData(data), backupCount: backups.length, lastBackup: latest?.date || null, path: isClientMode() ? settings.remoteHost + ':' + settings.remotePort : getDataDir() };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  ipcMain.handle('create-backup', async () => {
+    const clientBackupDir = path.join(app.getPath('userData'), 'client-backups', databaseIdentity(settings));
+    try {
+      let filePath;
+      if (isClientMode()) {
+        const snapshot = await server.getJson(settings.remoteHost, settings.remotePort, '/api/snapshot', 15000);
+        require('./database-health').inspectData(snapshot.data);
+        const dir = clientBackupDir;
+        filePath = path.join(dir, 'manual_' + require('crypto').randomUUID() + '.json');
+        writeAtomic(filePath, JSON.stringify(snapshot.data));
+      } else filePath = storage.makeManualBackup(getDataDir(), getBackupDir());
+      shell.showItemInFolder(filePath);
+      return { ok: true, filePath };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
   ipcMain.handle('write-data', async (_event, jsonStr) => {
+    const cacheFile = getCacheFile();
     if (isClientMode()) {
       try {
         const res = await server.postData(settings.remoteHost, settings.remotePort || 3377, jsonStr);
+        if (res && res.ok) rememberSnapshot(jsonStr, cacheFile);
         return res && res.ok;
       } catch (e) {
         return false;
@@ -216,6 +329,7 @@ app.whenReady().then(() => {
     createDailyBackup();
     try {
       const res = storage.writeAll(getDataDir(), JSON.parse(jsonStr));
+      rememberSnapshot(JSON.stringify(storage.readAll(getDataDir())));
       if (res.changed.length) console.log('[write-data] разделы: ' + res.changed.join(', '));
       return true;
     } catch (e) {
@@ -228,16 +342,22 @@ app.whenReady().then(() => {
   // Снимок: данные + версии разделов. На старом сервере (без /api/snapshot)
   // версии неизвестны — клиент работает по-старому, целиком.
   ipcMain.handle('read-snapshot', async () => {
+    const cacheFile = getCacheFile();
     if (isClientMode()) {
       const host = settings.remoteHost, port = settings.remotePort || 3377;
-      try { return JSON.stringify(await server.getJson(host, port, '/api/snapshot', 15000)); }
+      try {
+        const snap = await server.getJson(host, port, '/api/snapshot', 15000);
+        rememberSnapshot(JSON.stringify(snap.data), cacheFile);
+        return JSON.stringify(snap);
+      }
       catch (e) {
         try { return JSON.stringify({ data: JSON.parse(await server.fetchData(host, port)), revisions: null }); }
         catch { return null; }
       }
     }
     try {
-      return JSON.stringify({ data: storage.readAll(getDataDir()), revisions: storage.readRevisions(getDataDir()) });
+      const data = storage.readAll(getDataDir()); rememberSnapshot(JSON.stringify(data));
+      return JSON.stringify({ data, revisions: storage.readRevisions(getDataDir()) });
     } catch (e) {
       console.error('[read-snapshot] ' + e.message);
       return null;
@@ -252,21 +372,32 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('read-section', async (_event, name) => {
+    const cacheFile = getCacheFile();
     try {
-      if (isClientMode()) return await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/section/' + encodeURIComponent(name), 15000);
+      if (isClientMode()) {
+        const section = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/section/' + encodeURIComponent(name), 15000);
+        rememberSections({ [name]: section.rows }, cacheFile);
+        return section;
+      }
       return storage.readSection(getDataDir(), name);
     } catch (e) { return null; }
   });
 
   ipcMain.handle('write-sections', async (_event, jsonStr) => {
+    const cacheFile = getCacheFile();
     if (isClientMode()) {
-      try { return await server.postSections(settings.remoteHost, settings.remotePort || 3377, jsonStr); }
+      try {
+        const result = await server.postSections(settings.remoteHost, settings.remotePort || 3377, jsonStr);
+        if (result.ok) rememberSections(JSON.parse(jsonStr).sections, cacheFile);
+        return result;
+      }
       catch (e) { return { ok: false, error: e.message }; }
     }
     ensureDirs();
     createDailyBackup();
     try {
       const res = storage.writeSections(getDataDir(), JSON.parse(jsonStr));
+      if (res.ok) rememberSnapshot(JSON.stringify(storage.readAll(getDataDir())));
       if (res.ok && res.changed.length) console.log('[write-sections] ' + res.changed.join(', '));
       return res;
     } catch (e) {
@@ -278,20 +409,22 @@ app.whenReady().then(() => {
   ipcMain.handle('get-data-path', () => getDataDir());
 
   ipcMain.handle('get-settings', () => settings);
+  ipcMain.handle('get-theme', () => settings.uiTheme || null);
+  ipcMain.handle('set-theme', async (_event, theme) => {
+    if (!['light', 'dark'].includes(theme)) throw new Error('Неизвестная тема');
+    await queueSettings({ ...settings, uiTheme: theme });
+    for (const win of BrowserWindow.getAllWindows()) win.webContents.send('workspace-theme-changed', theme);
+    return true;
+  });
 
-  ipcMain.handle('save-settings', (_event, newSettings) => {
-    settings = newSettings;
-    server.configureKey(settings.networkKey);
-    saveSettings(settings);
-    if (!isClientMode()) ensureDirs();
+  ipcMain.handle('save-settings', async (_event, newSettings) => {
+    await queueSettings(newSettings);
     return true;
   });
 
   ipcMain.handle('switch-user', async (_event, idx) => {
     if (idx < 0 || idx >= settings.users.length) return { ok: false };
-    settings.activeUser = idx;
-    saveSettings(settings);
-    if (!isClientMode()) ensureDirs();
+    await queueSettings({ ...settings, activeUser: idx });
     return { ok: true };
   });
 
@@ -307,19 +440,11 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('server-start', async () => {
-    const port = settings.serverPort || 3377;
-    const user = getActiveUser();
-    return await server.start({
-      port,
-      dataDir: getDataDir(),
-      backupFn: () => { ensureDirs(); createDailyBackup(); },
-      serverName: user.name || os.hostname(),
-      key: settings.networkKey,
-    });
+    return startDataServer();
   });
 
-  ipcMain.handle('server-stop', () => {
-    server.stop();
+  ipcMain.handle('server-stop', async () => {
+    await server.stop();
     return { ok: true };
   });
 
@@ -337,13 +462,7 @@ app.whenReady().then(() => {
 
   // Автозапуск сервера если настроен режим "server"
   if (settings.networkMode === 'server') {
-    server.start({
-      port: settings.serverPort || 3377,
-      dataDir: getDataDir(),
-      backupFn: () => { ensureDirs(); createDailyBackup(); },
-      serverName: getActiveUser().name || os.hostname(),
-      key: settings.networkKey,
-    });
+    startDataServer().then(result => { if (!result.ok) console.error('[server] ' + result.error); });
   }
 
   // Импорт данных из RAR-архива (data.json + backups) для пополнения базы
@@ -468,7 +587,7 @@ app.whenReady().then(() => {
     const tmpFile = path.join(os.tmpdir(), `svodka_${Date.now()}.html`);
     const pdfWin = new BrowserWindow({
       show: false,
-      webPreferences: { contextIsolation: true, nodeIntegration: false },
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, javascript: false },
     });
     try {
       fs.writeFileSync(tmpFile, html, 'utf8');
@@ -499,7 +618,7 @@ app.whenReady().then(() => {
     downloadedPath = null;
     try {
       const filePath = await updater.downloadFile(url, pct => {
-        event.sender.send('download-progress', pct);
+        if (!event.sender.isDestroyed()) event.sender.send('download-progress', pct);
       });
       downloadedPath = filePath;
       return { ok: true, path: filePath };
@@ -508,19 +627,23 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('install-update', () => {
+  ipcMain.handle('install-update', async () => {
     if (downloadedPath && fs.existsSync(downloadedPath)) {
-      updater.launchInstaller(downloadedPath);
+      await updater.launchInstaller(downloadedPath);
     }
   });
 
   // ─── РЕЕСТР-БИЛДЕР ──────────────────────────────────────
   const REESTR_DIR = path.join(__dirname, '..', 'ReestrBuilder');
-  const REESTR_LIB_URL = 'file:///' + path.join(REESTR_DIR, 'lib.mjs').replace(/\\/g, '/');
+  const REESTR_LIB_URL = pathToFileURL(path.join(REESTR_DIR, 'lib.mjs')).href;
+  const reestrLibrary = () => import(REESTR_LIB_URL).then(lib => {
+    lib.setKnowledgeDir(path.join(app.getPath('userData'), 'ReestrBuilder'));
+    return lib;
+  });
 
   ipcMain.handle('reestr-parse-invoices', async (event, zipArrayBuffer) => {
     console.log('[reestr] parse-invoices start');
-    const { parseInvoices, loadConfig } = await import(REESTR_LIB_URL);
+    const { parseInvoices, loadConfig } = await reestrLibrary();
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const log = [];
     const rows = await parseInvoices(Buffer.from(zipArrayBuffer), config, (msg) => { log.push(msg); console.log('[reestr] log:', msg.type, msg.text); });
@@ -530,7 +653,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('reestr-parse-pdfs', async (event, pdfFilesRaw) => {
     console.log('[reestr] parse-pdfs start, files:', pdfFilesRaw.length);
-    const { parsePdfFiles, loadConfig } = await import(REESTR_LIB_URL);
+    const { parsePdfFiles, loadConfig } = await reestrLibrary();
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const log = [];
     const pdfFiles = pdfFilesRaw.map(f => ({ name: f.name, buffer: Buffer.from(f.buffer) }));
@@ -544,7 +667,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('reestr-build-xlsx', async (event, { rows }) => {
-    const { buildXlsxFromRows, loadConfig } = await import(REESTR_LIB_URL);
+    const { buildXlsxFromRows, loadConfig } = await reestrLibrary();
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const { buffer, total } = await buildXlsxFromRows(rows, config);
     return {
@@ -555,17 +678,17 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('reestr-learn', async (event, rows) => {
-    const { learnFromRows } = await import(REESTR_LIB_URL);
+    const { learnFromRows } = await reestrLibrary();
     return learnFromRows(rows);
   });
 
   ipcMain.handle('reestr-apply-knowledge', async (event, rows) => {
-    const { applyKnowledge } = await import(REESTR_LIB_URL);
+    const { applyKnowledge } = await reestrLibrary();
     return applyKnowledge(rows);
   });
 
   ipcMain.handle('reestr-analytics', async (event, rows) => {
-    const { getAnalytics } = await import(REESTR_LIB_URL);
+    const { getAnalytics } = await reestrLibrary();
     return getAnalytics(rows);
   });
 
@@ -595,10 +718,9 @@ app.whenReady().then(() => {
   });
 
   // ─── Отдельное окно реестра ───
-  let reestrWindowData = null;
+  const reestrWindowData = new Map();
 
   ipcMain.handle('open-reestr-window', (event, data) => {
-    reestrWindowData = data;
     const parentWin = BrowserWindow.fromWebContents(event.sender);
     const iconPath = path.join(__dirname, '../build/icon.ico');
     const reestrWin = new BrowserWindow({
@@ -616,6 +738,9 @@ app.whenReady().then(() => {
       },
     });
     reestrWin.setMenuBarVisibility(false);
+    reestrWindowData.set(reestrWin.webContents.id, { ...data, theme: settings.uiTheme || 'light', databaseIdentity: databaseIdentity(settings), ownerId: event.sender.id });
+    const reestrId = reestrWin.webContents.id;
+    reestrWin.once('closed', () => reestrWindowData.delete(reestrId));
     reestrWin.loadFile(path.join(__dirname, '../reestr-window.html'));
     return true;
   });
@@ -649,28 +774,32 @@ app.whenReady().then(() => {
       },
     });
     pdfWin.setMenuBarVisibility(false);
-    pdfEditorData = { pdfBase64: pdfData.toString('base64'), filePath: pdfPath, fileName: path.basename(pdfPath) };
+    const editorId = pdfWin.webContents.id;
+    pdfEditorData.set(editorId, { pdfBase64: pdfData.toString('base64'), filePath: pdfPath, fileName: path.basename(pdfPath), theme: settings.uiTheme || 'light' });
+    pdfWin.once('closed', () => pdfEditorData.delete(editorId));
     pdfWin.loadFile(path.join(__dirname, '../pdf-editor.html'));
     return { ok: true };
   });
 
-  let pdfEditorData = null;
+  const pdfEditorData = new Map();
 
-  ipcMain.handle('pdf-editor-data', () => pdfEditorData);
+  ipcMain.handle('pdf-editor-data', event => pdfEditorData.get(event.sender.id));
 
   ipcMain.handle('pdf-editor-save', async (event, { pdfBase64, filePath }) => {
+    const editor = pdfEditorData.get(event.sender.id);
+    if (!editor || filePath && filePath !== editor.filePath) throw new Error('Выберите путь через «Сохранить как»');
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     let savePath = filePath;
     if (!savePath) {
       const { canceled, filePath: fp } = await dialog.showSaveDialog(senderWin, {
         title: 'Сохранить PDF',
-        defaultPath: pdfEditorData ? pdfEditorData.filePath : 'edited.pdf',
+        defaultPath: editor.filePath,
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
       });
       if (canceled || !fp) return { saved: false };
       savePath = fp;
     }
-    fs.writeFileSync(savePath, Buffer.from(pdfBase64, 'base64'));
+    writeAtomic(savePath, Buffer.from(pdfBase64, 'base64'));
     return { saved: true, path: savePath };
   });
 
@@ -785,7 +914,7 @@ app.whenReady().then(() => {
     if (canceled || !filePaths || !filePaths[0]) return { ok: false };
     try {
       const pdfData = new Uint8Array(fs.readFileSync(filePaths[0]));
-      const pdfjsPkg = require('pdfjs-dist/build/pdf.js');
+      const pdfjsPkg = await import('pdfjs-dist/legacy/build/pdf.mjs');
       const { getDocument } = pdfjsPkg;
       const doc = await getDocument({ data: pdfData, useSystemFonts: true }).promise;
       const allItems = [];
@@ -824,7 +953,7 @@ app.whenReady().then(() => {
       if (!/\.pdf$/i.test(file)) {
         return { ok: true, kind: 'xlsx', base64: fs.readFileSync(file).toString('base64'), fileName: path.basename(file) };
       }
-      const { getDocument } = require('pdfjs-dist/build/pdf.js');
+      const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
       const doc = await getDocument({ data: new Uint8Array(fs.readFileSync(file)), useSystemFonts: true }).promise;
       const items = [];
       for (let i = 1; i <= doc.numPages; i++) {
@@ -845,28 +974,38 @@ app.whenReady().then(() => {
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePath } = await dialog.showSaveDialog(senderWin, {
       title: 'Сохранить PDF как…',
-      defaultPath: pdfEditorData ? pdfEditorData.filePath.replace('.pdf', '_edited.pdf') : 'edited.pdf',
+      defaultPath: pdfEditorData.get(event.sender.id)?.filePath.replace(/\.pdf$/i, '_edited.pdf') || 'edited.pdf',
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
     });
     if (canceled || !filePath) return { saved: false };
-    fs.writeFileSync(filePath, Buffer.from(pdfBase64, 'base64'));
+    writeAtomic(filePath, Buffer.from(pdfBase64, 'base64'));
     shell.showItemInFolder(filePath);
     return { saved: true, path: filePath };
   });
 
-  ipcMain.handle('reestr-window-data', () => {
-    console.log('[reestr-window] data request, rows:', reestrWindowData?.rows?.length, 'statyi:', reestrWindowData?.statyi?.length);
-    return reestrWindowData;
+  ipcMain.handle('reestr-window-data', event => {
+    return reestrWindowData.get(event.sender.id);
   });
 
-  ipcMain.handle('reestr-save-rows', (event, rows) => {
-    const allWindows = BrowserWindow.getAllWindows();
-    for (const w of allWindows) {
-      if (w.webContents !== event.sender) {
-        w.webContents.send('reestr-rows-saved', rows);
-      }
-    }
-    return { ok: true };
+  ipcMain.handle('reestr-save-rows', async (event, rows) => {
+    try {
+      storage.validateRows('reestrRows', rows);
+      const context = reestrWindowData.get(event.sender.id), identity = databaseIdentity(settings), cacheFile = getCacheFile();
+      if (!context || context.databaseIdentity !== identity) throw new Error('База переключена. Откройте реестр заново в нужной базе.');
+      const client = isClientMode(), dir = getDataDir();
+      const snapshot = client ? await server.getJson(settings.remoteHost, settings.remotePort, '/api/snapshot', 15000)
+        : { data: storage.readAll(dir), revisions: storage.readRevisions(dir) };
+      if (databaseIdentity(settings) !== identity || JSON.stringify(snapshot.data.reestrRows || []) !== JSON.stringify(context.rows || [])) throw new Error('Реестр изменён другим пользователем. Сверьте строки и откройте его заново.');
+      const payload = { base: { reestrRows: snapshot.revisions.reestrRows }, sections: { reestrRows: rows } };
+      if (!client) storage.makeDailyBackup(dir, path.join(dir, 'backups'), 30);
+      const result = client ? await server.postSections(settings.remoteHost, settings.remotePort, JSON.stringify(payload)) : storage.writeSections(dir, payload);
+      if (!result.ok) throw new Error(result.error || 'Реестр изменён другим пользователем. Откройте его заново.');
+      context.rows = rows;
+      rememberSections({ reestrRows: rows }, cacheFile);
+      const owner = BrowserWindow.getAllWindows().find(win => win.webContents.id === context.ownerId);
+      if (owner && databaseIdentity(settings) === identity) owner.webContents.send('reestr-rows-saved', { rows, revision: result.revisions.reestrRows });
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message }; }
   });
 
   createWindow();
