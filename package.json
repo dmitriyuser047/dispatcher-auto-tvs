@@ -1,7 +1,6 @@
 {
-  "name": "dispatcher-tvs-prototype",
-  "version": "3.5.2-prototype.3",
-  "prototype": true,
+  "name": "dispetcherizaciya-avto",
+  "version": "3.5.2",
   "author": "ООО Технрайз Велл Сервис",
   "description": "Диспетчеризация авто группы компаний ООО Технрайз Велл Сервис",
   "main": "electron/main.js",
@@ -17,9 +16,9 @@
     "electron-builder": "26.15.3"
   },
   "build": {
-    "appId": "com.tvs.dispatcher.prototype",
-    "productName": "Диспетчер ТВС — Прототип",
-    "artifactName": "Dispatcher-Prototype-${version}.${ext}",
+    "appId": "com.tvs.dispetcherizaciya-avto",
+    "productName": "Диспетчеризация авто ООО Технрайз Велл Сервис",
+    "artifactName": "Dispatcher-Setup-${version}.${ext}",
     "directories": {
       "output": "dist"
     },
@@ -66,7 +65,9 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "guid": "4286bdd0-2cff-53b2-b57c-c2a89b587631",
+      "deleteAppDataOnUninstall": false
     }
   },
   "allowScripts": {},
@@ -83,5 +84,7 @@
     "tesseract.js": "7.0.0",
     "tesseract.js-core": "7.0.0"
   },
-  "overrides": { "uuid": "^11.1.1" }
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
 }

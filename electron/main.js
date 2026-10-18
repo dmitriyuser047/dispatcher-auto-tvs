@@ -11,12 +11,11 @@ const { writeAtomic, validateSettings, databaseIdentity } = require('./settings'
 const { trustedPage, canInvoke, staticFile } = require('./security');
 const { pathToFileURL } = require('node:url');
 const { createNotificationService, bindingKey } = require('./notifications');
-const prototypeBuild = require('../package.json').prototype === true;
 const hiddenTest = app.commandLine.hasSwitch('tvs-test-hidden');
-app.setAppUserModelId(prototypeBuild ? 'com.tvs.dispatcher.prototype' : 'com.tvs.dispatcher');
+app.setAppUserModelId('com.tvs.dispetcherizaciya-avto');
 const requestedProfile = app.commandLine.getSwitchValue('user-data-dir');
 if (requestedProfile) app.setPath('userData', path.resolve(requestedProfile));
-else if (prototypeBuild) app.setPath('userData', path.join(app.getPath('appData'), 'dispatcher-tvs-prototype'));
+else app.setPath('userData', path.join(app.getPath('appData'), 'dispetcherizaciya-avto'));
 
 // Storage transactions belong to one application process at a time.
 if (!app.requestSingleInstanceLock()) app.exit(0);
@@ -25,7 +24,7 @@ app.on('second-instance', () => {
   if (win && !hiddenTest) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
 });
 
-const DEFAULT_DATA_DIR = path.join(os.homedir(), 'Documents', prototypeBuild ? 'ДиспетчеризацияАвто_ТВС_Прототип' : 'ДиспетчеризацияАвто_ТВС');
+const DEFAULT_DATA_DIR = path.join(os.homedir(), 'Documents', 'ДиспетчеризацияАвто_ТВС');
 const SETTINGS_FILE   = path.join(app.getPath('userData'), 'settings.json');
 
 function loadSettings() {
@@ -145,47 +144,6 @@ function createDailyBackup() {
   catch (e) { console.error('[backup] ' + e.message); }
 }
 
-function applyBundledDataSeedOnce() {
-  if (prototypeBuild) return;
-  if (settings.networkMode === 'client') return;
-
-  const seedVersion = '2.0.57';
-  const seedFile = path.join(__dirname, '..', 'bundled-data', 'data-' + seedVersion + '.json');
-  if (!fs.existsSync(seedFile)) return;
-
-  const dataDir = getDataDir();
-  const markerFile = path.join(dataDir, '.bundled-db-' + seedVersion + '.applied.json');
-  if (fs.existsSync(markerFile)) return;
-
-  try {
-    ensureDirs();
-    // Встроенная база нужна только для первой установки, не для обновления рабочих данных.
-    const sectionDir = path.join(dataDir, 'sections');
-    if (fs.existsSync(path.join(dataDir, 'data.json')) ||
-        fs.existsSync(sectionDir) && fs.readdirSync(sectionDir).some(name => name.endsWith('.json'))) {
-      console.log('[bundled-db] existing database preserved');
-      return;
-    }
-    fs.mkdirSync(getBackupDir(), { recursive: true });
-
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupFile = path.join(getBackupDir(), 'data_before_bundled_' + seedVersion + '_' + stamp + '.json');
-    fs.writeFileSync(backupFile, JSON.stringify(storage.readAll(dataDir), null, 2), 'utf8');
-
-    const seed = JSON.parse(fs.readFileSync(seedFile, 'utf8'));
-    const res = storage.writeAll(dataDir, seed);
-    fs.writeFileSync(markerFile, JSON.stringify({
-      version: seedVersion,
-      appliedAt: new Date().toISOString(),
-      backupFile,
-      changed: res.changed,
-    }, null, 2), 'utf8');
-    console.log('[bundled-db] applied ' + seedVersion + ', changed: ' + res.changed.join(', '));
-  } catch (e) {
-    console.error('[bundled-db] ' + e.message);
-  }
-}
-
 function createWindow() {
   const iconPath = path.join(__dirname, '../build/icon.ico');
   const win = new BrowserWindow({
@@ -236,6 +194,7 @@ function createWindow() {
 
   // Проверка обновлений через 5 сек после запуска
   win.webContents.once('did-finish-load', () => {
+    if (hiddenTest) return;
     setTimeout(async () => {
       const info = await updater.checkForUpdate();
       if (info && !win.isDestroyed()) win.webContents.send('update-available', info);
@@ -244,6 +203,7 @@ function createWindow() {
 
   // Периодическая проверка каждые 3 минуты
   const updateTimer = setInterval(async () => {
+    if (hiddenTest) return;
     const info = await updater.checkForUpdate();
     if (info && !win.isDestroyed()) win.webContents.send('update-available', info);
   }, 3 * 60 * 1000);
@@ -251,6 +211,7 @@ function createWindow() {
 
   // Проверка при показе/разворачивании окна
   win.on('show', async () => {
+    if (hiddenTest) return;
     const info = await updater.checkForUpdate();
     if (info && !win.isDestroyed()) win.webContents.send('update-available', info);
   });
@@ -261,7 +222,6 @@ function createWindow() {
 app.whenReady().then(() => {
   require('./artifacts').register({ipcMain,getDataDir,isClientMode,getSettings:()=>settings,knowledgeDir:()=>path.join(getDataDir(),'reestr-knowledge')});
   if (settings.networkMode !== 'client') ensureDirs();
-  applyBundledDataSeedOnce();
 
   // Экспорт сводок/актов (XLSX) идёт через обычную загрузку браузера —
   // открываем файл сразу после сохранения, чтобы не искать его в "Загрузках".

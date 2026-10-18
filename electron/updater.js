@@ -1,6 +1,5 @@
 /** Updates are accepted only from the project HTTPS manifest, with SHA-256. */
 const { app } = require('electron');
-const PROTOTYPE = require('../package.json').prototype === true;
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
@@ -77,7 +76,6 @@ async function fetchText(url) {
 }
 
 async function checkForUpdate() {
-  if (PROTOTYPE) return null;
   try {
     const info = JSON.parse(await fetchText(UPDATE_CHECK_URL + '?t=' + Date.now()));
     const current = app.getVersion();
@@ -100,7 +98,6 @@ async function checkForUpdate() {
 }
 
 async function downloadFile(url, onProgress) {
-  if (PROTOTYPE) throw new Error('Прототип обновляется отдельной тестовой сборкой');
   const release = trustedReleases.get(String(url));
   if (!release || Date.now() - release.checkedAt > TRUST_MS) throw new Error('Сначала повторно проверьте обновления');
   if (release.blockedReason) throw new Error(release.blockedReason);
@@ -141,7 +138,6 @@ async function downloadFile(url, onProgress) {
 }
 
 async function launchInstaller(filePath) {
-  if (PROTOTYPE) throw new Error('Установка автообновлений в прототипе отключена');
   const verified = verifiedDownloads.get(filePath);
   if (!verified || !fs.existsSync(filePath)) throw new Error('Установщик не прошёл проверку');
   const hash = crypto.createHash('sha256');

@@ -151,14 +151,14 @@ function fpRefreshFromTx(p, tx) {
   if (tx.azs && !p.azs) p.azs = tx.azs;
   if (tx.region && !p.region) p.region = tx.region;
   if (tx.fuel && !p.product) p.product = tx.fuel;
-  if (tx.sum && (p.restored || !p.sum) && Math.abs((+p.sum || 0) - tx.sum) >= 0.01) {
+  if (tx.sum && (p.restored || fqValue(p.sum) == null) && Math.abs((+p.sum || 0) - tx.sum) >= 0.01) {
     const delta = fpRound(tx.sum - (+p.sum || 0));
     p.sum = fpRound(tx.sum);
     p.price = tx.price ? fpRound(tx.price) : fpRound(tx.sum / (p.qty || tx.qty || 1));
     const rec = p.recordId && !p.deleted && (data.records || []).find(r => r.id === p.recordId);
     if (rec) rec.fuelSum = fpRound((+rec.fuelSum || 0) + delta) || null;
   }
-  if (tx.price && !p.price) p.price = fpRound(tx.price);
+  if (tx.price && fqValue(p.price) == null) p.price = fpRound(tx.price);
   p.restored = false;
 }
 
@@ -201,8 +201,13 @@ function fpRestoreFromJournal() {
   const known = new Map();   // ключ → сколько покупок уже есть
   fpList().forEach(p => {
     if (!p.importKey) return;
-    const key = canonical(p.date, p.qty, p.cardNo, p.grade);
-    known.set(key, (known.get(key) || 0) + 1);
+    const keys = new Set([canonical(p.date, p.qty, p.cardNo, p.grade)]);
+    // Правка даты, литров или карты сохраняет исходный ключ выписки. Старое
+    // примечание журнала не должно восстанавливать эту же покупку повторно.
+    const sourceKey = /^(\d{4}-\d{2}-\d{2})\|(\d+(?:\.\d+)?)\|(\d*)\|/.exec(p.importKey);
+    if (sourceKey) keys.add(canonical(sourceKey[1], sourceKey[2], sourceKey[3],
+      parseFuelGrade(p.sourceTransaction?.product || p.product) || p.grade));
+    keys.forEach(key => known.set(key, (known.get(key) || 0) + 1));
   });
   const owner = new Map();   // ключ → { rec, list } — где заправка числится сейчас
   (data.records || []).forEach(rec => {
@@ -609,14 +614,14 @@ async function fpEditSave(id) {
   const sourceOrg = owner.org ? sameSource && p.sourceOrg || owner.org : document.getElementById('fpe_org').value.trim();
   if (!sourceOrg) { showFieldError('Укажите организацию поступления', 'fpe_org'); return; }
   const grade = document.getElementById('fpe_grade').value, vehicleId = document.getElementById('fpe_vehicle').value || null;
-  if (p.manualStatement) {
+  if (p.manualStatement || p.statementReviewed) {
     const problem = gsmManualRecipientError(data, vehicleId, cardNo, date, grade);
     if (problem) { showFieldError(problem, 'fpe_vehicle'); return; }
   }
   const sum = optionalNumber('fpe_sum'), price = optionalNumber('fpe_price');
   if ([sum, price].some(n => n != null && (!Number.isFinite(n) || n < 0))) { showFieldError('Сумма и цена должны быть неотрицательными', 'fpe_sum'); return; }
   const before = JSON.stringify(data);
-  fpUpdate(p, {
+  const changes = {
     date, qty: fpRound(qty), sum: sum != null ? fpRound(sum) : null,
     price,
     time: document.getElementById('fpe_time').value.trim(),
@@ -626,8 +631,18 @@ async function fpEditSave(id) {
     restored: false,
     cardNo, sourceOrg, sourceProvider: sameSource && p.sourceProvider ? p.sourceProvider : owner.provider,
     cardVehicleId: sameSource && p.cardVehicleId ? p.cardVehicleId : owner.vehicleId,
-  });
-  if (!await saveData(data, { noMerge: !!p.manualStatement })) { data = JSON.parse(before); rebuildIndex(); return; }
+  };
+  if (vehicleId && typeof gsmStatementPlan === 'function') {
+    try {
+      const plan = gsmStatementPlan(data, id, changes);
+      data = gsmStatementApply(data, plan);
+      const updated = data.fuelPurchases.find(x => x.id === id);
+      Object.assign(updated, { time: changes.time, comment: changes.comment, restored: false });
+      rebuildIndex();
+    } catch (e) { showFieldError(e.message, 'fpe_vehicle'); return; }
+  } else fpUpdate(p, changes);
+  if (!await saveData(data, { noMerge: true })) { data = JSON.parse(before); rebuildIndex(); return; }
+  if (typeof gsmStatementDrafts !== 'undefined') gsmStatementDrafts.delete(id);
   closeModal('genericModal');
   if (fpView === 'vehicle' && p.vehicleId !== fpVehicle) showToast && showToast('Заправка перенесена на ' + fpVehicleTitle((data.vehicles || []).find(v => v.id === p.vehicleId)));
   renderFuelPurchases();

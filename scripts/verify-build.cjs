@@ -5,9 +5,9 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
 const asar=require('@electron/asar');
 const root=path.resolve(__dirname,'..'),metadata=require('../package.json');
 const archive=path.resolve(process.env.TVS_PACKAGED_ASAR||path.join(root,'dist/win-unpacked/resources/app.asar'));
-const reportPath=path.join(root,'audit','prototype-package-source.json');
+const reportPath=path.join(root,'audit','package-source.json');
 const digest=value=>crypto.createHash('sha256').update(value).digest('hex');
-const report={version:metadata.version,status:'FAIL',at:new Date().toISOString(),archive,files:[],published:false,autoUpdates:false};
+const report={version:metadata.version,name:metadata.name,appId:metadata.build.appId,status:'FAIL',at:new Date().toISOString(),archive,files:[],published:false};
 function check(condition,message){if(!condition)throw Error(message);}
 function archiveFile(file){return asar.extractFile(archive,path.normalize(file));}
 function inside(base,file){const relative=path.relative(base,file);return relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative);}
@@ -92,14 +92,17 @@ function verifyStagingDependencies(entries){
 }
 
 try{
+  require('./write-release-manifest.cjs').validateMetadata(metadata);
   const entries=verifyArchiveIntegrity();
   const packaged=JSON.parse(archiveFile('package.json').toString('utf8'));
-  check(metadata.prototype&&packaged.prototype&&packaged.name===metadata.name&&packaged.version===metadata.version,'Wrong prototype package identity');
+  check(!metadata.prototype&&!packaged.prototype&&/^\d+\.\d+\.\d+$/.test(metadata.version),'Only stable production packages may be verified');
+  check(packaged.name===metadata.name&&packaged.version===metadata.version,'Wrong packaged application identity');
+  check(!/prototype|прототип/i.test([packaged.name,metadata.build.appId,metadata.build.productName].join(' ')),'Prototype application identity cannot be released');
   const paths=['index.html','reestr-window.html','pdf-editor.html','ReestrBuilder/lib.mjs'];
   function walk(directory){for(const name of fs.readdirSync(path.join(root,directory))){const file=path.join(directory,name);if(fs.statSync(path.join(root,file)).isDirectory())walk(file);else if(/\.(?:js|mjs|cjs|css)$/.test(file))paths.push(file.replaceAll('\\','/'));}}
   for(const directory of ['electron','assets/js','assets/css'])walk(directory);
   for(const file of paths){const source=fs.readFileSync(path.join(root,file)),built=archiveFile(file);check(digest(source)===digest(built),'Package differs from current source: '+file);report.files.push({file,sha256:digest(built)});}
-  check(!entries.some(({file})=>file==='bundled-data/data-2.0.57.json'),'Working database must not be packaged');
+  check(!entries.some(({file})=>file==='bundled-data'||file.startsWith('bundled-data/')),'Working database must not be packaged');
   verifyStagingDependencies(entries);
   report.archiveSha256=digest(fs.readFileSync(archive));
   report.status='PASS';

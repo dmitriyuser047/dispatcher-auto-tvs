@@ -175,8 +175,17 @@ function recoverTransaction(dataDir) {
   const journal = path.join(sectionsDir(dataDir), '.transaction.json');
   if (!fs.existsSync(journal)) return;
   const tx = readJson(journal);
-  if (!tx || !tx.sections || !tx.before || !tx.revisions || Object.keys(tx.sections).some(n => !SECTIONS.includes(n) || !Array.isArray(tx.sections[n]) || !(n in tx.before) || tx.before[n] !== null && !Array.isArray(tx.before[n])) ||
-      SECTIONS.some(n => !Number.isSafeInteger(tx.revisions[n]) || tx.revisions[n] < 0)) throw new Error('Повреждён журнал сохранения');
+  const object = value => value && typeof value === 'object' && !Array.isArray(value);
+  const names = object(tx?.sections) ? Object.keys(tx.sections) : null;
+  // Recover using the schema recorded by the interrupted transaction. New
+  // optional sections are added by readRevisions only after recovery finishes.
+  const revisionsValid = (value, required) => object(value) &&
+    required.every(name => Object.hasOwn(value, name)) &&
+    Object.values(value).every(revision => Number.isSafeInteger(revision) && revision >= 0);
+  if (!tx || !names || !object(tx.before) ||
+      names.some(n => !SECTIONS.includes(n) || !Array.isArray(tx.sections[n]) || !Object.hasOwn(tx.before, n) || tx.before[n] !== null && !Array.isArray(tx.before[n])) ||
+      !revisionsValid(tx.revisions, ['vehicles', 'records', ...names]) ||
+      tx.base !== null && !revisionsValid(tx.base, ['vehicles', 'records'])) throw new Error('Повреждён журнал сохранения');
   const committed = JSON.stringify(readJson(revisionsFile(dataDir), null)) === JSON.stringify(tx.revisions);
   const target = committed ? tx.sections : tx.before;
   Object.keys(tx.sections).forEach(name => {

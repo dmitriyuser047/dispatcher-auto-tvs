@@ -1,4 +1,4 @@
-// Shared prototype shell; workflows and accounting keep their existing models.
+// Shared application shell; workflows and accounting keep their existing models.
 const UNIFIED_NAV = [
  ['Рабочий день', [['home','Главная','grid'],['dispatch','Диспетчерская','calendar'],['workflows','Рабочие процессы','tool']]],
  ['Техника и топливо', [['vehicles','Транспорт','car','vehicles'],['generators','Генераторы','power','generators'],['tanks','Ёмкости','tank'],['fuelPurchases','ГСМ и заправки','fuel'],['fuelReport','Топливная аналитика','chart'],['procurement','Закупки','tank'],['toSchedule','Обслуживание','calendar']]],
@@ -7,11 +7,11 @@ const UNIFIED_NAV = [
 function unifiedMountNav() {
  if(document.getElementById('unifiedNav'))return;
  const nav=document.createElement('nav');nav.id='unifiedNav';nav.className='workspace-nav';nav.setAttribute('aria-label','Разделы программы');
- nav.innerHTML=`<div class="workspace-brand"><span class="unified-brand-mark">ТВС</span><span><strong>Диспетчер</strong><small>Единый прототип</small></span></div><div class="workspace-nav-groups">${UNIFIED_NAV.map(([title,items])=>`<div class="workspace-nav-group-title">${title}</div>${items.map(([section,label,icon,count])=>`<button type="button" class="workspace-nav-link" data-section="${section}">${xpIcon(icon,17)}<span class="workspace-nav-label">${label}</span>${count?`<span class="workspace-nav-count" data-count="${count}">0</span>`:''}</button>`).join('')}`).join('')}</div><div class="workspace-nav-footer"><button type="button" class="workspace-nav-link" data-action="pdf">${xpIcon('document',17)}<span>PDF-студия</span></button><button type="button" class="workspace-nav-link" data-action="settings">${xpIcon('tool',17)}<span>Настройки и база</span></button><button type="button" class="workspace-nav-link" data-action="notifications">${xpIcon('calendar',17)}<span>Уведомления</span></button><span class="unified-prototype-note">Отдельная тестовая сборка</span></div>`;
+ nav.innerHTML=`<div class="workspace-brand"><span class="unified-brand-mark">ТВС</span><span><strong>Диспетчер</strong><small>Управление автопарком</small></span></div><div class="workspace-nav-groups">${UNIFIED_NAV.map(([title,items])=>`<div class="workspace-nav-group-title">${title}</div>${items.map(([section,label,icon,count])=>`<button type="button" class="workspace-nav-link" data-section="${section}">${xpIcon(icon,17)}<span class="workspace-nav-label">${label}</span>${count?`<span class="workspace-nav-count" data-count="${count}">0</span>`:''}</button>`).join('')}`).join('')}</div><div class="workspace-nav-footer"><button type="button" class="workspace-nav-link" data-action="pdf">${xpIcon('document',17)}<span>PDF-студия</span></button><button type="button" class="workspace-nav-link" data-action="settings">${xpIcon('tool',17)}<span>Настройки и база</span></button><button type="button" class="workspace-nav-link" data-action="notifications">${xpIcon('calendar',17)}<span>Уведомления</span></button><span class="unified-build-note">Диспетчер ТВС · 3.5.2</span></div>`;
  nav.addEventListener('click',event=>{const button=event.target.closest('button');if(!button)return;if(button.dataset.action==='pdf'){void openPdfEditor();return;}if(button.dataset.action==='settings'){void openSettingsModal();return;}if(button.dataset.action==='notifications'){void openNotificationSettings();return;}if(button.dataset.section)unifiedNavigate(button.dataset.section);});
  document.body.prepend(nav);
  const brand=document.querySelector('body > header .logo');
- if(brand){brand.className='workspace-breadcrumb';brand.innerHTML='<strong id="unifiedSectionLabel">Главная</strong><span class="unified-build-label">Прототип 3.5.2</span>';}
+ if(brand){brand.className='workspace-breadcrumb';brand.innerHTML='<strong id="unifiedSectionLabel">Главная</strong><span class="unified-build-label">Версия 3.5.2</span>';}
  unifiedRefreshNav();
 }
 function unifiedNavigate(section) {

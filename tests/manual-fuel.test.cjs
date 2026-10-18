@@ -17,6 +17,102 @@ function base() {
 function row(extra = {}) { return { id: 'draft1', date: '2026-10-01', vehicleId: 'v', grade: 'АИ-95', cardNo: '111111', qty: '30', sum: '', comment: '', ...extra }; }
 function draft(rows = [row()], org = 'A') { return { org, month: '2026-10', rows }; }
 function ledger(db) { return ctx.gsmBuildLedger(db, { from: '2026-10-01', to: '2026-10-31' }); }
+function statement(db, changes = {}) {
+  const p = db.fuelPurchases[0];
+  return ctx.gsmStatementPlan(db, p.id, { ...p, vehicleId: 'v', ...changes });
+}
+function imported(db, extra = {}) {
+  db.fuelPurchases.push({ id: 'imported', importId: 'file1', importKey: 'source-row-key', sourceRow: 17,
+    date: '2026-10-01', vehicleId: '', cardNo: '111111', sourceOrg: 'A', grade: 'АИ-95', qty: 30, sum: 3000, ...extra });
+  return db;
+}
+
+test('an imported statement row fuels the selected car without creating another purchase and is included in the act', () => {
+  const db = imported(base()), before = JSON.stringify(db), plan = statement(db);
+  const next = ctx.gsmStatementApply(db, plan), p = next.fuelPurchases[0];
+  assert.equal(JSON.stringify(db), before); assert.equal(next.fuelPurchases.length, 1);
+  assert.equal(p.id, 'imported'); assert.equal(p.importId, 'file1'); assert.equal(p.importKey, 'source-row-key'); assert.equal(p.sourceRow, 17);
+  assert.equal(p.vehicleId, 'v'); assert.equal(next.records[0].km, 0); assert.equal(next.records[0].fuelIssued, 30);
+  assert.equal(ledger(next).barrels[0].issued, 30);
+});
+
+test('allocating a loaded operation links matching manual fuel without changing journal mileage, litres or money', () => {
+  const db = imported(base());
+  db.records.push({ id: 'r', vehicleId: 'v', date: '2026-10-01', km: 120, odoStart: 100, odoEnd: 220, fuelIssued: 30, fuelSum: 3000, note: 'Manual' });
+  const before = JSON.stringify(db.records), plan = statement(db);
+  assert.equal(plan.mode, 'link:r');
+  const next = ctx.gsmStatementApply(db, plan);
+  assert.equal(JSON.stringify(next.records), before); assert.equal(next.fuelPurchases[0].recordId, 'r');
+  assert.equal(ledger(next).barrels[0].issued, 30);
+});
+
+test('confirming an already allocated operation repeatedly does not change the journal or double any litres', () => {
+  let db = imported(base(), { vehicleId: 'v', recordId: 'r', sum: undefined });
+  db.records.push({ id: 'r', vehicleId: 'v', date: '2026-10-01', fuelIssued: 30, km: 12, odoStart: 100, odoEnd: 112 });
+  const before = JSON.stringify(db.records);
+  for (let i = 0; i < 3; i++) db = ctx.gsmStatementApply(db, statement(db));
+  assert.equal(JSON.stringify(db.records), before); assert.equal(db.fuelPurchases.length, 1); assert.equal(ledger(db).barrels[0].issued, 30);
+});
+
+test('moving a statement purchase preserves manual remainder, odometers, source organization and import identity', () => {
+  const db = imported(base(), { vehicleId: 'holder', recordId: 'old', cardNo: '222222', sourceOrg: 'B', cardVehicleId: 'holder' });
+  db.records.push({ id: 'old', vehicleId: 'holder', date: '2026-10-01', fuelIssued: 40, fuelSum: 4000, km: 40, odoStart: 200, odoEnd: 240 });
+  const next = ctx.gsmStatementApply(db, statement(db)), old = next.records.find(r => r.id === 'old');
+  assert.equal(old.fuelIssued, 10); assert.equal(old.fuelSum, 1000); assert.equal(old.km, 40); assert.equal(old.odoEnd, 240);
+  assert.equal(next.fuelPurchases[0].sourceOrg, 'B'); assert.equal(next.fuelPurchases[0].cardVehicleId, 'holder');
+  assert.equal(next.fuelPurchases[0].importKey, 'source-row-key');
+  assert.equal(ledger(next).rows.find(r => r.vehicleId === 'v').org, 'B');
+});
+
+test('editing a posted operation changes only its quantity and money delta in the journal', () => {
+  const db = imported(base(), { vehicleId: 'v', recordId: 'r' });
+  db.records.push({ id: 'r', vehicleId: 'v', date: '2026-10-01', fuelIssued: 40, fuelSum: 4000, km: 110, fuelActual: 15 });
+  const next = ctx.gsmStatementApply(db, statement(db, { qty: 35, sum: 3500 }));
+  assert.equal(next.records[0].fuelIssued, 45); assert.equal(next.records[0].fuelSum, 4500);
+  assert.equal(next.records[0].km, 110); assert.equal(next.records[0].fuelActual, 15);
+});
+
+test('loaded operations reject incompatible fuel, cross-object moves, closed months and stale review', () => {
+  const db = imported(base());
+  assert.throws(() => statement(db, { grade: 'ДТ' }), /топлива/);
+  db.vehicles[0].object = 'ННГ'; db.fuelPurchases[0].cardNo = '222222';
+  assert.throws(() => statement(db), /объект/);
+  db.vehicles[0].object = 'УНГКМ'; db.fuelPurchases[0].cardNo = '111111';
+  db.fuelPeriods.push({ month: '2026-10', closed: true }); assert.throws(() => statement(db), /закрыт/);
+  db.fuelPeriods = []; const plan = statement(db); db.records.push({ id: 'changed' });
+  assert.throws(() => ctx.gsmStatementApply(db, plan), /изменилась/);
+});
+
+test('allocating a purchase keeps a different manual quantity in a separate journal receipt', () => {
+  const db = imported(base()); db.records.push({ id: 'r', vehicleId: 'v', date: '2026-10-01', fuelIssued: 10, km: 70 });
+  const next = ctx.gsmStatementApply(db, statement(db));
+  assert.equal(next.records.length, 2); assert.equal(next.records[0].fuelIssued, 10); assert.equal(next.records[0].km, 70);
+  assert.equal(ledger(next).barrels[0].issued, 40);
+});
+
+test('legacy source identity prevents restoration after editing date, quantity, card and fuel grade', () => {
+  const db = base();
+  db.fuelPurchases.push({ id: 'edited', importKey: '2026-10-01|30|111111||source',
+    date: '2026-10-03', qty: 35, cardNo: '222222', grade: 'ДТ', product: 'АИ-95', vehicleId: 'holder' });
+  db.records.push({ id: 'old', vehicleId: 'v', date: '2026-10-01', fuelIssued: 0, fuelGrade: 'АИ-95',
+    note: 'заправка: АИ-95 30л; импорт заправок: 2026-10-01|30|111111||source' });
+  ctx.inputData = db; vm.runInContext('data=inputData', ctx);
+  assert.equal(ctx.fpRestoreFromJournal(), 0);
+  assert.equal(db.fuelPurchases.length, 1);
+});
+
+test('edited source identity still restores a genuinely missing equal-volume second purchase once', () => {
+  const db = base();
+  db.fuelPurchases.push({ id: 'edited', importKey: '2026-10-01|30|111111||first',
+    date: '2026-10-03', qty: 35, cardNo: '111111', grade: 'АИ-95', product: 'АИ-95', vehicleId: 'v' });
+  db.records.push({ id: 'old', vehicleId: 'v', date: '2026-10-01', fuelIssued: 30, fuelSum: 3000, fuelGrade: 'АИ-95',
+    note: 'заправка: АИ-95 30л, АИ-95 30л; импорт заправок: 2026-10-01|30|111111||first | 2026-10-01|30|111111||second' });
+  ctx.inputData = db; vm.runInContext('data=inputData', ctx);
+  assert.equal(ctx.fpRestoreFromJournal(), 1);
+  assert.equal(db.fuelPurchases.length, 2);
+  assert.equal(db.fuelPurchases[1].importKey, '2026-10-01|30|111111||second');
+  assert.equal(ctx.fpRestoreFromJournal(), 0);
+});
 
 test('manual daily statement creates purchases and zero-mileage receipt rows, visible in the original act', () => {
   const db = base(), before = JSON.stringify(db), plan = ctx.gsmManualPlan(db, draft());

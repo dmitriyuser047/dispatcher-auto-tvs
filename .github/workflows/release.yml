@@ -1,96 +1,174 @@
 name: Build & Release
 
+# A tag push alone never starts a second build or overwrites a release that was
+# published from a separately verified local installer.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable tag on the current main commit, for example v3.5.2
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ inputs.tag }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Validate requested tag
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw 'Only a stable vMAJOR.MINOR.PATCH tag is allowed' }
 
-      - name: Reject prototype publication
-        run: node -e "if (require('./package.json').prototype) throw new Error('Prototype releases and auto-update publication are disabled')"
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
+          cache: npm
+
+      - name: Verify production identity and exact main commit
+        id: pkg
+        run: |
+          node -e "require('./scripts/write-release-manifest.cjs').validateMetadata(require('./package.json'))"
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid production package' }
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($env:RELEASE_TAG -cne "v$($pkg.version)") { throw 'Tag and package version differ' }
+          $commit = (git rev-parse HEAD).Trim()
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read current main' }
+          if ((git rev-parse origin/main).Trim() -cne $commit) { throw 'Release tag must point at the current main commit' }
+          $channel = git show origin/main:version.json | ConvertFrom-Json
+          if ([version]$channel.version -ge [version]$pkg.version) { throw 'The stable channel already has this or a newer version' }
+          $existing = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" 2>&1
+          if ($LASTEXITCODE -eq 0) { throw 'This tag already has a release; no existing release is overwritten, including drafts' }
+          if (($existing | Out-String) -notmatch 'HTTP 404') { throw "Cannot check existing releases: $existing" }
+          $global:LASTEXITCODE = 0
+          "version=$($pkg.version)" >> $env:GITHUB_OUTPUT
+          "source=$commit" >> $env:GITHUB_OUTPUT
+          "product=$($pkg.build.productName)" >> $env:GITHUB_OUTPUT
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Test fuel accounting
+      - name: Test accounting, concurrency, PDF, OCR and release guards
         run: npm test
 
-      - name: Install isolated browser test tools
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Install isolated browser tools
         run: npm install --prefix "${{ runner.temp }}/tvs-ui-tools" --no-save --package-lock=false playwright@1.62.1
 
-      - name: Install test browser
+      - name: Install Chromium
         run: node "${{ runner.temp }}/tvs-ui-tools/node_modules/playwright/cli.js" install chromium
 
-      - name: Test forms, deletion, imports and calculations in browser
+      - name: Test application interface
         env:
           TVS_PLAYWRIGHT_MODULES: ${{ runner.temp }}/tvs-ui-tools/node_modules
         run: npm run test:ui
 
-      - name: Build Electron app
-        run: npx electron-builder --win --x64 --publish never
+      - name: Test Electron source application
+        env:
+          TVS_PLAYWRIGHT_MODULES: ${{ runner.temp }}/tvs-ui-tools/node_modules
+        run: npm run test:electron
 
-      - name: Get version
-        id: pkg
-        shell: pwsh
-        run: |
-          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          echo "version=$v" >> $env:GITHUB_OUTPUT
+      - name: Build from the complete staged dependency graph and verify every packaged file
+        run: npm run build
 
-      - name: Release notes from CHANGELOG
-        shell: pwsh
+      - name: Test actual packaged executable
+        env:
+          TVS_PLAYWRIGHT_MODULES: ${{ runner.temp }}/tvs-ui-tools/node_modules
+          TVS_PACKAGED_EXE: ${{ github.workspace }}/dist/win-unpacked/${{ steps.pkg.outputs.product }}.exe
+        run: npm run test:electron
+
+      - name: Verify installer manifest and prepare release notes
         run: |
-          $v  = "${{ steps.pkg.outputs.version }}"
+          $manifest = Get-Content dist/release-manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.sourceDirty -or $manifest.sourceCommit -cne '${{ steps.pkg.outputs.source }}' -or $manifest.version -cne '${{ steps.pkg.outputs.version }}') { throw 'Installer source differs from the release commit' }
+          if ($manifest.published -or $manifest.packageIntegrity.mismatches -ne 0) { throw 'Invalid package verification manifest' }
+          if ((Get-FileHash "dist/$($manifest.installer)" -Algorithm SHA256).Hash.ToLowerInvariant() -cne $manifest.sha256) { throw 'Installer checksum differs from manifest' }
+          if (git status --porcelain --untracked-files=no) { throw 'Build changed tracked source files' }
           $md = Get-Content assets/CHANGELOG.md -Raw -Encoding UTF8
-          $m  = [regex]::Match($md, "(?ms)^## " + [regex]::Escape($v) + "\b[^\n]*\n(.*?)(?=^## |\z)")
-          $notes = $m.Groups[1].Value.Trim()
-          if (-not $notes) { $notes = "Доступна версия $v." }
-          [System.IO.File]::WriteAllText("release-notes.md", "## Версия $v`n`n$notes`n`nСкачайте и запустите установщик ниже.", [System.Text.UTF8Encoding]::new($false))
-          [System.IO.File]::WriteAllText("release-notes.txt", $notes, [System.Text.UTF8Encoding]::new($false))
+          $match = [regex]::Match($md, '(?ms)^## ' + [regex]::Escape($manifest.version) + '\b[^\n]*\n(.*?)(?=^## |\z)')
+          $notes = $match.Groups[1].Value.Trim()
+          if (-not $notes) { throw 'Stable release notes are missing from CHANGELOG' }
+          [IO.File]::WriteAllText('release-notes.txt', $notes, [Text.UTF8Encoding]::new($false))
+          [IO.File]::WriteAllText('release-notes.md', "## Версия $($manifest.version)`n`n$notes`n`nСкачайте и запустите установщик ниже. Контрольная сумма находится в SHA256SUMS.txt.", [Text.UTF8Encoding]::new($false))
 
-      - name: Create GitHub Release & upload installer
-        uses: softprops/action-gh-release@v2
-        with:
-          name: "v${{ steps.pkg.outputs.version }}"
-          body_path: release-notes.md
-          files: dist/Dispatcher-Setup-${{ steps.pkg.outputs.version }}.exe
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Commit & push version.json
-        shell: pwsh
+      - name: Create a draft and upload the exact verified installer
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          $manifest = Get-Content dist/release-manifest.json -Raw | ConvertFrom-Json
+          gh release create $env:RELEASE_TAG --verify-tag --draft --title $env:RELEASE_TAG --notes-file release-notes.md --target '${{ steps.pkg.outputs.source }}'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot create the draft release' }
+          gh release upload $env:RELEASE_TAG "dist/$($manifest.installer)" dist/release-manifest.json dist/SHA256SUMS.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot upload verified release assets' }
+
+      - name: Download uploaded assets and verify their exact hashes
+        run: |
+          $manifest = Get-Content dist/release-manifest.json -Raw | ConvertFrom-Json
+          $download = Join-Path $env:RUNNER_TEMP ('tvs-release-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $download | Out-Null
+          gh release download $env:RELEASE_TAG --dir $download
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot verify uploaded release assets' }
+          $installer = Join-Path $download $manifest.installer
+          if ((Get-Item -LiteralPath $installer).Length -ne $manifest.bytes -or (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -cne $manifest.sha256) { throw 'Uploaded installer differs from the tested file' }
+          foreach ($file in @('release-manifest.json','SHA256SUMS.txt')) {
+            if ((Get-FileHash -LiteralPath (Join-Path $download $file)).Hash -cne (Get-FileHash -LiteralPath "dist/$file").Hash) { throw "Uploaded $file differs from local verification" }
+          }
+
+      - name: Publish only after verification and current-main check
+        run: |
           git fetch origin main
-          git checkout main
-          git pull --rebase origin main
-          $v    = "${{ steps.pkg.outputs.version }}"
-          $tag  = "${{ github.ref_name }}"
-          $repo = "${{ github.repository }}"
-          $url  = "https://github.com/$repo/releases/download/$tag/Dispatcher-Setup-$v.exe"
-          $date = Get-Date -Format "yyyy-MM-dd"
+          if ($LASTEXITCODE -ne 0 -or (git rev-parse origin/main).Trim() -cne '${{ steps.pkg.outputs.source }}') { throw 'Main changed during release validation; the release remains a draft' }
+          gh release edit $env:RELEASE_TAG --draft=false --prerelease=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot publish the verified release' }
+
+      - name: Update the stable channel with the verified uploaded SHA256
+        run: |
+          $manifest = Get-Content dist/release-manifest.json -Raw | ConvertFrom-Json
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $release.draft -or $release.prerelease) { throw 'The verified stable release is not public' }
+          $assets = @($release.assets | Where-Object { $_.name -ceq $manifest.installer })
+          if ($assets.Count -ne 1 -or $assets[0].size -ne $manifest.bytes -or $assets[0].state -cne 'uploaded') { throw 'Public installer metadata does not match the verified upload' }
+          if ($assets[0].digest -and $assets[0].digest -cne "sha256:$($manifest.sha256)") { throw 'GitHub installer digest differs from the verified SHA256' }
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0 -or (git rev-parse origin/main).Trim() -cne $manifest.sourceCommit) { throw 'Main changed: release is public but the update channel was not changed' }
+          $current = git show origin/main:version.json | ConvertFrom-Json
+          if ([version]$current.version -ge [version]$manifest.version) { throw 'Refusing a duplicate or backwards channel update' }
           $json = [ordered]@{
-            version = $v
-            date    = $date
-            notes   = "Что нового:`n" + [System.IO.File]::ReadAllText("release-notes.txt") + "`n`nНажмите «Скачать обновление»."
-            url     = $url
+            version = $manifest.version
+            date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+            notes = "Что нового:`n" + [IO.File]::ReadAllText('release-notes.txt') + "`n`nНажмите «Скачать обновление»."
+            url = $assets[0].browser_download_url
+            sha256 = $manifest.sha256
+            sha512 = $manifest.sha512
+            bytes = $manifest.bytes
+            sourceCommit = $manifest.sourceCommit
           } | ConvertTo-Json
-          [System.IO.File]::WriteAllText("version.json", $json, [System.Text.UTF8Encoding]::new($false))
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          [IO.File]::WriteAllText('version.json', $json + "`n", [Text.UTF8Encoding]::new($false))
           git add version.json
-          git commit -m "chore: release ${{ github.ref_name }}"
-          git push origin main
+          git commit -m "chore: release $env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot commit the verified update manifest' }
+          git push origin HEAD:main
+          if ($LASTEXITCODE -ne 0) { throw 'Main changed or push was rejected: the update channel was not forced' }

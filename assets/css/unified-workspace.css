@@ -5,7 +5,7 @@
 .workspace-brand strong,.workspace-brand small {display:block;}
 .workspace-brand strong {font-size:16px;font-weight:650;}
 .workspace-brand small {font-size:10px;color:var(--ws-rail-muted);margin-top:3px;}
-.unified-prototype-note {display:block;padding:9px 10px 0;color:var(--ws-rail-muted);font-size:10px;}
+.unified-build-note {display:block;padding:9px 10px 0;color:var(--ws-rail-muted);font-size:10px;}
 .unified-build-label {font-size:10px;border:1px solid var(--border2);border-radius:5px;padding:3px 6px;color:var(--text3);white-space:nowrap;}
 body > header .workspace-breadcrumb {font-size:14px;flex-shrink:1;}
 body > header {height:64px;min-height:64px;padding-top:0;padding-bottom:0;}

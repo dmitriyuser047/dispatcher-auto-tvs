@@ -14,7 +14,7 @@ catch {
   pw = createRequire(path.join(modules, 'package.json'))('playwright');
 }
 
-test('hidden Electron prototype persists synthetic journals, isolates registry sessions and edits PDFs', { timeout:180000 }, async t => {
+test('hidden Electron application persists synthetic journals, isolates registry sessions and edits PDFs', { timeout:180000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvs-unified-native-'));
   let app;
   t.after(async () => {
@@ -40,6 +40,13 @@ test('hidden Electron prototype persists synthetic journals, isolates registry s
   page.on('pageerror', error => errors.push(error.message));
   await page.waitForFunction(() => typeof data !== 'undefined' && data.vehicles[0]?.id === 'A');
   assert.equal(await app.evaluate(({ app }) => app.getPath('userData')), profile);
+  if (process.env.TVS_PACKAGED_EXE) {
+    const identity=await app.evaluate(({app})=>({name:app.getName(),version:app.getVersion()}));
+    assert.equal(identity.name,'dispetcherizaciya-avto');
+    assert.equal(identity.version,require('../package.json').version);
+    assert.equal(await page.locator('#unifiedNav').innerText().then(text=>/прототип/i.test(text)),false);
+    assert.equal(await page.locator('.unified-build-label').innerText(),'Версия 3.5.2');
+  }
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(win => win.isVisible())), false);
 
   const first = await page.evaluate(async () => {
@@ -151,7 +158,7 @@ test('hidden Electron prototype persists synthetic journals, isolates registry s
   const beforeB = fs.readFileSync(pdfs[1]);
   const pdfSave = await editors[0].evaluate(async forgedTarget => {
     const host=window.PdfStudioHost;
-    host.mutate('Synthetic annotation',()=>host.current().elements.push({id:crypto.randomUUID(),type:'text',x:50,y:120,w:200,h:25,text:'Native prototype annotation',fontSize:14,color:'#17243b',opacity:1}));
+    host.mutate('Synthetic annotation',()=>host.current().elements.push({id:crypto.randomUUID(),type:'text',x:50,y:120,w:200,h:25,text:'Native production annotation',fontSize:14,color:'#17243b',opacity:1}));
     const bytes=await host.exportPdf(host.pages());let binary='';for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i]);
     const saved=await window.pdfEditor.save(btoa(binary),forgedTarget);host.markProjectSaved();return saved;
   }, pdfs[1]);

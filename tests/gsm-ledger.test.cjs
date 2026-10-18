@@ -363,15 +363,9 @@ test('import uses the actual vehicle before the assigned card vehicle', () => {
   assert.equal(local.matchVehicle({ date: '2026-08-01', vehicleText: 'Р999РР716', comment: '', cardNo: '111111' }), null);
   local.headers = ['закреплена']; assert.equal(local.matchVehicle({ date: '2026-08-01', vehicleText: 'Р559НВ716', comment: '6763АА16', cardNo: '111111' }).id, 'b');
 });
-test('existing working databases are never overwritten by a bundled seed', () => {
+test('production packages contain no bundled working database or automatic seed path', () => {
   const source = fs.readFileSync(path.join(root, 'electron/main.js'), 'utf8');
-  const fn = source.slice(source.indexOf('function applyBundledDataSeedOnce()'), source.indexOf('function createWindow()'));
-  for (const existing of ['legacy', 'sections', 'backup-fails']) {
-    let writes = 0;
-    const local = vm.createContext({ settings: {}, prototypeBuild:false, __dirname: '/app/electron', path: path.posix, console: { log() {}, error() {} },
-      getDataDir: () => '/active', getBackupDir: () => '/active/backups', ensureDirs() {}, storage: { readAll: () => ({}), writeAll() { writes++; } },
-      fs: { existsSync: f => f.includes('bundled-data') || existing === 'legacy' && f.endsWith('/data.json') || existing === 'sections' && f.endsWith('/sections'),
-        readdirSync: () => ['records.json'], mkdirSync() {}, writeFileSync() { throw Error('disk full'); }, readFileSync: () => '{}' } });
-    vm.runInContext(fn + 'applyBundledDataSeedOnce()', local); assert.equal(writes, 0, existing);
-  }
+  const metadata = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  assert.doesNotMatch(source, /applyBundledDataSeedOnce|bundled-data|data-2\.0\.57\.json/);
+  assert.equal(metadata.build.files.some(pattern => pattern.includes('bundled-data')), false);
 });

@@ -47,6 +47,22 @@
 .gsm-manual-duplicate input { width: auto; margin-top: 4px; }
 #genericModal:has(.gsm-manual-review) .modal, #genericModal:has(#fpe_date) .modal { width: calc(100vw - 32px); background: var(--bg2); border-radius: 8px; }
 .gsm-manual-review select { width: 100%; min-width: 250px; padding: 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg2); color: var(--text); font: inherit; }
+.gsm-statement-grid .gsm-table { min-width: 1210px; table-layout: fixed; }
+.gsm-statement-grid th:nth-child(1) { width: 140px; }
+.gsm-statement-grid th:nth-child(2) { width: 160px; }
+.gsm-statement-grid th:nth-child(3) { width: 155px; }
+.gsm-statement-grid th:nth-child(4) { width: 100px; }
+.gsm-statement-grid th:nth-child(5), .gsm-statement-grid th:nth-child(6) { width: 95px; }
+.gsm-statement-grid th:nth-child(7) { width: 245px; }
+.gsm-statement-grid th:nth-child(8) { width: 180px; }
+.gsm-statement-grid td { padding: 8px 6px; }
+.gsm-statement-grid input, .gsm-statement-grid select { box-sizing: border-box; width: 100%; min-width: 0; padding: 7px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg2); color: var(--text); font: inherit; }
+.gsm-statement-grid input[type="number"] { text-align: right; }
+.gsm-statement-actions { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+.gsm-statement-dirty td { background: var(--bg3); }
+.gsm-statement-grid [data-row-error] { margin-top: 6px; font-size: 12px; }
+.gsm-journal-receipts { margin-top: 20px; }
+.gsm-journal-receipts summary { cursor: pointer; padding: 10px 0; font-size: 13px; }
 .gsm-cross, .gsm-cross small { color: #b96818; }
 .gsm-error { color: var(--red, #bb263c); }
 .gsm-status { padding: 8px 0; font-size: 13px; }

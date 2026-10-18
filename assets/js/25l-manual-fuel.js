@@ -216,3 +216,174 @@ async function gsmManualCommit() {
     if (!gsmManualPending) renderFuelPurchases();
   }
 }
+
+const gsmStatementDrafts = new Map();
+let gsmStatementPending = null, gsmStatementSaving = false;
+function gsmStatementLinked(db, p) {
+  const records = db.records || [], vehicle = (db.vehicles || []).find(v => v.id === p.vehicleId);
+  const direct = records.find(r => r.id === p.recordId && r.vehicleId === p.vehicleId && r.date === p.date);
+  if (direct) return direct;
+  const grade = gsmGrade(p.grade || p.product, vehicle && gsmVehicleGrade(vehicle));
+  const candidates = records.filter(r => r.vehicleId === p.vehicleId && r.date === p.date && recordFuelGrade(r, vehicle) === grade);
+  return candidates.length === 1 ? candidates[0] : null;
+}
+function gsmStatementPlan(db, id, changes) {
+  const original = (db.fuelPurchases || []).find(p => p.id === id && !p.deleted);
+  if (!original) throw Error('Строка выписки больше не существует');
+  const date = changes.date, qty = Number(changes.qty), grade = changes.grade, vehicleId = changes.vehicleId;
+  const sum = changes.sum === '' || changes.sum == null ? null : Number(changes.sum);
+  if (!gsmValidDate(date)) throw Error('Укажите правильную дату');
+  if ((db.fuelPeriods || []).some(p => p.closed && [String(original.date || '').slice(0, 7), date.slice(0, 7)].includes(p.month))) throw Error('Месяц закрыт для изменения');
+  if (!Number.isFinite(qty) || qty <= 0 || Math.abs(qty - fpRound(qty)) > 0.000001) throw Error('Укажите положительные литры, до двух знаков после запятой');
+  if (sum != null && (!Number.isFinite(sum) || sum < 0)) throw Error('Сумма должна быть неотрицательной');
+  if (!FP_GRADES.includes(grade)) throw Error('Выберите вид топлива');
+  const cardNo = changes.cardNo ?? original.cardNo;
+  const problem = gsmManualRecipientError(db, vehicleId, cardNo, date, grade);
+  if (problem) throw Error(problem);
+  const owner = gsmCardAt(db, cardNo, date);
+  const sameDate = date === original.date && gsmCardKey(cardNo) === gsmCardKey(original.cardNo);
+  const org = sameDate && original.sourceOrg || owner.org || changes.sourceOrg || original.sourceOrg || (original.manual && (db.vehicles || []).find(v => v.id === vehicleId)?.org);
+  if (!org || gsmOrgKey(org) === gsmOrgKey(GSM_UNKNOWN_ORG)) throw Error('Не определена организация карты. Укажите её через «Изменить»');
+  const holderId = sameDate && original.cardVehicleId || owner.vehicleId;
+  const holder = (db.vehicles || []).find(v => v.id === holderId), vehicle = (db.vehicles || []).find(v => v.id === vehicleId);
+  if (holder && holder.id !== vehicleId) {
+    const objectKey = v => String(v.object || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('ru');
+    if (!objectKey(holder) || !objectKey(vehicle) || objectKey(holder) !== objectKey(vehicle)) throw Error('Карта и машина должны относиться к одному объекту');
+  }
+  const next = JSON.parse(JSON.stringify(db)), p = next.fuelPurchases.find(p => p.id === id);
+  const previous = gsmStatementLinked(next, p);
+  const samePosting = previous && p.vehicleId === vehicleId && p.date === date && gsmGrade(p.grade || p.product, gsmVehicleGrade(vehicle)) === grade;
+  const choices = [];
+  // Не переписываем ручной журнал при подтверждении уже учтённой операции.
+  if (samePosting) choices.push({ value: 'keep:' + previous.id, label: 'Сохранить связь с журналом; изменить только разницу литров и суммы' });
+  else {
+    if (previous) {
+      if ((+previous.fuelIssued || 0) + 0.011 < +p.qty) throw Error('В старой строке журнала меньше литров, чем в покупке. Сначала проверьте эту строку');
+      previous.fuelIssued = fpRound((+previous.fuelIssued || 0) - (+p.qty || 0));
+      if (p.sum != null && previous.fuelSum != null) previous.fuelSum = Math.max(0, fpRound(previous.fuelSum - p.sum));
+    }
+    p.recordId = null;
+    choices.push({ value: 'new', label: 'Создать отдельную выдачу без пробега' });
+    const remaining = next.fuelPurchases.filter(x => x.id !== id && !x.deleted);
+    const candidates = (next.records || []).filter(r => r.vehicleId === vehicleId && r.date === date && recordFuelGrade(r, vehicle) === grade);
+    candidates.forEach(r => {
+      const linkedQty = fpRound(remaining.filter(x => gsmStatementLinked(next, x)?.id === r.id).reduce((s, x) => s + (+x.qty || 0), 0));
+      const manualQty = fpRound((+r.fuelIssued || 0) - linkedQty);
+      if (Math.abs(manualQty - qty) < 0.011) choices.push({ value: 'link:' + r.id, label: 'Связать с уже выданными ' + fpNum(qty) + ' л; повторно не добавлять' });
+      else if (Math.abs(manualQty) < 0.011) choices.push({ value: 'add:' + r.id, label: 'Добавить ' + fpNum(qty) + ' л в журнал этой даты' });
+    });
+  }
+  Object.assign(p, { date, qty: fpRound(qty), sum: sum == null ? null : fpRound(sum), grade, vehicleId, cardNo, sourceOrg: org,
+    sourceProvider: sameDate && original.sourceProvider || owner.provider || '', cardVehicleId: holderId || '',
+    price: sum == null ? null : fpRound(sum / qty), statementReviewed: true });
+  return { id, original: { ...original }, next, choices, mode: choices.length === 2 ? choices[1].value : choices[0].value, fingerprint: gsmManualFingerprint(db) };
+}
+function gsmStatementApply(db, plan) {
+  if (gsmManualFingerprint(db) !== plan.fingerprint) throw Error('База изменилась. Проверьте строку выписки заново');
+  if (!plan.choices.some(c => c.value === plan.mode)) throw Error('Выберите запись журнала');
+  const next = JSON.parse(JSON.stringify(plan.next)), p = next.fuelPurchases.find(p => p.id === plan.id);
+  let rec = plan.mode === 'new' ? null : next.records.find(r => r.id === plan.mode.slice(plan.mode.indexOf(':') + 1));
+  if (!rec) {
+    rec = { id: 'r_statement_' + gsmManualId(), vehicleId: p.vehicleId, date: p.date, fuelGrade: p.grade, km: 0, fuelIssued: 0, note: '' };
+    (next.records || (next.records = [])).push(rec);
+  }
+  if (plan.mode.startsWith('keep:')) {
+    const delta = fpRound(p.qty - plan.original.qty);
+    if ((+rec.fuelIssued || 0) + delta < -0.011) throw Error('После правки литры журнала станут отрицательными. Проверьте журнал');
+    if (delta) rec.fuelIssued = fpRound((+rec.fuelIssued || 0) + delta);
+    if ((p.sum ?? null) !== (plan.original.sum ?? null)) rec.fuelSum = Math.max(0, fpRound((+rec.fuelSum || 0) + (+p.sum || 0) - (+plan.original.sum || 0)));
+  } else if (!plan.mode.startsWith('link:')) {
+    rec.fuelIssued = fpRound((+rec.fuelIssued || 0) + p.qty);
+    if (p.sum != null) rec.fuelSum = fpRound((+rec.fuelSum || 0) + p.sum);
+  }
+  p.recordId = rec.id; p.editedAt = new Date().toISOString();
+  return next;
+}
+function gsmStatementUpdate(id, field, value) {
+  if (gsmStatementSaving) return;
+  const p = fpById(id); if (!p) return;
+  if (!gsmStatementDrafts.has(id)) gsmStatementDrafts.set(id, { original: JSON.stringify(p), values: {} });
+  gsmStatementDrafts.get(id).values[field] = value;
+  const row = [...document.querySelectorAll('[data-purchase-id]')].find(el => el.dataset.purchaseId === id);
+  if (row) { row.classList.add('gsm-statement-dirty'); row.querySelector('[data-post]').disabled = false; row.querySelector('[data-row-error]').textContent = ''; }
+}
+function gsmStatementRow(p) {
+  const row = { ...p, ...gsmStatementDrafts.get(p.id)?.values }, linked = gsmStatementLinked(data, p);
+  const owner = gsmCardAt(data, p.cardNo, p.date), org = p.sourceOrg || owner.org || GSM_UNKNOWN_ORG;
+  const closed = fuelMonthClosed(p.date), disabled = closed || gsmStatementSaving ? ' disabled' : '';
+  const field = (name, tag, attrs, content) => '<' + tag + ' data-field="' + name + '" aria-label="' + fpEsc({ date: 'Дата операции', grade: 'Топливо операции', qty: 'Литры операции', sum: 'Сумма операции', vehicleId: 'Заправленная машина' }[name]) + '" ' + attrs + disabled +
+    ' on' + (tag === 'select' ? 'change' : 'input') + '="gsmStatementUpdate(' + gsmArg(p.id) + ',' + gsmArg(name) + ',this.value)">' + (tag === 'select' ? content + '</select>' : '');
+  const vehicles = (data.vehicles || []).slice().sort((a, b) => fpVehicleTitle(a).localeCompare(fpVehicleTitle(b), 'ru'));
+  return '<tr data-purchase-id="' + fpEsc(p.id) + '"' + (gsmStatementDrafts.has(p.id) ? ' class="gsm-statement-dirty"' : '') + '><td>' + field('date', 'input', 'type="date" value="' + fpEsc(row.date) + '"') + '<small>' + fpEsc(p.time || '') + '</small></td>' +
+    '<td>' + fpEsc(p.cardNo || 'Без карты') + '<small>' + fpEsc(org) + '</small><small>' + fpEsc(p.sourceProvider || owner.provider || '') + '</small></td>' +
+    '<td>' + fpEsc(p.vehicleText || fpVehicleTitle(gsmVehicle(p.cardVehicleId || owner.vehicleId))) + '<small>' + fpEsc(fpPlace(p)) + '</small></td>' +
+    '<td>' + field('grade', 'select', '', '<option value="">Выберите</option>' + [...new Set([...FP_GRADES, row.grade].filter(Boolean))].map(g => '<option' + (g === row.grade ? ' selected' : '') + '>' + fpEsc(g) + '</option>').join('')) + '</td>' +
+    '<td>' + field('qty', 'input', 'type="number" min="0.01" step="0.01" value="' + fpEsc(row.qty) + '"') + '</td>' +
+    '<td>' + field('sum', 'input', 'type="number" min="0" step="0.01" value="' + fpEsc(row.sum ?? '') + '"') + '</td>' +
+    '<td>' + field('vehicleId', 'select', '', '<option value="">Выберите машину</option>' + vehicles.map(v => '<option value="' + fpEsc(v.id) + '"' + (v.id === row.vehicleId ? ' selected' : '') + '>' + fpEsc(fpVehicleTitle(v) + (v.object ? ' · ' + v.object : '')) + '</option>').join('')) + '</td>' +
+    '<td><span class="' + (linked ? 'gsm-ok' : 'gsm-error') + '">' + (closed ? 'Месяц закрыт' : linked ? 'В журнале' : 'Не заправлено') + '</span>' +
+    '<div class="gsm-statement-actions"><button data-post class="btn btn-primary btn-sm" onclick="gsmStatementReview(' + gsmArg(p.id) + ')"' + disabled + '>Заправить</button>' +
+    '<button class="btn btn-ghost btn-sm" onclick="gsmStatementEdit(' + gsmArg(p.id) + ')"' + disabled + '>Изменить</button></div><div data-row-error class="gsm-error" role="alert"></div></td></tr>';
+}
+function gsmStatementHtml(ledger) {
+  const purchases = fpLive().filter(p => {
+    const owner = gsmCardAt(data, p.cardNo, p.date);
+    return fpInMonth(p) && gsmVisible({ org: p.sourceOrg || owner.org || (p.manual && gsmVehicle(p.vehicleId)?.org) || GSM_UNKNOWN_ORG, grade: gsmGrade(p.grade || p.product) });
+  }).sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.time || '').localeCompare(String(b.time || '')));
+  const manual = ledger.receipts.filter(p => !p.purchaseId && gsmVisible(p));
+  return '<div class="gsm-section-title" id="gsmReceiptOperations"><h3>Загруженная выписка <span>' + purchases.length + ' операций · ' + fpNum(purchases.reduce((s, p) => s + (+p.qty || 0), 0)) + ' л</span></h3>' +
+    '<div class="gsm-actions"><button class="btn btn-ghost" onclick="gsmOpenStatement()">Все заправки</button><button class="btn btn-ghost" onclick="gsmAddReceipt()">Добавить заправку</button></div></div>' +
+    '<div class="gsm-statement-grid">' + gsmTable(['Дата / время', 'Карта / организация', 'ТС в выписке / АЗС', 'Топливо', 'Литры', 'Сумма, ₽', 'Заправленная машина', 'Статус / действия'], purchases.map(gsmStatementRow)) + '</div>' +
+    (manual.length ? '<details class="gsm-journal-receipts"><summary>Ручные заправки журнала: ' + manual.length + ' · ' + fpNum(manual.reduce((s, p) => s + p.qty, 0)) + ' л</summary>' +
+      gsmTable(['Дата', 'Машина', 'Организация', 'Топливо', 'Литры', ''], manual.map(p => '<tr>' + gsmCell(fmtDate(p.date)) + gsmCell(fpVehicleTitle(gsmVehicle(p.vehicleId))) + gsmCell(p.org) + gsmCell(p.grade) + gsmCell(p.qty, true) +
+        '<td><button class="btn btn-ghost btn-sm" onclick="gsmEditRecord(' + gsmArg(p.recordId) + ')">Изменить</button></td></tr>')) + '</details>' : '');
+}
+function gsmOpenStatement() {
+  fpView = 'receipts'; fpMonth = 'all'; gsmOrg = ''; gsmFuel = '';
+  closeModal('fuelImportReportModal'); switchSection('fuelPurchases');
+}
+function gsmStatementEdit(id) {
+  fpEdit(id);
+  const draft = gsmStatementDrafts.get(id);
+  if (!draft || !document.getElementById('genericModal')?.classList.contains('open')) return;
+  Object.entries(draft.values).forEach(([key, value]) => {
+    const input = document.getElementById('fpe_' + (key === 'vehicleId' ? 'vehicle' : key));
+    if (input) input.value = key === 'date' ? fmtDate(value) : value;
+  });
+}
+function gsmStatementReview(id) {
+  if (gsmStatementSaving) return;
+  const row = [...document.querySelectorAll('[data-purchase-id]')].find(el => el.dataset.purchaseId === id);
+  try {
+    const p = fpById(id), draft = gsmStatementDrafts.get(id);
+    if (draft && draft.original !== JSON.stringify(p)) throw Error('Строка выписки изменилась. Обновите её перед правкой');
+    const plan = gsmStatementPlan(data, id, { ...p, ...draft?.values }), after = plan.next.fuelPurchases.find(p => p.id === id);
+    gsmStatementPending = plan;
+    openGenericModal('Заправить машину из выписки', '<div class="gsm-manual-review">' +
+      gsmTable(['Дата', 'Машина', 'Топливо', 'Литры', 'Организация карты'], ['<tr>' + gsmCell(fmtDate(after.date)) + gsmCell(fpVehicleTitle(gsmVehicle(after.vehicleId))) + gsmCell(after.grade) + gsmCell(after.qty, true) + gsmCell(after.sourceOrg) + '</tr>']) +
+      (plan.original.vehicleId && plan.original.vehicleId !== after.vehicleId ? '<p>Перенос с ' + fpEsc(fpVehicleTitle(gsmVehicle(plan.original.vehicleId))) + ': старые литры снимаются, новые записываются выбранной машине.</p>' : '') +
+      '<label>Запись в журнал <select aria-label="Запись заправки в журнал" onchange="gsmStatementPending.mode=this.value">' + plan.choices.map(c => '<option value="' + fpEsc(c.value) + '"' + (c.value === plan.mode ? ' selected' : '') + '>' + fpEsc(c.label) + '</option>').join('') + '</select></label>' +
+      '<div id="gsmStatementError" class="gsm-status gsm-error" role="alert"></div><div class="gsm-actions"><button class="btn btn-ghost" onclick="closeModal(\'genericModal\')">Назад</button>' +
+      '<button id="gsmStatementCommit" class="btn btn-primary" onclick="gsmStatementCommit()">Заправить</button></div></div>', 1000);
+  } catch (e) { if (row) row.querySelector('[data-row-error]').textContent = e.message; }
+}
+async function gsmStatementCommit() {
+  if (gsmStatementSaving || !gsmStatementPending) return;
+  const error = document.getElementById('gsmStatementError');
+  let before;
+  try {
+    const next = gsmStatementApply(data, gsmStatementPending); before = data;
+    gsmStatementSaving = true; document.getElementById('gsmStatementCommit').disabled = true;
+    data = next; rebuildIndex();
+    if (!await saveData(data, { noMerge: true })) {
+      data = before; rebuildIndex(); error.textContent = 'Не записано. Изменения в строке сохранены; проверьте соединение и повторите.'; return;
+    }
+    gsmStatementDrafts.delete(gsmStatementPending.id); gsmStatementPending = null;
+    closeModal('genericModal'); showToast('Заправка записана в журнал и учтена в акте');
+  } catch (e) { if (before) { data = before; rebuildIndex(); } error.textContent = e.message; }
+  finally {
+    gsmStatementSaving = false;
+    const button = document.getElementById('gsmStatementCommit'); if (button) button.disabled = false;
+    if (!gsmStatementPending) renderFuelPurchases();
+  }
+}

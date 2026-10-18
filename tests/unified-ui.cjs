@@ -71,18 +71,18 @@ test('dispatch form saves an assignment and refuses an overlapping asset and dri
 
 test('failed workflow save keeps entered values and retry creates one task with history',async()=>{
  await page.evaluate(()=>{wfOpenTab('opsTasks');wfEdit('opsTasks');window.__reject=true;});
- await page.locator('#wf_title').fill('Проверка прототипа');
+ await page.locator('#wf_title').fill('Проверка программы');
  await page.locator('#wf_owner').fill('Тестовый диспетчер');
  await page.locator('#wf_due').fill('2026-10-19');
  await page.locator('#wfForm button[type=submit]').click();
  await page.waitForFunction(()=>window.__writes===1&&unifiedPendingSaves===0);
- assert.equal(await page.locator('#wf_title').inputValue(),'Проверка прототипа');
+ assert.equal(await page.locator('#wf_title').inputValue(),'Проверка программы');
  assert.equal(await page.evaluate(()=>data.opsTasks.length),0);
  await page.evaluate(()=>window.__reject=false);
  await page.locator('#wfForm button[type=submit]').click();
  await page.waitForFunction(()=>data.opsTasks.length===1&&!document.querySelector('#wfModal.open'));
  const saved=await page.evaluate(()=>JSON.parse(window.__disk));
- assert.equal(saved.opsTasks.length,1);assert.equal(saved.opsTasks[0].title,'Проверка прототипа');assert.ok(saved.auditLog.some(row=>row.section==='opsTasks'&&row.action==='create'));
+ assert.equal(saved.opsTasks.length,1);assert.equal(saved.opsTasks[0].title,'Проверка программы');assert.ok(saved.auditLog.some(row=>row.section==='opsTasks'&&row.action==='create'));
 });
 
 test('rapid repeated record save is one write and navigation cannot redirect an open form',async()=>{

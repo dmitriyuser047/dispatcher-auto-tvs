@@ -649,7 +649,10 @@ function importFuelFromXls(input, mode = 'fuel') {
         return;
       }
       const v = data.vehicles.find(x => x.id === selectedVehicleId);
-      if (v) renderDetail(v);
+      if (activeSection === 'fuelPurchases') {
+        fpView = 'receipts'; fpMonth = 'all'; gsmOrg = ''; gsmFuel = '';
+        renderFuelPurchases();
+      } else if (v) renderDetail(v);
 
       showFuelImportReport({
         importId,
@@ -1199,6 +1202,7 @@ function showFuelImportReport(report) {
         </table>
       </div>
     </div>
+    <div class="gsm-actions"><button class="btn btn-primary" onclick="gsmOpenStatement()">Открыть выписку</button></div>
     ${mergedHtml}
     ${unmatchedHtml}
   `;
