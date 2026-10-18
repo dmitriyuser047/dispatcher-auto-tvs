@@ -3,54 +3,54 @@
 @media screen {
   :root {
     color-scheme: light;
-    --bg: #f5f2f4;
-    --bg2: #fffdff;
-    --bg3: #eee9ed;
-    --bg4: #e3dae1;
-    --accent: #76516b;
-    --accent2: #5f3e56;
-    --green: #16805a;
-    --red: #c83e4d;
-    --text: #352e36;
-    --text2: #625664;
-    --text3: #736676;
-    --border: #e4dbe2;
-    --border2: #cdbdcb;
+    --bg: #f3f5f9;
+    --bg2: #ffffff;
+    --bg3: #edf1f7;
+    --bg4: #e3e9f2;
+    --accent: #2e5bff;
+    --accent2: #2348d6;
+    --green: #17825d;
+    --red: #cc3e4d;
+    --text: #17243b;
+    --text2: #52627a;
+    --text3: #66778f;
+    --border: #dfe5ee;
+    --border2: #ccd5e3;
     --radius: 9px;
-    --shadow: 0 4px 16px #342d3812;
-    --dw-accent-soft: #f0e7ed;
+    --shadow: 0 4px 16px #16274712;
+    --dw-accent-soft: #e9efff;
     --dw-success-soft: #eaf6f0;
     --dw-danger-soft: #fceef0;
-    --dw-hover: #f6eff4;
-    --dw-canvas: #e8e1e7;
-    --dw-button: #76516b;
-    --dw-button-hover: #5f3e56;
+    --dw-hover: #edf1f7;
+    --dw-canvas: #edf1f7;
+    --dw-button: #2e5bff;
+    --dw-button-hover: #2348d6;
     --dw-button-text: #ffffff;
   }
   [data-theme="dark"] {
     color-scheme: dark;
-    --bg: #211c24;
-    --bg2: #2b2430;
-    --bg3: #352c3b;
-    --bg4: #413347;
-    --accent: #cba9c5;
-    --accent2: #dcc1d7;
-    --green: #6bc79e;
-    --red: #f08d99;
-    --text: #eee5ef;
-    --text2: #cfc0d0;
-    --text3: #b7a3bb;
-    --border: #4d3d53;
-    --border2: #66516c;
-    --shadow: 0 5px 20px #180e1c30;
-    --dw-accent-soft: #49334a;
+    --bg: #101722;
+    --bg2: #172130;
+    --bg3: #1f2c3e;
+    --bg4: #2b3b50;
+    --accent: #7898ff;
+    --accent2: #6488f6;
+    --green: #5ac79d;
+    --red: #f18390;
+    --text: #e8eef8;
+    --text2: #b0bed2;
+    --text3: #8e9fb7;
+    --border: #2b394d;
+    --border2: #3a4c65;
+    --shadow: 0 5px 20px #101b2d30;
+    --dw-accent-soft: #25365b;
     --dw-success-soft: #1d3b32;
-    --dw-danger-soft: #452c35;
-    --dw-hover: #3a2c3f;
-    --dw-canvas: #19151c;
-    --dw-button: #cba9c5;
-    --dw-button-hover: #dcc1d7;
-    --dw-button-text: #211c24;
+    --dw-danger-soft: color-mix(in srgb, var(--red) 14%, var(--bg2));
+    --dw-hover: #1f2c3e;
+    --dw-canvas: #101b2d;
+    --dw-button: #7898ff;
+    --dw-button-hover: #6488f6;
+    --dw-button-text: #101b2d;
   }
   html, body { background: var(--bg); color: var(--text); }
   body { font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif; font-size: 13px; line-height: 1.5; }
@@ -131,13 +131,13 @@
   .pages-panel { width: 144px; padding: 16px 14px; background: var(--bg2); border-right-color: var(--border); }
   .page-thumb { margin-bottom: 14px; padding: 4px; border-radius: 5px; border: 1px solid var(--border2); background: var(--bg3); }
   .page-thumb.active { border: 2px solid var(--accent); padding: 3px; background: var(--dw-accent-soft); }
-  .page-thumb-num { padding: 2px 5px; font-size: 9px; right: 6px; bottom: 6px; background: #342d38c9; border-radius: 3px; }
+  .page-thumb-num { padding: 2px 5px; font-size: 9px; right: 6px; bottom: 6px; background: #13223ec9; border-radius: 3px; }
   .canvas-area { min-width: 0; min-height: 0; background: var(--dw-canvas); padding: 28px; }
-  .page-container { background: #fff; box-shadow: 0 4px 18px #342d381f; }
+  .page-container { background: #fff; box-shadow: 0 4px 18px #1627471f; }
   .page-container canvas { background: transparent; }
   /* A selected overlay is painted over white paper in either application theme. */
-  .text-block.selected { color: #352e36; border-color: #76516b; }
-  .text-block.editing { color: #000; background: #fffffff2; border-color: #76516b; }
+  .text-block.selected { color: #17243b; border-color: #2e5bff; }
+  .text-block.editing { color: #000; background: #fffffff2; border-color: #2e5bff; }
   .zoom-controls { gap: 5px; }
   .zoom-btn { width: 30px; height: 30px; border-color: var(--border2); border-radius: 5px; color: var(--text2); background: var(--bg2); font-size: 15px; }
   .zoom-btn:hover { background: var(--bg3); color: var(--accent); }

@@ -1,89 +1,89 @@
-/* Dispatcher 3.0 workspace. Loaded after the legacy section styles.
-   Palette: Stone and Plum. Keep section DOM, accounting column widths,
+/* Shared workspace. Loaded after the legacy section styles.
+   Palette: restored 3.5.1 blue and slate. Keep section DOM, accounting column widths,
    and inline event handlers intact. */
 :root {
   color-scheme: light;
-  --bg: #f5f2f4;
-  --bg2: #fffdff;
-  --bg3: #eee9ed;
-  --bg4: #e3dae1;
-  --surface: #fffdff;
-  --surface2: #f5f2f4;
-  --card: #fffdff;
-  --text: #352e36;
-  --text1: #352e36;
-  --text2: #625664;
-  --text3: #736676;
-  --border: #e4dbe2;
-  --border2: #cdbdcb;
-  --accent: #76516b;
-  --accent2: #5f3e56;
-  --accent-light: #76516b;
+  --bg: #f3f5f9;
+  --bg2: #ffffff;
+  --bg3: #edf1f7;
+  --bg4: #e3e9f2;
+  --surface: #ffffff;
+  --surface2: #ffffff;
+  --card: #ffffff;
+  --text: #17243b;
+  --text1: #17243b;
+  --text2: #52627a;
+  --text3: #66778f;
+  --border: #dfe5ee;
+  --border2: #ccd5e3;
+  --accent: #2e5bff;
+  --accent2: #2348d6;
+  --accent-light: #244ad2;
   --accent-contrast: #ffffff;
-  --green: #34704d;
-  --yellow: #9a5c1b;
-  --red: #af3f4b;
+  --green: #17825d;
+  --yellow: #af6b0e;
+  --red: #cc3e4d;
   --radius: 10px;
-  --glass-bg: #fffdff;
-  --glass-border: #e4dbe2;
+  --glass-bg: #ffffff;
+  --glass-border: #dfe5ee;
   --glass-highlight: none;
   --glass-shadow: none;
   --shadow: none;
-  --mica-bg: #f5f2f4;
+  --mica-bg: #f3f5f9;
   --ws-rail-width: 216px;
-  --ws-rail: #342d38;
-  --ws-rail-muted: #c1aec2;
-  --ws-rail-text: #e8dfe9;
-  --ws-rail-strong: #fff4ff;
-  --ws-rail-active: #76516b;
-  --ws-rail-hover: #463a49;
-  --ws-rail-border: #56455a;
-  --ws-rail-avatar: #534258;
-  --ws-accent-soft: #f0e7ed;
-  --ws-success-soft: #eaf2e9;
-  --ws-warning-soft: #fbf0dc;
-  --ws-danger-soft: #f9e8e9;
-  --ws-hover: #f6eff4;
+  --ws-rail: #13223e;
+  --ws-rail-muted: #a8bdd8;
+  --ws-rail-text: #e0eafb;
+  --ws-rail-strong: #f5f8ff;
+  --ws-rail-active: #2e5bff;
+  --ws-rail-hover: #203653;
+  --ws-rail-border: #304560;
+  --ws-rail-avatar: #2b4264;
+  --ws-accent-soft: #e9efff;
+  --ws-success-soft: #eaf6f0;
+  --ws-warning-soft: #fff5e3;
+  --ws-danger-soft: #fceef0;
+  --ws-hover: #edf1f7;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #211c24;
-  --bg2: #2b2430;
-  --bg3: #352c3b;
-  --bg4: #413347;
-  --surface: #2b2430;
-  --surface2: #352c3b;
-  --card: #2b2430;
-  --text: #eee5ef;
-  --text1: #eee5ef;
-  --text2: #cfc0d0;
-  --text3: #b7a3bb;
-  --border: #4d3d53;
-  --border2: #66516c;
-  --accent: #cba9c5;
-  --accent2: #dcc1d7;
-  --accent-light: #dcc1d7;
-  --accent-contrast: #211c24;
-  --green: #6bc79e;
-  --yellow: #e8b56e;
-  --red: #f08d99;
-  --glass-bg: #2b2430;
-  --glass-border: #4d3d53;
-  --mica-bg: #211c24;
-  --ws-rail: #1c1720;
-  --ws-rail-hover: #382c3e;
-  --ws-rail-border: #45334d;
-  --ws-rail-avatar: #44324c;
-  --ws-accent-soft: #49334a;
+  --bg: #101722;
+  --bg2: #172130;
+  --bg3: #1f2c3e;
+  --bg4: #2b3b50;
+  --surface: #172130;
+  --surface2: #172130;
+  --card: #172130;
+  --text: #e8eef8;
+  --text1: #e8eef8;
+  --text2: #b0bed2;
+  --text3: #8e9fb7;
+  --border: #2b394d;
+  --border2: #3a4c65;
+  --accent: #7898ff;
+  --accent2: #6488f6;
+  --accent-light: #9bb2ff;
+  --accent-contrast: #101b2d;
+  --green: #5ac79d;
+  --yellow: #e8b967;
+  --red: #f18390;
+  --glass-bg: #172130;
+  --glass-border: #2b394d;
+  --mica-bg: #101722;
+  --ws-rail: #101b2d;
+  --ws-rail-hover: #1f2c3e;
+  --ws-rail-border: #2b394d;
+  --ws-rail-avatar: #2b3b50;
+  --ws-accent-soft: #25365b;
   --ws-success-soft: #1d3b32;
-  --ws-warning-soft: #423525;
+  --ws-warning-soft: #403725;
   --ws-danger-soft: #452c35;
-  --ws-hover: #3a2c3f;
+  --ws-hover: #1f2c3e;
 }
 
 html { background: var(--bg); }
-#globalToast { background: var(--text); color: var(--bg2); border: 1px solid var(--text2); border-radius: 9px; font-size: 13px; padding: 13px 18px; box-shadow: 0 8px 24px #211c2424; max-width: min(680px, calc(100vw - 40px)); white-space: pre-line; overflow-wrap: anywhere; }
+#globalToast { background: var(--text); color: var(--bg2); border: 1px solid var(--text2); border-radius: 9px; font-size: 13px; padding: 13px 18px; box-shadow: 0 8px 24px #10172224; max-width: min(680px, calc(100vw - 40px)); white-space: pre-line; overflow-wrap: anywhere; }
 body {
   display: grid;
   grid-template-columns: var(--ws-rail-width) minmax(0, 1fr);
@@ -375,7 +375,7 @@ label { font-size: 11px; color: var(--text2); font-weight: 550; }
 .fsel { border-color: var(--border2); border-radius: 6px; background-color: var(--bg2); font-size: 11px; min-height: 33px; padding-top: 7px; padding-bottom: 7px; appearance: auto; -webkit-appearance: auto; }
 .fsel.active { color: var(--accent); background: var(--ws-accent-soft); border-color: var(--accent); }
 .fsel-reset { min-height: 33px; font-size: 11px; color: var(--text2); border-radius: 6px; }
-.dropdown-menu, .sdrop-panel, .cal-popup { background: var(--bg2); border: 1px solid var(--border2); border-radius: 8px; box-shadow: 0 8px 24px #211c2414; }
+.dropdown-menu, .sdrop-panel, .cal-popup { background: var(--bg2); border: 1px solid var(--border2); border-radius: 8px; box-shadow: 0 8px 24px #10172214; }
 .dropdown-menu { padding: 5px; }
 .dropdown-item { font-size: 12px; padding: 9px 10px; }
 .dropdown-item:hover, .sdrop-item:hover { background: var(--ws-accent-soft); }
@@ -519,7 +519,7 @@ table tfoot td, table tfoot th { background: var(--bg3); color: var(--text); bor
 .gsm-manual-total { font-size: 11px; }
 
 /* Dialogs and settings follow the same surface system. */
-.modal-overlay { background: #211c2468; }
+.modal-overlay { background: #10172268; }
 .modal { display: flex; flex-direction: column; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 24px; max-height: calc(100vh - 48px); overflow: hidden; }
 .modal-header { flex-shrink: 0; margin-bottom: 22px; padding-bottom: 15px; border-bottom: 1px solid var(--border); gap: 12px; }
 .modal-title { font-size: 17px; font-weight: 650; letter-spacing: -.02em; color: var(--text); }

@@ -19,7 +19,7 @@ beforeEach(async()=>{
 });
 afterEach(async()=>{await page?.close();assert.deepEqual(errors,[]);});
 
-test('all 3.5 sections work in the shared navigation and both Stone and Plum themes at supported sizes',async()=>{
+test('all 3.5 sections work in the shared navigation and both restored 3.5.1 themes at supported sizes',async()=>{
  for(const width of [1280,960]){
   await page.setViewportSize({width,height:width===960?700:900});
   for(const theme of ['light','dark']){
@@ -27,7 +27,7 @@ test('all 3.5 sections work in the shared navigation and both Stone and Plum the
    for(const section of ['home','dispatch','workflows','vehicles','generators','tanks','fuelPurchases','fuelReport','toSchedule','reestr','finances','contragents','reports','printForms']){
     await page.locator('#unifiedNav [data-section="'+section+'"]').click();
     const state=await page.evaluate(()=>({active:activeSection,nav:document.querySelector('#unifiedNav [aria-current="page"]')?.dataset.section,overflow:document.documentElement.scrollWidth>innerWidth,accent:getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()}));
-    assert.equal(state.active,section);assert.equal(state.nav,section);assert.equal(state.overflow,false);assert.equal(state.accent,theme==='dark'?'#cba9c5':'#76516b');
+    assert.equal(state.active,section);assert.equal(state.nav,section);assert.equal(state.overflow,false);assert.equal(state.accent,theme==='dark'?'#7898ff':'#2e5bff');
    }
   }
  }

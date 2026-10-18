@@ -1,6 +1,6 @@
-/* New 3.5 workflows use the established Stone and Plum shell. */
-:root {--xp-ink:var(--text);--xp-hero:#342d38;--xp-soft:var(--ws-accent-soft);--xp-shadow:0 2px 9px #342d3805;}
-[data-theme="dark"] {--xp-hero:#1c1720;--xp-soft:var(--ws-accent-soft);}
+/* Shared navigation and 3.5 workflows use the restored 3.5.1 palette. */
+:root {--xp-ink:var(--text);--xp-hero:#13223e;--xp-soft:var(--ws-accent-soft);--xp-shadow:0 2px 9px #16274705;}
+[data-theme="dark"] {--xp-hero:#101b2d;--xp-soft:var(--ws-accent-soft);}
 .unified-brand-mark {display:grid;place-items:center;flex-shrink:0;width:38px;height:38px;border:1px solid var(--ws-rail-border);border-radius:11px;background:var(--ws-rail-active);font-size:12px;font-weight:700;color:#fff;}
 .workspace-brand strong,.workspace-brand small {display:block;}
 .workspace-brand strong {font-size:16px;font-weight:650;}
@@ -25,9 +25,9 @@ body > header .header-right {flex-wrap:nowrap;}
 .dx-kicker,.dx-hero-copy > p,.dx-date,.dx-hero-bottom,.dx-mode-tag {color:var(--ws-rail-muted);}
 .dx-kicker::before {background:var(--ws-rail-muted);}
 .dx-hero h2 {color:#fff!important;}
-.dx-hero .dx-primary-action {background:#cba9c5;border-color:#cba9c5;color:#211c24;box-shadow:none;}
-.dx-hero .dx-primary-action:hover {background:#dcc1d7;border-color:#dcc1d7;transform:none;}
-.dx-hero .dx-secondary-action {color:#eee5ef;border-color:var(--ws-rail-border);background:transparent;}
+.dx-hero .dx-primary-action {background:#3478f6;border-color:#4b88fa;color:#fff;box-shadow:none;}
+.dx-hero .dx-primary-action:hover {background:#4387ff;border-color:#87b4ff;transform:none;}
+.dx-hero .dx-secondary-action {color:#e0eafb;border-color:var(--ws-rail-border);background:transparent;}
 .dx-mode-tag {border-color:var(--ws-rail-border);}
 .btn-primary,.primary-btn {color:var(--accent-contrast);box-shadow:none;}
 [data-theme="dark"] :is(.btn-primary,.primary-btn) {color:var(--accent-contrast);}
