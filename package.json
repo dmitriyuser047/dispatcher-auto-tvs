@@ -1,13 +1,13 @@
 {
   "name": "dispatcher-tvs-prototype",
-  "version": "3.5.2-prototype.2",
+  "version": "3.5.2-prototype.3",
   "prototype": true,
   "author": "ООО Технрайз Велл Сервис",
   "description": "Диспетчеризация авто группы компаний ООО Технрайз Велл Сервис",
   "main": "electron/main.js",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "test:ui": "node --test --test-concurrency=2 tests/ui-regression.cjs tests/unified-ui.cjs",
+    "test:ui": "node --test --test-concurrency=2 tests/ui-regression.cjs tests/unified-ui.cjs tests/cost-accounting-ui.cjs tests/procurement-ui.cjs",
     "test:electron": "node --test tests/unified-electron.cjs",
     "start": "electron .",
     "build": "node scripts/build-installer.cjs"

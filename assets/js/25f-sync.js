@@ -20,6 +20,7 @@ const SYNC_SECTIONS = [
   'dispatchJobs', 'drivers', 'assetAssignments', 'workOrders', 'opsTasks',
   'assetDocuments', 'fuelMovements', 'parts', 'partMovements', 'shiftReports',
   'connectors', 'auditLog', 'savedViews', 'glonassTrips', 'glonassImports',
+  'costEntries', 'costProfiles', 'procurementOrders', 'procurementRules',
 ];
 const SYNC_NAMES = {
   vehicles: 'машины', records: 'журнал пробега', generators: 'ДЭС', genRecords: 'наработка ДЭС',
@@ -30,6 +31,7 @@ const SYNC_NAMES = {
   dispatchJobs:'заявки', drivers:'сотрудники', assetAssignments:'назначения', workOrders:'заказы на ремонт', opsTasks:'задачи',
   assetDocuments:'документы', fuelMovements:'движения топлива', parts:'запчасти и шины', partMovements:'движения запчастей', shiftReports:'сменные формы',
   connectors:'обмен', auditLog:'история действий', savedViews:'представления', glonassTrips:'исходные рейсы', glonassImports:'импорты ГЛОНАСС',
+  costEntries:'операции стоимости', costProfiles:'ставки стоимости', procurementOrders:'заказы поставщикам', procurementRules:'правила закупок',
 };
 const SYNC_POLL_MS = 20000;
 
@@ -250,6 +252,8 @@ function syncRefreshView(names) {
     else if (activeSection === 'workflows' || activeSection === 'dispatch') renderWorkflows();
     else if (activeSection === 'reports') renderReportsSection();
     else if (activeSection === 'fuelReport') renderFuelReport();
+    else if (activeSection === 'costs') renderCostsSection();
+    else if (activeSection === 'procurement') renderProcurementSection();
     else if (activeSection === 'generators' && typeof renderGeneratorCards === 'function' && !selectedGeneratorId) renderGeneratorCards();
   } catch (e) { console.warn('[sync] перерисовка: ' + e.message); }
 }

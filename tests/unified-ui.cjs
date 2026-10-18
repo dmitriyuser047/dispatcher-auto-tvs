@@ -24,13 +24,35 @@ test('all 3.5 sections work in the shared navigation and both restored 3.5.1 the
   await page.setViewportSize({width,height:width===960?700:900});
   for(const theme of ['light','dark']){
    await page.evaluate(theme=>applyTheme(theme),theme);
-   for(const section of ['home','dispatch','workflows','vehicles','generators','tanks','fuelPurchases','fuelReport','toSchedule','reestr','finances','contragents','reports','printForms']){
+   for(const section of ['home','dispatch','workflows','vehicles','generators','tanks','fuelPurchases','fuelReport','costs','procurement','toSchedule','reestr','finances','contragents','reports','printForms']){
     await page.locator('#unifiedNav [data-section="'+section+'"]').click();
     const state=await page.evaluate(()=>({active:activeSection,nav:document.querySelector('#unifiedNav [aria-current="page"]')?.dataset.section,overflow:document.documentElement.scrollWidth>innerWidth,accent:getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()}));
     assert.equal(state.active,section);assert.equal(state.nav,section);assert.equal(state.overflow,false);assert.equal(state.accent,theme==='dark'?'#7898ff':'#2e5bff');
    }
   }
  }
+});
+
+test('notification preferences preserve input on failure and never write the working database',async()=>{
+ await page.evaluate(()=>{
+  _sync.databaseToken='a'.repeat(64);_sync.access=null;window.__notificationSaves=[];window.__notificationReject=true;window.__notificationTests=0;
+  const state={ok:true,key:'b'.repeat(64),databaseToken:_sync.databaseToken,user:{id:'local',role:'admin'},preferences:{enabled:false,quietEnabled:true,quietStart:'22:00',quietEnd:'08:00'},supported:true,snoozedUntil:0,message:'Пока программа открыта'};
+  window.electronAPI.getNotificationSettings=async()=>structuredClone(state);
+  window.electronAPI.saveNotificationSettings=async payload=>{window.__notificationSaves.push(payload);if(window.__notificationReject)throw Error('Synthetic settings failure');state.preferences=payload.preferences;return{ok:true,preferences:payload.preferences};};
+  window.electronAPI.testNotification=async()=>{window.__notificationTests++;return{ok:true,message:'Synthetic explicit test'};};
+ });
+ await page.locator('#unifiedNav [data-action="notifications"]').click();
+ const form=page.locator('#notificationSettingsForm');await form.waitFor();
+ assert.equal(await form.locator('[name="enabled"]').isChecked(),false);
+ await form.locator('[name="enabled"]').check();await form.locator('[name="quietStart"]').fill('21:30');
+ await form.locator('[type="submit"]').click();
+ await page.waitForFunction(()=>document.querySelector('#notificationSettingsForm [data-notification-status]').textContent.includes('Synthetic settings failure'));
+ assert.equal(await form.locator('[name="enabled"]').isChecked(),true);assert.equal(await form.locator('[name="quietStart"]').inputValue(),'21:30');
+ await page.evaluate(()=>{window.__notificationReject=false;});await form.locator('[type="submit"]').click();
+ await page.waitForFunction(()=>window.__notificationSaves.length===2&&!document.querySelector('#notificationSettingsForm [type="submit"]').disabled);
+ await form.locator('[data-notification-test]').click();await page.waitForFunction(()=>window.__notificationTests===1);
+ assert.equal(await page.evaluate(()=>window.__writes),0);
+ await page.locator('#notificationsModal [aria-label="Закрыть"]').click();assert.equal(await page.locator('#notificationsModal').count(),0);
 });
 
 test('dispatch form saves an assignment and refuses an overlapping asset and driver',async()=>{

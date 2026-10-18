@@ -6,6 +6,7 @@ const CC_SECTIONS = [
   ['ГСМ · Заправки', 'fuelPurchases'], ['ГСМ · Отчёт по топливу', 'fuelReport'],
   ['Реестр', 'reestr'], ['График ТО', 'toSchedule'],
   ['Финансы', 'finances'], ['Контрагенты', 'contragents'], ['Отчёты', 'reports'],
+  ['Стоимость работы · Расходы на километр · Моточас', 'costs'], ['Закупки · Топливо · Запчасти', 'procurement'],
   ['Печатные формы', 'printForms'],
 ];
 let _ccItems = [], _ccIndex = 0;
@@ -19,6 +20,7 @@ function ccBuildItems(query) {
   CC_SECTIONS.forEach(([label, section]) => items.push({ label, detail: 'Раздел', section, score: q && ccNorm(label).includes(q) ? 0 : 3 }));
   items.push({ label: 'Журнал ремонта', detail: 'Раздел', action: () => openRepairsJournal(), score: q && ccNorm('Журнал ремонта').includes(q) ? 0 : 3 });
   items.push({ label: 'Редактор PDF', detail: 'Документы', action: () => openPdfEditor(), score: q && ccNorm('Редактор PDF').includes(q) ? 0 : 3 });
+  items.push({ label: 'Уведомления Windows', detail: 'Настройки напоминаний', action: () => openNotificationSettings(), score: q && ccNorm('Уведомления Windows напоминания').includes(q) ? 0 : 3 });
   const addRows = (rows, kind, section, fields, open) => (rows || []).forEach(row => {
     const label = fields.map(k => row[k]).filter(Boolean).join(' · ');
     const haystack = ccNorm([label, row.note, row.driver, row.object, row.location, row.serial, row.org].join(' '));

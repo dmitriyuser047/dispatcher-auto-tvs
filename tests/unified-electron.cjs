@@ -43,7 +43,7 @@ test('hidden Electron prototype persists synthetic journals, isolates registry s
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(win => win.isVisible())), false);
 
   const first = await page.evaluate(async () => {
-    for (const section of ['home','vehicles','generators','tanks','dispatch','workflows','reestr','toSchedule','repairs','finances','contragents','reports','printForms','fuelReport','fuelPurchases']) switchSection(section);
+    for (const section of ['home','vehicles','generators','tanks','dispatch','workflows','reestr','toSchedule','repairs','finances','costs','procurement','contragents','reports','printForms','fuelReport','fuelPurchases']) switchSection(section);
     const snap = JSON.parse(await window.electronAPI.readSnapshot());
     data.records.push({ id:'native-journal',vehicleId:'A',date:'2026-10-01',km:100,odoStart:1000,odoEnd:1100,fuelIssued:0,fuelActual:10,fuelGrade:'ДТ',driver:'Synthetic driver' });
     const saved = await saveData(data);
@@ -53,6 +53,26 @@ test('hidden Electron prototype persists synthetic journals, isolates registry s
   assert.equal(storage.readAll(dataA).records[0].id, 'native-journal');
   assert.match(first.token, /^[a-f0-9]{64}$/);
   assert.ok(first.identity.endsWith(':'+first.token));
+  const features = await page.evaluate(async () => {
+    data.costEntries.push({id:'native-cost',date:'2026-10-01',assetRef:'v:A',kind:'expense',amount:1000,title:'Synthetic standalone cost',category:'Прочее',independent:true});
+    data.costProfiles.push({id:'native-profile',assetRef:'v:A',salaryRate:5,fuelRate:10,fuelPrice:60});
+    data.parts.push({id:'native-part',name:'Synthetic filter',unit:'шт'});
+    data.procurementRules.push({id:'native-rule',kind:'part',itemId:'native-part',leadDays:3,reserveQty:2,coverDays:7,expectedDaily:null});
+    data.procurementOrders.push({id:'native-order',kind:'part',itemId:'native-part',supplier:'Synthetic supplier',quantity:10,receivedQty:2,stockPostedQty:0,deliveryDate:'2026-10-20',status:'partial',note:''});
+    const saved=await saveData(data);
+    switchSection('costs');switchSection('procurement');
+    const state=await window.electronAPI.getNotificationSettings();
+    const preferences={...state.preferences,enabled:true,quietEnabled:false};
+    const enabled=await window.electronAPI.saveNotificationSettings({key:state.key,preferences});
+    const probe=await window.electronAPI.testNotification({key:state.key});
+    const stale=await window.electronAPI.saveNotificationSettings({key:'0'.repeat(64),preferences});
+    await openNotificationSettings();const modal=!!document.querySelector('#notificationsModal.open');document.getElementById('notificationsModal')?.remove();
+    return {saved,state,enabled,probe,stale,modal};
+  });
+  assert.equal(features.saved,true);assert.equal(features.state.ok,true);assert.equal(features.state.preferences.enabled,false);
+  assert.equal(features.state.supported,false);assert.equal(features.enabled.preferences.enabled,true);assert.equal(features.probe.ok,false);assert.equal(features.probe.code,'test-mode');assert.equal(features.stale.ok,false);assert.equal(features.modal,true);
+  const featureData=storage.readAll(dataA);
+  assert.equal(featureData.costEntries[0].amount,1000);assert.equal(featureData.costProfiles[0].salaryRate,5);assert.equal(featureData.procurementOrders[0].receivedQty,2);assert.equal(featureData.procurementRules[0].reserveQty,2);assert.deepEqual(featureData.partMovements,[]);
   for (const request of ['/electron/main.js','/package.json','/bundled-data/data-2.0.57.json']) assert.equal(await page.evaluate(url => fetch(url).then(res => res.status), request), 403);
 
   // A second process with the same profile exits without running another writer.

@@ -2,20 +2,23 @@
 
 const crypto = require('crypto');
 
-const FINANCIAL_SECTIONS = Object.freeze(['payments', 'budget', 'contragents']);
+const FINANCIAL_SECTIONS = Object.freeze(['payments', 'budget', 'contragents', 'costEntries', 'costProfiles']);
 const DISPATCHER_WRITES = Object.freeze([
   'vehicles', 'records', 'generators', 'genRecords', 'tanks', 'tankIncomes',
   'fuelPurchases', 'fuelImports', 'fuelCards', 'fuelPeriods', 'monthlyFuel',
   'dispatchJobs', 'drivers', 'assetAssignments', 'opsTasks', 'assetDocuments',
   'fuelMovements', 'shiftReports', 'savedViews', 'glonassTrips', 'glonassImports', 'appMeta',
+  'procurementOrders', 'procurementRules',
 ]);
 const MECHANIC_WRITES = Object.freeze([
   'vehicleTo', 'toRecords', 'repairs', 'workOrders', 'opsTasks', 'assetDocuments',
   'parts', 'partMovements', 'shiftReports', 'savedViews', 'appMeta', 'vehicles', 'generators',
+  'procurementOrders', 'procurementRules',
 ]);
 const ACCOUNTANT_WRITES = Object.freeze([
   'payments', 'budget', 'contragents', 'reestrRows', 'savedReestrs',
   'fuelPurchases', 'fuelImports', 'fuelPeriods', 'monthlyFuel', 'opsTasks', 'savedViews', 'appMeta',
+  'costEntries', 'costProfiles', 'procurementOrders', 'procurementRules',
 ]);
 
 const ROLES = Object.freeze({

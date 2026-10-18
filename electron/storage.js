@@ -32,6 +32,7 @@ const SECTIONS = [
   'dispatchJobs', 'drivers', 'assetAssignments', 'workOrders', 'opsTasks',
   'assetDocuments', 'fuelMovements', 'parts', 'partMovements', 'shiftReports',
   'connectors', 'auditLog', 'savedViews', 'glonassTrips', 'glonassImports',
+  'costEntries', 'costProfiles', 'procurementOrders', 'procurementRules',
 ];
 
 const REVISIONS_FILE = 'revisions.json';
@@ -145,6 +146,27 @@ function readRows(dataDir, name) {
 }
 function validateRows(name, rows) {
   if (!Array.isArray(rows) || rows.some(row => !row || typeof row !== 'object' || Array.isArray(row))) throw new Error('Раздел ' + name + ' должен содержать массив объектов');
+}
+
+// The same pure rules protect desktop saves and remote writes. A client cannot
+// bypass the cost/procurement forms by submitting a malformed JSON section.
+function validatePlanningChanges(previous, sections) {
+  const next = { ...previous, ...sections };
+  for (const name of ['costEntries', 'costProfiles']) {
+    if (name in sections) require('../assets/js/45-cost-engine.js').validateSection(name, sections[name], next);
+  }
+  for (const name of ['procurementOrders', 'procurementRules']) {
+    if (!(name in sections)) continue;
+    require('../assets/js/47-procurement-engine.js').validateSection(name, sections[name], next);
+    const oldRows = new Map((previous[name] || []).map(row => [row.id, row]));
+    for (const row of sections[name]) {
+      const old = oldRows.get(row.id);
+      const item = (next[row.kind === 'tank' ? 'tanks' : 'parts'] || []).find(item => item.id === row.itemId);
+      if (item?.archived && (!old || old.kind !== row.kind || old.itemId !== row.itemId)) {
+        throw new Error('Новый заказ или правило нельзя привязать к архивной номенклатуре. Существующие заказы доступны для завершения.');
+      }
+    }
+  }
 }
 
 // Revisions are the commit point. Before that point a failed or interrupted
@@ -297,6 +319,7 @@ function writeAll(dataDir, data, options = {}) {
   if (!data || !Array.isArray(data.vehicles) || !Array.isArray(data.records)) throw new Error('Неполная база: нужны vehicles и records');
   SECTIONS.forEach(n => { if (n in data) validateRows(n, data[n]); });
   const previous = readAll(dataDir);
+  validatePlanningChanges(previous, data);
   checkClosedPeriods(previous, data);
   if (!isSplit(dataDir)) migrate(dataDir);
   const revisions = readRevisions(dataDir);
@@ -352,6 +375,7 @@ function writeSections(dataDir, payload) {
   const revisions = readRevisions(dataDir);
   const conflicts = names.filter(n => (revisions[n] || 0) !== (base[n] || 0));
   if (conflicts.length) return { ok: false, conflicts, revisions, databaseToken: token };
+  validatePlanningChanges(previous, sections);
   checkClosedPeriods(previous, sections);
   const changed = [];
   const pending = {};

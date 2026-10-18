@@ -30,6 +30,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   switchUser:        (idx)       => ipcRenderer.invoke('switch-user', idx),
   chooseDataFolder:  ()          => ipcRenderer.invoke('choose-data-folder'),
   chooseCertificate:()=>ipcRenderer.invoke('choose-certificate'),
+  getNotificationSettings:()=>ipcRenderer.invoke('get-notification-settings'),
+  saveNotificationSettings:payload=>ipcRenderer.invoke('save-notification-settings',payload),
+  snoozeNotifications:payload=>ipcRenderer.invoke('snooze-notifications',payload),
+  submitNotifications:payload=>ipcRenderer.invoke('submit-notifications',payload),
+  testNotification:payload=>ipcRenderer.invoke('test-notification',payload),
+  onNotificationOpen:cb=>{
+    const listener=(_event,target)=>cb(target);
+    ipcRenderer.on('notification-open',listener);
+    return ()=>ipcRenderer.removeListener('notification-open',listener);
+  },
 
   // Окно реестра
   openReestrWindow: (data) => ipcRenderer.invoke('open-reestr-window', data),

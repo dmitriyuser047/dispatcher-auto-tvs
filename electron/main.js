@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, session } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, session, Notification } = require('electron');
 const path    = require('path');
 const fs      = require('fs');
 const os      = require('os');
@@ -10,8 +10,10 @@ const storage = require('./storage');
 const { writeAtomic, validateSettings, databaseIdentity } = require('./settings');
 const { trustedPage, canInvoke, staticFile } = require('./security');
 const { pathToFileURL } = require('node:url');
+const { createNotificationService, bindingKey } = require('./notifications');
 const prototypeBuild = require('../package.json').prototype === true;
 const hiddenTest = app.commandLine.hasSwitch('tvs-test-hidden');
+app.setAppUserModelId(prototypeBuild ? 'com.tvs.dispatcher.prototype' : 'com.tvs.dispatcher');
 const requestedProfile = app.commandLine.getSwitchValue('user-data-dir');
 if (requestedProfile) app.setPath('userData', path.resolve(requestedProfile));
 else if (prototypeBuild) app.setPath('userData', path.join(app.getPath('appData'), 'dispatcher-tvs-prototype'));
@@ -67,9 +69,12 @@ function configureNetwork(s){
 try{configureNetwork(settings);}catch(e){networkConfigError=e.message;server.configureTransport({protocol:'https:'});console.error('[network] '+e.message);}
 
 const dataBindings = new Map();
+let notificationService = null;
 const settingsIdentity = () => databaseIdentity(settings);
-function bindData(event, token) {
-  dataBindings.set(event.sender.id, { identity:settingsIdentity(), databaseToken:token || null });
+function bindData(event, token, access = null) {
+  const previous=dataBindings.get(event.sender.id);
+  if(previous&&(previous.identity!==settingsIdentity()||previous.databaseToken!==(token||null)||JSON.stringify(previous.notificationAccess)!==JSON.stringify(access)))notificationService?.invalidate();
+  dataBindings.set(event.sender.id, { identity:settingsIdentity(), databaseToken:token || null, notificationAccess:access });
 }
 function assertDataBinding(event, token) {
   const binding = dataBindings.get(event.sender.id);
@@ -90,6 +95,7 @@ function queueSettings(next) {
     if (changed && server.isRunning()) await server.stop();
     saveSettings(checked);
     settings = checked;
+    notificationService?.invalidate();
     configureNetwork(settings);
     if (settings.networkMode !== 'client') ensureDirs();
     if (restart && restartConfiguredServer) {
@@ -269,6 +275,57 @@ app.whenReady().then(() => {
 
   function isClientMode() { return settings.networkMode === 'client' && settings.remoteHost; }
 
+  async function notificationContext(event) {
+    if(event.sender.isDestroyed())throw Error('Окно закрыто');
+    const binding=assertDataBinding(event), identity=settingsIdentity();
+    let access=binding.notificationAccess;
+    if(isClientMode()) {
+      if(networkConfigError)throw Error('Сервер недоступен. Напоминания приостановлены.');
+      const ping=await server.getJson(settings.remoteHost,settings.remotePort||3377,'/api/ping',5000);
+      if(identity!==settingsIdentity()||!ping?.ok||!binding.databaseToken||ping.databaseToken!==binding.databaseToken||!access||JSON.stringify(ping.access)!==JSON.stringify(access)) {
+        notificationService?.invalidate();
+        throw Error('База или права доступа изменились. Обновите данные перед включением напоминаний.');
+      }
+      assertDataBinding(event);
+    }
+    const readable=isClientMode()?access.readable:storage.SECTIONS;
+    const user=isClientMode()?access.user:{id:'local',role:'admin',name:getActiveUser().name};
+    const key=bindingKey([identity,binding.databaseToken,settings.activeUser,getActiveUser().name,user.id,user.role,readable]);
+    return {key,readable,databaseToken:binding.databaseToken,user,senderId:event.sender.id,event};
+  }
+  const NOTIFICATIONS_FILE=path.join(app.getPath('userData'),'notifications.json');
+  notificationService=createNotificationService({Notification,hidden:hiddenTest,
+    readState:()=>fs.existsSync(NOTIFICATIONS_FILE)?JSON.parse(fs.readFileSync(NOTIFICATIONS_FILE,'utf8')):{},
+    writeState:value=>writeAtomic(NOTIFICATIONS_FILE,JSON.stringify(value)),
+    isCurrent:async context=>{try{return(await notificationContext(context.event)).key===context.key;}catch{return false;}},
+    onOpen:({key,issueId,senderId})=>{
+      for(const win of BrowserWindow.getAllWindows()) {
+        if(win.isDestroyed()||win.webContents.id!==senderId||trustedPage(win.webContents.getURL(),path.join(__dirname,'..'),app._localServerPort)!=='main')continue;
+        if(win.isMinimized())win.restore();win.show();win.focus();
+        win.webContents.send('notification-open',{key,issueId});break;
+      }
+    }
+  });
+  app.once('before-quit',()=>notificationService.dispose());
+  ipcMain.handle('get-notification-settings',async event=>{try{
+    const context=await notificationContext(event);
+    return {...notificationService.status(context),databaseToken:context.databaseToken,user:context.user};
+  }catch(error){notificationService.invalidate();return{ok:false,error:error.message};}});
+  function notificationEnvelope(payload,fields) {
+    if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(k=>!fields.includes(k))||typeof payload.key!=='string'||!/^[a-f0-9]{64}$/.test(payload.key))throw Error('Некорректный запрос напоминаний');
+  }
+  for(const [channel,fields,action] of [
+    ['save-notification-settings',['key','preferences'],(context,payload)=>notificationService.update(context,payload.preferences)],
+    ['snooze-notifications',['key','minutes'],(context,payload)=>notificationService.snooze(context,payload.minutes)],
+    ['submit-notifications',['key','issues'],(context,payload)=>notificationService.submit(context,payload)],
+    ['test-notification',['key'],(context,payload)=>notificationService.test(context,payload.key)]
+  ])ipcMain.handle(channel,async(event,payload)=>{try{
+    notificationEnvelope(payload,fields);
+    const context=await notificationContext(event);
+    if(payload.key!==context.key)throw Error('База или учётная запись переключена. Откройте настройки заново.');
+    return action(context,payload);
+  }catch(error){notificationService.invalidate();return{ok:false,error:error.message};}});
+
   ipcMain.handle('read-data', async (event) => {
     const identity = settingsIdentity();
     if (isClientMode()) {
@@ -278,7 +335,7 @@ app.whenReady().then(() => {
         try { snapshot = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/snapshot', 15000); }
         catch { snapshot = { data:JSON.parse(await server.fetchData(settings.remoteHost, settings.remotePort || 3377)) }; }
         if (identity !== settingsIdentity()) throw new Error('База переключена во время чтения');
-        bindData(event, snapshot.databaseToken);
+        bindData(event, snapshot.databaseToken, snapshot.access);
         return JSON.stringify(snapshot.data);
       } catch (e) {
         return null;
@@ -335,7 +392,7 @@ app.whenReady().then(() => {
       try {
         const snapshot = await server.getJson(host, port, '/api/snapshot', 15000);
         if (identity !== settingsIdentity()) return null;
-        bindData(event, snapshot.databaseToken);
+        bindData(event, snapshot.databaseToken, snapshot.access);
         return JSON.stringify(snapshot);
       }
       catch (e) {
