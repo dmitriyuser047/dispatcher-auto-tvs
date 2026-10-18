@@ -86,19 +86,24 @@ async function writeRequest(req,res,full,principal) {
     if (_writeLock) { respond(res,423,{ok:false,error:'Повторите сохранение'}); return; }
     _writeLock = true;
     try {
+      return storage.withDatabaseLock(dataDir, () => {
+      const token = storage.databaseToken(dataDir);
       if (full && !access.authorize(principal,'replace')) { respond(res,403,{ok:false,error:'Полная замена базы разрешена только администратору'}); return; }
-      const supplied = full ? payload : payload.sections;
+      const supplied = full ? (payload.data || payload) : payload.sections;
       if (!supplied || typeof supplied !== 'object' || Array.isArray(supplied)) throw new Error('Не указаны разделы');
+      if (full && (!Array.isArray(supplied.vehicles) || !Array.isArray(supplied.records))) throw new Error('Неполная база: нужны vehicles и records');
       const sections = full ? Object.fromEntries(storage.SECTIONS.filter(name => name in supplied).map(name => [name,supplied[name]])) : { ...supplied };
       const names = Object.keys(sections);
       if (names.some(name => !storage.SECTIONS.includes(name) || !Array.isArray(sections[name]))) throw new Error('Некорректные разделы');
       const forbidden = names.filter(name => !access.authorize(principal,'write',name));
       if (forbidden.length) { respond(res,403,{ok:false,error:'Роль не разрешает изменение разделов: ' + forbidden.join(', ')}); return; }
+      if (typeof payload.databaseToken !== 'string' || !payload.databaseToken) { respond(res,428,{ok:false,databaseToken:token,error:'Обновите клиент и заново загрузите базу: для сохранения нужен идентификатор прочитанной базы.'}); return; }
+      if (payload.databaseToken !== token) { respond(res,409,{ok:false,databaseChanged:true,databaseToken:token,error:'База данных на сервере изменилась. Заново откройте её перед сохранением.'}); return; }
       const previous = storage.readAll(dataDir), revisions = storage.readRevisions(dataDir);
       if (!full) {
         const base = payload.base || {};
         const conflicts = names.filter(name => (base[name] || 0) !== (revisions[name] || 0));
-        if (conflicts.length) { respond(res,409,{ok:false,conflicts,revisions:filteredRevisions(revisions,principal)}); return; }
+        if (conflicts.length) { respond(res,409,{ok:false,conflicts,revisions:filteredRevisions(revisions,principal),databaseToken:token}); return; }
       }
       try { names.forEach(name => access.validateAssetChanges(principal,name,previous[name] || [],sections[name])); }
       catch (e) { respond(res,403,{ok:false,error:e.message}); return; }
@@ -113,13 +118,15 @@ async function writeRequest(req,res,full,principal) {
       if (storage.SECTIONS.includes('auditLog')) sections.auditLog = canonicalAudit(previous,sections,principal);
       if (backup) backup();
       const result = full
-        ? {ok:true,...storage.writeAll(dataDir,{...previous,...sections})}
-        : storage.writeSections(dataDir,{base:{...(payload.base || {}),auditLog:revisions.auditLog || 0},sections});
+        ? {ok:true,...storage.writeAll(dataDir,{...previous,...sections},{databaseToken:payload.databaseToken})}
+        : storage.writeSections(dataDir,{base:{...(payload.base || {}),auditLog:revisions.auditLog || 0},sections,databaseToken:payload.databaseToken});
+      result.databaseToken = token;
       if (result.ok) {
         result.revisions = filteredRevisions(result.revisions,principal);
         if (storage.SECTIONS.includes('auditLog')) result.canonicalSections = {auditLog:visibleAudit(sections.auditLog,principal)};
       }
       respond(res,result.ok ? 200 : 409,result);
+      });
     } finally { _writeLock = false; }
   } catch (e) { respond(res,400,{ok:false,error:e.message}); }
 }
@@ -144,26 +151,27 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls}) {
     const principal = !req.headers.origin && match ? access.authenticate(match[1],settingsProvider()) : null;
     if (!principal) { respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'}); return; }
     if (req.method === 'GET' && req.url === '/api/ping') {
-      respond(res,200,{ok:true,name:serverName || os.hostname(),version:require('../package.json').version,sections:true,protocol:tls ? 'https:' : 'http:',access:publicAccess(principal)}); return;
+      try { respond(res,200,{ok:true,name:serverName || os.hostname(),version:require('../package.json').version,sections:true,databaseToken:storage.databaseToken(_dataDir),protocol:tls ? 'https:' : 'http:',access:publicAccess(principal)}); }
+      catch (e) { respond(res,500,{ok:false,error:e.message}); } return;
     }
     if (req.method === 'POST' && ['/api/sections','/api/data'].includes(req.url)) {
       void writeRequest(req,res,req.url === '/api/data',principal); return;
     }
     if (req.method !== 'GET') { respond(res,404,{ok:false,error:'Неизвестный запрос'}); return; }
     try {
-      if (req.url === '/api/revisions') { respond(res,200,filteredRevisions(storage.readRevisions(_dataDir),principal)); return; }
+      if (req.url === '/api/revisions') { respond(res,200,{...filteredRevisions(storage.readRevisions(_dataDir),principal),databaseToken:storage.databaseToken(_dataDir)}); return; }
       const sectionMatch = /^\/api\/section\/([A-Za-z]+)$/.exec(req.url);
       if (sectionMatch) {
         const name = sectionMatch[1];
         if (!storage.SECTIONS.includes(name)) { respond(res,404,{ok:false,error:'Неизвестный раздел'}); return; }
-        if (!readable(principal,name)) { respond(res,200,{name,rev:0,rows:[]}); return; }
+        if (!readable(principal,name)) { respond(res,200,{name,rev:0,rows:[],databaseToken:storage.databaseToken(_dataDir)}); return; }
         const section = storage.readSection(_dataDir,name);
         if (name === 'auditLog') section.rows = visibleAudit(section.rows,principal);
         respond(res,200,section); return;
       }
       if (req.url === '/api/data' || req.url === '/api/snapshot') {
-        const all = filteredData(storage.readAll(_dataDir),principal);
-        respond(res,200,req.url === '/api/data' ? all : {data:all,revisions:filteredRevisions(storage.readRevisions(_dataDir),principal),access:publicAccess(principal)}); return;
+        const snapshot = storage.readSnapshot(_dataDir), all = filteredData(snapshot.data,principal);
+        respond(res,200,req.url === '/api/data' ? all : {data:all,revisions:filteredRevisions(snapshot.revisions,principal),databaseToken:snapshot.databaseToken,access:publicAccess(principal)}); return;
       }
       respond(res,404,{ok:false,error:'Неизвестный запрос'});
     } catch (e) { respond(res,500,{ok:false,error:e.message}); }
@@ -241,7 +249,7 @@ function parseResponse(response,allowConflict) {
   let value;
   try { value = JSON.parse(response.text); } catch { throw new Error('Сервер вернул неверный ответ'); }
   if (response.status >= 200 && response.status < 300 || allowConflict && response.status === 409) return value;
-  throw new Error(value?.error || 'HTTP ' + response.status);
+  throw new Error('HTTP ' + response.status + (value?.error ? ': ' + value.error : ''));
 }
 async function fetchData(host,port) { const response = await request(host,port,'/api/data',null,10000); parseResponse(response); return response.text; }
 async function postData(host,port,jsonStr) { return parseResponse(await request(host,port,'/api/data',jsonStr),true); }

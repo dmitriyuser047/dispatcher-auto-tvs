@@ -2,16 +2,19 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob:; object-src 'none'; base-uri 'none'">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>PDF-редактор · ТВС</title>
   <link rel="stylesheet" href="assets/css/pdf-editor.css">
   <link rel="stylesheet" href="assets/css/experience.css">
   <link rel="stylesheet" href="assets/css/pdf-ocr-workbench.css">
   <link rel="stylesheet" href="assets/css/pdf-document-studio.css">
-  <script defer src="node_modules/pdfjs-dist/build/pdf.min.js"></script>
+  <link rel="stylesheet" href="assets/css/document-workspace.css">
+  <script defer src="assets/js/38-pdf-runtime.js"></script>
   <script defer src="node_modules/pdf-lib/dist/pdf-lib.min.js"></script>
   <script defer src="node_modules/@pdf-lib/fontkit/dist/fontkit.umd.min.js"></script>
   <script defer src="assets/js/39-pdf-export.js"></script>
+  <script defer src="assets/js/40-pdf-page-model.js"></script>
   <script defer src="assets/js/42-pdf-ocr-workbench.js"></script>
   <script defer src="assets/js/43-pdf-document-studio.js"></script>
   <script defer src="assets/js/41-pdf-editor.js"></script>

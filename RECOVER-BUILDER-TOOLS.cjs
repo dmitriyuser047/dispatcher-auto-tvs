@@ -14,7 +14,8 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
   const bytes=Buffer.from(await response.arrayBuffer());
   if(bytes.length!==5635384||hash(bytes)!=='cdaec7154dda7cc31f88d886e2489379a0625a737d610b5ae7f62a12f16743a4')throw Error('Resource editor archive checksum mismatch');
   fs.mkdirSync(directory,{recursive:true});const archive=path.join(directory,'winCodeSign-2.6.0.7z');fs.writeFileSync(archive,bytes);
-  const result=cp.spawnSync(require('7zip-bin').path7za,['e',archive,'-o'+directory,'rcedit-x64.exe','-y'],{encoding:'utf8',windowsHide:true});
+  const unpacker=require.resolve('electron-winstaller/vendor/7z-x64.exe');
+  const result=cp.spawnSync(unpacker,['e',archive,'-o'+directory,'rcedit-x64.exe','-y'],{encoding:'utf8',windowsHide:true});
   if(result.status!==0)throw Error(result.stdout+result.stderr);
   if(hash(fs.readFileSync(executable))!==editorHash)throw Error('Resource editor checksum mismatch');
   console.log('Windows resource editor is ready');

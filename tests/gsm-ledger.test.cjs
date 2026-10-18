@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const ctx = vm.createContext({ console, window: {}, document: { addEventListener() {}, documentElement: { removeAttribute() {} }, getElementById() {} }, localStorage: { getItem() {} } });
-for (const file of ['assets/js/01-core.js', 'vendor/xlsx.bundle.js', 'assets/js/10-pdf-reports.js', 'assets/js/25-fuel-report.js', 'assets/js/25b-fuel-purchases.js', 'assets/js/25c-fuel-control.js', 'assets/js/25i-gsm-ledger.js', 'assets/js/25j-gsm-workspace.js', 'assets/js/25k-gsm-export.js']) {
+for (const file of ['assets/js/01-core.js', 'assets/js/29-fuel-quality.js', 'vendor/xlsx.bundle.js', 'assets/js/10-pdf-reports.js', 'assets/js/25-fuel-report.js', 'assets/js/25b-fuel-purchases.js', 'assets/js/25c-fuel-control.js', 'assets/js/25i-gsm-ledger.js', 'assets/js/25j-gsm-workspace.js', 'assets/js/25k-gsm-export.js']) {
   vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), ctx, { filename: file });
 }
 function base() {
@@ -368,7 +368,7 @@ test('existing working databases are never overwritten by a bundled seed', () =>
   const fn = source.slice(source.indexOf('function applyBundledDataSeedOnce()'), source.indexOf('function createWindow()'));
   for (const existing of ['legacy', 'sections', 'backup-fails']) {
     let writes = 0;
-    const local = vm.createContext({ settings: {}, __dirname: '/app/electron', path: path.posix, console: { log() {}, error() {} },
+    const local = vm.createContext({ settings: {}, prototypeBuild:false, __dirname: '/app/electron', path: path.posix, console: { log() {}, error() {} },
       getDataDir: () => '/active', getBackupDir: () => '/active/backups', ensureDirs() {}, storage: { readAll: () => ({}), writeAll() { writes++; } },
       fs: { existsSync: f => f.includes('bundled-data') || existing === 'legacy' && f.endsWith('/data.json') || existing === 'sections' && f.endsWith('/sections'),
         readdirSync: () => ['records.json'], mkdirSync() {}, writeFileSync() { throw Error('disk full'); }, readFileSync: () => '{}' } });

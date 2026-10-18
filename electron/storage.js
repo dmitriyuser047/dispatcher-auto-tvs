@@ -18,6 +18,10 @@
 
 const fs   = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const os = require('os');
+const runtimeProcess = require('node:process');
+const heldLocks = runtimeProcess[Symbol.for('tvs.storage.databaseLocks')] || (runtimeProcess[Symbol.for('tvs.storage.databaseLocks')] = new Map());
 
 // Порядок важен только для читаемости — файлы независимы
 const SECTIONS = [
@@ -36,6 +40,69 @@ function sectionsDir(dataDir) { return path.join(dataDir, 'sections'); }
 function sectionFile(dataDir, name) { return path.join(sectionsDir(dataDir), name + '.json'); }
 function revisionsFile(dataDir) { return path.join(sectionsDir(dataDir), REVISIONS_FILE); }
 function legacyFile(dataDir) { return path.join(dataDir, 'data.json'); }
+function canonicalDirectory(dataDir) {
+  const resolved = fs.realpathSync(path.resolve(dataDir));
+  return runtimeProcess.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+function databaseToken(dataDir) {
+  return crypto.createHash('sha256').update('tvs-database:' + canonicalDirectory(dataDir)).digest('hex');
+}
+function lockError(file, detail) {
+  const error = new Error('База занята другим процессом. Повторите операцию после окончания сохранения. ' + detail + ' Если все экземпляры программы закрыты, сохраните копию папки базы и удалите оставшийся файл блокировки: ' + file);
+  error.code = 'DB_BUSY';
+  return error;
+}
+function lockOwner(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } }
+function sameHostDead(owner) {
+  if (!owner || owner.host !== os.hostname() || !Number.isSafeInteger(owner.pid) || owner.pid <= 0 || typeof owner.nonce !== 'string') return false;
+  try { runtimeProcess.kill(owner.pid, 0); return false; } catch (error) { return error.code === 'ESRCH'; }
+}
+function createLock(file, owner) {
+  const fd = fs.openSync(file, 'wx', 0o600);
+  try { fs.writeFileSync(fd, JSON.stringify(owner), 'utf8'); fs.fsyncSync(fd); }
+  catch (error) { fs.closeSync(fd); try { fs.unlinkSync(file); } catch {} throw error; }
+  return fd;
+}
+function releaseLock(file, fd, owner) {
+  fs.closeSync(fd);
+  if (lockOwner(file)?.nonce === owner.nonce) fs.unlinkSync(file);
+}
+/** Synchronous, reentrant across modules in one process; readers also lock so
+ * recovery cannot mistake a live writer's journal for an interrupted save. */
+function withDatabaseLock(dataDir, action) {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const key = canonicalDirectory(dataDir);
+  if (heldLocks.has(key)) return action();
+  const file = path.join(key, '.tvs-database.lock'), recovery = file + '.recovery';
+  const owner = { host: os.hostname(), pid: runtimeProcess.pid, nonce: crypto.randomUUID(), startedAt: new Date().toISOString() };
+  if (fs.existsSync(recovery)) throw lockError(recovery, 'Проверяется аварийная блокировка.');
+  let fd;
+  try { fd = createLock(file, owner); }
+  catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    const stale = lockOwner(file);
+    if (!sameHostDead(stale)) throw lockError(file, 'Владелец: ' + (stale ? stale.host + ', PID ' + stale.pid : 'неизвестен') + '.');
+    let recoveryFd;
+    try { recoveryFd = createLock(recovery, owner); }
+    catch (recoverError) { if (recoverError.code === 'EEXIST') throw lockError(recovery, 'Проверяется аварийная блокировка.'); throw recoverError; }
+    try {
+      const current = lockOwner(file);
+      if (!current || current.nonce !== stale.nonce || !sameHostDead(current)) throw lockError(file, 'Владелец изменился во время проверки.');
+      fs.unlinkSync(file);
+      try { fd = createLock(file, owner); }
+      catch (acquireError) { if (acquireError.code === 'EEXIST') throw lockError(file, 'Базу успел открыть другой процесс.'); throw acquireError; }
+    } finally { releaseLock(recovery, recoveryFd, owner); }
+  }
+  // An ordinary acquisition that raced with stale-lock recovery yields rather
+  // than entering the transaction while the recovery guard is present.
+  if (fs.existsSync(recovery)) { releaseLock(file, fd, owner); throw lockError(recovery, 'Проверяется аварийная блокировка.'); }
+  heldLocks.set(key, owner);
+  try {
+    const result = action();
+    if (result && typeof result.then === 'function') throw new Error('Блокировка базы поддерживает только синхронные операции');
+    return result;
+  } finally { heldLocks.delete(key); releaseLock(file, fd, owner); }
+}
 
 function readJson(file, fallback) {
   try {
@@ -73,8 +140,11 @@ function readRevisions(dataDir) {
 
 function readRows(dataDir, name) {
   const rows = readJson(sectionFile(dataDir, name));
-  if (!Array.isArray(rows)) throw new Error('Раздел ' + name + ' должен содержать массив');
+  validateRows(name, rows);
   return rows;
+}
+function validateRows(name, rows) {
+  if (!Array.isArray(rows) || rows.some(row => !row || typeof row !== 'object' || Array.isArray(row))) throw new Error('Раздел ' + name + ' должен содержать массив объектов');
 }
 
 // Revisions are the commit point. Before that point a failed or interrupted
@@ -117,12 +187,54 @@ function commitSections(dataDir, sections, revisions) {
 function checkClosedPeriods(previous, next) {
   const closed = new Set((previous.fuelPeriods || []).filter(p => p.closed).map(p => p.month));
   if (!closed.size) return;
+  const lastClosed = [...closed].sort().at(-1);
+  const historical = row => { const month = String(row.date || row.month || '').slice(0, 7); return /^\d{4}-\d{2}$/.test(month) && month <= lastClosed; };
   for (const name of ['records', 'fuelPurchases', 'monthlyFuel', 'genRecords', 'tankIncomes', 'fuelMovements']) {
     if (!(name in next)) continue;
     const old = previous[name] || [], rows = next[name];
-    for (const month of closed) {
-      const select = list => list.filter(r => String(r.date || r.month || '').slice(0, 7) === month);
-      if (JSON.stringify(select(old)) !== JSON.stringify(select(rows))) throw new Error('Месяц закрыт: ' + month + '. Сначала откройте его.');
+    // Earlier movements also determine the opening balance of a closed month.
+    if (JSON.stringify(old.filter(historical)) !== JSON.stringify(rows.filter(historical))) throw new Error('Месяц закрыт: ' + lastClosed + '. Сначала откройте его: более ранние операции влияют на начальный остаток.');
+  }
+  const fields = {
+    vehicles: ['fuelBalance', 'fuelBalanceSources', 'fuelGrade', 'fuel', 'org', 'orgHistory', 'norm', 'fuelcard'],
+    generators: ['fuelBalance', 'fuelGrade', 'fuel', 'org', 'orgHistory', 'norm', 'norm100', 'norm50', 'normIdle', 'power', 'tankId'],
+    tanks: ['balanceInit', 'fuelGrade', 'fuel', 'org'],
+    fuelCards: ['number', 'provider', 'org', 'orgHistory', 'assignments'],
+  };
+  const [closedYear,closedMonth] = lastClosed.split('-').map(Number);
+  const end = new Date(Date.UTC(closedYear,closedMonth,0)).toISOString().slice(0,10);
+  const numeric = new Set(['fuelBalance', 'balanceInit', 'norm', 'norm100', 'norm50', 'normIdle', 'power']);
+  const project = (row, keys) => Object.fromEntries(keys.map(key => {
+    let value = row[key];
+    if (numeric.has(key)) value = value == null || value === '' ? (['fuelBalance','balanceInit'].includes(key) ? 0 : null) : Number(value);
+    else if (['orgHistory','assignments'].includes(key)) value = (Array.isArray(value) ? value : []).filter(entry => !entry.from || entry.from <= end).map(entry => ({from:entry.from||'',to:entry.to&&entry.to<end?entry.to:end,org:String(entry.org||'').trim(),...(key==='assignments'?{vehicleId:entry.vehicleId||''}:{})}));
+    else if (key === 'fuelBalanceSources') {
+      const fallbackGrade = row.fuelGrade || (row.fuel==='gasoline'?'Бензин':row.fuel==='gas'?'Газ':'ДТ'), fallbackOrg = String(row.org||'').trim() || 'Организация не определена';
+      value = (Array.isArray(value)&&value.length ? value : [{org:fallbackOrg,grade:fallbackGrade,qty:Number(row.fuelBalance)||0}]).map(entry => ({org:String(entry.org||fallbackOrg).trim(),grade:entry.grade||fallbackGrade,qty:Number(entry.qty)||0}));
+    } else value = value == null ? '' : value;
+    return [key,value];
+  }));
+  const nonzeroOpening = row => ['fuelBalance', 'balanceInit'].some(key => Number(row[key]) !== 0 && Number.isFinite(Number(row[key]))) || (row.fuelBalanceSources || []).some(entry => Number(entry.qty));
+  const cardKey = value => { const text=String(value||'').trim();return text.replace(/\D/g,'')||text.toUpperCase(); };
+  const historicalCardRows = [...(previous.records||[]),...(previous.fuelPurchases||[]),...(previous.monthlyFuel||[])].filter(historical);
+  for (const [name, keys] of Object.entries(fields)) {
+    if (!(name in next)) continue;
+    const old = previous[name] || [], after = new Map(next[name].map(row => [String(row.id), row]));
+    for (const row of old) {
+      const updated = after.get(String(row.id));
+      if (!updated || JSON.stringify(project(row, keys)) !== JSON.stringify(project(updated, keys))) throw new Error('Месяц закрыт: ' + lastClosed + '. Исходные данные ГСМ (' + name + ') изменят закрытые расчёты. Сначала откройте период.');
+      after.delete(String(row.id));
+    }
+    // A new asset with no opening stock and only future events does not
+    // change historical fuel. A new card may resolve an old unmatched card.
+    for (const row of after.values()) {
+      const historicalReference = name === 'fuelCards'
+        ? !!cardKey(row.number) && historicalCardRows.some(entry => cardKey(entry.fuelCardNum || entry.cardNo || entry.cardNumber) === cardKey(row.number))
+        : name === 'vehicles'
+          ? historicalCardRows.some(entry => [entry.vehicleId, entry.cardVehicleId].includes(row.id) || !!cardKey(row.fuelcard) && cardKey(entry.fuelCardNum || entry.cardNo || entry.cardNumber) === cardKey(row.fuelcard))
+          : name === 'generators' ? (previous.genRecords || []).some(entry => historical(entry) && entry.generatorId === row.id)
+          : [...(previous.tankIncomes || []),...(previous.genRecords||[]),...(previous.fuelMovements||[])].some(entry => historical(entry) && [entry.tankId,entry.fromTankId,entry.toTankId].includes(row.id)) || (previous.genRecords||[]).some(entry => historical(entry) && !Object.prototype.hasOwnProperty.call(entry,'tankId') && (previous.generators||[]).some(generator=>generator.id===entry.generatorId && generator.tankId===row.id));
+      if (nonzeroOpening(row) || historicalReference) throw new Error('Месяц закрыт: ' + lastClosed + '. Новый источник начального остатка или привязка изменит закрытые расчёты.');
     }
   }
 }
@@ -151,6 +263,7 @@ function migrate(dataDir) {
   const sections = {};
   SECTIONS.forEach(name => {
     const arr = existing.includes(name) ? readRows(dataDir, name) : data && Array.isArray(data[name]) ? data[name] : [];
+    validateRows(name, arr);
     sections[name] = arr;
     revisions[name] = existing.length ? Date.now() : 1;
     records += arr.length;
@@ -179,9 +292,10 @@ function readAll(dataDir) {
  * Записать данные, тронув только изменившиеся разделы.
  * Возвращает список записанных разделов и новые номера версий.
  */
-function writeAll(dataDir, data) {
+function writeAll(dataDir, data, options = {}) {
+  if (options.databaseToken != null && options.databaseToken !== databaseToken(dataDir)) throw new Error('База данных изменилась. Заново откройте её перед сохранением.');
   if (!data || !Array.isArray(data.vehicles) || !Array.isArray(data.records)) throw new Error('Неполная база: нужны vehicles и records');
-  SECTIONS.forEach(n => { if (n in data && !Array.isArray(data[n])) throw new Error('Некорректный раздел ' + n); });
+  SECTIONS.forEach(n => { if (n in data) validateRows(n, data[n]); });
   const previous = readAll(dataDir);
   checkClosedPeriods(previous, data);
   if (!isSplit(dataDir)) migrate(dataDir);
@@ -210,7 +324,12 @@ function readSection(dataDir, name) {
   if (!SECTIONS.includes(name)) throw new Error('Неизвестный раздел');
   recoverTransaction(dataDir);
   if (!isSplit(dataDir)) migrate(dataDir);
-  return { name, rev: readRevisions(dataDir)[name] || 0, rows: readRows(dataDir, name) };
+  return { name, rev: readRevisions(dataDir)[name] || 0, rows: readRows(dataDir, name), databaseToken: databaseToken(dataDir) };
+}
+
+function readSnapshot(dataDir) {
+  const data = readAll(dataDir);
+  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir) };
 }
 
 /**
@@ -221,15 +340,18 @@ function readSection(dataDir, name) {
  * Так правки двух людей не затирают друг друга молча.
  */
 function writeSections(dataDir, payload) {
+  const token = databaseToken(dataDir);
+  if (payload && payload.databaseToken != null && payload.databaseToken !== token) return { ok: false, databaseChanged: true, databaseToken: token, error: 'База данных изменилась. Заново откройте её перед сохранением.' };
   const previous = readAll(dataDir);
   if (!isSplit(dataDir)) migrate(dataDir);
   const base = (payload && payload.base) || {};
   const sections = (payload && payload.sections) || {};
   const names = Object.keys(sections);
   if (names.some(n => !SECTIONS.includes(n) || !Array.isArray(sections[n]))) throw new Error('Некорректные разделы');
+  names.forEach(n => validateRows(n, sections[n]));
   const revisions = readRevisions(dataDir);
   const conflicts = names.filter(n => (revisions[n] || 0) !== (base[n] || 0));
-  if (conflicts.length) return { ok: false, conflicts, revisions };
+  if (conflicts.length) return { ok: false, conflicts, revisions, databaseToken: token };
   checkClosedPeriods(previous, sections);
   const changed = [];
   const pending = {};
@@ -245,7 +367,7 @@ function writeSections(dataDir, payload) {
     changed.push(name);
   });
   commitSections(dataDir, pending, revisions);
-  return { ok: true, changed, revisions };
+  return { ok: true, changed, revisions, databaseToken: token };
 }
 
 /** Ежедневная резервная копия: складываем разделы обратно в один файл */
@@ -269,6 +391,6 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
 
 module.exports = {
   SECTIONS, sectionsDir, sectionFile, revisionsFile,
-  isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup,
-  readSection, writeSections,
+  databaseToken, withDatabaseLock, validateRows,
+  ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, () => operation(dataDir, ...args))])),
 };

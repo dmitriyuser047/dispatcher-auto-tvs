@@ -135,6 +135,18 @@ function normaliseChange(change, index) {
   return { pageIndex: change.pageIndex, kind: change.kind, rect, quad: quad ? [...quad] : null, fillColor, userUnit };
 }
 
+function normaliseRasterPages(value) {
+  if(value == null)return [];
+  if(!Array.isArray(value)||value.length>LIMITS.changes)throw new Error('Недопустимый список страниц защищённой копии');
+  const seen=new Set();
+  return value.map(page=>{
+    if(!page||!Number.isInteger(page.pageIndex)||page.pageIndex<0||seen.has(page.pageIndex))throw new Error('Некорректная страница защищённой копии');
+    const userUnit=page.userUnit==null?1:Number(page.userUnit);
+    if(!Number.isFinite(userUnit)||userUnit<=0||userUnit>75000)throw new Error('Некорректный масштаб страницы защищённой копии');
+    seen.add(page.pageIndex);return {pageIndex:page.pageIndex,userUnit};
+  });
+}
+
 function intersects(a, b) { return a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]; }
 
 function isAxisAligned(quad) {
@@ -269,11 +281,11 @@ function clearPolygon(module, bitmap, polygon, fillColor, width, height) {
   }
 }
 
-function appendRasterPage(module, sourceDocument, sourcePage, destination, pageIndex, changes) {
+function appendRasterPage(module, sourceDocument, sourcePage, destination, pageIndex, changes, requestedUserUnit) {
   let bitmap = 0, page = 0, image = 0, scratch = 0, formInfo = 0, formHandle = 0;
   const originalRotation = module.FPDFPage_GetRotation(sourcePage);
   if (originalRotation < 0 || originalRotation > 3) throw new Error('Не удалось прочитать поворот исходной страницы');
-  const userUnit = changes[0].userUnit;
+  const userUnit = requestedUserUnit ?? changes[0]?.userUnit ?? 1;
   if (changes.some(change => change.userUnit !== userUnit)) throw new Error('Исправления страницы имеют разный масштаб единиц');
   // Work in the same unrotated PDF user space as PDF.js's baseTransform.
   // Baked-in /Rotate would otherwise be applied a second time by the renderer.
@@ -366,13 +378,15 @@ async function applyContentChangesCore(value, inputChanges, options = {}) {
   const bytes = inputBuffer(value);
   if (!Array.isArray(inputChanges) || inputChanges.length > LIMITS.changes) throw new Error('Недопустимое число исправлений PDF');
   const changes = inputChanges.map(normaliseChange);
-  if (!changes.length) return { bytes, warnings: [], pages: [], engine: ENGINE, rewritten: false };
+  const rasterizePages = normaliseRasterPages(options.rasterizePages);
+  if (!changes.length && !rasterizePages.length) return { bytes, warnings: [], pages: [], engine: ENGINE, rewritten: false };
   return serial(async () => {
     const module = await getModule();
     return withDocument(module, bytes, options.password, source => {
       const count = module.FPDF_GetPageCount(source);
       if (!count) throw new Error('В PDF нет страниц');
       if (changes.some(change => change.pageIndex >= count)) throw new Error('Страница исправления отсутствует в PDF');
+      if (rasterizePages.some(page => page.pageIndex >= count)) throw new Error('Страница защищённой копии отсутствует в PDF');
       if (module.EPDF_IsEncrypted(source) && !module.EPDF_IsOwnerUnlocked(source) && !(module.FPDF_GetDocPermissions(source) & 8)) throw new Error('Владелец PDF запретил изменение содержимого');
       const destination = module.FPDF_CreateNewDocument();
       if (!destination) throw new Error('Не удалось создать исправленный PDF');
@@ -381,7 +395,8 @@ async function applyContentChangesCore(value, inputChanges, options = {}) {
         if (module.FPDF_GetSignatureCount(source) > 0) warnings.push('После изменения документа исходные электронные подписи не сохраняют действительность.');
         for (let index = 0; index < count; index++) {
           const pageChanges = changes.filter(change => change.pageIndex === index);
-          if (!pageChanges.length) {
+          const raster = rasterizePages.find(page => page.pageIndex === index);
+          if (!pageChanges.length && !raster) {
             if (!module.FPDF_ImportPages(destination, source, String(index + 1), index)) throw new Error('Не удалось сохранить страницу ' + (index + 1));
             continue;
           }
@@ -389,19 +404,20 @@ async function applyContentChangesCore(value, inputChanges, options = {}) {
           if (!page) throw new Error('Не удалось открыть страницу ' + (index + 1));
           let method, dpi;
           try {
-            if (nativeTextPossible(module, page, pageChanges)) {
+            if (!raster && nativeTextPossible(module, page, pageChanges)) {
               removeNativeText(module, page, pageChanges);
               method = 'native-text';
             } else {
-              dpi = appendRasterPage(module, source, page, destination, index, pageChanges);
+              dpi = appendRasterPage(module, source, page, destination, index, pageChanges, raster?.userUnit);
               method = 'raster-content';
             }
           } finally { module.FPDF_ClosePage(page); }
           if (method === 'native-text' && !module.FPDF_ImportPages(destination, source, String(index + 1), index)) throw new Error('Не удалось перенести исправленную страницу ' + (index + 1));
-          pages.push({ pageIndex: index, method, ...(dpi ? { dpi, userUnit: pageChanges[0].userUnit } : {}) });
+          pages.push({ pageIndex: index, method, ...(dpi ? { dpi, userUnit: raster?.userUnit ?? pageChanges[0].userUnit } : {}) });
         }
         const rasterPages = pages.filter(page => page.method === 'raster-content');
         if (rasterPages.length) warnings.push('Страницы ' + rasterPages.map(page => page.pageIndex + 1).join(', ') + ' сохранены изображением после очистки содержимого; исходный поиск и интерактивные поля этих страниц удалены.');
+        if(rasterizePages.length)warnings.push('После удаления или выбора части страниц сохранены только видимые изображения оставшихся страниц до 300 dpi. Общие ресурсы исходного PDF могут содержать данные исключённых страниц, поэтому они не переносятся. Исходный текст перестанет быть редактируемым; для поиска можно выполнить OCR.');
         warnings.push('Исправленный PDF пересобран целиком; закладки, вложения и свойства исходного документа не переносятся.');
         return { bytes: saveFull(module, destination), warnings, pages, engine: ENGINE, rewritten: true };
       } finally { module.FPDF_CloseDocument(destination); }
@@ -421,7 +437,8 @@ async function applyContentChanges(value, inputChanges, options = {}) {
     fillColor: change.fillColor,
     userUnit: change.userUnit,
   }));
-  if (!changes.length) return { bytes: Buffer.from(bytes), warnings: [], pages: [], engine: ENGINE, rewritten: false };
+  const rasterizePages = normaliseRasterPages(options.rasterizePages);
+  if (!changes.length && !rasterizePages.length) return { bytes: Buffer.from(bytes), warnings: [], pages: [], engine: ENGINE, rewritten: false };
   const password = options?.password == null ? '' : String(options.password);
   if (password.length > 1024) throw new Error('Пароль PDF слишком длинный');
   const timeout = Number(options && options.timeoutMs);
@@ -431,7 +448,7 @@ async function applyContentChanges(value, inputChanges, options = {}) {
   copy.set(bytes);
   return new Promise((resolve, reject) => {
     const worker = new Worker(__filename, {
-      workerData: { tvsPdfContentWorker: 1, bytes: copy, changes, password },
+      workerData: { tvsPdfContentWorker: 1, bytes: copy, changes, password, rasterizePages },
       transferList: [copy.buffer],
       resourceLimits: { maxOldGenerationSizeMb: 256 },
     });
@@ -460,7 +477,7 @@ async function applyContentChanges(value, inputChanges, options = {}) {
 module.exports = { applyContentChanges, ENGINE, LIMITS };
 
 if (!isMainThread && workerData && workerData.tvsPdfContentWorker === 1) {
-  applyContentChangesCore(workerData.bytes, workerData.changes, { password: workerData.password }).then(result => {
+  applyContentChangesCore(workerData.bytes, workerData.changes, { password: workerData.password, rasterizePages: workerData.rasterizePages }).then(result => {
     const copy = new Uint8Array(result.bytes.length);
     copy.set(result.bytes);
     parentPort.postMessage({ ok: true, result: { ...result, bytes: copy } }, [copy.buffer]);

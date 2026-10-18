@@ -1,22 +1,25 @@
 {
-  "name": "dispetcherizaciya-avto",
-  "version": "3.5.1",
+  "name": "dispatcher-tvs-prototype",
+  "version": "3.5.2-prototype.1",
+  "prototype": true,
+  "author": "ООО Технрайз Велл Сервис",
   "description": "Диспетчеризация авто группы компаний ООО Технрайз Велл Сервис",
   "main": "electron/main.js",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "test:ui": "node --test tests/ui-regression.cjs",
+    "test:ui": "node --test --test-concurrency=2 tests/ui-regression.cjs tests/unified-ui.cjs",
+    "test:electron": "node --test tests/unified-electron.cjs",
     "start": "electron .",
     "build": "node scripts/build-installer.cjs"
   },
   "devDependencies": {
-    "electron": "^28.0.0",
-    "electron-builder": "^24.0.0"
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3"
   },
   "build": {
-    "appId": "com.tvs.dispetcherizaciya-avto",
-    "productName": "Диспетчеризация авто ООО Технрайз Велл Сервис",
-    "artifactName": "Dispatcher-Setup-${version}.${ext}",
+    "appId": "com.tvs.dispatcher.prototype",
+    "productName": "Диспетчер ТВС — Прототип",
+    "artifactName": "Dispatcher-Prototype-${version}.${ext}",
     "directories": {
       "output": "dist"
     },
@@ -33,7 +36,6 @@
       "reestr-window.html",
       "pdf-editor.html",
       "ReestrBuilder/contracts.json",
-      "bundled-data/**",
       "package.json"
     ],
     "asarUnpack": [
@@ -41,6 +43,7 @@
       "node_modules/tesseract.js/**",
       "node_modules/tesseract.js-core/**",
       "node_modules/@embedpdf/pdfium/**",
+      "node_modules/@napi-rs/**",
       "vendor/tesseract-worker/**",
       "vendor/tesseract-core/**",
       "assets/ocr/models/**",
@@ -59,8 +62,7 @@
         }
       ],
       "icon": "build/icon.ico",
-      "signingHashAlgorithms": null,
-      "sign": null
+      "signExecutable": false
     },
     "nsis": {
       "oneClick": false,
@@ -70,14 +72,16 @@
   "allowScripts": {},
   "dependencies": {
     "@embedpdf/pdfium": "2.15.1",
+    "@napi-rs/canvas": "1.0.11",
     "@pdf-lib/fontkit": "^1.1.1",
-    "adm-zip": "^0.5.0",
+    "adm-zip": "0.6.1",
     "exceljs": "^4.4.0",
     "iconv-lite": "^0.7.3",
     "node-unrar-js": "^2.0.2",
     "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^3.0.0",
+    "pdfjs-dist": "6.4.299",
     "tesseract.js": "7.0.0",
     "tesseract.js-core": "7.0.0"
-  }
+  },
+  "overrides": { "uuid": "^11.1.1" }
 }

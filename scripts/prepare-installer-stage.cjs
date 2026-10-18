@@ -138,7 +138,7 @@ const config = {
   ...originalConfig,
   directories: { ...originalConfig.directories, app: stage, output: path.join(workspace, 'dist'), buildResources: path.join(workspace, 'build') },
   win: { ...originalConfig.win, icon: path.join(workspace, metadata.build.win.icon) },
-  electronVersion: '28.3.3',
+  electronVersion: metadata.devDependencies.electron,
   npmRebuild: false,
   nodeGypRebuild: false,
 };
@@ -147,5 +147,6 @@ const report = { createdAt: new Date().toISOString(), version: metadata.version,
 fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
 // Load the actual staged module tree once before the builder sees it.
 const requireStage = createRequire(path.join(stage, 'package.json'));
-for (const name of ['exceljs', 'pdfjs-dist/build/pdf.js', 'tesseract.js', 'adm-zip', 'node-unrar-js', 'iconv-lite']) requireStage(name);
+for (const name of ['exceljs', 'tesseract.js', 'adm-zip', 'node-unrar-js', 'iconv-lite', '@napi-rs/canvas']) requireStage(name);
+requireStage.resolve('pdfjs-dist/legacy/build/pdf.mjs');
 console.log(JSON.stringify({ stagePath: stage, configPath, reportPath, modules: modules.length, totalModuleFiles: report.totalModuleFiles, totalModuleBytes: report.totalModuleBytes, skippedOptional: skippedOptional.length }, null, 2));

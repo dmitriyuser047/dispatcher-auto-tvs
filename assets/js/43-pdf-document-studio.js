@@ -211,10 +211,10 @@
       let comparison;
       await this.run('Подготовка сравнения…',async()=>{
         const chosen=await this.api.compareFile();if(chosen?.canceled)return;if(!chosen?.ok)throw Error(chosen?.error||'Не удалось открыть второй PDF');
-        const models=this.pages(),bytes=await this.host.exportPdf(models),options={useSystemFonts:true,standardFontDataUrl:new URL('./node_modules/pdfjs-dist/standard_fonts/',location.href).href};
+        const models=this.pages(),bytes=await this.host.exportPdf(models),options=window.pdfjsDocumentOptions();
         let left,right;
         try{left=await pdfjsLib.getDocument({...options,data:typeof bytes==='string'?from64(bytes):new Uint8Array(bytes).slice()}).promise;right=await pdfjsLib.getDocument({...options,data:from64(chosen.bytesBase64)}).promise;comparison={left,right,name:chosen.name};}
-        catch(error){void left?.destroy();void right?.destroy();throw Error(error?.name==='PasswordException'?'Второй PDF защищён паролем. Откройте копию без пароля.':error.message);}
+        catch(error){void left?.loadingTask.destroy();void right?.loadingTask.destroy();throw Error(error?.name==='PasswordException'?'Второй PDF защищён паролем. Откройте копию без пароля.':error.message);}
       });
       if(comparison)await this.compareDialog(comparison);
     }
@@ -226,7 +226,7 @@
       leftPane.append(make('h3','',this.title()+' · текущие правки'),leftCanvas,leftEmpty);rightPane.append(make('h3','',name),rightCanvas,rightEmpty);pagePanel.append(leftPane,rightPane);
       const diffPanel=make('div','pds-diff-panel');diffPanel.hidden=true;view.body.append(controls,pagePanel,diffPanel);view.actions.append(make('span','pds-note','Слева — сохранённый вид текущих правок. Справа — выбранный PDF.'),button('Закрыть',view.close));
       let closed=false,token=0,tasks=[],textStop=false;
-      view.dialog.addEventListener('close',()=>{closed=true;textStop=true;token++;tasks.forEach(task=>task.cancel());void left.destroy();void right.destroy();leftCanvas.width=leftCanvas.height=rightCanvas.width=rightCanvas.height=1;},{once:true});
+      view.dialog.addEventListener('close',()=>{closed=true;textStop=true;token++;tasks.forEach(task=>task.cancel());void left.loadingTask.destroy();void right.loadingTask.destroy();leftCanvas.width=leftCanvas.height=rightCanvas.width=rightCanvas.height=1;},{once:true});
       const render=async()=>{
         const turn=++token;tasks.forEach(task=>task.cancel());tasks=[];
         const number=Math.max(1,Math.min(total,Math.floor(Number(pageNumber.value)||1)));pageNumber.value=String(number);previous.disabled=number<=1;next.disabled=number>=total;

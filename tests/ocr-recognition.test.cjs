@@ -92,3 +92,11 @@ test('scan PDF chooses full page over its first logo and OCRs each mixed-documen
   assert.deepEqual(pages.map(page => page.page), [2]);
   assert.deepEqual(mixedRows[1].recognition.sourcePages, [2]);
 });
+
+test('a scan encoded as multiple positioned image strips keeps all invoice fields', { timeout: 120000 }, async () => {
+  const rows = await lib.parsePdfFiles([file('synthetic-split.pdf')], lib.DEFAULT_CONFIG);
+  assert.equal(rows.length, 1);
+  assertFields(rows[0], expected.scan.sum);
+  assert.match(rows[0].osn, /315\/[ТT]-26/);
+  assert.equal(rows[0].recognition.method, 'ocr');
+});

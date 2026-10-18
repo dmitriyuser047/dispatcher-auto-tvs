@@ -1,7 +1,7 @@
-# Frozen OCR files are verified by byte hashes; preserve their line endings.
-/vendor/tesseract-core/** -text
-/vendor/tesseract-worker/** -text
-/assets/ocr/** -text
-/assets/licenses/** -text
-*.traineddata -text
-*.wasm -text
+# Preserve document fixtures and runtime assets byte-for-byte on Windows.
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.wasm binary
+*.traineddata binary

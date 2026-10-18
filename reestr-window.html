@@ -152,6 +152,7 @@
 </style>
 <link rel="stylesheet" href="assets/css/experience.css">
 <link rel="stylesheet" href="assets/css/recognition.css">
+<link rel="stylesheet" href="assets/css/document-workspace.css">
 </head>
 <body>
 
@@ -213,6 +214,9 @@
 <script>
 const theme = localStorage.getItem('theme');
 if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+function applyRegistryTheme(value){document.documentElement.toggleAttribute('data-theme',value==='dark');if(value==='dark')document.documentElement.dataset.theme='dark';else document.documentElement.removeAttribute('data-theme');try{localStorage.setItem('theme',value);}catch{}}
+window.reestrWindow?.onThemeChanged?.(applyRegistryTheme);
+window.reestrWindow?.getTheme?.().then(value=>{if(value)applyRegistryTheme(value);}).catch(()=>{});
 
 const RAZDELY = ['Логистика', 'ТО и ремонт', 'Аренда', 'Офисные платежи', 'ГСМ ДЭС и авто'];
 const PAY_TYPES = ['ОПЛАТА ПО ФАКТУ', 'ОПЛАТА 50%', 'ПРЕДОПЛАТА 100%', 'ПРЕДОПЛАТА 50%'];
@@ -616,10 +620,15 @@ document.getElementById('addRowBtn').addEventListener('click', () => {
 
 document.getElementById('saveBtn').addEventListener('click', async () => {
   if (window.reestrWindow && window.reestrWindow.saveRows) {
-    await window.reestrWindow.saveRows(rows);
     const btn = document.getElementById('saveBtn');
-    btn.textContent = 'Сохранено';
-    setTimeout(() => { btn.textContent = 'Сохранить'; }, 1500);
+    if(btn.disabled)return;
+    btn.disabled=true;btn.textContent='Сохранение…';
+    try{
+      const result=await window.reestrWindow.saveRows(rows);
+      if(!result?.ok)throw Error(result?.error||'Реестр не записан. Проверьте базу и обновите данные.');
+      btn.textContent='Сохранено';
+    }catch(error){btn.textContent='Повторить сохранение';alert('Не удалось сохранить: '+error.message);}
+    finally{btn.disabled=false;setTimeout(()=>{if(!btn.disabled)btn.textContent='Сохранить';},1500);}
   }
 });
 

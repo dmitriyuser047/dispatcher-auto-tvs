@@ -33,7 +33,17 @@ const SYNC_NAMES = {
 };
 const SYNC_POLL_MS = 20000;
 
-const _sync = { enabled: false, revs: {}, synced: {}, access:null, chain: Promise.resolve(), polling: null, needRefresh: [] };
+const _sync = { enabled: false, revs: {}, synced: {}, databaseToken:null, access:null, chain: Promise.resolve(), polling: null, needRefresh: [] };
+
+function syncAssertDatabase(response) {
+  if (!_sync.databaseToken || response?.databaseToken === _sync.databaseToken) return;
+  _sync.enabled = false;
+  if (_sync.polling) { clearInterval(_sync.polling); _sync.polling = null; }
+  if (typeof _loadWriteBlocked !== 'undefined') _loadWriteBlocked = true;
+  const error = new Error('База данных на сервере изменилась. Перезапустите программу и проверьте выбранную базу. Текущие данные не объединялись с другой базой.');
+  error.databaseChanged = true;
+  throw error;
+}
 
 function syncKey(row) { return row && typeof row === 'object' ? (row.id ?? row.month ?? null) : null; }
 
@@ -85,8 +95,8 @@ async function syncResolveMerge(section,base,local,remote){
   if(!conflicts.length)return syncMerge(base,local,remote);
   if(typeof wfShowDialog!=='function')throw Error('Конфликт данных. Откройте программу заново для выбора версии.');
   const resolution=await new Promise(resolve=>{
-    wfShowDialog('Совместное изменение · '+(SYNC_NAMES[section]||section),`<p>Выберите значение каждого поля. Остальные изменения объединятся автоматически.</p><form id="syncConflictForm">${conflicts.map((c,i)=>`<article class="wf-card"><strong>${htmlEsc(c.key)} · ${htmlEsc(c.field)}</strong><details><summary>Было</summary><pre>${htmlEsc(JSON.stringify(c.base,null,2))}</pre></details><div class="wf-grid"><div><b>Моя версия</b><pre>${htmlEsc(JSON.stringify(c.local,null,2))}</pre></div><div><b>На сервере</b><pre>${htmlEsc(JSON.stringify(c.remote,null,2))}</pre></div></div><select name="choice${i}" required><option value="">Выберите версию</option value="local">Моя версия</option><option value="remote">На сервере</option></select></article>`).join('')}<button class="btn btn-primary">Объединить и сохранить</button></form>`);
-    const modal=document.getElementById('wfModal');let settled=false;const finish=value=>{if(settled)return;settled=true;observer.disconnect();resolve(value);};const observer=new MutationObserver(()=>{if(!modal.classList.contains('open')||!modal.isConnected)finish(null);});observer.observe(modal,{attributes:true,attributeFilter:['class']});
+    wfShowDialog('Совместное изменение · '+(SYNC_NAMES[section]||section),`<p>Выберите значение каждого поля. Остальные изменения объединятся автоматически.</p><form id="syncConflictForm">${conflicts.map((c,i)=>`<article class="wf-card"><strong>${htmlEsc(c.key)} · ${htmlEsc(c.field)}</strong><details><summary>Было</summary><pre>${htmlEsc(JSON.stringify(c.base,null,2))}</pre></details><div class="wf-grid"><div><b>Моя версия</b><pre>${htmlEsc(JSON.stringify(c.local,null,2))}</pre></div><div><b>На сервере</b><pre>${htmlEsc(JSON.stringify(c.remote,null,2))}</pre></div></div><select name="choice${i}" required><option value="">Выберите версию</option><option value="local">Моя версия</option><option value="remote">На сервере</option></select></article>`).join('')}<button class="btn btn-primary">Объединить и сохранить</button></form>`);
+    const modal=document.getElementById('wfModal');let settled=false;const finish=value=>{if(settled)return;settled=true;observer.disconnect();resolve(value);};const observer=new MutationObserver(()=>{if(!modal.classList.contains('open')||!modal.isConnected)finish(null);});observer.observe(modal,{attributes:true,attributeFilter:['class']});observer.observe(document.body,{childList:true});
     document.getElementById('syncConflictForm').onsubmit=e=>{e.preventDefault();const fd=new FormData(e.target);finish(conflicts.map((_,i)=>fd.get('choice'+i)));closeModal('wfModal');};
   });
   if(!resolution)throw Error('Сохранение отменено: конфликт требует решения');
@@ -99,6 +109,10 @@ async function syncLoad() {
   if (!raw) return null;
   const snap = JSON.parse(raw);
   if (!snap || !snap.data) return null;
+  _sync.enabled = false;
+  _sync.revs = {};
+  _sync.synced = {};
+  _sync.databaseToken = typeof snap.databaseToken === 'string' ? snap.databaseToken : null;
   _sync.access=snap.access||null;
   if(typeof wfInitData==='function')wfInitData(snap.data);
   if (snap.revisions) {
@@ -136,13 +150,14 @@ async function syncSaveNow(d, options) {
   if (!changed.length) return true;
   const mergedNames = new Set();
   for (let attempt = 0; attempt < 4; attempt++) {
-    const payload = { base: {}, sections: {} };
+    const payload = { base: {}, sections: {}, ...(_sync.databaseToken ? {databaseToken:_sync.databaseToken} : {}) };
     changed.forEach(n => { payload.base[n] = _sync.revs[n] || 0; payload.sections[n] = d[n] || []; });
     const res = await window.electronAPI.writeSections(JSON.stringify(payload));
+    if (res && (res.databaseToken != null || res.ok || res.conflicts || res.databaseChanged)) syncAssertDatabase(res);
     if (res && res.unsupported) {
       // Сервер старой версии — сохраняем по-старому, целиком
       _sync.enabled = false;
-      return await window.electronAPI.writeData(JSON.stringify(d)) !== false;
+      return await window.electronAPI.writeData(JSON.stringify(_sync.databaseToken ? {databaseToken:_sync.databaseToken,data:d} : d)) !== false;
     }
     if (res && res.ok) {
       changed.forEach(n => {
@@ -163,6 +178,7 @@ async function syncSaveNow(d, options) {
     for (const n of res.conflicts) {
       const remote = await window.electronAPI.readSection(n);
       if (!remote) return false;
+      syncAssertDatabase(remote);
       const base = JSON.parse(_sync.synced[n] || '[]');
       d[n] = await syncResolveMerge(n,base,d[n]||[],remote.rows||[]);
       _sync.synced[n] = JSON.stringify(remote.rows || []);
@@ -181,7 +197,9 @@ async function syncPoll() {
   if (!_sync.enabled || !window.electronAPI.getRevisions) return;
   if (document.querySelector('.modal-overlay.open')) return;
   if (_sync.needRefresh.length) syncRefreshView([]);
-  const revs = await window.electronAPI.getRevisions();
+  let revs;
+  try { revs = await window.electronAPI.getRevisions(); if (revs) syncAssertDatabase(revs); }
+  catch (error) { console.warn('[sync] ' + error.message); if (error.databaseChanged) showToast(error.message); return; }
   if (!revs) return;
   const stale = SYNC_SECTIONS.filter(n => (revs[n] || 0) !== (_sync.revs[n] || 0));
   if (!stale.length) return;
@@ -192,6 +210,7 @@ async function syncPoll() {
     for (const n of stale) {
       const remote = await window.electronAPI.readSection(n);
       if (!remote) continue;
+      syncAssertDatabase(remote);
       if (document.querySelector('.modal-overlay.open')) return;
       const localStr = JSON.stringify(data[n] || []);
       if (localStr !== _sync.synced[n]) {
@@ -210,7 +229,7 @@ async function syncPoll() {
     rebuildIndex();
     showToast('Обновлено другим пользователем: ' + got.map(n => SYNC_NAMES[n] || n).join(', '));
     syncRefreshView(got);
-  }).catch(e => console.warn('[sync] ' + (e && e.message)));
+  }).catch(e => { console.warn('[sync] ' + (e && e.message)); if (e?.databaseChanged) showToast(e.message); });
 }
 
 // Перерисовать текущий экран, но не мешать вводу: если открыто окно или

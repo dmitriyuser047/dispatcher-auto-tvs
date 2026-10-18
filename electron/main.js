@@ -7,28 +7,49 @@ const updater = require('./updater');
 const server  = require('./server');
 const { createExtractorFromData } = require('node-unrar-js');
 const storage = require('./storage');
+const { writeAtomic, validateSettings, databaseIdentity } = require('./settings');
+const { trustedPage, canInvoke, staticFile } = require('./security');
+const { pathToFileURL } = require('node:url');
+const prototypeBuild = require('../package.json').prototype === true;
+const hiddenTest = app.commandLine.hasSwitch('tvs-test-hidden');
+const requestedProfile = app.commandLine.getSwitchValue('user-data-dir');
+if (requestedProfile) app.setPath('userData', path.resolve(requestedProfile));
+else if (prototypeBuild) app.setPath('userData', path.join(app.getPath('appData'), 'dispatcher-tvs-prototype'));
 
-const DEFAULT_DATA_DIR = path.join(os.homedir(), 'Documents', 'ДиспетчеризацияАвто_ТВС');
+// Storage transactions belong to one application process at a time.
+if (!app.requestSingleInstanceLock()) app.exit(0);
+app.on('second-instance', () => {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win && !hiddenTest) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
+});
+
+const DEFAULT_DATA_DIR = path.join(os.homedir(), 'Documents', prototypeBuild ? 'ДиспетчеризацияАвто_ТВС_Прототип' : 'ДиспетчеризацияАвто_ТВС');
 const SETTINGS_FILE   = path.join(app.getPath('userData'), 'settings.json');
 
 function loadSettings() {
-  try {
-    if (fs.existsSync(SETTINGS_FILE)) return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-  } catch {}
-  return {
-    users: [{ name: 'Пользователь', dataDir: DEFAULT_DATA_DIR }],
-    activeUser: 0,
-    networkMode: 'local',
-    serverPort: 3377,
-    remoteHost: '',
-    remotePort: 3377,
+  const defaults = {
+    users: [{ name: 'Пользователь', dataDir: DEFAULT_DATA_DIR }], activeUser: 0,
+    networkMode: 'local', serverPort: 3377, remoteHost: '', remotePort: 3377,
   };
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      const checked = validateSettings({ ...defaults, ...saved, networkKey:saved.networkKey || require('crypto').randomBytes(24).toString('hex') });
+      if (!saved.networkKey) saveSettings(checked);
+      return checked;
+    }
+  } catch (e) {
+    dialog.showErrorBox('Не прочитаны настройки', 'Файл настроек повреждён. Восстановите его копию:\n' + SETTINGS_FILE + '\n' + e.message);
+    app.exit(1);
+    throw e;
+  }
+  return defaults;
 }
 
 function saveSettings(s) {
   const dir = path.dirname(SETTINGS_FILE);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const temp=SETTINGS_FILE+'.tmp';const fd=fs.openSync(temp,'w');try{fs.writeFileSync(fd,JSON.stringify(s,null,2),'utf8');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}fs.renameSync(temp,SETTINGS_FILE);
+  writeAtomic(SETTINGS_FILE, JSON.stringify(s, null, 2));
 }
 
 let settings = loadSettings();
@@ -44,6 +65,56 @@ function configureNetwork(s){
   server.configureKey(s.networkKey);networkConfigError='';
 }
 try{configureNetwork(settings);}catch(e){networkConfigError=e.message;server.configureTransport({protocol:'https:'});console.error('[network] '+e.message);}
+
+const dataBindings = new Map();
+const settingsIdentity = () => databaseIdentity(settings);
+function bindData(event, token) {
+  dataBindings.set(event.sender.id, { identity:settingsIdentity(), databaseToken:token || null });
+}
+function assertDataBinding(event, token) {
+  const binding = dataBindings.get(event.sender.id);
+  if (!binding || binding.identity !== settingsIdentity() || token && token !== binding.databaseToken) throw new Error('База переключена. Загрузите выбранную базу заново перед сохранением.');
+  if (settings.networkMode !== 'client' && binding.databaseToken !== storage.databaseToken(getDataDir())) throw new Error('База изменилась. Загрузите её заново.');
+  return binding;
+}
+
+let settingsChain = Promise.resolve(), restartConfiguredServer = null;
+function queueSettings(next) {
+  const operation = settingsChain.then(async () => {
+    const checked = validateSettings(typeof next === 'function' ? next(settings) : next);
+    // Validate the CA before mutating the active transport or settings.
+    if (checked.networkMode === 'client' && checked.remoteCaFile) fs.readFileSync(checked.remoteCaFile);
+    const changed = settingsIdentity() !== databaseIdentity(checked) || settings.networkMode !== checked.networkMode ||
+      JSON.stringify([settings.serverPort,settings.serverProtocol,settings.serverTlsCert,settings.serverTlsKey]) !== JSON.stringify([checked.serverPort,checked.serverProtocol,checked.serverTlsCert,checked.serverTlsKey]);
+    const restart = changed && checked.networkMode === 'server' && server.isRunning();
+    if (changed && server.isRunning()) await server.stop();
+    saveSettings(checked);
+    settings = checked;
+    configureNetwork(settings);
+    if (settings.networkMode !== 'client') ensureDirs();
+    if (restart && restartConfiguredServer) {
+      const result = await restartConfiguredServer();
+      if (!result.ok) throw new Error('Настройки сохранены, но сервер не запущен: ' + result.error);
+    }
+    return true;
+  });
+  settingsChain = operation.catch(() => {});
+  return operation;
+}
+
+// Validate the exact trusted top frame and the capabilities of each window.
+const handle = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, listener) => handle(channel, (event, ...args) => {
+  const page = trustedPage(event.senderFrame?.url, path.join(__dirname, '..'), app._localServerPort);
+  if (event.senderFrame !== event.sender.mainFrame || !canInvoke(page, channel)) throw new Error('Недоверенный источник запроса');
+  return listener(event, ...args);
+});
+app.on('web-contents-created', (_event, contents) => {
+  contents.setWindowOpenHandler(() => ({ action:'deny' }));
+  contents.on('will-navigate', (event, url) => { if (url !== contents.getURL()) event.preventDefault(); });
+  contents.on('will-attach-webview', event => event.preventDefault());
+  contents.once('destroyed', () => dataBindings.delete(contents.id));
+});
 
 function getActiveUser() {
   const idx = settings.activeUser || 0;
@@ -69,6 +140,7 @@ function createDailyBackup() {
 }
 
 function applyBundledDataSeedOnce() {
+  if (prototypeBuild) return;
   if (settings.networkMode === 'client') return;
 
   const seedVersion = '2.0.57';
@@ -111,6 +183,7 @@ function applyBundledDataSeedOnce() {
 function createWindow() {
   const iconPath = path.join(__dirname, '../build/icon.ico');
   const win = new BrowserWindow({
+    show:!hiddenTest,
     width: 1280,
     height: 800,
     minWidth: 960,
@@ -121,6 +194,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
   win.setMenuBarVisibility(false);
@@ -135,17 +209,14 @@ function createWindow() {
   const mime = { '.html':'text/html', '.js':'application/javascript', '.css':'text/css', '.json':'application/json', '.png':'image/png', '.ico':'image/x-icon', '.svg':'image/svg+xml' };
   if (!app._localServer) {
     app._localServer = http.createServer((req, res) => {
-      const url = req.url === '/' ? '/index.html' : req.url.split('?')[0];
-      let filePath;
-      try { filePath = path.resolve(rootDir, '.' + decodeURIComponent(url)); }
-      catch { res.writeHead(400); res.end(); return; }
-      const relative = path.relative(rootDir, filePath);
-      if (relative.startsWith('..') || path.isAbsolute(relative)) { res.writeHead(403); res.end(); return; }
+      const filePath = staticFile(rootDir, req.url);
+      if (!filePath || !['GET','HEAD'].includes(req.method)) { res.writeHead(403); res.end(); return; }
       fs.readFile(filePath, (err, data) => {
         if (err) { res.writeHead(404); res.end(); return; }
         const ext = path.extname(filePath).toLowerCase();
-        res.writeHead(200, { 'Content-Type': mime[ext] || 'application/octet-stream' });
-        res.end(data);
+        res.writeHead(200, { 'Content-Type': mime[ext] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff',
+          'Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'" });
+        res.end(req.method === 'HEAD' ? undefined : data);
       });
     });
     app._localServer.listen(0, '127.0.0.1', () => {
@@ -161,20 +232,21 @@ function createWindow() {
   win.webContents.once('did-finish-load', () => {
     setTimeout(async () => {
       const info = await updater.checkForUpdate();
-      if (info) win.webContents.send('update-available', info);
+      if (info && !win.isDestroyed()) win.webContents.send('update-available', info);
     }, 5000);
   });
 
   // Периодическая проверка каждые 3 минуты
-  setInterval(async () => {
+  const updateTimer = setInterval(async () => {
     const info = await updater.checkForUpdate();
-    if (info) win.webContents.send('update-available', info);
+    if (info && !win.isDestroyed()) win.webContents.send('update-available', info);
   }, 3 * 60 * 1000);
+  win.once('closed', () => clearInterval(updateTimer));
 
   // Проверка при показе/разворачивании окна
   win.on('show', async () => {
     const info = await updater.checkForUpdate();
-    if (info) win.webContents.send('update-available', info);
+    if (info && !win.isDestroyed()) win.webContents.send('update-available', info);
   });
 
   return win;
@@ -182,30 +254,40 @@ function createWindow() {
 
 app.whenReady().then(() => {
   require('./artifacts').register({ipcMain,getDataDir,isClientMode,getSettings:()=>settings,knowledgeDir:()=>path.join(getDataDir(),'reestr-knowledge')});
-  ensureDirs();
+  if (settings.networkMode !== 'client') ensureDirs();
   applyBundledDataSeedOnce();
 
   // Экспорт сводок/актов (XLSX) идёт через обычную загрузку браузера —
   // открываем файл сразу после сохранения, чтобы не искать его в "Загрузках".
   session.defaultSession.on('will-download', (_event, item) => {
     item.once('done', (_e, state) => {
-      if (state === 'completed') shell.openPath(item.getSavePath());
+      if (state === 'completed' && ['.xlsx','.csv','.pdf','.docx','.txt'].includes(path.extname(item.getSavePath()).toLowerCase())) shell.openPath(item.getSavePath());
     });
   });
+  session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  session.defaultSession.setPermissionCheckHandler(() => false);
 
   function isClientMode() { return settings.networkMode === 'client' && settings.remoteHost; }
 
-  ipcMain.handle('read-data', async () => {
+  ipcMain.handle('read-data', async (event) => {
+    const identity = settingsIdentity();
     if (isClientMode()) {
       if(networkConfigError)return null;
       try {
-        return await server.fetchData(settings.remoteHost, settings.remotePort || 3377);
+        let snapshot;
+        try { snapshot = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/snapshot', 15000); }
+        catch { snapshot = { data:JSON.parse(await server.fetchData(settings.remoteHost, settings.remotePort || 3377)) }; }
+        if (identity !== settingsIdentity()) throw new Error('База переключена во время чтения');
+        bindData(event, snapshot.databaseToken);
+        return JSON.stringify(snapshot.data);
       } catch (e) {
         return null;
       }
     }
     try {
-      return JSON.stringify(storage.readAll(getDataDir()));
+      const snapshot = storage.readSnapshot(getDataDir());
+      bindData(event, snapshot.databaseToken);
+      return JSON.stringify(snapshot.data);
     } catch (e) {
       console.error('[read-data] ' + e.message);
       return null;
@@ -213,11 +295,19 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('write-data', async (_event, jsonStr) => {
+    let payload, binding;
+    try {
+      payload = JSON.parse(jsonStr);
+      binding = assertDataBinding(_event, payload.databaseToken);
+    } catch (e) { console.error('[write-data] ' + e.message); return false; }
+    const data = payload.data && !Array.isArray(payload.data) && Array.isArray(payload.data.vehicles) ? payload.data : payload;
+    const identity = settingsIdentity();
     if (isClientMode()) {
       if(networkConfigError)return false;
       try {
-        const res = await server.postData(settings.remoteHost, settings.remotePort || 3377, jsonStr);
-        return res && res.ok;
+        const body = binding.databaseToken ? { databaseToken:binding.databaseToken, data } : data;
+        const res = await server.postData(settings.remoteHost, settings.remotePort || 3377, JSON.stringify(body));
+        return identity === settingsIdentity() && res && res.ok;
       } catch (e) {
         return false;
       }
@@ -225,7 +315,7 @@ app.whenReady().then(() => {
     ensureDirs();
     createDailyBackup();
     try {
-      const res = storage.writeAll(getDataDir(), JSON.parse(jsonStr));
+      const res = storage.writeAll(getDataDir(), data);
       if (res.changed.length) console.log('[write-data] разделы: ' + res.changed.join(', '));
       return true;
     } catch (e) {
@@ -237,18 +327,32 @@ app.whenReady().then(() => {
   // ── Синхронизация по разделам ──
   // Снимок: данные + версии разделов. На старом сервере (без /api/snapshot)
   // версии неизвестны — клиент работает по-старому, целиком.
-  ipcMain.handle('read-snapshot', async () => {
+  ipcMain.handle('read-snapshot', async (event) => {
+    const identity = settingsIdentity();
     if (isClientMode()) {
       if(networkConfigError)return null;
       const host = settings.remoteHost, port = settings.remotePort || 3377;
-      try { return JSON.stringify(await server.getJson(host, port, '/api/snapshot', 15000)); }
+      try {
+        const snapshot = await server.getJson(host, port, '/api/snapshot', 15000);
+        if (identity !== settingsIdentity()) return null;
+        bindData(event, snapshot.databaseToken);
+        return JSON.stringify(snapshot);
+      }
       catch (e) {
-        try { return JSON.stringify({ data: JSON.parse(await server.fetchData(host, port)), revisions: null }); }
+        try {
+          const data = JSON.parse(await server.fetchData(host, port));
+          if (identity !== settingsIdentity()) return null;
+          bindData(event, null);
+          return JSON.stringify({ data, revisions:null });
+        }
         catch { return null; }
       }
     }
     try {
-      return JSON.stringify({ data: storage.readAll(getDataDir()), revisions: storage.readRevisions(getDataDir()) });
+      const dir = getDataDir();
+      const snapshot = storage.readSnapshot(dir);
+      bindData(event, snapshot.databaseToken);
+      return JSON.stringify(snapshot);
     } catch (e) {
       console.error('[read-snapshot] ' + e.message);
       return null;
@@ -259,7 +363,7 @@ app.whenReady().then(() => {
     if(isClientMode()&&networkConfigError)return null;
     try {
       if (isClientMode()) return await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/revisions', 5000);
-      return storage.readRevisions(getDataDir());
+        return { ...storage.readRevisions(getDataDir()), databaseToken:storage.databaseToken(getDataDir()) };
     } catch (e) { return null; }
   });
 
@@ -272,15 +376,26 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('write-sections', async (_event, jsonStr) => {
+    let payload;
+    try {
+      payload = JSON.parse(jsonStr);
+      const binding = assertDataBinding(_event, payload.databaseToken);
+      if (binding.databaseToken) payload.databaseToken = binding.databaseToken;
+    } catch (e) { return { ok:false, error:e.message }; }
+    const identity = settingsIdentity();
     if (isClientMode()) {
       if(networkConfigError)return {ok:false,error:networkConfigError};
-      try { return await server.postSections(settings.remoteHost, settings.remotePort || 3377, jsonStr); }
+      try {
+        const result = await server.postSections(settings.remoteHost, settings.remotePort || 3377, JSON.stringify(payload));
+        if (identity !== settingsIdentity()) return { ok:false, error:'База переключена во время сохранения. Загрузите выбранную базу заново.' };
+        return result;
+      }
       catch (e) { return { ok: false, error: e.message }; }
     }
     ensureDirs();
     createDailyBackup();
     try {
-      const res = storage.writeSections(getDataDir(), JSON.parse(jsonStr));
+      const res = storage.writeSections(getDataDir(), payload);
       if (res.ok && res.changed.length) console.log('[write-sections] ' + res.changed.join(', '));
       return res;
     } catch (e) {
@@ -290,6 +405,14 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('get-data-path', () => getDataDir());
+  ipcMain.handle('get-data-identity', async () => {
+    const identity = settingsIdentity();
+    if (!isClientMode()) return identity + ':' + storage.databaseToken(getDataDir());
+    if (networkConfigError) throw new Error(networkConfigError);
+    const ping = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/ping', 5000);
+    if (identity !== settingsIdentity() || !ping?.ok) throw new Error('База переключена или недоступна. Повторите действие.');
+    return identity + ':' + (ping.databaseToken || 'legacy');
+  });
   ipcMain.handle('choose-certificate',async(event)=>{const r=await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender),{title:'Сертификат или ключ PEM',properties:['openFile'],filters:[{name:'PEM / CRT / KEY',extensions:['pem','crt','key']}]});return r.canceled?null:r.filePaths[0];});
 
   ipcMain.handle('get-data-health', async () => {
@@ -327,25 +450,22 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('get-settings', () => settings);
+  ipcMain.handle('get-theme', () => settings.uiTheme || null);
+  ipcMain.handle('set-theme', async (_event, theme) => {
+    if (!['light','dark'].includes(theme)) throw new Error('Неизвестная тема');
+    await queueSettings(current => ({ ...current, uiTheme:theme }));
+    for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send('workspace-theme-changed', theme);
+    return true;
+  });
 
-  ipcMain.handle('save-settings', (_event, newSettings) => {
-    if(!newSettings||!Array.isArray(newSettings.users)||!newSettings.users.length)throw new Error('Нужен хотя бы один профиль данных');
-    if(newSettings.serverUsers)newSettings.serverUsers=require('./access-control').normalizeServerUsers(newSettings.serverUsers);
-    configureNetwork(newSettings);
-    const connectionChanged=JSON.stringify([settings.activeUser,settings.users,settings.serverPort,settings.serverProtocol,settings.serverTlsCert,settings.serverTlsKey,settings.networkMode])!==JSON.stringify([newSettings.activeUser,newSettings.users,newSettings.serverPort,newSettings.serverProtocol,newSettings.serverTlsCert,newSettings.serverTlsKey,newSettings.networkMode]);
-    if(connectionChanged&&server.isRunning())server.stop();
-    settings = newSettings;
-    saveSettings(settings);
-    if (!isClientMode()) ensureDirs();
+  ipcMain.handle('save-settings', async (_event, newSettings) => {
+    await queueSettings(newSettings);
     return true;
   });
 
   ipcMain.handle('switch-user', async (_event, idx) => {
-    if (idx < 0 || idx >= settings.users.length) return { ok: false };
-    if(server.isRunning())server.stop();
-    settings.activeUser = idx;
-    saveSettings(settings);
-    if (!isClientMode()) ensureDirs();
+    if (!Number.isInteger(idx) || idx < 0 || idx >= settings.users.length) return { ok: false };
+    await queueSettings(current => ({ ...current, activeUser:idx }));
     return { ok: true };
   });
 
@@ -374,10 +494,11 @@ app.whenReady().then(() => {
       tls:settings.serverProtocol==='https:'?{cert:fs.readFileSync(settings.serverTlsCert),key:fs.readFileSync(settings.serverTlsKey)}:null,
     });
   }catch(e){return {ok:false,error:'Сервер не запущен: '+e.message};}}
+  restartConfiguredServer = startConfiguredServer;
   ipcMain.handle('server-start',startConfiguredServer);
 
-  ipcMain.handle('server-stop', () => {
-    server.stop();
+  ipcMain.handle('server-stop', async () => {
+    await server.stop();
     return { ok: true };
   });
 
@@ -571,12 +692,23 @@ app.whenReady().then(() => {
 
   // ─── РЕЕСТР-БИЛДЕР ──────────────────────────────────────
   const REESTR_DIR = path.join(__dirname, '..', 'ReestrBuilder');
-  const REESTR_LIB_URL = 'file:///' + path.join(REESTR_DIR, 'lib.mjs').replace(/\\/g, '/');
-  async function loadReestrLib(){const lib=await import(REESTR_LIB_URL);lib.configureKnowledgePath(path.join(getDataDir(),'reestr-knowledge'));return lib;}
+  const REESTR_LIB_URL = pathToFileURL(path.join(REESTR_DIR, 'lib.mjs'));
+  async function loadReestrLib(event) {
+    const identity = settingsIdentity(), directory = path.join(getDataDir(), 'reestr-knowledge');
+    const registry = event && reestrWindowData.get(event.sender.id);
+    if (registry && registry.identity !== identity) throw new Error('База переключена. Откройте реестр заново.');
+    if (event && !registry) assertDataBinding(event);
+    const url = new URL(REESTR_LIB_URL); url.searchParams.set('profile', identity);
+    // Each database owns its module instance and knowledge path during long OCR jobs.
+    const lib = await import(url.href);
+    if (identity !== settingsIdentity()) throw new Error('База переключена во время обработки реестра. Повторите действие.');
+    lib.configureKnowledgePath(directory);
+    return lib;
+  }
 
   ipcMain.handle('reestr-parse-invoices', async (event, zipArrayBuffer) => {
     console.log('[reestr] parse-invoices start');
-    const { parseInvoices, loadConfig } = await loadReestrLib();
+    const { parseInvoices, loadConfig } = await loadReestrLib(event);
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const log = [];
     const rows = await parseInvoices(Buffer.from(zipArrayBuffer), config, (msg) => { log.push(msg); console.log('[reestr] log:', msg.type, msg.text); });
@@ -586,7 +718,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('reestr-parse-pdfs', async (event, pdfFilesRaw) => {
     console.log('[reestr] parse-pdfs start, files:', pdfFilesRaw.length);
-    const { parsePdfFiles, loadConfig } = await loadReestrLib();
+    const { parsePdfFiles, loadConfig } = await loadReestrLib(event);
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const log = [];
     const pdfFiles = pdfFilesRaw.map(f => ({ name: f.name, buffer: Buffer.from(f.buffer) }));
@@ -600,7 +732,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('reestr-build-xlsx', async (event, { rows }) => {
-    const { buildXlsxFromRows, loadConfig } = await loadReestrLib();
+    const { buildXlsxFromRows, loadConfig } = await loadReestrLib(event);
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const { buffer, total } = await buildXlsxFromRows(rows, config);
     return {
@@ -611,17 +743,17 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('reestr-learn', async (event, rows) => {
-    const { learnFromRows } = await loadReestrLib();
+    const { learnFromRows } = await loadReestrLib(event);
     return learnFromRows(rows);
   });
 
   ipcMain.handle('reestr-apply-knowledge', async (event, rows) => {
-    const { applyKnowledge } = await loadReestrLib();
+    const { applyKnowledge } = await loadReestrLib(event);
     return applyKnowledge(rows);
   });
 
   ipcMain.handle('reestr-analytics', async (event, rows) => {
-    const { getAnalytics } = await loadReestrLib();
+    const { getAnalytics } = await loadReestrLib(event);
     return getAnalytics(rows);
   });
 
@@ -651,13 +783,24 @@ app.whenReady().then(() => {
   });
 
   // ─── Отдельное окно реестра ───
-  let reestrWindowData = null;
+  const reestrWindowData = new Map();
+  const registryRows = rows => {
+    if (!Array.isArray(rows) || rows.length > 100000 || rows.some(row => !row || typeof row !== 'object' || Array.isArray(row)) || Buffer.byteLength(JSON.stringify(rows)) > 32 * 1024 * 1024) throw new Error('Некорректные строки реестра');
+    return rows;
+  };
+  const localRegistrySnapshot = dir => storage.readSnapshot(dir);
 
-  ipcMain.handle('open-reestr-window', (event, data) => {
-    reestrWindowData = data;
+  ipcMain.handle('open-reestr-window', async (event, data) => {
+    registryRows(data?.rows);
+    const identity = settingsIdentity(), client = isClientMode(), dir = getDataDir();
+    const snapshot = client ? await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/snapshot', 15000)
+      : storage.withDatabaseLock(dir, () => localRegistrySnapshot(dir));
+    if (identity !== settingsIdentity()) throw new Error('База переключена. Откройте реестр заново.');
+    assertDataBinding(event, snapshot.databaseToken);
     const parentWin = BrowserWindow.fromWebContents(event.sender);
     const iconPath = path.join(__dirname, '../build/icon.ico');
     const reestrWin = new BrowserWindow({
+      show:!hiddenTest,
       width: 1400,
       height: 900,
       minWidth: 900,
@@ -669,10 +812,16 @@ app.whenReady().then(() => {
         preload: path.join(__dirname, 'reestr-preload.js'),
         contextIsolation: true,
         nodeIntegration: false,
+        sandbox: true,
       },
     });
     reestrWin.setMenuBarVisibility(false);
-    reestrWin.loadFile(path.join(__dirname, '../reestr-window.html'));
+    const id = reestrWin.webContents.id;
+    reestrWindowData.set(id, { ...data, theme:settings.uiTheme || 'light', identity, databaseToken:snapshot.databaseToken || null,
+      revision:snapshot.revisions?.reestrRows, baseRows:snapshot.data.reestrRows || [], ownerId:event.sender.id, busy:false });
+    reestrWin.once('closed', () => reestrWindowData.delete(id));
+    try { await reestrWin.loadFile(path.join(__dirname, '../reestr-window.html')); }
+    catch (e) { reestrWindowData.delete(id); reestrWin.destroy(); throw e; }
     return true;
   });
 
@@ -688,11 +837,13 @@ app.whenReady().then(() => {
       properties: ['openFile'],
     });
     if (canceled || !filePaths || !filePaths[0]) return { ok: false };
+    let loadingTask;
     try {
       const pdfData = new Uint8Array(fs.readFileSync(filePaths[0]));
-      const pdfjsPkg = require('pdfjs-dist/build/pdf.js');
+      const pdfjsPkg = await require('./pdfjs-runtime.cjs').loadPdfJs();
       const { getDocument } = pdfjsPkg;
-      const doc = await getDocument({ data: pdfData, useSystemFonts: true }).promise;
+      loadingTask = getDocument({ ...require('./pdfjs-runtime.cjs').pdfDocumentOptions(), data:pdfData });
+      const doc = await loadingTask.promise;
       const allItems = [];
       for (let i = 1; i <= doc.numPages; i++) {
         const page = await doc.getPage(i);
@@ -712,7 +863,7 @@ app.whenReady().then(() => {
       return { ok: true, items: allItems, fileName: path.basename(filePaths[0]) };
     } catch (e) {
       return { ok: false, error: e.message };
-    }
+    } finally { if (loadingTask) await loadingTask.destroy().catch(() => {}); }
   });
 
   // Отчёт ГЛОНАСС: PDF отдаём текстом с координатами, Excel — как есть
@@ -725,12 +876,14 @@ app.whenReady().then(() => {
     });
     if (canceled || !filePaths || !filePaths[0]) return { ok: false };
     const file = filePaths[0];
+    let loadingTask;
     try {
       if (!/\.pdf$/i.test(file)) {
         return { ok: true, kind: 'xlsx', base64: fs.readFileSync(file).toString('base64'), fileName: path.basename(file) };
       }
-      const { getDocument } = require('pdfjs-dist/build/pdf.js');
-      const doc = await getDocument({ data: new Uint8Array(fs.readFileSync(file)), useSystemFonts: true }).promise;
+      const { getDocument } = await require('./pdfjs-runtime.cjs').loadPdfJs();
+      loadingTask = getDocument({ ...require('./pdfjs-runtime.cjs').pdfDocumentOptions(), data:new Uint8Array(fs.readFileSync(file)) });
+      const doc = await loadingTask.promise;
       const items = [];
       for (let i = 1; i <= doc.numPages; i++) {
         const page = await doc.getPage(i);
@@ -743,22 +896,55 @@ app.whenReady().then(() => {
       return { ok: true, kind: 'pdf', items, fileName: path.basename(file) };
     } catch (e) {
       return { ok: false, error: e.message };
-    }
+    } finally { if (loadingTask) await loadingTask.destroy().catch(() => {}); }
   });
 
-  ipcMain.handle('reestr-window-data', () => {
-    console.log('[reestr-window] data request, rows:', reestrWindowData?.rows?.length, 'statyi:', reestrWindowData?.statyi?.length);
-    return reestrWindowData;
+  ipcMain.handle('reestr-window-data', event => {
+    const context = reestrWindowData.get(event.sender.id);
+    if (!context) throw new Error('Окно реестра закрыто');
+    const { rows,log,statyi,contracts,vehicles,theme } = context;
+    return { rows,log,statyi,contracts,vehicles,theme };
   });
 
-  ipcMain.handle('reestr-save-rows', (event, rows) => {
-    const allWindows = BrowserWindow.getAllWindows();
-    for (const w of allWindows) {
-      if (w.webContents !== event.sender) {
-        w.webContents.send('reestr-rows-saved', rows);
-      }
-    }
-    return { ok: true };
+  ipcMain.handle('reestr-save-rows', async (event, rows) => {
+    let context, ownsBusy = false;
+    try {
+      registryRows(rows);
+      context = reestrWindowData.get(event.sender.id);
+      const identity = settingsIdentity(), client = isClientMode(), dir = getDataDir();
+      if (!context || context.identity !== identity) throw new Error('База переключена. Откройте реестр заново в нужной базе.');
+      if (context.busy) throw new Error('Сохранение уже выполняется');
+      context.busy = true; ownsBusy = true;
+      const checkSnapshot = snapshot => {
+        if (identity !== settingsIdentity() || (snapshot.databaseToken || null) !== context.databaseToken ||
+            !Number.isSafeInteger(context.revision) || snapshot.revisions?.reestrRows !== context.revision ||
+            JSON.stringify(snapshot.data.reestrRows || []) !== JSON.stringify(context.baseRows)) throw new Error('База или реестр изменены. Сверьте строки и откройте реестр заново.');
+      };
+      let result;
+      if (client) {
+        const host = settings.remoteHost, port = settings.remotePort || 3377;
+        const snapshot = await server.getJson(host, port, '/api/snapshot', 15000);
+        checkSnapshot(snapshot);
+        result = await server.postSections(host, port, JSON.stringify({ databaseToken:context.databaseToken, base:{ reestrRows:context.revision }, sections:{ reestrRows:rows } }));
+      } else result = storage.withDatabaseLock(dir, () => {
+        const snapshot = localRegistrySnapshot(dir);
+        checkSnapshot(snapshot);
+        storage.makeDailyBackup(dir, path.join(dir, 'backups'), 30);
+        const sections = { reestrRows:rows }, base = { reestrRows:context.revision };
+        if (JSON.stringify(rows) !== JSON.stringify(context.baseRows)) {
+          const entry = { id:'audit_' + require('crypto').randomUUID(), at:new Date().toISOString(), actor:getActiveUser().name || 'Пользователь', actorId:'local-profile', actorRole:'admin', source:'local', section:'reestrRows', recordId:'registry', action:'replace', before:context.baseRows, after:rows };
+          sections.auditLog = [...(snapshot.data.auditLog || []),entry]; base.auditLog = snapshot.revisions.auditLog;
+        }
+        const saved = storage.writeSections(dir, { databaseToken:context.databaseToken, base, sections });
+        return { ...saved, canonicalSections:{ auditLog:sections.auditLog || snapshot.data.auditLog || [] } };
+      });
+      if (!result?.ok) throw new Error(result?.error || 'Реестр изменён другим пользователем. Откройте его заново.');
+      context.rows = rows; context.baseRows = rows; context.revision = result.revisions.reestrRows;
+      const owner = BrowserWindow.getAllWindows().find(win => win.webContents.id === context.ownerId);
+      if (owner && identity === settingsIdentity()) owner.webContents.send('reestr-rows-saved', { rows, revision:context.revision, revisions:result.revisions, databaseToken:context.databaseToken, canonicalSections:result.canonicalSections });
+      return { ok:true };
+    } catch (e) { return { ok:false, error:e.message }; }
+    finally { if (context && ownsBusy) context.busy = false; }
   });
 
   createWindow();
@@ -766,6 +952,10 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+}).catch(error => {
+  console.error('[startup]', error && error.stack || error);
+  if (!hiddenTest) dialog.showErrorBox('Не удалось запустить программу', String(error && error.message || error));
+  app.exit(1);
 });
 
 app.on('window-all-closed', () => {

@@ -347,15 +347,16 @@ test('ambiguous manual fuel is reported for review, not mislabeled duplicate or 
     const rows = [['Дата транзакции','Тип транзакции','Количество','Товар','Комментарий','Номер карты'], ['01.10.2026 14:00','Покупка',30,'АИ-95','Х123АА716','123456']];
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Sheet1');
     importFuelFromXls({ files: [new File([XLSX.write(wb, { type: 'array', bookType: 'xlsx' })], 'test.xlsx')], value: '' });
-    for (let i = 0; i < 100 && !window.__report; i++) await new Promise(r => setTimeout(r, 20));
+    for (let i = 0; i < 100 && !window.__report; i++) { document.getElementById('importPlanCommit')?.click(); await new Promise(r => setTimeout(r, 20)); }
     return { issued: data.records[0].fuelIssued, purchase: data.fuelPurchases[0].qty, action: window.__report.reportRows[0].action, duplicates: window.__report.duplicates };
   }); assert.deepEqual(out, { issued: 40, purchase: 30, action: 'review', duplicates: 0 });
 });
-test('counters show actual totals without animation', async () => {
+test('counterparty table shows actual document count and amount', async () => {
   const out = await page.evaluate(() => {
     data.contragents = [{ id: 'c', name: 'Company' }]; data.payments = [{ id: 'p', sum: 1234, contragent: 'Company' }]; renderContragentsSection();
-    return [...document.querySelectorAll('.counter')].map(el => el.textContent.replace(/\D/g, ''));
-  }); assert.deepEqual(out, ['1', '1', '1234']);
+    const cells=document.querySelector('#mainContent tbody tr').cells;
+    return [cells[5].textContent,cells[6].textContent].map(value=>value.replace(/\D/g,''));
+  }); assert.deepEqual(out, ['1', '1234']);
 });
 test('a distinct equal-volume purchase is added when previous journal litres are already accounted for', async () => {
   const out = await page.evaluate(async () => {
@@ -366,7 +367,7 @@ test('a distinct equal-volume purchase is added when previous journal litres are
     const rows = [['Дата транзакции','Тип транзакции','Количество','Товар','Комментарий','Номер карты'], ['01.10.2026 15:00','Покупка',40,'АИ-95','Х123АА716','222222']];
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Sheet1');
     importFuelFromXls({ files: [new File([XLSX.write(wb, { type: 'array', bookType: 'xlsx' })], 'new.xlsx')], value: '' });
-    for (let i = 0; i < 100 && !window.__report; i++) await new Promise(r => setTimeout(r, 20));
+    for (let i = 0; i < 100 && !window.__report; i++) { document.getElementById('importPlanCommit')?.click(); await new Promise(r => setTimeout(r, 20)); }
     return { issued: data.records[0].fuelIssued, purchases: data.fuelPurchases.length, action: window.__report.reportRows[0].action };
   }); assert.deepEqual(out, { issued: 80, purchases: 2, action: 'updated' });
 });

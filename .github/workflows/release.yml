@@ -16,6 +16,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Reject prototype publication
+        run: node -e "if (require('./package.json').prototype) throw new Error('Prototype releases and auto-update publication are disabled')"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:

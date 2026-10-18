@@ -69,7 +69,7 @@
   }
   async function addSource(bytes,name) {
     const item={id:id(),bytes:bytes.slice(),name};
-    const doc=await pdfjsLib.getDocument({data:bytes.slice(),useSystemFonts:true,standardFontDataUrl:new URL('./node_modules/pdfjs-dist/standard_fonts/',location.href).href}).promise;
+    const doc=await pdfjsLib.getDocument({...window.pdfjsDocumentOptions(),data:bytes.slice()}).promise;
     const models=[];
     for(let n=1;n<=doc.numPages;n++){const pdfPage=await doc.getPage(n),vp=pdfPage.getViewport({scale:1,rotation:0});models.push({id:id(),sourceId:item.id,sourcePage:n-1,nativeRotation:turn(pdfPage.rotate||0),rotation:0,width:vp.width,height:vp.height,baseTransform:Array.from(vp.transform),elements:[]});}
     PE.sources.push(item);PE.docs.set(item.id,doc);return models;
@@ -79,7 +79,7 @@
     PE.renderToken++;PE.renderTask?.cancel();
     let models;try{models=await addSource(from64(data.pdfBase64),data.fileName);}catch(err){if(page())void renderPage();throw err;}
     const newId=models[0].sourceId,newSource=PE.sources.find(s=>s.id===newId),newDoc=PE.docs.get(newId);
-    for(const [key,doc] of PE.docs)if(key!==newId)void doc.destroy();
+    for(const [key,doc] of PE.docs)if(key!==newId)void doc.loadingTask.destroy();
     PE.sources=[newSource];PE.docs=new Map([[newId,newDoc]]);PE.text.clear();sourceText.clear();imageCache.clear();PE.undo=[];PE.redo=[];PE.selected=null;PE.find=[];PE.findIndex=-1;
     PE.pages=models;PE.current=PE.pages[0].id;PE.saved=snapshot();PE.projectSaved='';modelRevision++;
     $('peFileName').textContent=data.fileName||'Документ.pdf';$('peEmpty').hidden=true;$('peStage').hidden=false;
@@ -213,7 +213,7 @@
       if(kind==='rotateLeft'||kind==='rotateRight')model.rotation=turn(model.rotation+(kind==='rotateLeft'?-90:90));
       if(kind==='left'&&index>0)[PE.pages[index-1],PE.pages[index]]=[PE.pages[index],PE.pages[index-1]];
       if(kind==='right'&&index<PE.pages.length-1)[PE.pages[index],PE.pages[index+1]]=[PE.pages[index+1],PE.pages[index]];
-      if(kind==='duplicate'){const copy=clone(model);copy.id=id();copy.elements.forEach(e=>e.id=id());PE.pages.splice(index+1,0,copy);PE.current=copy.id;}
+      if(kind==='duplicate'){const copy=PdfPageModel.copyPage(model);PE.pages.splice(index+1,0,copy);PE.current=copy.id;}
       PE.selected=null;
     });renderThumbs();void renderPage();
   }
@@ -359,11 +359,12 @@
       for(const entry of project.sources){
         if(!entry||typeof entry.id!=='string'||nextDocs.has(entry.id)||typeof entry.bytesBase64!=='string')throw Error('Повреждён список PDF-источников проекта');
         const bytes=from64(entry.bytesBase64);total+=bytes.length;if(total>200*1024*1024)throw Error('Проект превышает 200 МБ исходных PDF');
-        const doc=await pdfjsLib.getDocument({data:bytes.slice(),useSystemFonts:true,standardFontDataUrl:new URL('./node_modules/pdfjs-dist/standard_fonts/',location.href).href}).promise;
+        const doc=await pdfjsLib.getDocument({...window.pdfjsDocumentOptions(),data:bytes.slice()}).promise;
         nextDocs.set(entry.id,doc);nextSources.push({id:entry.id,name:String(entry.name||'Документ.pdf').slice(0,240),bytes});
       }
       const pageIds=new Set();
-      for(const model of nextPages){
+      for(let modelIndex=0;modelIndex<nextPages.length;modelIndex++){
+        const model=nextPages[modelIndex];
         if(!model||typeof model.id!=='string'||pageIds.has(model.id)||!nextDocs.has(model.sourceId)||!Number.isInteger(model.sourcePage)||model.sourcePage<0||model.sourcePage>=nextDocs.get(model.sourceId).numPages||!Array.isArray(model.elements)||model.elements.length>20000)throw Error('Повреждена страница проекта');
         pageIds.add(model.id);const pdfPage=await nextDocs.get(model.sourceId).getPage(model.sourcePage+1),vp=pdfPage.getViewport({scale:1,rotation:0});
         model.width=vp.width;model.height=vp.height;model.baseTransform=Array.from(vp.transform);model.nativeRotation=turn(pdfPage.rotate||0);
@@ -387,15 +388,18 @@
         const validBox=b=>b&&['x','y','w','h'].every(key=>Number.isFinite(b[key])&&Math.abs(b[key])<=1000000)&&b.w>0&&b.h>0;
         for(const area of model.ocrAreas||[])if(!area||typeof area.id!=='string'||!['text','table','exclude'].includes(area.type)||!validBox(area))throw Error('Повреждена OCR-область проекта');
         for(const table of model.ocrTables||[])if(!table||typeof table.id!=='string'||!validBox(table.bbox)||!Array.isArray(table.rows)||table.rows.length>2000||table.rows.some(row=>!Array.isArray(row)||row.length>200||row.some(cell=>typeof cell!=='string'||cell.length>100000)))throw Error('Повреждена сетка таблицы проекта');
+        // Older projects could contain duplicated page-owned table/region IDs.
+        // Rebind all references while preserving the page's navigation ID.
+        nextPages[modelIndex]=PdfPageModel.copyPage(model,{pageId:model.id});
       }
       const result=await window.pdfEditor.adoptProject({title:String(project.title||'Документ.pdf'),pdfBase64:to64(nextSources[0].bytes)});
       if(!result?.ok)throw Error(result?.error||'Не удалось принять PDF-проект');adopted=true;
-      PE.renderToken++;PE.renderTask?.cancel();for(const doc of PE.docs.values())void doc.destroy();
+      PE.renderToken++;PE.renderTask?.cancel();for(const doc of PE.docs.values())void doc.loadingTask.destroy();
       modelRevision++;PE.sources=nextSources;PE.docs=nextDocs;PE.pages=nextPages;PE.current=pageIds.has(project.current)?project.current:nextPages[0].id;
       PE.text.clear();sourceText.clear();imageCache.clear();PE.undo=[];PE.redo=[];PE.find=[];PE.findIndex=-1;PE.selected=null;PE.tool='select';PE.propertyBefore=null;PE.saved='';PE.projectSaved=snapshot();
       $('peFileName').textContent=String(project.title||'Документ.pdf');$('peEmpty').hidden=true;$('peStage').hidden=false;
       fitZoom('page');renderThumbs();await renderPage();syncState();setStatus('Проект восстановлен. Сохранение PDF предложит выбрать новый файл.');
-    }catch(err){if(!adopted)for(const doc of nextDocs.values())void doc.destroy();throw err;}
+    }catch(err){if(!adopted)for(const doc of nextDocs.values())void doc.loadingTask.destroy();throw err;}
   }
   window.PdfStudioHost=Object.freeze({
     pages:()=>PE.pages,current:page,sources:()=>PE.sources,text:effectiveText,
@@ -433,8 +437,11 @@
   const theme=localStorage.getItem('theme');if(theme==='dark')document.documentElement.dataset.theme='dark';
   async function init() {
     try{
+      await window.pdfjsReady;
       if(!window.pdfEditor||!window.pdfjsLib||!window.PDFLib)throw Error('Модули редактора не загружены. Переустановите программу.');
-      pdfjsLib.GlobalWorkerOptions.workerSrc=new URL('./node_modules/pdfjs-dist/build/pdf.worker.min.js',location.href).href;
+      const applyTheme=value=>{if(value==='dark')document.documentElement.dataset.theme='dark';else if(value==='light')delete document.documentElement.dataset.theme;};
+      applyTheme(await window.pdfEditor.getTheme?.());
+      window.pdfEditor.onThemeChanged?.(applyTheme);
       window.pdfEditor.onOcrProgress?.(progress=>{if(PE.busy&&progress.status==='recognizing text')setStatus('Распознавание страницы: '+Math.round((progress.progress||0)*100)+'%');});
       await busy('Открытие PDF…',async()=>loadDocument(await window.pdfEditor.getData()));
       if(PE.pages.length&&window.PdfDocumentStudio)studio=PdfDocumentStudio.install(window.PdfStudioHost);

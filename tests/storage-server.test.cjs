@@ -120,7 +120,7 @@ test('authenticated server preserves split UTF-8 and survives malformed and abor
   assert.equal((await request(port, '/api/data', {})).status, 400);
   for (const route of ['/api/data', '/api/sections']) {
     const rows = [{ id: 'v', driver: 'Уренгой Ёж 中文' }];
-    const payload = route.endsWith('sections') ? { base: storage.readRevisions(dir), sections: { vehicles: rows } } : { ...db, vehicles: rows };
+    const payload = route.endsWith('sections') ? { databaseToken:storage.databaseToken(dir), base: storage.readRevisions(dir), sections: { vehicles: rows } } : { databaseToken:storage.databaseToken(dir), data:{ ...db, vehicles: rows } };
     const bytes = Buffer.from(JSON.stringify(payload)), split = bytes.indexOf(Buffer.from('У')) + 1;
     assert.equal((await request(port, route, payload, undefined, split)).status, 200);
     assert.equal(storage.readAll(dir).vehicles[0].driver, rows[0].driver);
@@ -129,7 +129,7 @@ test('authenticated server preserves split UTF-8 and survives malformed and abor
     const req = http.request({ host: '127.0.0.1', port, path: '/api/sections', method: 'POST', headers: { Authorization: 'Bearer ' + key } });
     req.on('error', () => {}); req.on('close', resolve); req.write('{'); setTimeout(() => req.destroy(), 20);
   });
-  const payload = { base: storage.readRevisions(dir), sections: { records: [] } };
+  const payload = { databaseToken:storage.databaseToken(dir), base: storage.readRevisions(dir), sections: { records: [] } };
   assert.equal((await request(port, '/api/sections', payload)).status, 200);
   server.configureKey(key); assert.ok(JSON.parse(await server.fetchData('127.0.0.1', port)).vehicles.length);
   server.configureKey('wrong'); await assert.rejects(server.fetchData('127.0.0.1', port), /401/);

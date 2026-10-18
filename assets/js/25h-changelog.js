@@ -10,7 +10,7 @@ function clParse(md) {
   const out = [];
   let cur = null;
   String(md || '').split(/\r?\n/).forEach(line => {
-    const h = /^##\s+(\d+\.\d+\.\d+)\s*(?:—\s*(.*))?$/.exec(line.trim());
+    const h = /^##\s+(\d+\.\d+\.\d+(?:-[\da-zA-Z.-]+)?)\s*(?:—\s*(.*))?$/.exec(line.trim());
     if (h) { cur = { version: h[1], date: (h[2] || '').trim(), items: [] }; out.push(cur); return; }
     const li = /^[-*]\s+(.*)$/.exec(line.trim());
     if (li && cur) cur.items.push(li[1]);
@@ -19,7 +19,7 @@ function clParse(md) {
 }
 
 function clCmp(a, b) {
-  const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+  const pa = a.split('-')[0].split('.').map(Number), pb = b.split('-')[0].split('.').map(Number);
   for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
   return 0;
 }

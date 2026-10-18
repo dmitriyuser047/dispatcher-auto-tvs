@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const ctx = vm.createContext({ console, window: {}, document: { addEventListener() {}, documentElement: { removeAttribute() {} }, getElementById() {} }, localStorage: { getItem() {} } });
-for (const file of ['01-core.js', '10-pdf-reports.js', '25b-fuel-purchases.js', '25c-fuel-control.js', '25i-gsm-ledger.js', '25j-gsm-workspace.js', '25k-gsm-export.js', '25l-manual-fuel.js'])
+for (const file of ['01-core.js', '29-fuel-quality.js', '10-pdf-reports.js', '25b-fuel-purchases.js', '25c-fuel-control.js', '25i-gsm-ledger.js', '25j-gsm-workspace.js', '25k-gsm-export.js', '25l-manual-fuel.js'])
   vm.runInContext(fs.readFileSync(path.join(root, 'assets/js', file), 'utf8'), ctx, { filename: file });
 vm.runInContext(fs.readFileSync(path.join(root, 'vendor/xlsx.bundle.js'), 'utf8'), ctx);
 function base() {

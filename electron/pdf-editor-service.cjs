@@ -78,6 +78,7 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
       if (!session) return { ok: false, canceled: true };
       const iconPath = path.join(rootDir, 'build', 'icon.ico');
       const pdfWin = new BrowserWindow({
+        show: !app.commandLine.hasSwitch('tvs-test-hidden'),
         width: 1400, height: 900, minWidth: 900, minHeight: 600,
         title: 'PDF-редактор — ' + path.basename(session.filePath),
         icon: fs.existsSync(iconPath) ? iconPath : undefined,
@@ -86,6 +87,7 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
           preload: path.join(__dirname, 'pdf-preload.js'),
           contextIsolation: true,
           nodeIntegration: false,
+          sandbox: true,
         },
       });
       const webContentsId = pdfWin.webContents.id;
@@ -258,7 +260,7 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
       const physicalEngine = enginePath.replace(/([\\/])app\.asar(?=[\\/]|$)/i, '$1app.asar.unpacked');
       const run=contentQueue.catch(()=>{}).then(()=>{
         if(event.sender.isDestroyed()||sessionOf(event)!==session)throw new Error('Документ уже закрыт или заменён');
-        return require(fs.existsSync(physicalEngine) ? physicalEngine : enginePath).applyContentChanges(bytes, payload.changes);
+        return require(fs.existsSync(physicalEngine) ? physicalEngine : enginePath).applyContentChanges(bytes, payload.changes, { rasterizePages: payload.rasterizePages });
       });
       contentQueue=run.catch(()=>{});
       const result = await run;

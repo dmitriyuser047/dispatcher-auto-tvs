@@ -1,6 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('pdfEditor', {
+  getTheme:     () => ipcRenderer.invoke('get-theme'),
+  setTheme:     theme => ipcRenderer.invoke('set-theme', theme),
+  onThemeChanged: callback => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, theme) => callback(theme);
+    ipcRenderer.on('workspace-theme-changed', listener);
+    return () => ipcRenderer.removeListener('workspace-theme-changed', listener);
+  },
   getData:      () => ipcRenderer.invoke('pdf-editor-data'),
   openFile:     () => ipcRenderer.invoke('pdf-editor-open'),
   commitOpen:   (token) => ipcRenderer.invoke('pdf-editor-commit-open', token),

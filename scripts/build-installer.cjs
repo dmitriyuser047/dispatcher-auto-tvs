@@ -12,4 +12,5 @@ run([path.join(__dirname,'prepare-installer-stage.cjs')]);
 const stage=JSON.parse(fs.readFileSync(path.join(root,'audit','installer-stage-'+version+'.json'),'utf8'));
 if(!path.isAbsolute(stage.stagePath)||!path.isAbsolute(stage.configPath))throw Error('Invalid installer staging paths');
 run([require.resolve('electron-builder/cli.js'),'--projectDir',stage.stagePath,'--win','--x64','--publish','never','--config',stage.configPath]);
+run([path.join(__dirname,'verify-prototype-build.cjs')]);
 run([path.join(__dirname,'write-release-manifest.cjs')]);

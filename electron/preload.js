@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readSection:    (name)    => ipcRenderer.invoke('read-section', name),
   writeSections:  (json)    => ipcRenderer.invoke('write-sections', json),
   getDataPath:    ()        => ipcRenderer.invoke('get-data-path'),
+  getDataIdentity:()        => ipcRenderer.invoke('get-data-identity'),
   getDataHealth:  ()        => ipcRenderer.invoke('get-data-health'),
   addAttachment:  ()        => ipcRenderer.invoke('add-attachment'),
   openAttachment:(id)      => ipcRenderer.invoke('open-attachment',id),
@@ -22,6 +23,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Настройки / пользователи
   getSettings:       ()          => ipcRenderer.invoke('get-settings'),
+  getTheme:          ()          => ipcRenderer.invoke('get-theme'),
+  setTheme:          (theme)     => ipcRenderer.invoke('set-theme', theme),
+  onThemeChanged:    (cb)        => ipcRenderer.on('workspace-theme-changed', (_event, theme) => cb(theme)),
   saveSettings:      (s)         => ipcRenderer.invoke('save-settings', s),
   switchUser:        (idx)       => ipcRenderer.invoke('switch-user', idx),
   chooseDataFolder:  ()          => ipcRenderer.invoke('choose-data-folder'),

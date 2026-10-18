@@ -111,18 +111,17 @@ const STORAGE_KEY = 'fuel_tracker_v1';
 let localCacheKey=STORAGE_KEY;
 let _loadWriteBlocked = false;
 let _lastPersisted = null;
+function validDatabase(value) {
+  if (!value || !Array.isArray(value.vehicles) || !Array.isArray(value.records)) return false;
+  const sections = typeof SYNC_SECTIONS !== 'undefined' ? SYNC_SECTIONS : ['vehicles','records','generators','genRecords'];
+  return sections.every(name => !(name in value) || Array.isArray(value[name]) && value[name].every(row => row && typeof row === 'object' && !Array.isArray(row)));
+}
 
 async function loadData() {
   let d = null;
   _loadWriteBlocked = false;
-  // Кеш разделён по базе и персональному сетевому доступу: отключение
-  // сервера не должно открывать данные от прежней учётной записи.
-  if(window.electronAPI?.getSettings){try{
-    const s=await window.electronAPI.getSettings(),profile=(s.users||[])[s.activeUser||0]||{};
-    const identity=JSON.stringify(s.networkMode==='client'?['client',s.remoteProtocol||'http:',s.remoteHost,s.remotePort,s.networkKey]:['local',profile.dataDir]);
-    const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(identity));
-    localCacheKey=STORAGE_KEY+':'+Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
-  }catch(e){localCacheKey=null;console.warn('[cache] персональный кеш недоступен');}}
+  if (typeof _sync !== 'undefined') { _sync.enabled=false; _sync.revs={}; _sync.synced={}; _sync.databaseToken=null; _sync.access=null; }
+  localCacheKey = window.electronAPI ? null : STORAGE_KEY;
   // Снимок с версиями разделов — для синхронизации нескольких пользователей
   if (typeof syncLoad === 'function') {
     try { d = await syncLoad(); } catch (e) { console.warn('[loadData] снимок: ' + e.message); }
@@ -130,7 +129,22 @@ async function loadData() {
   if (!d && window.electronAPI) {
     try { const raw = await window.electronAPI.readData(); if (raw) d = JSON.parse(raw); } catch {}
   }
-  if (d && (!Array.isArray(d.vehicles) || !Array.isArray(d.records))) d = null;
+  // Bind the cache to the live served database as well as endpoint/account.
+  // A replacement folder behind an unchanged host must not inherit its cache.
+  if (window.electronAPI) { try {
+    let identity;
+    if (window.electronAPI.getDataIdentity) identity = await window.electronAPI.getDataIdentity();
+    else if (window.electronAPI.getSettings) {
+      const s=await window.electronAPI.getSettings(), profile=(s.users||[])[s.activeUser||0]||{};
+      if (s.networkMode==='client' && !d) throw Error('Сервер недоступен; принадлежность кеша не подтверждена');
+      identity=JSON.stringify(s.networkMode==='client'?['client',s.remoteProtocol||'http:',s.remoteHost,s.remotePort,s.networkKey,s.remoteCa||null]:['local',profile.dataDir])+':'+(typeof _sync!=='undefined'&&_sync.databaseToken||'legacy');
+    }
+    if (typeof identity!=='string' || !identity) throw Error('База не определена');
+    if (typeof _sync!=='undefined' && _sync.databaseToken && !identity.endsWith(':'+_sync.databaseToken)) { _loadWriteBlocked=true; throw Error('База переключена во время загрузки. Откройте программу заново.'); }
+    const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(identity));
+    localCacheKey=STORAGE_KEY+':'+Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+  } catch(error) { localCacheKey=null; console.warn('[cache] '+error.message); } }
+  if (d && !validDatabase(d)) d = null;
   if (!d && window.electronAPI) {
     _loadWriteBlocked = true;
     showToast('Основная база недоступна. Открыта резервная копия только для просмотра. Проверьте подключение и файлы базы.');
@@ -138,7 +152,7 @@ async function loadData() {
   if (!d) {
     try { if(localCacheKey)d = JSON.parse(localStorage.getItem(localCacheKey)); } catch {}
   }
-  if (d && (!Array.isArray(d.vehicles) || !Array.isArray(d.records))) d = null;
+  if (d && !validDatabase(d)) d = null;
   if (!d) d = { vehicles: [], records: [] };
   if (!d.generators)  d.generators  = [];
   if (!d.genRecords)  d.genRecords   = [];
@@ -155,7 +169,15 @@ async function loadData() {
   if (!d.fuelPurchases) d.fuelPurchases = [];
   if (!d.fuelImports)   d.fuelImports   = [];
   if (!d.fuelCards)     d.fuelCards     = [];
-  if ((typeof _sync==='undefined'||!_sync.access||_sync.access.writable.includes('fuelCards'))&&!d.fuelCards.some(c => /наличк/i.test(c.number) || /наличк/i.test(c.provider)))
+  const lastClosedFuelMonth=(d.fuelPeriods||[]).filter(period=>period.closed).map(period=>period.month).sort().at(-1);
+  const cashCardKey=value=>{const text=String(value||'').trim();return text.replace(/\D/g,'')||text.toUpperCase();};
+  // A default card must not retroactively bind unresolved historical cash
+  // receipts: opening a closed database is a read, not a fuel correction.
+  const cashTouchesClosedHistory=lastClosedFuelMonth&&[...(d.records||[]),...(d.fuelPurchases||[]),...(d.monthlyFuel||[])].some(row=>{
+    const month=String(row.date||row.month||'').slice(0,7);
+    return /^\d{4}-\d{2}$/.test(month)&&month<=lastClosedFuelMonth&&cashCardKey(row.fuelCardNum||row.cardNo||row.cardNumber)==='НАЛИЧКА';
+  });
+  if (!_loadWriteBlocked&&!cashTouchesClosedHistory&&(typeof _sync==='undefined'||!_sync.access||_sync.access.writable.includes('fuelCards'))&&!d.fuelCards.some(c => /наличк/i.test(c.number) || /наличк/i.test(c.provider)))
     d.fuelCards.push({ id: 'fc_cash', number: 'НАЛИЧКА', provider: 'Наличка', org: '', status: 'active', limit: null, assignments: [], note: 'Для учёта наличных закупок топлива' });
   if (!d.fuelPeriods)   d.fuelPeriods   = [];
   if (!d.monthlyFuel)   d.monthlyFuel   = [];
@@ -199,7 +221,7 @@ async function saveData(d = data, options) {
       // По разделам с проверкой версии; на старом сервере — целиком, как раньше
       const ok = typeof _sync !== 'undefined' && _sync.enabled
         ? await syncSave(d, options)
-        : await window.electronAPI.writeData(json);
+        : await window.electronAPI.writeData(typeof _sync!=='undefined'&&_sync.databaseToken ? JSON.stringify({databaseToken:_sync.databaseToken,data:d}) : json);
       if (ok !== true) throw new Error('Изменения не записаны. Проверьте соединение и состояние базы.');
     }
     _lastPersisted = JSON.stringify(d);

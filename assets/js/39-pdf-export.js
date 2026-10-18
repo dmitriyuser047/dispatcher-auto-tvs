@@ -153,7 +153,7 @@
 
   async function build(options) {
     options = options || {};
-    const PDFLib = scope.PDFLib;
+    const PDFLib = options.PDFLib || scope.PDFLib;
     if (!PDFLib || !PDFLib.PDFDocument) fail('Модуль сохранения PDF не загружен. Откройте редактор повторно.');
     const sources = options.sources;
     const models = options.pages;
@@ -162,35 +162,43 @@
 
     const sourceDocs = new Map();
     const preparationWarnings=[];
-    const firstSourceId=sources[0].id;
-    const rewritesContent=models.some(model=>(model.elements||[]).some(element=>element&&(element.original||element.type==='mask'||element.type==='redaction')));
+    const usedSources = new Set(models.map(model => model && model.sourceId));
     for (const source of sources) {
       if (!source || source.id == null || sourceDocs.has(source.id)) fail('Неверный список исходных PDF.');
+      if (!usedSources.has(source.id)) continue;
       let document;
       try {
         document = await PDFLib.PDFDocument.load(bytesOf(source.bytes, 'исходный PDF'), { updateMetadata: false });
       } catch (error) {
         fail('Не удалось открыть исходный PDF для сохранения: ' + (error && error.message || String(error)));
       }
-      const structuralChange=source.id!==firstSourceId||models.length!==document.getPageCount()||models.some((model,index)=>model.sourceId!==firstSourceId||model.sourcePage!==index);
-      if(rewritesContent||structuralChange){
-        const form=document.getForm();
-        if(form.getFields().length){
-          try{form.flatten({updateFieldAppearances:false});}
-          catch(error){fail('Не удалось сохранить вид полей PDF-формы. Сначала сохраните плоскую PDF-копию: '+error.message);}
-          preparationWarnings.push('Интерактивные поля документа «'+String(source.name||'PDF')+'» превращены в обычное содержимое страниц для сохранения их внешнего вида.');
-        }
+      const form=document.getForm();
+      if(form.getFields().length){
+        try{form.flatten({updateFieldAppearances:false});}
+        catch(error){fail('Не удалось сохранить вид полей PDF-формы. Сначала сохраните плоскую PDF-копию: '+error.message);}
+        preparationWarnings.push('Интерактивные поля документа «'+String(source.name||'PDF')+'» превращены в обычное содержимое страниц для сохранения их внешнего вида.');
       }
+      // An annotation's /Dest, file attachment or action can reference an
+      // excluded page. Remove these references before copying any page graph.
+      // Visible form appearances were flattened above.
+      let omittedAnnotations=false;
+      for(const page of document.getPages()){
+        const annotations=page.node.Annots();
+        if(annotations?.size())omittedAnnotations=true;
+        page.node.delete(PDFLib.PDFName.of('Annots'));
+        page.node.delete(PDFLib.PDFName.of('AA'));
+      }
+      if(omittedAnnotations)preparationWarnings.push('Ссылки, вложения и комментарии PDF не перенесены в сохранённую копию.');
       sourceDocs.set(source.id, { document: document, pages: document.getPages() });
     }
-    const firstId = sources[0].id;
-    let document = sourceDocs.get(firstId).document;
+    // Start with a fresh context. Removing pages from the original page tree
+    // leaves their content streams, attachments and metadata in its context,
+    // and pdf-lib serializes those objects even when they are no longer shown.
+    let document = await PDFLib.PDFDocument.create();
     const ordered = [];
-    const reused = new Set();
 
-    // Keep the original first PDF and its page objects so its metadata,
-    // form fields and resources remain attached to the document catalog.
-    // Duplicate and external pages are copied before any overlays are drawn.
+    // Copy only retained pages, before drawing overlays, so duplicates remain
+    // independent and no discarded page object enters the output context.
     for (const model of models) {
       const source = model && sourceDocs.get(model.sourceId);
       const index = model && model.sourcePage;
@@ -202,20 +210,18 @@
       const transform = inverse(model.baseTransform);
       positive(model.width, 'ширина страницы');
       positive(model.height, 'высота страницы');
-      let page;
-      if (model.sourceId === firstId && !reused.has(index)) {
-        page = source.pages[index];
-        reused.add(index);
-      } else {
-        [page] = await document.copyPages(source.document, [index]);
-      }
+      const [page] = await document.copyPages(source.document, [index]);
       const rawUnit=source.pages[index].node.lookup(PDFLib.PDFName.of('UserUnit'));
       const userUnit=rawUnit instanceof PDFLib.PDFNumber?rawUnit.asNumber():1;
       ordered.push({ model: model, page: page, transform: transform, userUnit,
         nativeRotation: source.pages[index].getRotation().angle });
     }
-    for (let index = document.getPageCount() - 1; index >= 0; index--) document.removePage(index);
     for (const entry of ordered) document.addPage(entry.page);
+    const omittedSourcePages=[...sourceDocs.entries()].some(([sourceId,source])=>new Set(models.filter(model=>model.sourceId===sourceId).map(model=>model.sourcePage)).size<source.pages.length);
+    // A shared /Resources dictionary can include an image from a discarded
+    // page. For subsets, rebuild visible retained pages as fresh bitmaps, so
+    // neither discarded objects nor unused shared resources can be recovered.
+    const rasterizePages=omittedSourcePages?ordered.map((entry,pageIndex)=>({pageIndex,userUnit:entry.userUnit})):[];
 
     // Rewrite source content before adding replacement text and annotations.
     // An engine failure aborts saving; a visual rectangle is never a fallback.
@@ -239,10 +245,10 @@
       }
       entry.redactions = redactions;
     });
-    if (contentChanges.length) {
+    if (contentChanges.length || rasterizePages.length) {
       if (typeof options.api?.processContent !== 'function') fail('Не загружен движок изменения содержимого PDF. Переустановите программу.');
       const base = new Uint8Array(await document.save({updateFieldAppearances:false}));
-      const result = await options.api.processContent({bytesBase64:encodeBase64(base),changes:contentChanges});
+      const result = await options.api.processContent({bytesBase64:encodeBase64(base),changes:contentChanges,rasterizePages});
       if (!result?.ok || !result.bytesBase64) fail('Содержимое PDF не изменено: '+(result?.error||'движок не вернул документ'));
       if (typeof options.onWarnings === 'function') await options.onWarnings(preparationWarnings.concat(result.warnings||[]), result.pages || []);
       document = await PDFLib.PDFDocument.load(decodeBase64(result.bytesBase64,'обработанный PDF'),{updateMetadata:false});
@@ -379,4 +385,5 @@
   }
 
   scope.PdfEditorExport = Object.freeze({ build: build });
+  if(typeof module==='object'&&module.exports)module.exports=scope.PdfEditorExport;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -4,14 +4,14 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { deflateSync } from 'node:zlib';
 import { fileURLToPath } from "url";
 import AdmZip from "adm-zip";
 import { createExtractorFromData } from "node-unrar-js";
 import ExcelJS from "exceljs";
 import iconv from "iconv-lite";
-import pkg from "pdfjs-dist/build/pdf.js";
-const { getDocument, OPS, ImageKind } = pkg;
+import { createCanvas } from '@napi-rs/canvas';
+import pdfjsRuntime from '../electron/pdfjs-runtime.cjs';
+const { getDocument } = await pdfjsRuntime.loadPdfJs();
 import ocrRuntimeModule from "../electron/ocr-runtime.cjs";
 
 // ═══════════════════════════════════════════════════════════════════
@@ -506,81 +506,23 @@ async function recognizeImage(input) {
   return {data:{text:result.text,confidence:result.confidence},engine:engineEvidence(result.meta)};
 }
 
-async function extractPageImage(page) {
-  const ops = await page.getOperatorList();
-  const images = [];
-  for (let i = 0; i < ops.fnArray.length; i++) {
-    if (ops.fnArray[i] === OPS.paintImageXObject || ops.fnArray[i] === OPS.paintImageXObjectRepeat) {
-      const imgName = ops.argsArray[i][0];
-      const imgData = await new Promise(resolve => page.objs.get(imgName, resolve));
-      if (imgData?.data && imgData.width && imgData.height) images.push(imgData);
-    } else if (ops.fnArray[i] === OPS.paintInlineImageXObject) {
-      const imgData = ops.argsArray[i][0];
-      if (imgData?.data && imgData.width && imgData.height) images.push(imgData);
-    }
-  }
-  return images.sort((a, b) => b.width * b.height - a.width * a.height)[0] || null;
-}
-
-function preprocessForOcr(imgData) {
-  const { width, height, data } = imgData;
-  const pixels = width * height;
-  if (!Number.isSafeInteger(pixels) || pixels <= 0 || pixels > 30000000) throw new Error('Размер скана превышает 30 мегапикселей');
-  const channels = data.length / pixels;
-  const gray = new Uint8Array(width * height);
-  for (let i = 0; i < width * height; i++) {
-    const idx = i * channels;
-    if (imgData.kind === ImageKind.GRAYSCALE_1BPP || channels < 1) {
-      const byte = Math.floor(i / width) * Math.ceil(width / 8) + Math.floor((i % width) / 8);
-      gray[i] = data[byte] & (128 >> (i % width % 8)) ? 255 : 0;
-    } else if (channels === 1) gray[i] = data[i];
-    else if (channels === 3 || channels === 4) {
-      const alpha = channels === 4 ? data[idx + 3] / 255 : 1;
-      gray[i] = Math.round((0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]) * alpha + 255 * (1 - alpha));
-    } else throw new Error('Неподдерживаемый формат пикселей скана');
-  }
-
-  // Keep grayscale/antialiasing for Tesseract's own thresholding. The previous
-  // unconditional JS binarization allocated two Float64 integral images
-  // (480 MB at the 30 MP limit) and discarded grayscale before the engine.
-  return { width, height, data: gray };
-}
-
-const pngCrcTable = Array.from({ length: 256 }, (_, index) => {
-  let value = index;
-  for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-  return value >>> 0;
-});
-
-function pngChunk(type, data) {
-  const name = Buffer.from(type, 'ascii');
-  const chunk = Buffer.alloc(data.length + 12);
-  chunk.writeUInt32BE(data.length, 0);
-  name.copy(chunk, 4); data.copy(chunk, 8);
-  let crc = 0xffffffff;
-  for (let i = 4; i < chunk.length - 4; i++) crc = pngCrcTable[(crc ^ chunk[i]) & 255] ^ (crc >>> 8);
-  chunk.writeUInt32BE((crc ^ 0xffffffff) >>> 0, chunk.length - 4);
-  return chunk;
-}
-
-function grayToPngBuffer(imgData) {
-  const { width, height, data } = imgData;
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4);
-  header[8] = 8; // grayscale, 8 bits, no palette/interlacing
-  const scanlines = Buffer.alloc((width + 1) * height);
-  for (let y = 0; y < height; y++) {
-    scanlines.set(data.subarray(y * width, (y + 1) * width), y * (width + 1) + 1);
-  }
-  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', header), pngChunk('IDAT', deflateSync(scanlines)), pngChunk('IEND', Buffer.alloc(0))]);
-}
-
 async function ocrPageImage(page) {
-  const imgData = await extractPageImage(page);
-  if (!imgData) return { text: '', confidence: null, warning: 'На странице нет доступного растрового слоя для OCR' };
-  const processed = preprocessForOcr(imgData);
-  const result = await recognizeImage(grayToPngBuffer(processed));
-  return { text: result.data.text || '', confidence: Number.isFinite(result.data.confidence) ? result.data.confidence : null, engine: result.engine };
+  // Render the visible page rather than extracting one XObject. Scanners can
+  // split one page into strips, masks and rotated/clipped images; all of them
+  // and any vector content must reach OCR in the same order as in the PDF.
+  const base = page.getViewport({ scale: 1 });
+  if (!(base.width > 0) || !(base.height > 0) || !Number.isFinite(base.width * base.height)) throw new Error('Неверный размер страницы для OCR');
+  const scale = Math.min(300 / 72, 4800 / Math.max(base.width, base.height), Math.sqrt(16000000 / (base.width * base.height)));
+  const viewport = page.getViewport({ scale });
+  const canvas = createCanvas(Math.max(1, Math.ceil(viewport.width)), Math.max(1, Math.ceil(viewport.height)));
+  try {
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport, background: '#ffffff' }).promise;
+    const result = await recognizeImage(await canvas.encode('png'));
+    return { text: result.data.text || '', confidence: Number.isFinite(result.data.confidence) ? result.data.confidence : null, engine: result.engine };
+  } finally {
+    // Release the large pixel surface before parsing the next PDF page.
+    canvas.width = canvas.height = 1;
+  }
 }
 
 function cleanOcrText(text) {
@@ -635,7 +577,7 @@ async function pdfToPageLayouts(filePathOrBuffer, onOcrPage = () => {}) {
   const data = typeof filePathOrBuffer === "string"
     ? new Uint8Array(fs.readFileSync(filePathOrBuffer))
     : new Uint8Array(filePathOrBuffer);
-  const doc = await getDocument({ data, useSystemFonts: true }).promise;
+  const doc = await getDocument({ ...pdfjsRuntime.pdfDocumentOptions(), data }).promise;
   const pages = [];
   try {
     for (let i = 1; i <= doc.numPages; i++) {
@@ -658,7 +600,7 @@ async function pdfToPageLayouts(filePathOrBuffer, onOcrPage = () => {}) {
       page.cleanup();
     }
     return pages;
-  } finally { await doc.destroy(); }
+  } finally { await doc.loadingTask.destroy(); }
 }
 
 function isInvoiceStartPage(pageLines) {
