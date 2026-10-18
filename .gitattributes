@@ -5,3 +5,10 @@
 *.jpeg binary
 *.wasm binary
 *.traineddata binary
+
+# These checked-in OCR files are verified against byte-level manifests.
+# Git's Windows newline conversion would invalidate their recorded hashes.
+/vendor/tesseract-worker/** -text
+/vendor/tesseract-core/** -text
+/assets/ocr/models-manifest.json -text
+/scripts/ocr-native/patches/** text eol=lf
