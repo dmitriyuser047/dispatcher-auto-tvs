@@ -3,101 +3,36 @@
 
 // ─── IMPORT FROM XLS ────────────────────────────────────
 function importVehiclesFromXls(input) {
-  const file = input.files[0];
-  if (!file) return;
-  input.value = '';
-
+  const file = input.files[0]; if (!file) return; input.value = '';
   const reader = new FileReader();
   reader.onload = async function(e) {
     try {
       const wb = XLSX.read(e.target.result, { type: 'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-
-      // Ищем строку-заголовок (содержит "Марка" или "Гос")
-      let headerRow = -1;
-      for (let i = 0; i < Math.min(rows.length, 10); i++) {
-        const row = rows[i].map(c => String(c).toLowerCase());
-        if (row.some(c => c.includes('марка') || c.includes('гос'))) {
-          headerRow = i;
-          break;
-        }
-      }
-      if (headerRow === -1) {
-        alert('Не удалось найти строку с заголовками. Убедитесь, что файл содержит колонки: Марка ТС, Гос. №, Ф.И.О. водителя...');
-        return;
-      }
-
-      // Маппинг заголовков на поля
-      const headers = rows[headerRow].map(c => String(c).trim().toLowerCase());
-      function col(keywords) {
-        const idx = headers.findIndex(h => keywords.some(k => h.includes(k)));
-        return idx === -1 ? null : idx;
-      }
-
-      const colMap = {
-        make:          col(['марка']),
-        plate:         col(['гос']),
-        driver:        col(['ф.и.о', 'фио', 'водител']),
-        org:           col(['организац', 'исполнит']),
-        object:        col(['объект']),
-        justification: col(['обоснован']),
-        responsible:   col(['ответствен']),
-        status:        col(['состоян']),
-        fuelcard:      col(['топливн', 'карт']),
-      };
-
-      let added = 0, skipped = 0;
-      const dataRows = rows.slice(headerRow + 1);
-
-      dataRows.forEach(row => {
-        const get = (field) => {
-          const i = colMap[field];
-          return i !== null && i !== undefined ? String(row[i] ?? '').trim() : '';
-        };
-
-        const make  = get('make');
-        const plate = get('plate');
-        if (!make && !plate) return; // пустая строка
-
-        // Проверяем дубликат по госномеру
-        if (plate && data.vehicles.some(v => v.plate.toLowerCase() === plate.toLowerCase())) {
-          skipped++;
-          return;
-        }
-
-        data.vehicles.push({
-          id:            newId('v') + '_' + Math.random().toString(36).slice(2, 7),
-          make,
-          plate,
-          driver:        get('driver'),
-          org:           get('org'),
-          object:        get('object'),
-          justification: get('justification'),
-          responsible:   get('responsible'),
-          status:        get('status'),
-          fuelcard:      get('fuelcard'),
-          fuel:          'diesel',
-          norm:          null,
-          note:          '',
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+      if (!rows.length) { alert('В файле нет строк.'); return; }
+      let headerRow = rows.slice(0, 30).findIndex(row => row.some(cell => /марка|гос/i.test(String(cell))));
+      const guessed = { rows, headerRow: Math.max(0, headerRow), fields: IMPORT_VEHICLE_FIELDS };
+      const selection = await importReviewConfigureColumns({ ...guessed, kind: 'vehicles', fileName: file.name, mapping: importReviewGuessMapping(guessed) });
+      if (!selection) return;
+      const identity = await importReviewDataIdentity();
+      const plan = importReviewBuildPlan({ identity, title: 'Транспорт из Excel', fileName: file.name, kind: 'vehicles', template: selection.template }, () => {
+        let added = 0, skipped = 0;
+        const known = new Set(data.vehicles.map(v => normPlate(v.plate)));
+        rows.slice(selection.headerRow + 1).forEach(row => {
+          const get = field => selection.mapping[field] >= 0 ? String(row[selection.mapping[field]] ?? '').trim() : '';
+          const make = get('make'), plate = get('plate');
+          if (!make && !plate) return;
+          if (plate && known.has(normPlate(plate))) { skipped++; return; }
+          data.vehicles.push({ id: newId('v') + '_' + Math.random().toString(36).slice(2, 7), make, plate,
+            driver: get('driver'), org: get('org'), object: get('object'), justification: get('justification'),
+            responsible: get('responsible'), status: get('status'), fuelcard: get('fuelcard'), fuel: 'diesel', norm: null, note: '' });
+          if (plate) known.add(normPlate(plate)); added++;
         });
-        added++;
+        return { added, skipped };
       });
-
-      if (added === 0 && skipped === 0) {
-        alert('В файле не найдено строк с данными.');
-        return;
-      }
-
-      if (!await saveData(data)) return;
-      renderVehicleList();
-
-      let msg = `Импорт завершён: добавлено ${added} ТС.`;
-      if (skipped > 0) msg += `\nПропущено дубликатов (по госномеру): ${skipped}.`;
-      alert(msg);
-    } catch(err) {
-      alert('Ошибка при чтении файла: ' + err.message);
-    }
+      plan.notes = ['Пропущено дубликатов по госномеру: ' + plan.result.skipped + '.'];
+      importReviewPresent(plan, result => { populateOrgSelect(); renderVehicleList(); if (activeSection === 'vehicles') renderVehicleCards(); alert('Импорт завершён: добавлено ' + result.added + ' ТС. Пропущено дубликатов: ' + result.skipped + '.'); });
+    } catch (err) { alert('Ошибка при чтении файла: ' + err.message); }
   };
   reader.readAsArrayBuffer(file);
 }
@@ -131,34 +66,16 @@ function importFuelFromXls(input, mode = 'fuel') {
           break;
         }
       }
-      if (headerRow === -1) {
-        const expected = isOfficeFuelImport
-          ? 'Ожидаются столбцы: Дата, Номер карты, Закреплена, Тип операции, Количество.'
-          : 'Ожидаются столбцы: Дата транзакции, Количество, Тип транзакции, Комментарий.';
-        alert('Не удалось найти заголовки отчёта «' + importTitle + '».\n' + expected);
-        return;
-      }
-
+      if (!rows.length) { alert('В файле нет строк.'); return; }
+      const guessed = { rows, headerRow: Math.max(0, headerRow), fields: IMPORT_FUEL_FIELDS };
+      const selection = await importReviewConfigureColumns({ ...guessed, kind: mode, fileName: file.name, mapping: importReviewGuessMapping(guessed) });
+      if (!selection) return;
+      headerRow = selection.headerRow;
       const headers = rows[headerRow].map(c => String(c).trim().toLowerCase());
-      function col(keywords) {
-        return headers.findIndex(h => keywords.some(k => h.includes(k)));
-      }
-      const cDate    = col(['дата транзакц', 'дата']);
-      const cType    = col(['тип транзакц', 'тип операции']);
-      const cQty     = col(['количество']);
-      const cFuel    = col(['товар']);
-      const cComment = col(['комментар', 'местонахождение']);
-      const cCard    = col(['номер карт']);
-      const cVehicle = col(['закреплена', 'тс', 'транспорт', 'авто']);
-      // Цена и сумма клиента — то, что платит компания. ГПН: «Цена клиента»,
-      // «Сумма к оплате»; офисные карты: «Цена клиента, руб.», «Сумма клиента, руб.».
-      const cPrice   = col(['цена клиента']) !== -1 ? col(['цена клиента']) : col(['цена']);
-      const cSum     = col(['сумма к оплате', 'сумма клиента']);
-
-      if (cDate === -1 || cQty === -1) {
-        alert('Не найдены обязательные столбцы: Дата, Количество.');
-        return;
-      }
+      const columns = selection.mapping;
+      const cDate = columns.date, cType = columns.type, cQty = columns.qty, cFuel = columns.fuel;
+      const cComment = columns.comment, cCard = columns.card, cVehicle = columns.vehicle;
+      const cPrice = columns.price, cSum = columns.sum;
 
       const plateChars = {
         A: 'А', B: 'В', E: 'Е', K: 'К', M: 'М', H: 'Н',
@@ -216,17 +133,18 @@ function importFuelFromXls(input, mode = 'fuel') {
       ].join('|');
 
       const transactions = [];
+      let rejectedRows = 0, ignoredRows = 0;
       for (let i = headerRow + 1; i < rows.length; i++) {
         const row = rows[i];
         const typeVal = cType !== -1 ? String(row[cType] || '').trim() : '';
-        if (cType !== -1 && !typeVal) continue;
-        if (typeVal && !typeVal.toLowerCase().includes('покуп')) continue;
+        if (cType !== -1 && !typeVal) { ignoredRows++; continue; }
+        if (typeVal && !typeVal.toLowerCase().includes('покуп')) { ignoredRows++; continue; }
 
-        const qty = parseFloat(String(row[cQty] || '0').replace(',', '.'));
-        if (!qty || qty <= 0) continue;
+        const qty = Number(String(row[cQty] || '0').replace(/\s/g, '').replace(',', '.'));
+        if (!Number.isFinite(qty) || qty <= 0) { rejectedRows++; continue; }
 
         let dateVal = row[cDate];
-        if (!dateVal) continue;
+        if (!dateVal) { rejectedRows++; continue; }
         let parsedDate = null;
         let parsedTime = '';
         const hhmm = (h, m) => String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
@@ -255,13 +173,13 @@ function importFuelFromXls(input, mode = 'fuel') {
             if (m2) parsedDate = m2[3] + '-' + m2[2] + '-' + m2[1];
           }
         }
-        if (!parsedDate) continue;
+        if (!parsedDate || !/^\d{4}-\d{2}-\d{2}$/.test(parsedDate) || !Number.isFinite(new Date(parsedDate + 'T12:00:00Z').getTime()) || new Date(parsedDate + 'T12:00:00Z').toISOString().slice(0, 10) !== parsedDate) { rejectedRows++; continue; }
 
         const commentParts = [];
         if (cComment !== -1) commentParts.push(String(row[cComment] || '').trim());
         if (isOfficeFuelImport) {
-          const cSupplier = col(['поставщик']);
-          const cAzs = col(['№ азс', 'азс']);
+          const cSupplier = columns.supplier;
+          const cAzs = columns.azs;
           const supplier = cSupplier !== -1 ? String(row[cSupplier] || '').trim() : '';
           const azs = cAzs !== -1 ? String(row[cAzs] || '').trim() : '';
           if (supplier) commentParts.push(supplier);
@@ -269,8 +187,8 @@ function importFuelFromXls(input, mode = 'fuel') {
         }
         const comment = commentParts.filter(Boolean).join('; ');
         // АЗС для раздела «Заправки»: номер и адрес, если они есть в выписке
-        const cAzsNo = col(['№ азс', 'азс']);
-        const cAzsAddr = col(['адрес азс']);
+        const cAzsNo = columns.azs;
+        const cAzsAddr = columns.azsAddress;
         const azs = [
           cAzsNo !== -1 && String(row[cAzsNo] || '').trim() ? 'АЗС ' + String(row[cAzsNo]).trim().replace(/^азс\s*/i, '') : '',
           cAzsAddr !== -1 ? String(row[cAzsAddr] || '').trim() : '',
@@ -290,8 +208,8 @@ function importFuelFromXls(input, mode = 'fuel') {
         const sum = Math.abs(num(cSum)) || fuelImportRoundMoney(qty * price);
 
         // Регион АЗС — для проверки заправок вне своего региона
-        const cRegion = col(['регион азс', 'регион']);
-        const cCity = col(['город азс']);
+        const cRegion = columns.region;
+        const cCity = columns.city;
         const region = [cRegion !== -1 ? String(row[cRegion] || '').trim() : '', cCity !== -1 ? String(row[cCity] || '').trim() : '']
           .filter(x => x && x.toLowerCase() !== 'null').join(', ');
 
@@ -330,8 +248,15 @@ function importFuelFromXls(input, mode = 'fuel') {
       // Покупки из выписок хранятся в разделе «Заправки». Строка, которая там уже
       // есть, в журнал второй раз не идёт — даже если её перенесли на другую
       // машину, поправили или удалили. У неё только уточняются цена и время.
+      const identity = await importReviewDataIdentity();
+      const plan = importReviewBuildPlan({ identity, title: importTitle, fileName: file.name, kind: mode, template: selection.template }, () => {
       if (!data.fuelPurchases) data.fuelPurchases = [];
-      if (typeof fpRestoreFromJournal === 'function') fpRestoreFromJournal();
+      if (typeof fpRestoreFromJournal === 'function') {
+        const previousIds = new Set(data.fuelPurchases.map(row => row.id));
+        const fileKeys = new Set(transactions.map(row => row.importKey));
+        fpRestoreFromJournal();
+        data.fuelPurchases = data.fuelPurchases.filter(row => previousIds.has(row.id) || fileKeys.has(row.importKey) && !(typeof fuelMonthClosed === 'function' && fuelMonthClosed(row.date)));
+      }
       const importId = newId('fi');
       // Одинаковые покупки за день по одной карте имеют одинаковый ключ —
       // каждая строка выписки забирает свою покупку
@@ -523,18 +448,8 @@ function importFuelFromXls(input, mode = 'fuel') {
         duplicates: knownTx.length, skipped: unmatchedRows.length,
       });
 
-      const saved = await saveData(data);
-      if (!saved) {
-        alert('Заправки обработаны, но сохранить изменения не удалось. Проверьте соединение с сервером и повторите импорт.');
-        return;
-      }
-      const v = data.vehicles.find(x => x.id === selectedVehicleId);
-      if (activeSection === 'fuelPurchases') {
-        fpView = 'receipts'; fpMonth = 'all'; gsmOrg = ''; gsmFuel = '';
-        renderFuelPurchases();
-      } else if (v) renderDetail(v);
+      return {
 
-      showFuelImportReport({
         fileName: importTitle + ': ' + file.name,
         transactionsCount: transactions.length,
         sourceLitres: transactions.reduce((s, tx) => s + tx.qty, 0),
@@ -551,6 +466,16 @@ function importFuelFromXls(input, mode = 'fuel') {
         reportRows,
         unmatchedRows,
         unmatched: [...unmatched],
+      };
+      });
+      const result = plan.result;
+      plan.notes = ['Операций: ' + result.transactionsCount + '; уже загружено: ' + result.duplicates + '; без машины: ' + result.skipped + '.',
+        'Закрытые месяцы: пропущено ' + result.closedCount + ' операций. Неверные дата/количество: ' + rejectedRows + '; другие типы операций: ' + ignoredRows + '.'];
+      importReviewPresent(plan, report => {
+        const v = data.vehicles.find(x => x.id === selectedVehicleId);
+        if (activeSection === 'fuelPurchases') { fpView = 'receipts'; fpMonth = 'all'; gsmOrg = ''; gsmFuel = ''; renderFuelPurchases(); }
+        else if (v) renderDetail(v);
+        showFuelImportReport(report);
       });
     } catch(err) {
       alert('Ошибка при чтении файла: ' + err.message);
@@ -1331,6 +1256,8 @@ async function doSvodkaImport() {
   document.querySelectorAll('.svodka-chk:checked').forEach(el => checked.add(+el.dataset.idx));
   if (!checked.size) { alert('Не выбрано ни одного ТС.'); return; }
 
+  const identity = await importReviewDataIdentity();
+  const plan = importReviewBuildPlan({ identity, title: 'Сводка PDF', fileName: 'Сводка PDF', kind: 'pdf' }, () => {
   const plateMap = {};
   data.vehicles.forEach(v => { plateMap[normPlate(v.plate)] = v; });
 
@@ -1393,18 +1320,16 @@ async function doSvodkaImport() {
     }
   });
 
-  if (!await saveData(data)) return;
+  return { addedV, updatedV, addedR, skippedR };
+  });
+  plan.notes = ['Новых ТС: ' + plan.result.addedV + '; обновлено ТС: ' + plan.result.updatedV + '; новых записей: ' + plan.result.addedR + '; дубликатов: ' + plan.result.skippedR + '.'];
   closeModal('svodkaImportModal');
-  populateOrgSelect();
-  renderVehicleList();
-
-  let msg = 'Импорт завершён.';
-  if (addedV) msg += '\nНовых ТС: ' + addedV;
-  if (updatedV) msg += '\nОбновлено ТС: ' + updatedV;
-  if (addedR) msg += '\nДобавлено записей: ' + addedR;
-  if (skippedR) msg += '\nПропущено (уже есть): ' + skippedR;
-  alert(msg);
-  _svodkaParsed = null;
+  importReviewPresent(plan, result => {
+    populateOrgSelect(); renderVehicleList();
+    if (activeSection === 'vehicles') renderVehicleCards();
+    alert('Импорт завершён. Новых ТС: ' + result.addedV + '; обновлено ТС: ' + result.updatedV + '; записей: ' + result.addedR + '.');
+    _svodkaParsed = null;
+  });
 }
 
 // Экспорт данных ДЭС (генераторы, записи, ТО, ёмкости, приход) в JSON —
@@ -1471,6 +1396,9 @@ function showImportPreview(res) {
 async function doRarMerge() {
   if (!_rarImport) return;
   const includeBackups = document.getElementById('rarIncludeBackups').checked;
+  const identity = await importReviewDataIdentity();
+  const source = _rarImport;
+  const plan = importReviewBuildPlan({ identity, title: 'Данные из файла / архива', fileName: source.fileName, kind: 'archive' }, () => {
   RAR_KEYS.forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
   const byId = {};
   RAR_KEYS.forEach(k => { byId[k] = {}; data[k].forEach(x => { if (x && x.id) byId[k][x.id] = x; }); });
@@ -1495,27 +1423,15 @@ async function doRarMerge() {
   mergeSrc(_rarImport.main);
   if (includeBackups) mergeSrc(_rarImport.backupExtra);
 
-  if (!await saveData(data)) return;
-  populateOrgSelect();
-  updateFilterUI();
-  renderVehicleList();
-  if (typeof renderGeneratorList === 'function') renderGeneratorList();
-  if (typeof renderTankList === 'function') renderTankList();
+  return { added, updated };
+  });
   closeModal('rarImportModal');
-
-  const totalAdded = RAR_KEYS.reduce((s, k) => s + added[k], 0);
-  const totalUpdated = RAR_KEYS.reduce((s, k) => s + updated[k], 0);
-  let msg = '';
-  if (totalAdded > 0) {
-    msg += 'Добавлено:\n';
-    RAR_KEYS.forEach(k => { if (added[k] > 0) msg += '• ' + RAR_LABELS[k] + ': ' + added[k] + '\n'; });
-  }
-  if (totalUpdated > 0) {
-    msg += (msg ? '\n' : '') + 'Обновлено:\n';
-    RAR_KEYS.forEach(k => { if (updated[k] > 0) msg += '• ' + RAR_LABELS[k] + ': ' + updated[k] + '\n'; });
-  }
-  if (!msg) msg = 'Новых данных не найдено — всё уже есть в базе.';
-  _rarImport = null;
-  alert(msg.trim());
+  importReviewPresent(plan, result => {
+    populateOrgSelect(); updateFilterUI(); renderVehicleList();
+    if (typeof renderGeneratorList === 'function') renderGeneratorList();
+    if (typeof renderTankList === 'function') renderTankList();
+    if (activeSection === 'vehicles') renderVehicleCards();
+    _rarImport = null;
+    alert('Импорт завершён. Добавлено записей: ' + RAR_KEYS.reduce((sum, key) => sum + result.added[key], 0) + '.');
+  });
 }
-

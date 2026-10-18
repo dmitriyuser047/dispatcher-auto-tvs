@@ -103,17 +103,18 @@ function workspaceOverview() {
   const today = todayIso(), from = today.slice(0, 7) + '-01';
   const inPeriod = date => date && date >= from && date <= today;
   const records = (data.records || []).filter(row => inPeriod(row.date));
-  const payments = (data.payments || []).filter(row => !row.paid);
+  const payments = (data.payments || []).filter(row => typeof woPaymentBalance==='function'?woPaymentBalance(row)>.009:!row.paid);
   const planned = [...(data.vehicleTo || []), ...(data.toRecords || [])].filter(row => row.planned && row.date);
   const horizon = new Date(); horizon.setDate(horizon.getDate() + 7);
   const due = planned.filter(row => row.date <= todayIso(horizon));
+  const workQueue=typeof workspaceBuildIssues==='function'?workspaceBuildIssues('maintenance'):null;
   let ledger = { receipts: [], errors: [], barrels: [] };
   if (typeof gsmBuildLedger === 'function') ledger = gsmBuildLedger(data, { from, to: today });
   const vehicles = new Map((data.vehicles || []).map(row => [row.id, row]));
   const generators = new Map((data.generators || []).map(row => [row.id, row]));
   const recent = [
-    ...(data.records || []).map(row => ({ id: row.vehicleId, date: row.date, kind: 'Пробег', section: 'vehicles', title: vehicles.get(row.vehicleId)?.plate || 'ТС не найдено', note: vehicles.get(row.vehicleId)?.make || '', value: workspaceNumber(row.km, 1) + ' км', detail: row.note || '' })),
-    ...(data.genRecords || []).map(row => ({ id: row.generatorId, date: row.date, kind: 'Наработка ДЭС', section: 'generators', title: generators.get(row.generatorId)?.name || 'ДЭС не найдена', note: generators.get(row.generatorId)?.location || '', value: workspaceNumber(row.hours, 1) + ' мтч', detail: row.note || '' })),
+    ...(data.records || []).map(row => ({ id: row.id, date: row.date, kind: 'Пробег', section: 'records', title: vehicles.get(row.vehicleId)?.plate || 'ТС не найдено', note: vehicles.get(row.vehicleId)?.make || '', value: workspaceNumber(row.km, 1) + ' км', detail: row.note || '' })),
+    ...(data.genRecords || []).map(row => ({ id: row.id, date: row.date, kind: 'Наработка ДЭС', section: 'genRecords', title: generators.get(row.generatorId)?.name || 'ДЭС не найдена', note: generators.get(row.generatorId)?.location || '', value: workspaceNumber(row.hours, 1) + ' мтч', detail: row.note || '' })),
   ].filter(row => row.date).sort((a, b) => cmpDateDesc(a.date, b.date)).slice(0, 6);
   return { today, from, vehicleCount: vehicles.size, generatorCount: generators.size,
     repairCount: (data.vehicles || []).filter(row => /ремонт|дтп/i.test(row.status || '')).length,
@@ -121,11 +122,12 @@ function workspaceOverview() {
     km: records.reduce((sum, row) => sum + (Number(row.km) || 0), 0), recordCount: records.length,
     received: ledger.receipts.reduce((sum, row) => sum + (Number(row.qty) || 0), 0),
     fuelIssues: ledger.errors.length, pendingReceipts: ledger.receipts.filter(row => !row.recordId).length,
-    due: due.length, overdue: due.filter(row => row.date < today).length,
-    paymentCount: payments.length, payable: payments.reduce((sum, row) => sum + (Number(row.sum) || 0), 0), recent };
+    due: workQueue?workQueue.length:due.length, overdue: workQueue?workQueue.filter(row=>row.date&&row.date<today).length:due.filter(row => row.date < today).length,
+    paymentCount: payments.length, payable: payments.reduce((sum, row) => sum + (typeof woPaymentBalance==='function'?woPaymentBalance(row):Number(row.sum)||0), 0), recent };
 }
 
 function workspaceOpenEntry(section, id) {
+  if(typeof workspaceFocusRecord==='function')return workspaceFocusRecord(section,id);
   switchSection(section);
   if (section === 'vehicles' && (data.vehicles || []).some(row => row.id === id)) selectVehicle(id);
   if (section === 'generators' && (data.generators || []).some(row => row.id === id)) openGeneratorDetail(id);
@@ -135,7 +137,7 @@ function renderWorkspaceDashboard() {
   const view = workspaceOverview();
   const month = new Date().toLocaleDateString('ru-RU', { month: 'long' });
   const metric = (label, value, unit, note, icon) => `<article class="workspace-metric"><div class="workspace-metric-label">${label}${workspaceIcon(icon)}</div><div class="workspace-metric-value">${value}<span>${unit}</span></div><div class="workspace-metric-note">${note}</div></article>`;
-  const queue = (icon, label, note, amount, destination, warning) => `<button type="button" class="workspace-queue-item" onclick="workspaceNavigate('${destination}')"><span class="workspace-queue-icon ${warning ? 'is-warning' : ''}">${workspaceIcon(icon)}</span><span class="workspace-queue-copy"><span class="workspace-queue-label">${label}</span><span class="workspace-queue-note">${note}</span></span><span class="workspace-queue-count">${amount}</span>${workspaceIcon('arrow-right')}</button>`;
+  const queue = (icon, label, note, amount, destination, warning) => `<button type="button" class="workspace-queue-item" onclick="workspaceOpenIssues('${destination}')"><span class="workspace-queue-icon ${warning ? 'is-warning' : ''}">${workspaceIcon(icon)}</span><span class="workspace-queue-copy"><span class="workspace-queue-label">${label}</span><span class="workspace-queue-note">${note}</span></span><span class="workspace-queue-count">${amount}</span>${workspaceIcon('arrow-right')}</button>`;
   document.getElementById('mainContent').innerHTML = `<div class="workspace-dashboard">
     <div class="workspace-page-intro"><div><div class="workspace-eyebrow">Ежедневная работа</div><h1 class="workspace-page-title">Рабочий обзор</h1><p class="workspace-page-subtitle">Техника, топливо и задачи — в одном пространстве.</p></div><div class="workspace-page-actions"><span class="workspace-date">${new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}</span><button type="button" class="btn btn-primary" onclick="workspaceNavigate('vehicles')">${workspaceIcon('vehicles')}Открыть транспорт</button></div></div>
     <div class="workspace-metrics">
@@ -145,9 +147,9 @@ function renderWorkspaceDashboard() {
       ${metric('Ожидают оплаты', workspaceNumber(view.payable, 2), '₽', view.paymentCount + ' записей в журнале платежей', 'finances')}
     </div>
     <div class="workspace-overview-grid"><section class="workspace-panel"><div class="workspace-panel-heading"><h2 class="workspace-panel-title">Требует внимания</h2><span class="workspace-badge is-neutral">По данным базы</span></div>
-      ${queue('fuel', 'Проверка ГСМ', view.fuelIssues ? 'Замечания в расчёте за текущий месяц' : 'Замечаний в расчёте за месяц нет', workspaceNumber(view.fuelIssues), 'fuelPurchases', view.fuelIssues > 0)}
-      ${queue('maintenance', 'Ближайшее обслуживание', view.overdue ? view.overdue + ' просроченных работ по графику' : 'Запланированные работы на 7 дней', workspaceNumber(view.due), 'toSchedule', view.overdue > 0)}
-      ${queue('finances', 'Неоплаченные платежи', 'Проверить даты, суммы и получателей', workspaceNumber(view.paymentCount), 'finances', view.paymentCount > 0)}
+      ${queue('fuel', 'Проверка ГСМ', view.fuelIssues ? 'Замечания в расчёте за текущий месяц' : 'Замечаний в расчёте за месяц нет', workspaceNumber(view.fuelIssues), 'fuel', view.fuelIssues > 0)}
+      ${queue('maintenance', 'Ближайшее обслуживание', view.overdue ? view.overdue + ' просроченных работ по графику' : 'Запланированные работы на 7 дней', workspaceNumber(view.due), 'maintenance', view.overdue > 0)}
+      ${queue('finances', 'Неоплаченные платежи', 'Проверить даты, суммы и получателей', workspaceNumber(view.paymentCount), 'payments', view.paymentCount > 0)}
     </section><section class="workspace-panel"><div class="workspace-panel-heading"><h2 class="workspace-panel-title">Быстрые действия</h2><span class="workspace-panel-caption">Частые операции</span></div><div class="workspace-shortcuts">
       <button type="button" onclick="workspaceNavigate('fuelPurchases')">${workspaceIcon('fuel')}<span>Выписки и заправки<small>Проверить и связать с журналом</small></span>${workspaceIcon('arrow-right')}</button>
       <button type="button" onclick="workspaceNavigate('toSchedule')">${workspaceIcon('maintenance')}<span>График обслуживания<small>Работы по транспорту и ДЭС</small></span>${workspaceIcon('arrow-right')}</button>

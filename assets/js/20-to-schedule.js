@@ -89,14 +89,14 @@ function renderToScheduleSection() {
         : `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M12 12v4m-2-2h4"/></svg>`;
       rows += `<tr${r.planned ? ' style="background:var(--bg2)"' : ''}>
         <td class="td-day">${fmtDate(r.date)}${r.planned ? '<div style="font-size:10px;color:var(--text3)">план</div>' : ''}</td>
-        <td style="padding:10px 14px;font-size:13px">${icon}${r.objName}</td>
-        <td style="padding:10px 14px;font-size:13px;font-weight:600">${r.type || '—'}</td>
+        <td style="padding:10px 14px;font-size:13px">${icon}${htmlEsc(r.objName)}</td>
+        <td style="padding:10px 14px;font-size:13px;font-weight:600">${htmlEsc(r.type || '—')}${woSummaryHtml(r, r.source)}</td>
         <td class="td-num">${r.meter != null ? r.meter.toLocaleString('ru',{maximumFractionDigits:1})+' '+r.meterUnit : '—'}</td>
         <td class="td-num">${r.cost != null ? r.cost.toLocaleString('ru-RU')+' ₽' : '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${r.performer || '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.note || '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.performer || '—')}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${htmlEsc(r.note || '—')}</td>
         <td class="td-actions">
-          <button class="icon-btn" onclick="tssEditRecord('${r.id}','${r.source}')">
+          <button class="icon-btn" onclick="tssEditRecord(${htmlJs(r.id)},${htmlJs(r.source)})">
             <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
           <button class="icon-btn del" onclick="tssDeleteDirect(${htmlJs(r.id)},${htmlJs(r.source)})">
@@ -172,12 +172,12 @@ function tssObjTypeChanged() {
   const label = document.getElementById('tss_odo_label');
   if (type === 'vehicle') {
     sel.innerHTML = (data.vehicles || []).slice().sort((a,b) => (a.plate||'').localeCompare(b.plate||''))
-      .map(v => `<option value="${v.id}">${v.plate} — ${v.make}</option>`).join('');
+      .map(v => `<option value="${htmlEsc(v.id)}">${htmlEsc(v.plate)} — ${htmlEsc(v.make)}</option>`).join('');
     label.textContent = 'Пробег (км)';
     document.getElementById('tss_odometer').placeholder = '0';
   } else {
     sel.innerHTML = (data.generators || []).slice().sort((a,b) => (a.name||'').localeCompare(b.name||''))
-      .map(g => `<option value="${g.id}">${g.name}${g.location ? ' — '+g.location : ''}</option>`).join('');
+      .map(g => `<option value="${htmlEsc(g.id)}">${htmlEsc(g.name)}${g.location ? ' — '+htmlEsc(g.location) : ''}</option>`).join('');
     label.textContent = 'Моточасы';
     document.getElementById('tss_odometer').placeholder = '0';
   }
@@ -193,7 +193,10 @@ function tssOpenAdd() {
   ['tss_type','tss_performer','tss_note'].forEach(id => document.getElementById(id).value = '');
   ['tss_odometer','tss_cost'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('tss_obj_type').value = tssFilter === 'generator' ? 'generator' : 'vehicle';
+  document.getElementById('tss_obj_type').disabled = false;
+  document.getElementById('tss_obj_id').disabled = false;
   tssObjTypeChanged();
+  woFormMount('toScheduleModal', 'tss', null, document.getElementById('tss_obj_type').value === 'vehicle' ? 'vehicleTo' : 'toRecords');
   openModal('toScheduleModal');
 }
 
@@ -227,6 +230,9 @@ function tssEditRecord(id, source) {
     document.getElementById('tss_performer').value = r.performer || '';
     document.getElementById('tss_note').value = r.note || '';
   }
+  woFormMount('toScheduleModal', 'tss', woFind(source, id), source);
+  document.getElementById('tss_obj_type').disabled = true;
+  document.getElementById('tss_obj_id').disabled = true;
   openModal('toScheduleModal');
 }
 
@@ -238,18 +244,28 @@ async function tssSaveRecord() {
   const objType = document.getElementById('tss_obj_type').value;
   const objId = document.getElementById('tss_obj_id').value;
   if (!objId) { showFieldError('Выберите объект', 'tss_obj_id'); return; }
+  if (!validNonnegativeFields(['tss_odometer', 'tss_cost'])) return;
+  const section = objType === 'vehicle' ? 'vehicleTo' : 'toRecords';
+  const existing = woFind(section, tssEditingId);
+  if (tssEditingId && !existing) { showToast('Запись ТО уже удалена. Откройте график заново.'); return; }
+  let work;
+  try { work = woFormRead('tss', existing, section); } catch (error) { showToast(error.message); return; }
+  const before = JSON.stringify(data);
   const meter = parseFloat(document.getElementById('tss_odometer').value);
-  const cost = parseFloat(document.getElementById('tss_cost').value) || null;
+  const cost = optionalNumber('tss_cost');
   const performer = document.getElementById('tss_performer').value.trim();
   const note = document.getElementById('tss_note').value.trim();
 
   if (objType === 'vehicle') {
     const obj = {
+      ...work,
       vehicleId: objId, date: dateIso, type,
       odometer: !isNaN(meter) ? meter : null,
-      nextKm: null, nextOdometerAbs: null, nextDate: null,
+      nextKm: existing?.nextKm ?? null, nextOdometerAbs: existing?.nextOdometerAbs ?? null, nextDate: existing?.nextDate ?? null,
       cost, performer, note,
     };
+    try { Object.assign(obj, woMergeFormRecord(existing, obj, 'tss')); } catch (error) { showToast(error.message); return; }
+    Object.assign(obj, woFinishRecord(existing, obj, section, todayIso()));
     if (!data.vehicleTo) data.vehicleTo = [];
     if (tssEditingId && tssEditingSource === 'vehicleTo') {
       Object.assign(data.vehicleTo.find(x => x.id === tssEditingId), obj);
@@ -259,11 +275,14 @@ async function tssSaveRecord() {
     }
   } else {
     const obj = {
+      ...work,
       generatorId: objId, date: dateIso, type,
       hours: !isNaN(meter) ? +meter : null,
-      nextHours: null, nextHoursAbs: null, nextDate: null,
+      nextHours: existing?.nextHours ?? null, nextHoursAbs: existing?.nextHoursAbs ?? null, nextDate: existing?.nextDate ?? null,
       cost, performer, note,
     };
+    try { Object.assign(obj, woMergeFormRecord(existing, obj, 'tss')); } catch (error) { showToast(error.message); return; }
+    Object.assign(obj, woFinishRecord(existing, obj, section, todayIso()));
     if (!data.toRecords) data.toRecords = [];
     if (tssEditingId && tssEditingSource === 'toRecords') {
       Object.assign(data.toRecords.find(x => x.id === tssEditingId), obj);
@@ -272,7 +291,9 @@ async function tssSaveRecord() {
       data.toRecords.push(obj);
     }
   }
-  if (!await saveData(data)) return;
+  const savedRecord = tssEditingId ? woFind(section, tssEditingId) : data[section][data[section].length - 1];
+  if (savedRecord) woSyncSourcePaid(data, section, savedRecord.id);
+  if (!await saveData(data)) { data = JSON.parse(before); rebuildIndex(); return; }
   closeModal('toScheduleModal');
   renderToScheduleSection();
 }
@@ -283,6 +304,7 @@ async function tssDeleteRecord() {
 
 async function tssDeleteDirect(id, source) {
   if (!id) return;
+  if (!woDeleteAllowed(source, id)) return false;
   if (!await confirmAction('Удалить эту запись ТО?')) return false;
   if (source === 'vehicleTo') {
     data.vehicleTo = (data.vehicleTo || []).filter(r => r.id !== id);

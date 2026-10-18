@@ -9,8 +9,14 @@ let _backupFn  = null;
 let _writeLock = false;
 let _clientKey = '';
 let _generation = 0;
-function configureKey(key) { _clientKey = String(key || ''); }
-function authHeaders() { return { Authorization: 'Bearer ' + _clientKey }; }
+let _actor = '';
+function configureKey(key,actor) { _clientKey = String(key || ''); _actor = String(actor || ''); }
+function authHeaders() { return { Authorization: 'Bearer ' + _clientKey, 'X-TVS-Actor':encodeURIComponent(_actor.slice(0,120)) }; }
+function requestContext(req,meta = {}) {
+  let actor = 'Сетевой клиент';
+  try { actor = decodeURIComponent(String(req.headers['x-tvs-actor'] || '')).slice(0,120) || actor; } catch {}
+  return { actor,action:typeof meta.action === 'string' ? meta.action.slice(0,160) : 'Изменение по сети' };
+}
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -31,12 +37,14 @@ async function writeRequest(req, res, full, generation) {
   try {
     const payload = await readBody(req);
     if (generation !== _generation) throw new Error('Сервер переключён на другую базу. Подключитесь заново.');
+    const databaseToken = storage.databaseToken(dataDir);
+    if (payload?.databaseToken != null && payload.databaseToken !== databaseToken) throw new Error('Сервер выбрал другую базу. Загрузите данные заново.');
     if (_writeLock) { res.writeHead(423); res.end(JSON.stringify({ error: 'Повторите сохранение' })); return; }
     _writeLock = true;
     try {
       if (backup) backup();
-      const r = full ? { ok: true, ...storage.writeAll(dataDir, payload) } : storage.writeSections(dataDir, payload);
-      res.writeHead(r.ok ? 200 : 409, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(r));
+      const r = full ? { ok: true, ...storage.writeAll(dataDir, payload,requestContext(req)) } : storage.writeSections(dataDir, payload,requestContext(req,payload.meta));
+      res.writeHead(r.ok ? 200 : 409, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ...r, databaseToken }));
     } finally { _writeLock = false; }
   } catch (e) {
     if (!res.destroyed && !res.headersSent) { res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ error: e.message })); }
@@ -70,8 +78,37 @@ function start({ port, dataDir, backupFn, serverName, key }) {
 
     if (req.method === 'GET' && req.url === '/api/ping') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, name: serverName || os.hostname(), version: '2.0', sections: true }));
+      res.end(JSON.stringify({ ok: true, name: serverName || os.hostname(), version: '2.0', sections: true, databaseToken: storage.databaseToken(_dataDir) }));
       return;
+    }
+
+    let historyURL;
+    try { historyURL = new URL(req.url,'http://localhost'); }
+    catch {res.writeHead(400);res.end(JSON.stringify({error:'Неверный адрес запроса'}));return;}
+    if (req.method === 'GET' && historyURL.pathname === '/api/history') {
+      try {
+        const result = storage.listHistory(_dataDir,{before:historyURL.searchParams.get('before'),limit:historyURL.searchParams.get('limit')});
+        res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({ ...result, databaseToken: storage.databaseToken(_dataDir) }));
+      } catch(e) {res.writeHead(400);res.end(JSON.stringify({error:e.message}));}
+      return;
+    }
+    const historyMatch = /^\/api\/history\/(change_[a-z0-9]+_[a-f0-9-]{36})$/.exec(historyURL.pathname);
+    if (historyMatch && req.method === 'GET') {
+      try {const event=storage.readHistoryEntry(_dataDir,historyMatch[1]);res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({ ...event, databaseToken: storage.databaseToken(_dataDir) }));}
+      catch(e){res.writeHead(400);res.end(JSON.stringify({error:e.message}));}return;
+    }
+    if (req.method === 'POST' && req.url === '/api/history/restore') {
+      const dataDir=_dataDir,backup=_backupFn;
+      void (async()=>{try{
+        const request=await readBody(req);
+        if(generation!==_generation)throw new Error('Сервер переключён на другую базу');
+        const databaseToken=storage.databaseToken(dataDir);
+        if(!request?.databaseToken||request.databaseToken!==databaseToken)throw new Error('Выбрана другая база. Откройте историю заново.');
+        if(_writeLock)throw new Error('Повторите сохранение');
+        _writeLock=true;
+        try{if(backup)backup();const result=storage.restoreHistoryEntry(dataDir,request.id,requestContext(req));res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({ ...result,databaseToken }));}
+        finally{_writeLock=false;}
+      }catch(e){if(!res.destroyed&&!res.headersSent){res.writeHead(409);res.end(JSON.stringify({ok:false,error:e.message}));}}})();return;
     }
 
     // Номера версий разделов — несколько сотен байт. По ним клиент понимает,
@@ -79,7 +116,7 @@ function start({ port, dataDir, backupFn, serverName, key }) {
     if (req.method === 'GET' && req.url === '/api/revisions') {
       try {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(storage.readRevisions(_dataDir)));
+        res.end(JSON.stringify({ ...storage.readRevisions(_dataDir), databaseToken: storage.databaseToken(_dataDir) }));
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ error: e.message }));
@@ -98,7 +135,7 @@ function start({ port, dataDir, backupFn, serverName, key }) {
       }
       try {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(storage.readSection(_dataDir, name)));
+        res.end(JSON.stringify({ ...storage.readSection(_dataDir, name), databaseToken: storage.databaseToken(_dataDir) }));
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ error: e.message }));
@@ -111,7 +148,7 @@ function start({ port, dataDir, backupFn, serverName, key }) {
     if (req.method === 'GET' && req.url === '/api/snapshot') {
       try {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ data: storage.readAll(_dataDir), revisions: storage.readRevisions(_dataDir) }));
+        res.end(JSON.stringify({ data: storage.readAll(_dataDir), revisions: storage.readRevisions(_dataDir), databaseToken: storage.databaseToken(_dataDir) }));
       } catch (e) {
         res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ error: e.message }));
@@ -224,10 +261,10 @@ function getJson(host, port, path, timeout) {
   });
 }
 
-function postSections(host, port, jsonStr) {
+function postSections(host, port, jsonStr,endpoint='/api/sections') {
   return new Promise((resolve, reject) => {
     const opts = {
-      hostname: host, port, path: '/api/sections', method: 'POST',
+      hostname: host, port, path: endpoint, method: 'POST',
       headers: { ...authHeaders(), 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(jsonStr) },
       timeout: 15000,
     };

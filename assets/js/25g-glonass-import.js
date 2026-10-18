@@ -141,14 +141,38 @@ async function importGlonassTrips() {
   const table = res.kind === 'pdf' ? fgTableFromPdf(res.items) : fgTableFromXlsx(res.base64);
   const trips = table && fgTrips(table);
   if (!trips || !trips.length) { alert('В файле не найдена таблица ГЛОНАСС: нужны колонки «Объект», «Начало» или «Дата» и «Пробег, км» или «Пройденный путь, км».'); return; }
-  const { report, unknown } = fgApplyTrips(trips);
-  _fgLast = { fileName: res.fileName, trips, report, unknown };
-  await saveData(data);
-  fgShowImportReport();
-  if (activeSection === 'fuelPurchases') renderFuelPurchases();
+  const identity = await importReviewDataIdentity();
+  fgStageImport({ fileName: res.fileName, identity, trips, pendingTrips: trips, baseReport: [], baseUnknown: new Map(), assignments: {} });
 }
 
 let _fgLast = null;
+
+function fgStageImport(state) {
+  const plan = importReviewBuildPlan({ identity: state.identity, fileName: state.fileName, title: 'ГЛОНАСС', kind: 'glonass' }, () => {
+    for (const [object, id] of Object.entries(state.assignments || {})) {
+      const vehicle = data.vehicles.find(row => row.id === id);
+      if (!vehicle) throw new Error('Выбранная машина больше не существует. Повторите сопоставление.');
+      const key = plateKey(object);
+      if (!(vehicle.glonassAliases || (vehicle.glonassAliases = [])).includes(key)) vehicle.glonassAliases.push(key);
+    }
+    const result = fgApplyTrips(state.pendingTrips);
+    const unknown = new Map(state.baseUnknown || []);
+    state.pendingTrips.forEach(trip => unknown.delete(trip.object));
+    result.unknown.forEach((value, key) => unknown.set(key, value));
+    return { report: [...(state.baseReport || []), ...result.report], unknown };
+  });
+  plan.notes = ['Выездов: ' + state.pendingTrips.length + '; объектов без машины: ' + plan.result.unknown.size + '; закрытых машино-дней: ' + plan.result.report.filter(row => row.action === 'closed').length + '.'];
+  _fgLast = { ...state, ...plan.result, plan, committed: false };
+  fgShowImportReport();
+}
+function fgReviewImport() {
+  const state = _fgLast; if (!state?.plan || state.committed) return;
+  importReviewPresent(state.plan, result => {
+    _fgLast = { ...state, ...result, committed: true };
+    fgShowImportReport();
+    if (activeSection === 'fuelPurchases') renderFuelPurchases();
+  });
+}
 
 // Выезды → машина × день → запись журнала
 function fgApplyTrips(trips) {
@@ -218,18 +242,15 @@ function fgSuggest(text) {
 // выезды этого объекта сразу загружаются
 async function fgAssign(idx) {
   if (!_fgLast) return;
+  const identity = await importReviewDataIdentity();
+  if (identity !== _fgLast.identity) { showToast('Выбрана другая база. Загрузите отчёт ГЛОНАСС заново.'); return; }
   const object = [..._fgLast.unknown.keys()][idx];
   const vid = document.getElementById('fgAssign_' + idx)?.value;
   const v = (data.vehicles || []).find(x => x.id === vid);
   if (!object || !v) { alert('Выберите машину'); return; }
-  const key = plateKey(object);
-  (v.glonassAliases || (v.glonassAliases = [])).includes(key) || v.glonassAliases.push(key);
-  const res = fgApplyTrips(_fgLast.trips.filter(t => t.object === object));
-  _fgLast.report.push(...res.report);
-  _fgLast.unknown.delete(object);
-  await saveData(data);
-  fgShowImportReport();
-  if (activeSection === 'fuelPurchases') renderFuelPurchases();
+  const state = _fgLast.committed ? { ..._fgLast, pendingTrips: [], baseReport: _fgLast.report, baseUnknown: _fgLast.unknown, assignments: {} } : _fgLast;
+  const pendingTrips = state.pendingTrips.some(trip => trip.object === object) ? state.pendingTrips : [...state.pendingTrips, ...state.trips.filter(trip => trip.object === object)];
+  fgStageImport({ ...state, pendingTrips, assignments: { ...state.assignments, [object]: v.id } });
 }
 
 function fgShowImportReport() {
@@ -251,25 +272,26 @@ function fgShowImportReport() {
       <td style="text-align:right">${x.d.engine ? fpNum(x.d.engine, 1) : '—'}</td>
     </tr>`;
   }).join('');
-  openGenericModal('Загрузка ГЛОНАСС: ' + fileName, `
+  openGenericModal((_fgLast.committed ? 'Результат загрузки ГЛОНАСС: ' : 'Предпросмотр ГЛОНАСС: ') + fileName, `
+    ${_fgLast.committed ? '' : '<p role="status">Данные ещё не сохранены. Сопоставьте объекты, затем проверьте изменения перед применением.</p>'}
     <div style="font-size:13px;margin-bottom:10px">Выездов в отчёте: <b>${tripCount}</b>, машино-дней: <b>${report.length}</b>.
       Добавлен ГЛОНАСС: <b>${cnt('updated')}</b>, создано записей: <b>${cnt('created')}</b>, без изменений: ${cnt('same')}${cnt('closed') ? ', в закрытом месяце: ' + cnt('closed') : ''}.</div>
     ${unknown.size ? `<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px">
-      <div style="color:#92400e;font-weight:600;margin-bottom:6px">Не найдены машины по номеру — выберите машину, привязка запомнится</div>
+      <div style="color:#92400e;font-weight:600;margin-bottom:6px">Не найдены машины по номеру — выберите машину. Привязка сохранится после применения импорта.</div>
       ${[...unknown.entries()].map(([obj, u], i) => {
         const s = fgSuggest(obj);
         return `<div style="display:flex;gap:8px;align-items:center;margin:4px 0;flex-wrap:wrap">
           <span style="min-width:220px"><b>${fpEsc(obj)}</b> <span style="color:var(--text3)">· ${u.trips} стр., ${fpNum(u.km, 0)} км</span></span>
           <select id="fgAssign_${i}" class="fsel" style="max-width:260px">${fuelImportVehicleOptions(s ? s.id : '', true)}</select>
-          <button class="btn btn-primary btn-sm" onclick="fgAssign(${i})">Привязать и загрузить</button>
+          <button class="btn btn-primary btn-sm" onclick="fgAssign(${i})">Сопоставить</button>
           ${s ? '<span style="color:#92400e;font-size:12px">похоже на ' + fpEsc(s.plate) + ' — проверьте номер в ГЛОНАСС</span>' : ''}
         </div>`;
       }).join('')}</div>` : ''}
     <div style="max-height:55vh;overflow:auto"><table class="data-table" style="width:100%">
-      <thead><tr><th>Дата</th><th>Машина</th><th>Что сделано</th><th style="text-align:right">ГЛОНАСС, км</th><th style="text-align:right">Журнал, км</th>
+      <thead><tr><th>Дата</th><th>Машина</th><th>${_fgLast.committed ? 'Результат' : 'Что изменится'}</th><th style="text-align:right">ГЛОНАСС, км</th><th style="text-align:right">Журнал, км</th>
         <th style="text-align:right">Датчик, л</th><th style="text-align:right">Датчик, л/100</th><th style="text-align:right">Моточасы</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
     <div style="font-size:12px;color:var(--text3);margin-top:8px">Пробег и одометр, внесённые водителем, не меняются: ГЛОНАСС пишется в отдельные поля.
       Сравнение и расход по датчику — во вкладке «ГЛОНАСС».</div>
-    <div style="text-align:right;margin-top:10px"><button class="btn btn-primary" onclick="closeModal('genericModal')">Готово</button></div>`, 900);
+    <div class="gsm-actions" style="margin-top:10px"><button class="btn btn-ghost" onclick="closeModal('genericModal')">${_fgLast.committed ? 'Готово' : 'Отмена'}</button>${_fgLast.committed ? '' : '<button class="btn btn-primary" onclick="fgReviewImport()">Показать изменения</button>'}</div>`, 1000);
 }

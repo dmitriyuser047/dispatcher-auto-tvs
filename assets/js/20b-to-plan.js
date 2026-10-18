@@ -103,12 +103,15 @@ function toPlanFor(v, horizonMonths) {
 // Пересчёт планов по всему парку: плановые записи заменяются, факт не трогается
 async function toRebuildPlan(horizonMonths) {
   const vehicles = (data.vehicles || []).filter(v => !/списан|продан/i.test(v.status || ''));
-  data.vehicleTo = (data.vehicleTo || []).filter(r => !r.planned);
+  const before = JSON.stringify(data);
+  data.vehicleTo = (data.vehicleTo || []).filter(r => woKeepPlanned(r, data));
   let added = 0;
   vehicles.forEach(v => {
     const p = toPlanFor(v, horizonMonths || 12);
     const reg = toRegFor(v);
     p.items.forEach((it, i) => {
+      if (data.vehicleTo.some(r => r.vehicleId === v.id && r.planned &&
+          (r.nextOdometerAbs === Math.round(it.odo) || r.odometer === Math.round(it.odo)))) return;
       data.vehicleTo.push({
         id: 'vto_plan_' + v.id + '_' + i + '_' + Date.now().toString(36),
         vehicleId: v.id,
@@ -129,13 +132,13 @@ async function toRebuildPlan(horizonMonths) {
       added++;
     });
   });
-  await saveData(data);
+  if (!await saveData(data)) { data = JSON.parse(before); rebuildIndex(); return 0; }
   return added;
 }
 
 // Кнопка в разделе «График ТО»
 async function toRebuildPlanClick() {
-  if (!confirm('Построить план ТО по регламентам на 12 месяцев вперёд?\n\nПлановые записи будут пересозданы, выполненные ТО не изменятся.')) return;
+  if (!confirm('Построить план ТО по регламентам на 12 месяцев вперёд?\n\nАвтоматические планы будут пересозданы. Назначенные заявки, работы в процессе и связанные счета сохранятся.')) return;
   const n = await toRebuildPlan(12);
   showToast('План ТО построен: ' + n + ' записей');
   renderToScheduleSection();

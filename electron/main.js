@@ -53,11 +53,14 @@ if (!settings.networkKey) {
   settings.networkKey = require('crypto').randomBytes(24).toString('hex');
   saveSettings(settings);
 }
-server.configureKey(settings.networkKey);
+server.configureKey(settings.networkKey,getActiveUser().name);
 
 function getActiveUser() {
   const idx = settings.activeUser || 0;
   return settings.users[idx] || settings.users[0] || { name: 'Пользователь', dataDir: DEFAULT_DATA_DIR };
+}
+function historyContext(meta) {
+  return {actor:getActiveUser().name || 'Пользователь', action:typeof meta?.action === 'string' ? meta.action.slice(0,160) : 'Изменение данных'};
 }
 
 function getDataDir()   { return getActiveUser().dataDir || DEFAULT_DATA_DIR; }
@@ -95,7 +98,7 @@ async function applySettings(next) {
   if (changed) await server.stop();
   saveSettings(checked);
   settings = checked;
-  server.configureKey(settings.networkKey);
+  server.configureKey(settings.networkKey,getActiveUser().name);
   if (settings.networkMode !== 'client') ensureDirs();
   if (changed && restart) {
     const result = await startDataServer();
@@ -314,7 +317,7 @@ app.whenReady().then(() => {
     } catch (e) { return { ok: false, error: e.message }; }
   });
 
-  ipcMain.handle('write-data', async (_event, jsonStr) => {
+  ipcMain.handle('write-data', async (_event, jsonStr,meta) => {
     const cacheFile = getCacheFile();
     if (isClientMode()) {
       try {
@@ -328,7 +331,7 @@ app.whenReady().then(() => {
     ensureDirs();
     createDailyBackup();
     try {
-      const res = storage.writeAll(getDataDir(), JSON.parse(jsonStr));
+      const res = storage.writeAll(getDataDir(), JSON.parse(jsonStr),historyContext(meta));
       rememberSnapshot(JSON.stringify(storage.readAll(getDataDir())));
       if (res.changed.length) console.log('[write-data] разделы: ' + res.changed.join(', '));
       return true;
@@ -342,22 +345,28 @@ app.whenReady().then(() => {
   // Снимок: данные + версии разделов. На старом сервере (без /api/snapshot)
   // версии неизвестны — клиент работает по-старому, целиком.
   ipcMain.handle('read-snapshot', async () => {
-    const cacheFile = getCacheFile();
+    const cacheFile = getCacheFile(), identity = databaseIdentity(settings);
     if (isClientMode()) {
       const host = settings.remoteHost, port = settings.remotePort || 3377;
       try {
         const snap = await server.getJson(host, port, '/api/snapshot', 15000);
+        if (identity !== databaseIdentity(settings)) return null;
         rememberSnapshot(JSON.stringify(snap.data), cacheFile);
         return JSON.stringify(snap);
       }
       catch (e) {
-        try { return JSON.stringify({ data: JSON.parse(await server.fetchData(host, port)), revisions: null }); }
+        if (identity !== databaseIdentity(settings)) return null;
+        try {
+          const data = JSON.parse(await server.fetchData(host, port));
+          if (identity !== databaseIdentity(settings)) return null;
+          return JSON.stringify({ data, revisions: null });
+        }
         catch { return null; }
       }
     }
     try {
       const data = storage.readAll(getDataDir()); rememberSnapshot(JSON.stringify(data));
-      return JSON.stringify({ data, revisions: storage.readRevisions(getDataDir()) });
+      return JSON.stringify({ data, revisions: storage.readRevisions(getDataDir()), databaseToken: storage.databaseToken(getDataDir()) });
     } catch (e) {
       console.error('[read-snapshot] ' + e.message);
       return null;
@@ -366,40 +375,48 @@ app.whenReady().then(() => {
 
   ipcMain.handle('get-revisions', async () => {
     try {
-      if (isClientMode()) return await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/revisions', 5000);
-      return storage.readRevisions(getDataDir());
+      const identity = databaseIdentity(settings);
+      if (isClientMode()) {
+        const result = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/revisions', 5000);
+        return identity === databaseIdentity(settings) ? result : null;
+      }
+      return { ...storage.readRevisions(getDataDir()), databaseToken: storage.databaseToken(getDataDir()) };
     } catch (e) { return null; }
   });
 
   ipcMain.handle('read-section', async (_event, name) => {
-    const cacheFile = getCacheFile();
+    const cacheFile = getCacheFile(), identity = databaseIdentity(settings);
     try {
       if (isClientMode()) {
         const section = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/section/' + encodeURIComponent(name), 15000);
+        if (identity !== databaseIdentity(settings)) return null;
         rememberSections({ [name]: section.rows }, cacheFile);
         return section;
       }
-      return storage.readSection(getDataDir(), name);
+      return { ...storage.readSection(getDataDir(), name), databaseToken: storage.databaseToken(getDataDir()) };
     } catch (e) { return null; }
   });
 
   ipcMain.handle('write-sections', async (_event, jsonStr) => {
-    const cacheFile = getCacheFile();
+    const cacheFile = getCacheFile(), identity = databaseIdentity(settings);
     if (isClientMode()) {
       try {
         const result = await server.postSections(settings.remoteHost, settings.remotePort || 3377, jsonStr);
+        if (identity !== databaseIdentity(settings)) return { ok: false, error: 'База переключена во время сохранения. Обновите выбранную базу.' };
         if (result.ok) rememberSections(JSON.parse(jsonStr).sections, cacheFile);
         return result;
       }
       catch (e) { return { ok: false, error: e.message }; }
     }
     ensureDirs();
-    createDailyBackup();
     try {
-      const res = storage.writeSections(getDataDir(), JSON.parse(jsonStr));
+      const payload=JSON.parse(jsonStr);
+      if (payload.databaseToken != null && payload.databaseToken !== storage.databaseToken(getDataDir())) throw new Error('Выбрана другая база. Загрузите данные заново.');
+      createDailyBackup();
+      const res = storage.writeSections(getDataDir(), payload,historyContext(payload.meta));
       if (res.ok) rememberSnapshot(JSON.stringify(storage.readAll(getDataDir())));
       if (res.ok && res.changed.length) console.log('[write-sections] ' + res.changed.join(', '));
-      return res;
+      return { ...res, databaseToken: storage.databaseToken(getDataDir()) };
     } catch (e) {
       console.error('[write-sections] ' + e.message);
       return { ok: false, error: e.message };
@@ -407,6 +424,42 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('get-data-path', () => getDataDir());
+  ipcMain.handle('get-data-identity', async () => {
+    const identity = databaseIdentity(settings);
+    if (!isClientMode()) return identity;
+    const response = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/ping', 5000);
+    if (identity !== databaseIdentity(settings)) throw new Error('Выбрана другая база. Повторите действие.');
+    if (!response?.ok) throw new Error('Не удалось определить базу сервера. Проверьте соединение.');
+    return identity + ':' + (response.databaseToken || 'legacy');
+  });
+
+  async function historyRead(request,entry) {
+    const baseIdentity=databaseIdentity(settings),client=isClientMode();
+    const result=client
+      ? await server.getJson(settings.remoteHost,settings.remotePort||3377,entry ? '/api/history/'+encodeURIComponent(request.id) : '/api/history?limit=50&before='+encodeURIComponent(request?.before||''))
+      : { ...(entry ? storage.readHistoryEntry(getDataDir(),request.id) : storage.listHistory(getDataDir(),request||{})), databaseToken:storage.databaseToken(getDataDir()) };
+    if(baseIdentity!==databaseIdentity(settings))throw new Error('Выбрана другая база. Откройте историю заново.');
+    const identity=client ? baseIdentity+':'+(result.databaseToken||'legacy') : baseIdentity;
+    if(request?.identity && request.identity!==identity || request?.databaseToken && request.databaseToken!==result.databaseToken)throw new Error('Выбрана другая база. Откройте историю заново.');
+    return {...result,identity};
+  }
+  ipcMain.handle('read-change-history',(_event,request)=>historyRead(request,false));
+  ipcMain.handle('read-change-entry',(_event,request)=>historyRead(request,true));
+  ipcMain.handle('restore-change-entry',async(_event,request)=>{
+    const baseIdentity=databaseIdentity(settings),cacheFile=getCacheFile(),client=isClientMode();
+    const identity=client ? baseIdentity+':'+request?.databaseToken : baseIdentity;
+    if(!request?.databaseToken || request.identity!==identity)throw new Error('Выбрана другая база. Откройте историю заново.');
+    let result;
+    if(client) result=await server.postSections(settings.remoteHost,settings.remotePort||3377,JSON.stringify({id:request.id,databaseToken:request.databaseToken}),'/api/history/restore');
+    else {
+      if(request.databaseToken!==storage.databaseToken(getDataDir()))throw new Error('Выбрана другая база. Откройте историю заново.');
+      createDailyBackup();result={...storage.restoreHistoryEntry(getDataDir(),request.id,historyContext()),databaseToken:request.databaseToken};
+    }
+    if(baseIdentity!==databaseIdentity(settings))throw new Error('База переключена во время операции. Обновите выбранную базу.');
+    if(result.ok && result.databaseToken!==request.databaseToken)throw new Error('Сервер выбрал другую базу. Откройте историю заново.');
+    if(result.ok)rememberSnapshot(JSON.stringify(result.data),cacheFile);
+    return {...result,identity};
+  });
 
   ipcMain.handle('get-settings', () => settings);
   ipcMain.handle('get-theme', () => settings.uiTheme || null);
@@ -720,7 +773,11 @@ app.whenReady().then(() => {
   // ─── Отдельное окно реестра ───
   const reestrWindowData = new Map();
 
-  ipcMain.handle('open-reestr-window', (event, data) => {
+  ipcMain.handle('open-reestr-window', async (event, data) => {
+    const identity = databaseIdentity(settings), client = isClientMode(), dir = getDataDir();
+    const ping = client ? await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/ping', 5000) : null;
+    if (identity !== databaseIdentity(settings)) throw new Error('База переключена. Откройте реестр заново.');
+    const databaseToken = client ? ping.databaseToken || null : storage.databaseToken(dir);
     const parentWin = BrowserWindow.fromWebContents(event.sender);
     const iconPath = path.join(__dirname, '../build/icon.ico');
     const reestrWin = new BrowserWindow({
@@ -738,7 +795,7 @@ app.whenReady().then(() => {
       },
     });
     reestrWin.setMenuBarVisibility(false);
-    reestrWindowData.set(reestrWin.webContents.id, { ...data, theme: settings.uiTheme || 'light', databaseIdentity: databaseIdentity(settings), ownerId: event.sender.id });
+    reestrWindowData.set(reestrWin.webContents.id, { ...data, theme: settings.uiTheme || 'light', databaseIdentity: identity, databaseToken, ownerId: event.sender.id });
     const reestrId = reestrWin.webContents.id;
     reestrWin.once('closed', () => reestrWindowData.delete(reestrId));
     reestrWin.loadFile(path.join(__dirname, '../reestr-window.html'));
@@ -994,11 +1051,13 @@ app.whenReady().then(() => {
       if (!context || context.databaseIdentity !== identity) throw new Error('База переключена. Откройте реестр заново в нужной базе.');
       const client = isClientMode(), dir = getDataDir();
       const snapshot = client ? await server.getJson(settings.remoteHost, settings.remotePort, '/api/snapshot', 15000)
-        : { data: storage.readAll(dir), revisions: storage.readRevisions(dir) };
-      if (databaseIdentity(settings) !== identity || JSON.stringify(snapshot.data.reestrRows || []) !== JSON.stringify(context.rows || [])) throw new Error('Реестр изменён другим пользователем. Сверьте строки и откройте его заново.');
+        : { data: storage.readAll(dir), revisions: storage.readRevisions(dir), databaseToken: storage.databaseToken(dir) };
+      if (databaseIdentity(settings) !== identity || (snapshot.databaseToken || null) !== context.databaseToken || JSON.stringify(snapshot.data.reestrRows || []) !== JSON.stringify(context.rows || [])) throw new Error('База или реестр изменены. Сверьте строки и откройте реестр заново.');
       const payload = { base: { reestrRows: snapshot.revisions.reestrRows }, sections: { reestrRows: rows } };
+      if (context.databaseToken) payload.databaseToken = context.databaseToken;
       if (!client) storage.makeDailyBackup(dir, path.join(dir, 'backups'), 30);
-      const result = client ? await server.postSections(settings.remoteHost, settings.remotePort, JSON.stringify(payload)) : storage.writeSections(dir, payload);
+      payload.meta={action:'Сохранение реестра'};
+      const result = client ? await server.postSections(settings.remoteHost, settings.remotePort, JSON.stringify(payload)) : storage.writeSections(dir, payload,historyContext(payload.meta));
       if (!result.ok) throw new Error(result.error || 'Реестр изменён другим пользователем. Откройте его заново.');
       context.rows = rows;
       rememberSections({ reestrRows: rows }, cacheFile);

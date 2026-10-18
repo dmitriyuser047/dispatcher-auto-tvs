@@ -54,6 +54,17 @@ test('Electron opens every section, writes the chosen database, switches the ser
   assert.equal(initial.xlsx, true);
   if (process.env.TVS_PACKAGED_EXE) assert.equal(initial.version, require('../package.json').version);
   assert.equal(storage.readAll(dataA).vehicles[0].driver, 'Saved from Electron');
+  const audit=await page.evaluate(async()=>{
+    const identity=await window.electronAPI.getDataIdentity();
+    data.vehicles[0].driver='Audit change';
+    if(!await saveData(data,{history:{action:'Native history test'}}))throw Error('History save failed');
+    const list=await window.electronAPI.readHistory();const item=list.items.find(e=>e.action==='Native history test');
+    const detail=await window.electronAPI.readHistoryEntry({id:item.id,identity});
+    const restored=await window.electronAPI.restoreHistoryEntry({id:item.id,identity,databaseToken:list.databaseToken});
+    data=await loadData();rebuildIndex();
+    return{identity,id:item.id,databaseToken:list.databaseToken,actor:detail.actor,before:detail.changes[0].before.driver,after:detail.changes[0].after.driver,restored:restored.ok,driver:data.vehicles[0].driver};
+  });
+  assert.equal(audit.actor,'A');assert.equal(audit.before,'Saved from Electron');assert.equal(audit.after,'Audit change');assert.equal(audit.restored,true);assert.equal(audit.driver,'Saved from Electron');
   const forbidden = await page.evaluate(async () => (await fetch('/bundled-data/data-2.0.57.json')).status);
   assert.equal(forbidden, 403);
   await page.evaluate(() => window.electronAPI.setTheme('dark'));
@@ -78,6 +89,7 @@ test('Electron opens every section, writes the chosen database, switches the ser
     }).on('error', reject);
   });
   assert.equal(remoteData.vehicles[0].id, 'B');
+  assert.equal(await page.evaluate(async audit=>{try{await window.electronAPI.restoreHistoryEntry({id:audit.id,identity:audit.identity});return false;}catch{return true;}},audit),true);
   assert.equal((await register.evaluate(() => window.reestrWindow.saveRows([]))).ok, false);
   const { PDFDocument, StandardFonts } = require('pdf-lib');
   const pdfs = [];

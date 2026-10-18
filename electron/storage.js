@@ -18,6 +18,7 @@
 
 const fs   = require('fs');
 const path = require('path');
+const history = require('./change-history');
 
 // Порядок важен только для читаемости — файлы независимы
 const SECTIONS = [
@@ -33,6 +34,11 @@ function sectionsDir(dataDir) { return path.join(dataDir, 'sections'); }
 function sectionFile(dataDir, name) { return path.join(sectionsDir(dataDir), name + '.json'); }
 function revisionsFile(dataDir) { return path.join(sectionsDir(dataDir), REVISIONS_FILE); }
 function legacyFile(dataDir) { return path.join(dataDir, 'data.json'); }
+function databaseToken(dataDir) {
+  let resolved=path.resolve(dataDir);
+  try {resolved=fs.realpathSync(resolved);}catch{}
+  return require('node:crypto').createHash('sha256').update('tvs-database:'+(process.platform==='win32'?resolved.toLowerCase():resolved)).digest('hex');
+}
 
 function readJson(file, fallback) {
   try {
@@ -85,7 +91,7 @@ function recoverTransaction(dataDir) {
   if (!fs.existsSync(journal)) return;
   const tx = readJson(journal);
   if (!tx || !tx.sections || !tx.before || !tx.revisions || Object.keys(tx.sections).some(n => !SECTIONS.includes(n) || !Array.isArray(tx.sections[n]) || !(n in tx.before) || tx.before[n] !== null && !Array.isArray(tx.before[n])) ||
-      SECTIONS.some(n => !Number.isSafeInteger(tx.revisions[n]) || tx.revisions[n] < 0)) throw new Error('Повреждён журнал сохранения');
+      SECTIONS.some(n => !Number.isSafeInteger(tx.revisions[n]) || tx.revisions[n] < 0) || tx.audit && !history.validEvent(tx.audit, SECTIONS)) throw new Error('Повреждён журнал сохранения');
   const committed = JSON.stringify(readJson(revisionsFile(dataDir), null)) === JSON.stringify(tx.revisions);
   const target = committed ? tx.sections : tx.before;
   Object.keys(tx.sections).forEach(name => {
@@ -93,20 +99,28 @@ function recoverTransaction(dataDir) {
     if (rows === null) { if (fs.existsSync(file)) fs.unlinkSync(file); }
     else writeJsonAtomic(file, rows);
   });
+  if (tx.audit) {
+    const file = historyFile(dataDir, tx.audit.id);
+    if (committed) { fs.mkdirSync(path.dirname(file), { recursive:true }); writeJsonAtomic(file, tx.audit); }
+    else if (fs.existsSync(file)) fs.unlinkSync(file);
+  }
   if (committed || tx.base !== null) writeJsonAtomic(revisionsFile(dataDir), committed ? tx.revisions : tx.base);
   else if (fs.existsSync(revisionsFile(dataDir))) fs.unlinkSync(revisionsFile(dataDir));
   fs.unlinkSync(journal);
 }
 
-function commitSections(dataDir, sections, revisions) {
+function commitSections(dataDir, sections, revisions, context) {
   const changed = Object.keys(sections);
   if (!changed.length) return;
   const journal = path.join(sectionsDir(dataDir), '.transaction.json');
   const before = Object.fromEntries(changed.map(n => [n, readJson(sectionFile(dataDir, n), null)]));
   const base = readJson(revisionsFile(dataDir), null);
-  writeJsonAtomic(journal, { before, base, sections, revisions });
+  const audit = context ? history.createEvent(before, sections, context) : null;
+  if (audit) fs.mkdirSync(path.dirname(historyFile(dataDir, audit.id)), { recursive:true });
+  writeJsonAtomic(journal, { before, base, sections, revisions, audit });
   try {
     changed.forEach(n => writeJsonAtomic(sectionFile(dataDir, n), sections[n]));
+    if (audit) writeJsonAtomic(historyFile(dataDir, audit.id), audit);
     writeJsonAtomic(revisionsFile(dataDir), revisions);
   } catch (e) {
     recoverTransaction(dataDir);
@@ -181,7 +195,7 @@ function readAll(dataDir) {
  * Записать данные, тронув только изменившиеся разделы.
  * Возвращает список записанных разделов и новые номера версий.
  */
-function writeAll(dataDir, data) {
+function writeAll(dataDir, data, context = {}) {
   if (!data || !Array.isArray(data.vehicles) || !Array.isArray(data.records)) throw new Error('Неполная база: нужны vehicles и records');
   SECTIONS.forEach(n => { if (n in data) validateRows(n, data[n]); });
   const previous = readAll(dataDir);
@@ -203,7 +217,7 @@ function writeAll(dataDir, data) {
     changed.push(name);
   });
 
-  commitSections(dataDir, sections, revisions);
+  commitSections(dataDir, sections, revisions, context);
   return { changed, revisions };
 }
 
@@ -222,7 +236,7 @@ function readSection(dataDir, name) {
  * и возвращаем список конфликтов — клиент сольёт правки и повторит.
  * Так правки двух людей не затирают друг друга молча.
  */
-function writeSections(dataDir, payload) {
+function writeSections(dataDir, payload, context = {}) {
   const previous = readAll(dataDir);
   if (!isSplit(dataDir)) migrate(dataDir);
   const base = (payload && payload.base) || {};
@@ -247,7 +261,7 @@ function writeSections(dataDir, payload) {
     revisions[name] = (revisions[name] || 0) + 1;
     changed.push(name);
   });
-  commitSections(dataDir, pending, revisions);
+  commitSections(dataDir, pending, revisions, context);
   return { ok: true, changed, revisions };
 }
 
@@ -282,8 +296,47 @@ function makeManualBackup(dataDir, backupDir) {
   return dest;
 }
 
+function historyFile(dataDir, id) {
+  if (!history.ID.test(id || '')) throw new Error('Неверный идентификатор истории');
+  return path.join(dataDir, 'history', id + '.json');
+}
+function readHistoryEntry(dataDir, id) {
+  recoverTransaction(dataDir);
+  const event = readJson(historyFile(dataDir,id));
+  if (!history.validEvent(event,SECTIONS)) throw new Error('Повреждена запись истории');
+  return event;
+}
+function listHistory(dataDir, options = {}) {
+  recoverTransaction(dataDir);
+  const dir = path.join(dataDir,'history'), limit = Math.min(100,Math.max(1,Number(options.limit)||50));
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.endsWith('.json') && history.ID.test(f.slice(0,-5))) : [];
+  const ids = files.map(f=>f.slice(0,-5)).sort().reverse().filter(id=>!options.before || id < options.before);
+  const selected = ids.slice(0,limit);
+  return { items:selected.map(id=>history.summary(readHistoryEntry(dataDir,id))), next:ids.length>limit ? selected.at(-1) : null };
+}
+function restoreHistoryEntry(dataDir, id, context = {}) {
+  const event = readHistoryEntry(dataDir,id), previous = readAll(dataDir);
+  const sections = history.restoration(previous,event,SECTIONS);
+  checkClosedPeriods(previous,sections);
+  // Restoring old opening inputs can recalculate an already closed fuel act,
+  // even when the dated journal rows themselves have not changed.
+  if((previous.fuelPeriods||[]).some(period=>period.closed)) {
+    const fields=['id','fuelBalance','fuelBalanceSources','fuelGrade','fuel','org','orgHistory','norm'];
+    for(const change of event.changes) {
+      const fuelInput=change.section==='fuelCards' || change.section==='vehicles' && (change.key===null || !change.before || !change.after || fields.some(field=>JSON.stringify(change.before[field])!==JSON.stringify(change.after[field])));
+      if(fuelInput)throw new Error('Восстановление меняет исходные данные ГСМ закрытого месяца. Сначала откройте и перепроверьте период.');
+    }
+  }
+  const revisions = readRevisions(dataDir);
+  Object.keys(sections).forEach(name=>{ revisions[name]++; });
+  commitSections(dataDir,sections,revisions,{...context,action:'Восстановление операции',reverts:id});
+  return {ok:true,data:readAll(dataDir),revisions:readRevisions(dataDir)};
+}
+
 module.exports = {
   SECTIONS, sectionsDir, sectionFile, revisionsFile,
   isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup,
   readSection, writeSections, makeManualBackup, validateRows,
+  listHistory, readHistoryEntry, restoreHistoryEntry,
+  databaseToken,
 };

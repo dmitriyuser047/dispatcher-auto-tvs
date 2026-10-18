@@ -29,13 +29,16 @@ function renderFinancesSection() {
     if (finCategory && p.category !== finCategory) return false;
     if (finPaidFilter === 'paid' && !p.paid) return false;
     if (finPaidFilter === 'unpaid' && p.paid) return false;
+    if (finPaidFilter === 'partial' && !(woPaidAmount(p) > 0 && woPaymentBalance(p) > 0)) return false;
+    if (finPaidFilter === 'overdue' && !woPaymentState(p, data, todayIso()).overdue) return false;
+    if (finPaidFilter === 'mismatch' && !woPaymentState(p, data, todayIso()).amountMismatch) return false;
     return true;
   });
   filtered.sort((a, b) => cmpDateDesc(a.date, b.date));
 
   const totalSum = filtered.reduce((s,p) => s + (p.sum||0), 0);
-  const paidSum = filtered.filter(p=>p.paid).reduce((s,p) => s + (p.sum||0), 0);
-  const unpaidSum = totalSum - paidSum;
+  const paidSum = filtered.reduce((s,p) => s + woPaidAmount(p), 0);
+  const unpaidSum = filtered.reduce((s,p) => s + woPaymentBalance(p), 0);
 
   const monthTabs = `<button class="mtab ${finMonth==='all'?'active':''}" onclick="finMonth='all';renderFinancesSection()">Все</button>` +
     sortedMonths.map(m => {
@@ -47,10 +50,10 @@ function renderFinancesSection() {
   const usedCategories = [...new Set(payments.map(p => p.category).filter(Boolean))].sort();
   const catOptions = `<option value="" ${finCategory===''?'selected':''}>Все статьи</option>` +
     usedCategories.map(c =>
-      `<option value="${c}" ${finCategory===c?'selected':''}>${c}</option>`
+      `<option value="${htmlEsc(c)}" ${finCategory===c?'selected':''}>${htmlEsc(c)}</option>`
     ).join('');
 
-  const paidOptions = [['','Все статусы'],['paid','Оплачено'],['unpaid','Не оплачено']].map(([v,l]) =>
+  const paidOptions = [['','Все статусы'],['paid','Оплачено'],['unpaid','Есть остаток'],['partial','Частичная оплата'],['overdue','Просрочено'],['mismatch','Сумма отличается от заявки']].map(([v,l]) =>
     `<option value="${v}" ${finPaidFilter===v?'selected':''}>${l}</option>`
   ).join('');
 
@@ -67,9 +70,13 @@ function renderFinancesSection() {
       const dateStr = p.date ? new Date(p.date).toLocaleDateString('ru') : '—';
       const vPlate = p.vehicleId ? (vMap[p.vehicleId]||'—') : '—';
       const reestrLabel = p.reestrNo ? ('Реестр №'+p.reestrNo) : '—';
-      const statusBadge = p.paid
-        ? '<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:10px;font-size:12px">Оплачено</span>'
-        : '<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:10px;font-size:12px">Не оплачено</span>';
+      const state = woPaymentState(p, data, todayIso());
+      const statusBadge = '<span class="workspace-badge ' + (state.balance <= 0 ? 'is-success' : state.paidAmount > 0 ? 'is-warning' : 'is-neutral') + '">' +
+        (state.balance <= 0 ? 'Оплачено' : state.paidAmount > 0 ? 'Частично оплачено' : 'Не оплачено') + '</span>' +
+        (state.overdue ? '<div class="gsm-error" style="margin-top:5px">Срок просрочен</div>' : '') +
+        (state.amountMismatch ? '<div class="gsm-error" style="margin-top:5px">Сумма заявки: ' + woCurrency(state.sourceCost) + '</div>' : '') +
+        (state.sourceMissing ? '<div class="gsm-error">Заявка не найдена</div>' : '') +
+        (state.duplicateLink ? '<div class="gsm-error">Несколько счетов на заявку</div>' : '');
       const catShort = p.category ? (p.category.length > 30 ? p.category.slice(0,30)+'…' : p.category) : '—';
       return `<tr style="cursor:pointer" onclick="openEditPayment(${htmlJs(p.id)})">
         <td>${dateStr}</td>
@@ -79,16 +86,19 @@ function renderFinancesSection() {
         <td>${htmlEsc(p.contragent||'—')}</td>
         <td>${htmlEsc(vPlate)}</td>
         <td>${htmlEsc(reestrLabel)}</td>
+        <td>${p.dueDate ? htmlEsc(fmtDate(p.dueDate)) : '—'}</td>
+        <td>${woCurrency(state.paidAmount)}<div style="font-size:11px;color:var(--text3)">Остаток: ${woCurrency(state.balance)}</div></td>
         <td>${statusBadge}</td>
+        <td onclick="event.stopPropagation()">${state.source ? '<button type="button" class="btn btn-ghost btn-sm" onclick="woOpen(' + htmlJs(state.sourceSection) + ',' + htmlJs(p.sourceId) + ')">Заявка</button>' : ''}${state.balance > 0 ? '<button type="button" class="btn btn-ghost btn-sm" onclick="woPaymentDialog(' + htmlJs(p.id) + ')">Внести оплату</button>' : ''}</td>
       </tr>`;
     }).join('');
 
     contentHtml = `<div style="overflow-x:auto">
       <table class="tbl" style="width:100%;min-width:800px">
         <thead><tr>
-          <th>Дата</th><th>Сумма</th><th>Статья БДДС</th><th>Описание</th><th>Контрагент</th><th>ТС</th><th>Реестр</th><th>Статус</th>
+          <th>Дата</th><th>Сумма</th><th>Статья БДДС</th><th>Описание</th><th>Контрагент</th><th>ТС</th><th>Реестр</th><th>Срок оплаты</th><th>Оплаты / остаток</th><th>Статус</th><th>Действия</th>
         </tr></thead>
-        <tbody>${rows || '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:40px">Нет записей</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:40px">Нет записей</td></tr>'}</tbody>
       </table>
     </div>`;
   }
@@ -150,7 +160,8 @@ function renderFinancesAnalyticsHtml(allPayments) {
       if (!byMonth[mk]) byMonth[mk] = {total:0,paid:0,unpaid:0,count:0,sortKey:p.date};
       byMonth[mk].total += sum;
       byMonth[mk].count++;
-      if (p.paid) byMonth[mk].paid += sum; else byMonth[mk].unpaid += sum;
+      byMonth[mk].paid += woPaidAmount(p);
+      byMonth[mk].unpaid += woPaymentBalance(p);
       if (!byMonth[mk].sortKey || p.date < byMonth[mk].sortKey) byMonth[mk].sortKey = p.date;
     }
     const cat = p.category || 'Без категории';
@@ -402,6 +413,7 @@ async function openAddPayment() {
   selectPayCategory('');
   document.getElementById('pay_vehicle').value = '';
   document.getElementById('pay_reestr').value = '';
+  woPaymentFormMount(null);
   openModal('paymentModal');
 }
 
@@ -423,6 +435,7 @@ async function openEditPayment(id) {
   selectPayCategory(p.category || '');
   document.getElementById('pay_vehicle').value = p.vehicleId || '';
   document.getElementById('pay_reestr').value = p.reestrNo || '';
+  woPaymentFormMount(p);
   openModal('paymentModal');
 }
 
@@ -509,8 +522,13 @@ async function savePayment() {
   }
   const isoDate = parseDate(dateRaw);
   if (!isoDate) { showFieldError('Укажите действительную дату', 'pay_date'); return; }
+  let settlement;
+  try { settlement = woPaymentFormRead(sum); } catch (error) { showToast(error.message); return; }
+  const existing = (data.payments || []).find(p => p.id === editingPaymentId);
+  if (editingPaymentId && !existing) { showToast('Счёт уже удалён. Откройте платежи заново.'); return; }
 
   const obj = {
+    ...(existing || {}),
     id: editingPaymentId || (newId('pay')),
     date: isoDate,
     sum: sum,
@@ -525,6 +543,13 @@ async function savePayment() {
     source: null,
     sourceId: null
   };
+  Object.assign(obj, settlement);
+  try {
+    Object.assign(obj, woMergeFormRecord(existing, obj, 'pay'));
+    if (woPaidAmount(obj) > woMoney(obj.sum)) throw Error('Оплаченная сумма больше текущей суммы счёта. Сверьте изменения.');
+    obj.paid = woMoney(obj.sum) > 0 && woPaymentBalance(obj) <= 0;
+  } catch (error) { showToast(error.message); return; }
+  const before = JSON.stringify(data);
 
   if (editingPaymentId) {
     const existing = data.payments.find(p => p.id === editingPaymentId);
@@ -537,75 +562,42 @@ async function savePayment() {
   } else {
     data.payments.push(obj);
   }
-  if (!await saveData(data)) return;
+  const section = woSourceSection(obj, data);
+  if (section) woSyncSourcePaid(data, section, obj.sourceId);
+  if (!await saveData(data)) { data = JSON.parse(before); rebuildIndex(); return; }
   closeModal('paymentModal');
   renderFinancesSection();
 }
 
 async function deletePayment(id) {
   if (!id) return;
+  const record = (data.payments || []).find(p => p.id === id);
+  if (record && (woPaidAmount(record) > 0 || (record.settlements || []).length)) {
+    showToast('В счёте есть оплаты. Сохраните его для истории; исправить сумму можно в форме счёта.'); return;
+  }
   if (!await confirmAction('Удалить запись?')) return;
+  const before = JSON.stringify(data);
+  const source = record && woSource(record, data);
+  if (source) source.paid = false;
   data.payments = data.payments.filter(p => p.id !== id);
-  if (!await saveData(data)) return;
+  if (!await saveData(data)) { data = JSON.parse(before); rebuildIndex(); return; }
   closeModal('paymentModal');
   renderFinancesSection();
 }
 
 async function importPaymentsFromJournals() {
+  const before = JSON.stringify(data);
   if (!data.payments) data.payments = [];
   let imported = 0;
-  const existingSourceIds = new Set(data.payments.filter(p=>p.sourceId).map(p=>p.sourceId));
-
-  (data.repairs || []).forEach(r => {
-    if ((r.cost || 0) > 0 && !existingSourceIds.has(r.id)) {
-      const parts = (r.invoiceDate || '').split('.');
-      const isoDate = parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : (r.invoiceDate || todayIso());
-      data.payments.push({
-        id: newId('pay') + '_r' + imported,
-        date: isoDate,
-        sum: r.cost,
-        category: 'Ремонт',
-        description: r.description || 'Ремонт',
-        vehicleId: r.vehicleId || null,
-        contragent: '',
-        reestrNo: null,
-        invoiceNo: r.invoiceNo || '',
-        paid: !!r.paid,
-        note: '',
-        source: 'repair',
-        sourceId: r.id
-      });
+  for (const section of WO_SECTIONS) {
+    for (const row of data[section] || []) {
+      if (!(Number(row.cost) > 0) || woLinkedPayments(data, section, row.id).length) continue;
+      data.payments.push(woInvoiceFromSource(data, section, row.id, newId('pay'), todayIso()));
       imported++;
     }
-  });
-
-  (data.vehicleTo || []).forEach(t => {
-    if ((t.cost || 0) > 0 && !existingSourceIds.has(t.id)) {
-      data.payments.push({
-        id: newId('pay') + '_t' + imported,
-        date: t.date || todayIso(),
-        sum: t.cost,
-        category: 'ТО',
-        description: t.toType ? ('ТО: ' + t.toType) : 'Техническое обслуживание',
-        vehicleId: t.vehicleId || null,
-        contragent: '',
-        reestrNo: null,
-        invoiceNo: '',
-        paid: !!t.paid,
-        note: '',
-        source: 'to',
-        sourceId: t.id
-      });
-      imported++;
-    }
-  });
-
-  if (imported > 0) {
-    if (!await saveData(data)) return;
-    renderFinancesSection();
-    alert('Импортировано записей: ' + imported);
-  } else {
-    alert('Нет новых записей для импорта');
   }
+  if (!imported) { showToast('Нет новых записей для импорта'); return; }
+  if (!await saveData(data, { history: { action: 'Связанные счета из журналов' } })) { data = JSON.parse(before); rebuildIndex(); return; }
+  renderFinancesSection();
+  showToast('Создано связанных счетов: ' + imported);
 }
-

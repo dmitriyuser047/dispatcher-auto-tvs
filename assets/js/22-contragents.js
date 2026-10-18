@@ -8,7 +8,7 @@ let caSearchQuery = '';
 function renderContragentsSection() {
   const list = data.contragents || [];
   const q = caSearchQuery.toLowerCase().trim();
-  const filtered = q ? list.filter(c => [c.name,c.inn,c.contact,c.phone,c.note].some(f=>(f||'').toLowerCase().includes(q))) : list;
+  const filtered = q ? list.filter(c => [c.name,c.inn,c.contact,c.phone,c.note].some(f=>(f||'').toLowerCase().includes(q))) : [...list];
   filtered.sort((a,b) => (a.name||'').localeCompare(b.name||''));
 
   const totalPayments = (data.payments||[]);

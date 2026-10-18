@@ -59,7 +59,7 @@ function renderVehicleToSection(vid, currentOdometer) {
     [...recs].reverse().forEach(r => {
       rows += `<tr>
         <td class="td-day">${fmtDate(r.date)}</td>
-        <td style="padding:10px 14px;font-size:13px;font-weight:600">${htmlEsc(r.type || '—')}</td>
+        <td style="padding:10px 14px;font-size:13px;font-weight:600">${htmlEsc(r.type || '—')}${woSummaryHtml(r, 'vehicleTo')}</td>
         <td class="td-num">${r.odometer != null ? r.odometer.toLocaleString('ru', {maximumFractionDigits:0}) : '—'}</td>
         <td class="td-num">${r.nextOdometerAbs != null ? r.nextOdometerAbs.toLocaleString('ru', {maximumFractionDigits:0}) : (r.nextKm ? '+'+r.nextKm.toLocaleString('ru')+' км' : '—')}</td>
         <td class="td-day">${r.nextDate ? fmtDate(r.nextDate) : '—'}</td>
@@ -120,6 +120,7 @@ function openAddVehicleTo(vid) {
     if (last && last.nextKm) document.getElementById('vto_next_km').value = last.nextKm;
   }
   document.getElementById('vehicleToModal').dataset.vid = vid;
+  woFormMount('vehicleToModal', 'vto', null, 'vehicleTo');
   openModal('vehicleToModal');
 }
 
@@ -138,6 +139,7 @@ function openEditVehicleTo(id) {
   document.getElementById('vto_performer').value  = r.performer   || '';
   document.getElementById('vto_note').value       = r.note        || '';
   document.getElementById('vehicleToModal').dataset.vid = r.vehicleId;
+  woFormMount('vehicleToModal', 'vto', r, 'vehicleTo');
   openModal('vehicleToModal');
 }
 
@@ -146,6 +148,11 @@ async function saveVehicleTo() {
   const type    = document.getElementById('vto_type').value.trim();
   if (!dateIso) { showFieldError('Укажите дату проведения ТО', 'vto_date'); return; }
   if (!type)    { showFieldError('Укажите вид ТО', 'vto_type'); return; }
+  if (!validNonnegativeFields(['vto_odometer', 'vto_next_km', 'vto_cost'])) return;
+  const existing = (data.vehicleTo || []).find(x => x.id === editingVehicleToId);
+  if (editingVehicleToId && !existing) { showToast('Запись ТО уже удалена. Откройте график заново.'); return; }
+  let work;
+  try { work = woFormRead('vto', existing, 'vehicleTo'); } catch (error) { showToast(error.message); return; }
   const nextKm      = parseFloat(document.getElementById('vto_next_km').value);
   const odometer    = parseFloat(document.getElementById('vto_odometer').value);
   const nextDate    = parseDate(document.getElementById('vto_next_date').value.trim()) || null;
@@ -153,6 +160,7 @@ async function saveVehicleTo() {
   const hasOdometer = !isNaN(odometer);
   const nextOdometerAbs = hasOdometer && hasNextKm ? Math.round(odometer + nextKm) : null;
   const obj = {
+    ...work,
     vehicleId:  document.getElementById('vehicleToModal').dataset.vid,
     date:       dateIso,
     type,
@@ -160,24 +168,29 @@ async function saveVehicleTo() {
     nextKm:     hasNextKm ? nextKm : null,
     nextOdometerAbs,
     nextDate,
-    cost:       parseFloat(document.getElementById('vto_cost').value) || null,
+    cost:       optionalNumber('vto_cost'),
     performer:  document.getElementById('vto_performer').value.trim(),
     note:       document.getElementById('vto_note').value.trim(),
   };
+  try { Object.assign(obj, woMergeFormRecord(existing, obj, 'vto')); } catch (error) { showToast(error.message); return; }
+  Object.assign(obj, woFinishRecord(existing, obj, 'vehicleTo', todayIso()));
   if (!data.vehicleTo) data.vehicleTo = [];
+  const before = JSON.stringify(data);
   if (editingVehicleToId) {
     Object.assign(data.vehicleTo.find(x => x.id === editingVehicleToId), obj);
   } else {
     obj.id = newId('vto');
     data.vehicleTo.push(obj);
   }
-  if (!await saveData(data)) return;
+  woSyncSourcePaid(data, 'vehicleTo', editingVehicleToId || obj.id);
+  if (!await saveData(data)) { data = JSON.parse(before); rebuildIndex(); return; }
   closeModal('vehicleToModal');
   const v = data.vehicles.find(x => x.id === obj.vehicleId);
   if (v) renderDetail(v);
 }
 
 async function deleteVehicleTo(id) {
+  if (!woDeleteAllowed('vehicleTo', id)) return;
   if (!await confirmAction('Удалить эту запись ТО?')) return;
   data.vehicleTo = (data.vehicleTo || []).filter(r => r.id !== id);
   if (!await saveData(data)) return;

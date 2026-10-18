@@ -27,7 +27,10 @@ const SYNC_NAMES = {
 };
 const SYNC_POLL_MS = 20000;
 
-const _sync = { enabled: false, revs: {}, synced: {}, chain: Promise.resolve(), polling: null, needRefresh: [] };
+const _sync = { enabled: false, databaseToken: null, revs: {}, synced: {}, chain: Promise.resolve(), polling: null, needRefresh: [] };
+function syncCheckDatabaseToken(token) {
+  if (_sync.databaseToken && token && token !== _sync.databaseToken) throw new Error('Сервер выбрал другую базу. Загрузите данные заново перед сохранением.');
+}
 
 function syncKey(row) { return row && typeof row === 'object' ? (row.id ?? row.month ?? null) : null; }
 
@@ -77,11 +80,13 @@ function syncMerge(base, local, remote) {
 }
 
 async function syncLoad() {
+  _sync.databaseToken = null;
   if (!window.electronAPI || !window.electronAPI.readSnapshot) return null;
   const raw = await window.electronAPI.readSnapshot();
   if (!raw) return null;
   const snap = JSON.parse(raw);
   if (!snap || !snap.data) return null;
+  _sync.databaseToken = snap.databaseToken || null;
   if (snap.revisions) {
     _sync.enabled = true;
     _sync.revs = Object.assign({}, snap.revisions);
@@ -117,10 +122,13 @@ async function syncSaveNow(d, options) {
   if (!changed.length) return true;
   const mergedNames = new Set();
   for (let attempt = 0; attempt < 4; attempt++) {
-    const payload = { base: {}, sections: {} };
+    const payload = { base: {}, sections: {}, meta:options?.history || {} };
+    if (_sync.databaseToken) payload.databaseToken = _sync.databaseToken;
     changed.forEach(n => { payload.base[n] = _sync.revs[n] || 0; payload.sections[n] = d[n] || []; });
     const res = await window.electronAPI.writeSections(JSON.stringify(payload));
+    syncCheckDatabaseToken(res?.databaseToken);
     if (res && res.unsupported) {
+      if (_sync.databaseToken) throw new Error('Сервер изменился и не подтверждает выбранную базу. Загрузите данные заново.');
       // Сервер старой версии — сохраняем по-старому, целиком
       _sync.enabled = false;
       return await window.electronAPI.writeData(JSON.stringify(d)) !== false;
@@ -143,6 +151,7 @@ async function syncSaveNow(d, options) {
     for (const n of res.conflicts) {
       const remote = await window.electronAPI.readSection(n);
       if (!remote) return false;
+      syncCheckDatabaseToken(remote.databaseToken);
       const base = JSON.parse(_sync.synced[n] || '[]');
       d[n] = syncMerge(base, d[n] || [], remote.rows || []);
       _sync.synced[n] = JSON.stringify(remote.rows || []);
@@ -164,6 +173,7 @@ async function syncPoll() {
   if (_sync.needRefresh.length) syncRefreshView([]);
   const revs = await window.electronAPI.getRevisions();
   if (!revs) return;
+  try { syncCheckDatabaseToken(revs.databaseToken); } catch (error) { showToast(error.message); return; }
   const stale = SYNC_SECTIONS.filter(n => (revs[n] || 0) !== (_sync.revs[n] || 0));
   if (!stale.length) return;
   // В очередь с сохранениями, чтобы не подтягивать посреди записи
@@ -173,6 +183,7 @@ async function syncPoll() {
     for (const n of stale) {
       const remote = await window.electronAPI.readSection(n);
       if (!remote) continue;
+      syncCheckDatabaseToken(remote.databaseToken);
       if (document.querySelector('.modal-overlay.open')) return;
       const localStr = JSON.stringify(data[n] || []);
       if (localStr !== _sync.synced[n]) {

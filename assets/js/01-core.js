@@ -233,7 +233,7 @@ async function saveData(d = data, options) {
       // По разделам с проверкой версии; на старом сервере — целиком, как раньше
       const ok = typeof _sync !== 'undefined' && _sync.enabled
         ? await syncSave(d, options)
-        : await window.electronAPI.writeData(json);
+        : await window.electronAPI.writeData(json,options?.history);
       if (ok !== true) throw new Error('Изменения не записаны. Проверьте соединение и состояние базы.');
     }
     _lastPersisted = JSON.stringify(d);

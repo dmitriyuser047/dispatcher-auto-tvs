@@ -5,7 +5,8 @@
 // Repeated clicks while persistence is pending must not create another row.
 ['saveRecord', 'saveVehicle', 'saveGenerator', 'saveGenRecord', 'saveTank', 'saveTankIncome',
  'savePayment', 'saveContragent', 'saveRepair', 'saveVehicleTo', 'saveTankTransfer', 'addBudgetEntry', 'doRarMerge', 'doSvodkaImport',
- 'reestrSaveCurrent', 'reestrOpenSaved', 'reestrDeleteSaved'].forEach(name => {
+ 'reestrSaveCurrent', 'reestrOpenSaved', 'reestrDeleteSaved', 'tssSaveRecord', 'saveToRecord',
+ 'woSetStatus', 'woEnsurePayment', 'woSaveSettlement', 'importPaymentsFromJournals'].forEach(name => {
   if (typeof globalThis[name] === 'function') globalThis[name] = singleFlightAction(globalThis[name]);
 });
 (async () => {
@@ -19,6 +20,7 @@
   }
   if (typeof workspaceMount === 'function') workspaceMount();
   data = await loadData();
+  if(typeof productivityInitialize==='function')await productivityInitialize();
   if (data.reestrRows && data.reestrRows.length) reestrRows = data.reestrRows;
   rebuildIndex();
   populateOrgSelect();

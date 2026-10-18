@@ -66,7 +66,8 @@ test('disk error during multi-section commit rolls back rows and revisions', t =
     if (key === 'renameSync') return (src, dst) => { if (fail && dst === storage.sectionFile(dir, 'records')) { fail = false; throw Error('disk failure'); } return fs.renameSync(src, dst); };
     return target[key];
   } });
-  const ctx = { require: id => id === 'fs' ? proxy : require(id), module: { exports: {} }, console };
+  const storageRequire = require('node:module').createRequire(path.join(__dirname,'../electron/storage.js'));
+  const ctx = { require: id => id === 'fs' ? proxy : storageRequire(id), module: { exports: {} }, console };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../electron/storage.js'), 'utf8'), ctx);
   assert.throws(() => ctx.module.exports.writeSections(dir, { base: revs, sections: { vehicles: [{ id: 'changed' }], records: [{ id: 'new' }] } }), /disk failure/);
   assert.deepEqual(storage.readAll(dir), db);

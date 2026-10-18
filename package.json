@@ -6,10 +6,10 @@
   "main": "electron/main.js",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "test:ui": "node --test tests/ui-regression.cjs",
+    "test:ui": "node --test --test-concurrency=2 tests/ui-regression.cjs tests/productivity-ui.cjs tests/work-orders-ui.cjs tests/import-preview-ui.cjs tests/review-history-ui.cjs",
     "test:electron": "node --test tests/electron-smoke.cjs",
     "start": "electron .",
-    "build": "electron-builder --win --x64"
+    "build": "electron-builder --win --x64 --publish never"
   },
   "devDependencies": {
     "electron": "44.9.0",

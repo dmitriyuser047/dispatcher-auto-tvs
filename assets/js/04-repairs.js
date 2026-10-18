@@ -7,7 +7,7 @@
 function renderRepairSection(vid) {
   const recs = repairsFor(vid).slice().sort((a, b) => cmpDateDesc(a.invoiceDate, b.invoiceDate));
   const totalCost   = recs.reduce((s, r) => s + (r.cost || 0), 0);
-  const unpaidCost  = recs.filter(r => !r.paid).reduce((s, r) => s + (r.cost || 0), 0);
+  const unpaidCost  = recs.reduce((s, r) => s + woSourceBalance(r, 'repairs', data), 0);
 
   let rows = '';
   if (!recs.length) {
@@ -16,15 +16,12 @@ function renderRepairSection(vid) {
     recs.forEach(r => {
       rows += `<tr>
         <td class="td-day">${fmtDate(r.invoiceDate)}</td>
-        <td style="padding:10px 14px;font-size:13px;font-weight:600">${r.invoiceNo ? '<span class="invoice-badge"><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' + r.invoiceNo + '</span>' : '—'}</td>
+        <td style="padding:10px 14px;font-size:13px;font-weight:600">${r.invoiceNo ? '<span class="invoice-badge"><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' + htmlEsc(r.invoiceNo) + '</span>' : '—'}</td>
         <td class="td-num">${r.mileage != null ? r.mileage.toLocaleString('ru') + ' км' : '—'}</td>
         <td class="td-num" style="font-weight:600">${r.cost != null ? r.cost.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ₽' : '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${htmlEsc(r.description || '—')}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + r.category.split(',')[0].trim() + '</span></div>' : ''}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${htmlEsc(r.description || '—')}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + htmlEsc(r.category.split(',')[0].trim()) + '</span></div>' : ''}${woSummaryHtml(r, 'repairs')}</td>
         <td class="td-num">
-          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:700;color:${r.paid ? 'var(--green)' : 'var(--red)'}">
-            <input type="checkbox" ${r.paid ? 'checked' : ''} onchange="toggleRepairPaid(${htmlJs(r.id)})" style="width:auto;accent-color:var(--accent)">
-            ${r.paid ? 'Оплачено' : 'Не оплачено'}
-          </label>
+          ${woRepairPaymentHtml(r)}
         </td>
         <td class="td-actions">
           <button class="icon-btn" onclick="openEditRepair(${htmlJs(r.id)})">
@@ -89,6 +86,7 @@ function openAddRepair(vid) {
   ['rp_cost','rp_mileage'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('rp_paid').checked = false;
   populateRepairCategorySelect('');
+  woFormMount('repairModal', 'rp', null, 'repairs');
   // предзаполнить пробег из последней записи по ТС, если известен
   const presetVid = vid || selectedVehicleId;
   const v = presetVid && data.vehicles.find(x => x.id === presetVid);
@@ -117,6 +115,7 @@ function openEditRepair(id) {
   document.getElementById('rp_paid').checked       = !!r.paid;
   document.getElementById('rp_note').value         = r.note || '';
   populateRepairCategorySelect(r.category || '');
+  woFormMount('repairModal', 'rp', r, 'repairs');
   openModal('repairModal');
 }
 
@@ -127,9 +126,15 @@ async function saveRepair() {
   const description = document.getElementById('rp_description').value.trim();
   if (!vehicleId)     { showFieldError('Выберите транспортное средство', 'rp_vehicle'); return; }
   if (!invoiceDate)   { showFieldError('Укажите дату счёта в формате ДД.ММ.ГГГГ', 'rp_invoice_date'); return; }
-  if (isNaN(cost))    { showFieldError('Укажите сумму ремонта', 'rp_cost'); return; }
+  if (!Number.isFinite(cost) || cost < 0) { showFieldError('Укажите неотрицательную сумму ремонта', 'rp_cost'); return; }
   if (!description)   { showFieldError('Укажите описание ремонта', 'rp_description'); return; }
+  if (!validNonnegativeFields(['rp_mileage'])) return;
+  const existing = (data.repairs || []).find(x => x.id === editingRepairId);
+  if (editingRepairId && !existing) { showToast('Ремонт уже удалён. Откройте журнал заново.'); return; }
+  let work;
+  try { work = woFormRead('rp', existing, 'repairs'); } catch (error) { showToast(error.message); return; }
   const obj = {
+    ...work,
     vehicleId,
     invoiceNo:   document.getElementById('rp_invoice_no').value.trim(),
     invoiceDate,
@@ -140,14 +145,17 @@ async function saveRepair() {
     note:        document.getElementById('rp_note').value.trim(),
     category:    document.getElementById('rp_category').value,
   };
+  try { Object.assign(obj, woMergeFormRecord(existing, obj, 'rp')); } catch (error) { showToast(error.message); return; }
   if (!data.repairs) data.repairs = [];
+  const before = JSON.stringify(data);
   if (editingRepairId) {
     Object.assign(data.repairs.find(x => x.id === editingRepairId), obj);
   } else {
     obj.id = newId('rp');
     data.repairs.push(obj);
   }
-  if (!await saveData(data)) return;
+  woSyncSourcePaid(data, 'repairs', editingRepairId || obj.id);
+  if (!await saveData(data)) { data = JSON.parse(before); rebuildIndex(); return; }
   closeModal('repairModal');
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   if (v) renderDetail(v);
@@ -158,6 +166,7 @@ async function saveRepair() {
 }
 
 async function deleteRepair(id) {
+  if (!woDeleteAllowed('repairs', id)) return;
   if (!await confirmAction('Удалить эту запись о ремонте?')) return;
   data.repairs = (data.repairs || []).filter(r => r.id !== id);
   if (!await saveData(data)) return;
@@ -170,6 +179,8 @@ async function deleteRepair(id) {
 async function toggleRepairPaid(id) {
   const r = (data.repairs || []).find(x => x.id === id);
   if (!r) return;
+  const linked = woLinkedPayments(data, 'repairs', id);
+  if (linked.length) { woOpenPayment(linked[0].id); return; }
   r.paid = !r.paid;
   if (!await saveData(data)) return;
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
@@ -201,7 +212,7 @@ function renderRepairsJournal() {
   recs.sort((a, b) => cmpDateDesc(a.invoiceDate, b.invoiceDate));
 
   const totalCost  = recs.reduce((s, r) => s + (r.cost || 0), 0);
-  const unpaidCost = recs.filter(r => !r.paid).reduce((s, r) => s + (r.cost || 0), 0);
+  const unpaidCost = recs.reduce((s, r) => s + woSourceBalance(r, 'repairs', data), 0);
 
   let rows = '';
   if (!recs.length) {
@@ -210,17 +221,14 @@ function renderRepairsJournal() {
     recs.forEach(r => {
       const v = data.vehicles.find(x => x.id === r.vehicleId);
       rows += `<tr>
-        <td style="padding:10px 14px;font-size:13px;font-weight:600">${v ? v.plate : '—'}<div style="font-weight:400;color:var(--text3);font-size:11px">${v ? v.make : ''}</div></td>
+        <td style="padding:10px 14px;font-size:13px;font-weight:600">${v ? htmlEsc(v.plate) : '—'}<div style="font-weight:400;color:var(--text3);font-size:11px">${v ? htmlEsc(v.make) : ''}</div></td>
         <td class="td-day">${fmtDate(r.invoiceDate)}</td>
-        <td style="padding:10px 14px;font-size:13px">${r.invoiceNo ? '<span class="invoice-badge"><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' + r.invoiceNo + '</span>' : '—'}</td>
+        <td style="padding:10px 14px;font-size:13px">${r.invoiceNo ? '<span class="invoice-badge"><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' + htmlEsc(r.invoiceNo) + '</span>' : '—'}</td>
         <td class="td-num">${r.mileage != null ? r.mileage.toLocaleString('ru') + ' км' : '—'}</td>
         <td class="td-num" style="font-weight:600">${r.cost != null ? r.cost.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ₽' : '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${htmlEsc(r.description || '—')}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + r.category.split(',')[0].trim() + '</span></div>' : ''}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${htmlEsc(r.description || '—')}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + htmlEsc(r.category.split(',')[0].trim()) + '</span></div>' : ''}${woSummaryHtml(r, 'repairs')}</td>
         <td class="td-num">
-          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:700;color:${r.paid ? 'var(--green)' : 'var(--red)'}">
-            <input type="checkbox" ${r.paid ? 'checked' : ''} onchange="toggleRepairPaid(${htmlJs(r.id)})" style="width:auto;accent-color:var(--accent)">
-            ${r.paid ? 'Оплачено' : 'Не оплачено'}
-          </label>
+          ${woRepairPaymentHtml(r)}
         </td>
         <td class="td-actions">
           <button class="icon-btn" onclick="openEditRepair(${htmlJs(r.id)})">
@@ -278,7 +286,7 @@ function renderRepairsSummary() {
   });
 
   const grandTotal = recs.reduce((s, r) => s + (r.cost || 0), 0);
-  const grandUnpaid = recs.filter(r => !r.paid).reduce((s, r) => s + (r.cost || 0), 0);
+  const grandUnpaid = recs.reduce((s, r) => s + woSourceBalance(r, 'repairs', data), 0);
 
   let html = '<div style="margin-top:14px">';
   const vids = Object.keys(groups).sort((a, b) => {
@@ -295,7 +303,7 @@ function renderRepairsSummary() {
     const v = data.vehicles.find(x => x.id === vid);
     const items = groups[vid];
     const total = items.reduce((s, r) => s + (r.cost || 0), 0);
-    const unpaid = items.filter(r => !r.paid).reduce((s, r) => s + (r.cost || 0), 0);
+    const unpaid = items.reduce((s, r) => s + woSourceBalance(r, 'repairs', data), 0);
 
     const cats = {};
     items.forEach(r => {
@@ -316,8 +324,8 @@ function renderRepairsSummary() {
     html += `<div class="summary-card">
       <div class="summary-card-header">
         <div>
-          <span style="font-weight:700;font-size:14px">${v ? v.plate : '—'}</span>
-          <span style="color:var(--text3);font-size:12px;margin-left:8px">${v ? v.make : ''}</span>
+          <span style="font-weight:700;font-size:14px">${v ? htmlEsc(v.plate) : '—'}</span>
+          <span style="color:var(--text3);font-size:12px;margin-left:8px">${v ? htmlEsc(v.make) : ''}</span>
         </div>
         <div style="text-align:right">
           <span style="font-weight:700;font-size:14px">${total.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2})} &#8381;</span>

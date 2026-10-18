@@ -148,7 +148,7 @@ function closeModal(id) {
   if (id === 'paymentModal' && typeof closePayCategoryDrop === 'function') closePayCategoryDrop();
 }
 let _confirmResolve = null;
-function confirmAction(message) {
+function confirmAction(message,options={}) {
   if (_confirmResolve) return Promise.resolve(false);
   let el = document.getElementById('confirmModal');
   if (!el) {
@@ -158,6 +158,7 @@ function confirmAction(message) {
   }
   el.style.zIndex = '10050';
   document.getElementById('confirmMessage').textContent = message;
+  const yes=document.getElementById('confirmYes');yes.textContent=options.label||'Удалить';yes.className='btn '+(options.danger===false?'btn-primary':'btn-danger');
   const previous = document.activeElement;
   return new Promise(resolve => {
     _confirmResolve = answer => { resolve(answer); if (previous && previous.isConnected) previous.focus(); };
@@ -196,7 +197,8 @@ function openGenericModal(title, bodyHtml, width) {
     bindModalOverlay(el);
     document.body.appendChild(el);
   }
-  el.querySelector('.modal').style.maxWidth = (width || 600) + 'px';
+  el.querySelector('.modal').style.width = 'min(' + (width || 600) + 'px, calc(100vw - 32px))';
+  el.querySelector('.modal').style.maxWidth = 'calc(100vw - 32px)';
   document.getElementById('genericModalTitle').textContent = title;
   document.getElementById('genericModalBody').innerHTML = bodyHtml;
   openModal('genericModal');

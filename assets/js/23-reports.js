@@ -31,7 +31,7 @@ function renderReportsSection() {
   }
 
   const totalSum = filtered.reduce((s,p)=>s+(p.sum||0),0);
-  const paidSum = filtered.filter(p=>p.paid).reduce((s,p)=>s+(p.sum||0),0);
+  const paidSum = filtered.reduce((s,p)=>s+woPaidAmount(p),0);
   const unpaidSum = totalSum - paidSum;
 
   const periodTabs = `<button class="mtab ${reportPeriod==='all'?'active':''}" onclick="reportPeriod='all';renderReportsSection()">Все</button>` +
@@ -60,8 +60,8 @@ function renderReportsSection() {
     if (!groups[key]) groups[key] = { count:0, sum:0, paid:0, unpaid:0 };
     groups[key].count++;
     groups[key].sum += (p.sum||0);
-    if (p.paid) groups[key].paid += (p.sum||0);
-    else groups[key].unpaid += (p.sum||0);
+    groups[key].paid += woPaidAmount(p);
+    groups[key].unpaid += woPaymentBalance(p);
   });
 
   const sorted = Object.entries(groups).sort((a,b)=>b[1].sum-a[1].sum);
@@ -126,8 +126,8 @@ function exportReportXlsx() {
     });
   }
 
-  const rows = [['Дата','Сумма','Категория','Описание','Контрагент','ТС','Оплачено']];
-  filtered.sort((a, b) => cmpDateAsc(a.date, b.date)).forEach(p => {
+  const rows = [['Дата','Сумма','Категория','Описание','Контрагент','ТС','Оплачено полностью','Оплачено, ₽','Остаток, ₽','Срок оплаты']];
+  [...filtered].sort((a, b) => cmpDateAsc(a.date, b.date)).forEach(p => {
     rows.push([
       p.date ? fmtDate(p.date) : '',
       p.sum||0,
@@ -135,7 +135,7 @@ function exportReportXlsx() {
       p.description||'',
       p.contragent||'',
       p.vehicleId ? (vMap[p.vehicleId]||'') : '',
-      p.paid ? 'Да' : 'Нет'
+      woPaymentBalance(p)<.01 ? 'Да' : 'Нет', woPaidAmount(p), woPaymentBalance(p),p.dueDate?fmtDate(p.dueDate):''
     ]);
   });
   rows.push([]);
@@ -143,7 +143,7 @@ function exportReportXlsx() {
 
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [{wch:12},{wch:12},{wch:14},{wch:30},{wch:20},{wch:16},{wch:10}];
+  ws['!cols'] = [{wch:12},{wch:12},{wch:14},{wch:30},{wch:20},{wch:16},{wch:18},{wch:14},{wch:14},{wch:14}];
   XLSX.utils.book_append_sheet(wb, ws, 'Оборотка');
   XLSX.writeFile(wb, `Оборотка_${todayIso()}.xlsx`);
 }

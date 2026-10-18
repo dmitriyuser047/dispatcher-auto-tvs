@@ -5,22 +5,35 @@
 let vcSearchQuery = '';
 let genSearchQuery = '';
 const fleetViewModes = { vehicles: 'table', generators: 'table' };
-try {
-  for (const section of Object.keys(fleetViewModes)) {
-    if (localStorage.getItem('dispatcher.fleetView.' + section) === 'cards') fleetViewModes[section] = 'cards';
-  }
-} catch (_) { /* View preferences are optional when browser storage is unavailable. */ }
+// Profile preferences are loaded by productivityInitialize; never inherit another base's view.
 
 function setFleetView(section, view) {
   if (!Object.prototype.hasOwnProperty.call(fleetViewModes, section)) return;
   fleetViewModes[section] = view === 'cards' ? 'cards' : 'table';
-  try { localStorage.setItem('dispatcher.fleetView.' + section, fleetViewModes[section]); } catch (_) {}
+  if (typeof productivitySetPreference === 'function') productivitySetPreference('fleetView.' + section, fleetViewModes[section]);
   if (section === 'vehicles') renderVehicleCards(); else renderGeneratorCards();
   document.querySelectorAll('[data-fleet-view="' + section + '"]').forEach(button => {
     const active = button.dataset.view === fleetViewModes[section];
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
   });
+}
+
+function fleetSetFilter(name, value) {
+  if (name === 'status') filterStatus = value;
+  if (name === 'fuel') filterFuel = value;
+  if (name === 'org') filterOrg = value;
+  renderVehicleCards();
+}
+
+function fleetFiltersHtml() {
+  const option = (value, label, current) => `<option value="${htmlEsc(value)}" ${value === current ? 'selected' : ''}>${htmlEsc(label)}</option>`;
+  return `<div class="fleet-filters">
+    <select aria-label="Статус транспорта" onchange="fleetSetFilter('status',this.value)">${option('', 'Все статусы', filterStatus)}${[...new Set((data.vehicles || []).map(v => v.status).filter(Boolean))].sort().map(s => option(s.toLowerCase(), s, filterStatus)).join('')}</select>
+    <select aria-label="Топливо транспорта" onchange="fleetSetFilter('fuel',this.value)">${[['','Все виды топлива'],['diesel','Дизель'],['gasoline','Бензин'],['gas','Газ']].map(([v,l]) => option(v,l,filterFuel)).join('')}</select>
+    <select aria-label="Организация транспорта" onchange="fleetSetFilter('org',this.value)">${option('', 'Все организации', filterOrg)}${[...new Set((data.vehicles || []).map(v => v.org).filter(Boolean))].sort().map(s => option(s,s,filterOrg)).join('')}</select>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="openSavedViews()">Выборки</button>
+  </div>`;
 }
 
 function fleetStatusBadge(status) {
@@ -90,12 +103,12 @@ function renderVehicleCards() {
   }
   document.getElementById('mainContent').innerHTML = `<div class="fleet-page">
     <div class="workspace-page-intro"><div><span class="workspace-eyebrow">Управление парком</span><h1 class="workspace-page-title">Транспорт</h1><p class="workspace-page-subtitle">Автомобили, водители и состояние автопарка</p></div>
-      <div class="workspace-page-actions">${workspaceFleetTools('vehicles')}<button type="button" class="btn btn-ghost" onclick="openActGsmModal()">${workspaceIcon('file')} Акт ГСМ</button><button type="button" class="btn btn-primary" onclick="openAddVehicle()">${workspaceIcon('plus')} Добавить ТС</button></div></div>
+      <div class="workspace-page-actions">${workspaceFleetTools('vehicles')}<button type="button" class="btn btn-ghost" onclick="openShiftEntry()">${workspaceIcon('table')} Ввод смены</button><button type="button" class="btn btn-ghost" onclick="openActGsmModal()">${workspaceIcon('file')} Акт ГСМ</button><button type="button" class="btn btn-primary" onclick="openAddVehicle()">${workspaceIcon('plus')} Добавить ТС</button></div></div>
     <div class="fleet-summary"><div><span>Всего в парке</span><strong>${vehicles.length}<small> ТС</small></strong></div><div><span>На ходу</span><strong>${vehicles.filter(v => v.status === 'На ходу').length}<small> ТС</small></strong></div><div><span>В ремонте / после ДТП</span><strong>${vehicles.filter(v => ['В ремонте', 'После ДТП'].includes(v.status)).length}<small> ТС</small></strong></div></div>
     <section class="workspace-panel" aria-label="Список транспорта"><div class="fleet-list-toolbar">
       <label class="fleet-search">${workspaceIcon('search')}<input type="search" id="vcSearchInput" aria-label="Поиск транспорта" placeholder="Номер, марка, водитель или объект" value="${htmlEsc(vcSearchQuery)}" oninput="vcSearchQuery=this.value;renderVehicleCards()"></label>
       ${fleetViewSwitch('vehicles')}
-    </div><div id="vcGridArea">${gridHtml}</div><div id="vcCountArea" class="fleet-count" role="status">${countHtml}</div></section>
+    </div>${fleetFiltersHtml()}<div id="vcGridArea">${gridHtml}</div><div id="vcCountArea" class="fleet-count" role="status">${countHtml}</div></section>
   </div>`;
 }
 

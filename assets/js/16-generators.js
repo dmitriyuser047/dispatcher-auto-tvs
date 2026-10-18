@@ -227,7 +227,7 @@ function renderToSection(gid, currentHours) {
     [...recs].reverse().forEach(r => {
       rows += `<tr>
         <td class="td-day">${fmtDate(r.date)}</td>
-        <td style="padding:10px 14px;font-size:13px;font-weight:600">${htmlEsc(r.type || '—')}</td>
+        <td style="padding:10px 14px;font-size:13px;font-weight:600">${htmlEsc(r.type || '—')}${woSummaryHtml(r, 'toRecords')}</td>
         <td class="td-num">${r.hours != null ? r.hours.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${r.nextHoursAbs != null ? r.nextHoursAbs.toLocaleString('ru', {maximumFractionDigits:0}) : (r.nextHours ? '+'+r.nextHours+' мтч' : '—')}</td>
         <td class="td-day">${r.nextDate ? fmtDate(r.nextDate) : '—'}</td>
@@ -289,6 +289,7 @@ function openAddToRecord(gid) {
     if (last && last.nextHours) document.getElementById('to_next_hours').value = last.nextHours;
   }
   document.getElementById('toModal').dataset.gid = gid;
+  woFormMount('toModal', 'to', null, 'toRecords');
   openModal('toModal');
 }
 
@@ -306,6 +307,7 @@ function openEditToRecord(id) {
   document.getElementById('to_performer').value  = r.performer   || '';
   document.getElementById('to_note').value       = r.note        || '';
   document.getElementById('toModal').dataset.gid = r.generatorId;
+  woFormMount('toModal', 'to', r, 'toRecords');
   openModal('toModal');
 }
 
@@ -314,11 +316,17 @@ async function saveToRecord() {
   const type    = document.getElementById('to_type').value.trim();
   if (!dateIso) { showFieldError('Укажите дату проведения ТО', 'to_date'); return; }
   if (!type)    { showFieldError('Укажите вид ТО', 'to_type'); return; }
-  const nextHours   = parseFloat(document.getElementById('to_next_hours').value) || null;
-  const hours       = parseFloat(document.getElementById('to_hours').value) ?? null;
+  if (!validNonnegativeFields(['to_hours', 'to_next_hours', 'to_cost'])) return;
+  const existing = (data.toRecords || []).find(r => r.id === editingToId);
+  if (editingToId && !existing) { showToast('Запись ТО уже удалена. Откройте график заново.'); return; }
+  let work;
+  try { work = woFormRead('to', existing, 'toRecords'); } catch (error) { showToast(error.message); return; }
+  const nextHours   = optionalNumber('to_next_hours');
+  const hours       = optionalNumber('to_hours');
   const nextDate    = parseDate(document.getElementById('to_next_date').value.trim()) || null;
   const nextHoursAbs = hours != null && nextHours != null ? +(hours + nextHours).toFixed(1) : null;
   const obj = {
+    ...work,
     generatorId:  document.getElementById('toModal').dataset.gid,
     date:         dateIso,
     type,
@@ -326,24 +334,29 @@ async function saveToRecord() {
     nextHours,
     nextHoursAbs,
     nextDate,
-    cost:         parseFloat(document.getElementById('to_cost').value) || null,
+    cost:         optionalNumber('to_cost'),
     performer:    document.getElementById('to_performer').value.trim(),
     note:         document.getElementById('to_note').value.trim(),
   };
+  try { Object.assign(obj, woMergeFormRecord(existing, obj, 'to')); } catch (error) { showToast(error.message); return; }
+  Object.assign(obj, woFinishRecord(existing, obj, 'toRecords', todayIso()));
   if (!data.toRecords) data.toRecords = [];
+  const before = JSON.stringify(data);
   if (editingToId) {
     Object.assign(data.toRecords.find(x => x.id === editingToId), obj);
   } else {
     obj.id = newId('to');
     data.toRecords.push(obj);
   }
-  if (!await saveData(data)) return;
+  woSyncSourcePaid(data, 'toRecords', editingToId || obj.id);
+  if (!await saveData(data)) { data = JSON.parse(before); rebuildIndex(); return; }
   closeModal('toModal');
   const g = (data.generators || []).find(x => x.id === obj.generatorId);
   if (g) renderGenDetail(g);
 }
 
 async function deleteToRecord(id) {
+  if (!woDeleteAllowed('toRecords', id)) return;
   if (!await confirmAction('Удалить эту запись ТО?')) return;
   data.toRecords = (data.toRecords || []).filter(r => r.id !== id);
   if (!await saveData(data)) return;
