@@ -123,3 +123,66 @@ test('a merge conflict remains actionable during an active save and closes after
  assert.equal(await page.locator('#wfModal.open').count(),0);
  assert.equal(await page.evaluate(()=>window.__merged[0].driver),'Моя версия');
 });
+
+test('transport summary export remains visible and exports the chosen period at supported sizes',async()=>{
+ await page.evaluate(()=>{
+  toAutoSetupOnce=async()=>{};
+  data.records.push({id:'outside-summary-period',vehicleId:'v',date:'2026-09-30',km:99,fuelActual:9.9,route:['OUTSIDE_SUMMARY_PERIOD']});
+  rebuildIndex();
+  window.__summaryBefore=JSON.stringify(data);window.__summaryDiskBefore=window.__disk;
+  window.__summaryXlsx=null;window.__summaryPdf=null;
+  XLSX.writeFile=(workbook,fileName)=>{window.__summaryXlsx={fileName,sheetNames:workbook.SheetNames.slice(),rows:XLSX.utils.sheet_to_json(workbook.Sheets['Общая сводка'],{header:1,defval:''})};};
+  window.electronAPI.exportPdf=async(html,fileName)=>{window.__summaryPdf={html,fileName};return{ok:true};};
+ });
+ for(const width of [1280,960])for(const theme of ['light','dark']){
+  await page.setViewportSize({width,height:width===960?700:900});
+  await page.evaluate(theme=>applyTheme(theme),theme);
+  // Re-entering the section and searching rebuild different parts of its DOM.
+  await page.locator('#unifiedNav [data-section="reports"]').click();
+  await page.locator('#unifiedNav [data-section="vehicles"]').click();
+  await page.locator('#vcSearchInput').fill('ТЕСТ001');
+  const button=page.locator('.vehicle-cards-toolbar').getByRole('button',{name:'Выгрузить сводку',exact:true});
+  assert.equal(await button.isVisible(),true,`${width}/${theme}: summary trigger is visible`);
+  assert.equal(await page.locator('#vehicleSummaryExportMenu').count(),1);
+  for(const format of ['xls','pdf']){
+   await page.evaluate(format=>{if(format==='xls')window.__summaryXlsx=null;else window.__summaryPdf=null;},format);
+   await button.click();
+   const menu=page.locator('#vehicleSummaryExportMenu');assert.equal(await menu.isVisible(),true);
+   const bounds=await menu.boundingBox();
+   assert.ok(bounds&&bounds.x>=0&&bounds.y>=0&&bounds.x+bounds.width<=width&&bounds.y+bounds.height<=(width===960?700:900),`${width}/${theme}: summary menu fits the viewport`);
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+   await menu.getByRole('button',{name:format==='xls'?'Сводка в XLS':'Сводка в PDF',exact:true}).click();
+   const dialog=page.locator('#exportPeriodModal');assert.equal(await dialog.isVisible(),true);
+   assert.match(await page.locator('#exportPeriodTitle').innerText(),format==='xls'?/Excel/:/PDF/);
+   await page.locator('#ep_range').check();
+   await page.locator('#ep_date_from').fill('01.10.2026');await page.locator('#ep_date_to').fill('31.10.2026');
+   await dialog.getByRole('button',{name:'Выгрузить',exact:true}).click();
+   if(format==='xls'){
+    await page.waitForFunction(()=>!!window.__summaryXlsx);
+    const exported=await page.evaluate(()=>window.__summaryXlsx);
+    assert.deepEqual(exported.sheetNames,['Общая сводка']);
+    assert.match(exported.rows[0][0],/ОБЩАЯ СВОДКА/);
+    assert.match(exported.rows[1][0],/01\.10\.2026 — 31\.10\.2026/);
+    assert.equal(exported.rows.find(row=>row[1]==='ТЕСТ001')[8],100);
+    assert.equal(exported.rows.find(row=>row[0]==='Общий пробег, км')[4],100);
+    assert.equal(exported.rows.find(row=>row[1]==='ИТОГО')[8],100);
+    assert.equal(exported.rows.flat().includes('OUTSIDE_SUMMARY_PERIOD'),false);
+    assert.match(exported.fileName,/^Сводка_все_ТС_.*_01102026-31102026\.xlsx$/);
+   }else{
+    await page.waitForFunction(()=>!!window.__summaryPdf);
+    const exported=await page.evaluate(()=>{
+     const result=window.__summaryPdf,doc=new DOMParser().parseFromString(result.html,'text/html');
+     const vehicle=[...doc.querySelectorAll('tr')].find(row=>row.cells[1]?.textContent==='ТЕСТ001');
+     const total=vehicle?.parentElement.querySelector('tr.tot');
+     return{fileName:result.fileName,title:doc.querySelector('.doc-title')?.textContent,text:doc.body.textContent,plate:vehicle?.cells[1]?.textContent,km:vehicle?.cells[8]?.textContent,totalKm:total?.cells[1]?.textContent};
+    });
+    assert.match(exported.title,/ОБЩАЯ СВОДКА/);assert.match(exported.text,/01\.10\.2026 — 31\.10\.2026/);
+    assert.equal(exported.plate,'ТЕСТ001');assert.equal(exported.km,'100');assert.equal(exported.totalKm,'100');
+    assert.match(exported.fileName,/^Сводка_все_ТС_.*_01102026-31102026\.pdf$/);
+   }
+   assert.equal(await page.locator('.modal-overlay.open').count(),0);
+   assert.equal(await page.locator('#vehicleSummaryExportMenu.open').count(),0);
+   assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__summaryBefore,disk:window.__disk===window.__summaryDiskBefore,writes:window.__writes})),{same:true,disk:true,writes:0});
+  }
+ }
+});

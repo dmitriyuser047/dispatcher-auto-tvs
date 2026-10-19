@@ -76,6 +76,16 @@ function renderVehicleCards() {
           <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
           Акт ГСМ
         </button>
+        <div class="dropdown">
+          <button type="button" class="btn btn-ghost" onclick="toggleDropdown('vehicleSummaryExportMenu')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            Выгрузить сводку
+          </button>
+          <div class="dropdown-menu" id="vehicleSummaryExportMenu">
+            <button type="button" class="dropdown-item" onclick="openExportPeriodModal('xls');closeDropdowns()">Сводка в XLS</button>
+            <button type="button" class="dropdown-item" onclick="openExportPeriodModal('pdf');closeDropdowns()">Сводка в PDF</button>
+          </div>
+        </div>
         <button class="btn btn-primary" onclick="openAddVehicle()">
           <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Добавить ТС

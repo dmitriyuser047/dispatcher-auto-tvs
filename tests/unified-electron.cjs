@@ -45,7 +45,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
     assert.equal(identity.name,'dispetcherizaciya-avto');
     assert.equal(identity.version,require('../package.json').version);
     assert.equal(await page.locator('#unifiedNav').innerText().then(text=>/прототип/i.test(text)),false);
-    assert.equal(await page.locator('.unified-build-label').innerText(),'Версия 3.5.2');
+    assert.equal(await page.locator('.unified-build-label').innerText(),'Версия '+require('../package.json').version);
   }
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(win => win.isVisible())), false);
 
