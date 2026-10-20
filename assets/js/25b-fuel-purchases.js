@@ -26,6 +26,8 @@ function fpEsc(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 function fpRound(v) { return Math.round((+v || 0) * 100) / 100; }
+// Литры хранятся до миллилитра; денежные суммы по-прежнему округляются до копеек.
+function fpQtyRound(v) { return Math.round((+v || 0) * 1000) / 1000; }
 function fpNum(v, dec) {
   return (+v || 0).toLocaleString('ru', { minimumFractionDigits: dec ?? 2, maximumFractionDigits: dec ?? 2 });
 }
@@ -62,8 +64,9 @@ function fpRecordFor(vehicleId, date, grade, create) {
 
 // Запись пустая, если в ней не осталось ничего, кроме снятой заправки
 function fpRecordIsEmpty(rec) {
-  return !(+rec.fuelIssued) && !(+rec.km) && !(+rec.fuelActual) && !(+rec.fuelUsed) && !(+rec.fuelIdle) &&
-    !(+rec.odoStart) && !(+rec.odoEnd) && !(+rec.kmGlonass) && !(Array.isArray(rec.route) ? rec.route.length : rec.route) &&
+  return !(+rec.fuelIssued) && !(+rec.km) &&
+    !['fuelActual', 'fuelUsed', 'fuelIdle', 'odoStart', 'odoEnd', 'kmGlonass', 'tankMeasured'].some(key => fqValue(rec[key]) != null) &&
+    !(Array.isArray(rec.route) ? rec.route.length : rec.route) &&
     !fpLive().some(p => p.recordId === rec.id);
 }
 
@@ -85,11 +88,11 @@ function fpApply(p, sign) {
       rec = fpRecordFor(p.vehicleId, p.date, p.grade, true);
     }
     const before = +rec.fuelIssued || 0;
-    rec.fuelIssued = fpRound(before + (+p.qty || 0)) || null;
+    rec.fuelIssued = fpQtyRound(before + (+p.qty || 0)) || null;
     if (+p.sum) rec.fuelSum = fpRound((+rec.fuelSum || 0) + (+p.sum)) || null;
     if (!rec.fuelGrade) rec.fuelGrade = p.grade;
     if (p.importKey && typeof fuelImportAppendNote === 'function') {
-      fuelImportAppendNote(rec, 'заправка: ' + (p.product || p.grade) + ' ' + fpRound(p.qty) + 'л; импорт заправок: ' + p.importKey);
+      fuelImportAppendNote(rec, 'заправка: ' + (p.product || p.grade) + ' ' + fpQtyRound(p.qty) + 'л; импорт заправок: ' + p.importKey);
     }
     p.recordId = rec.id;
     return { record: rec, before, after: rec.fuelIssued };
@@ -98,7 +101,7 @@ function fpApply(p, sign) {
   p.recordId = null;
   if (!rec) return null;
   const before = +rec.fuelIssued || 0;
-  const left = fpRound(before - (+p.qty || 0));
+  const left = fpQtyRound(before - (+p.qty || 0));
   rec.fuelIssued = left > 0 ? left : null;
   if (+p.sum && rec.fuelSum) {
     const s = fpRound(rec.fuelSum - p.sum);
@@ -128,7 +131,7 @@ function fpCreate(tx, opts) {
     recordId: opts.recordId || null,
     grade: opts.grade || parseFuelGrade(tx.fuel) || '',
     product: tx.fuel || '',
-    qty: fpRound(tx.qty),
+    qty: fpQtyRound(tx.qty),
     price: fqValue(tx.price) != null ? fpRound(tx.price) : (fqValue(tx.sum) != null && tx.qty ? fpRound(tx.sum / tx.qty) : null),
     sum: fqValue(tx.sum) != null ? fpRound(tx.sum) : null,
     cardNo: tx.cardNo || '',
@@ -197,7 +200,7 @@ function fpKeysFromNote(note) {
 }
 
 function fpRestoreFromJournal() {
-  const canonical = (date, qty, card, grade) => [date, fpRound(qty), fcNorm(card), grade].join('|');
+  const canonical = (date, qty, card, grade) => [date, fpQtyRound(qty), fcNorm(card), grade].join('|');
   const known = new Map();   // ключ → сколько покупок уже есть
   fpList().forEach(p => {
     if (!p.importKey) return;
@@ -259,8 +262,9 @@ function fpRestoreFromJournal() {
 function fpStats() {
   const byRecord = new Map();
   fpLive().forEach(p => {
-    if (!p.recordId) return;
-    byRecord.set(p.recordId, fpRound((byRecord.get(p.recordId) || 0) + (+p.qty || 0)));
+    const recordId = fpLinkedRecord(p)?.id || p.recordId;
+    if (!recordId) return;
+    byRecord.set(recordId, fpQtyRound((byRecord.get(recordId) || 0) + (+p.qty || 0)));
   });
   return byRecord;
 }
@@ -268,7 +272,7 @@ function fpStats() {
 // Состояние покупки относительно журнала: ok | missing | diff
 function fpJournalState(p, byRecord) {
   if (!p.vehicleId) return { state: 'none' };
-  const rec = p.recordId && (data.records || []).find(r => r.id === p.recordId);
+  const rec = fpLinkedRecord(p);
   if (!rec) return { state: 'missing' };
   const j = +rec.fuelIssued || 0, s = byRecord.get(rec.id) || 0;
   return Math.abs(j - s) > 0.05 ? { state: 'diff', journal: j, statement: s, rec } : { state: 'ok', rec };
@@ -422,7 +426,7 @@ function fpRenderVehicle() {
   const recs = recsFor(v.id).filter(r => fpMonth === 'all' || (r.date || '').startsWith(fpMonth));
   const journal = recs.reduce((s, r) => s + (+r.fuelIssued || 0), 0);
   // Заправки журнала, которых нет в выписках (внесены вручную или по другой карте)
-  const onlyJournal = recs.map(r => ({ r, extra: fpRound((+r.fuelIssued || 0) - (byRecord.get(r.id) || 0)) }))
+  const onlyJournal = recs.map(r => ({ r, extra: fpQtyRound((+r.fuelIssued || 0) - (byRecord.get(r.id) || 0)) }))
     .filter(x => Math.abs(x.extra) > 0.05 && !(byRecord.get(x.r.id)));
 
   const stateHtml = p => {
@@ -469,7 +473,7 @@ function fpRenderVehicle() {
   const card = (t, val, sub, color) => `<div style="flex:1;min-width:150px;background:var(--bg2);border:1px solid var(--border);border-left:4px solid ${color};border-radius:8px;padding:10px 14px">
       <div style="font-size:12px;color:var(--text3)">${t}</div><div style="font-size:19px;font-weight:800">${val}</div>
       ${sub ? `<div style="font-size:12px;color:var(--text3)">${sub}</div>` : ''}</div>`;
-  const diff = fpRound(journal - litres);
+  const diff = fpQtyRound(journal - litres);
 
   document.getElementById('mainContent').innerHTML = `
     <div style="padding:24px 28px;width:100%;box-sizing:border-box;overflow-y:auto;height:100%">
@@ -555,6 +559,37 @@ function fpHistoryHtml() {
 
 // ─── Действия ─────────────────────────────────────────────
 
+let fpEditSaving = false, fpEditContext = null;
+function fpFuelFormFingerprint() {
+  return JSON.stringify({ data: typeof gsmManualFingerprint === 'function' ? gsmManualFingerprint(data) : JSON.stringify([data.vehicles, data.records, data.fuelPurchases, data.fuelCards, data.fuelPeriods]),
+    cache: typeof localCacheKey !== 'undefined' ? localCacheKey : null,
+    token: typeof _sync !== 'undefined' ? _sync.databaseToken : null,
+    principal: typeof _sync !== 'undefined' ? _sync.access?.user || null : null });
+}
+function fpSourceOrgEdit(original, changes, db) {
+  const owner = gsmCardAt(db, changes.cardNo ?? original.cardNo, changes.date || original.date);
+  const sameSource = gsmCardKey(changes.cardNo ?? original.cardNo) === gsmCardKey(original.cardNo) && (changes.date || original.date) === original.date;
+  const override = changes.sourceOrgOverride === true;
+  const org = String(override ? changes.sourceOrg || '' : sameSource && original.sourceOrg || owner.org || changes.sourceOrg || original.sourceOrg ||
+    (original.manual && (db.vehicles || []).find(v => v.id === changes.vehicleId)?.org) || '').trim();
+  if (!org || gsmOrgKey(org) === gsmOrgKey(GSM_UNKNOWN_ORG)) throw Error('Укажите организацию поступления');
+  const result = { sourceOrg: org };
+  if (override) {
+    const reason = String(changes.sourceOrgReason || '').trim();
+    if (!reason) throw Error('Укажите основание уточнения организации');
+    if (gsmOrgKey(org) !== gsmOrgKey(original.sourceOrg || owner.org)) result.sourceOrgCorrections = [
+      ...(Array.isArray(original.sourceOrgCorrections) ? original.sourceOrgCorrections : []),
+      { from: original.sourceOrg || owner.org || '', to: org, reason, at: new Date().toISOString() },
+    ];
+  }
+  return result;
+}
+function fpEditOrgToggle() {
+  const checked = !!document.getElementById('fpe_correct_org')?.checked;
+  const reason = document.getElementById('fpe_org_reason');
+  if (reason) { reason.disabled = !checked; reason.required = checked; }
+}
+
 async function fpSaveAndRender() {
   const ok = await saveData(data);
   if (ok) renderFuelPurchases();
@@ -564,6 +599,7 @@ async function fpSaveAndRender() {
 function fpEdit(id) {
   const p = fpById(id);
   if (!p || !fuelEditAllowed(p.date)) return;
+  fpEditContext = { id, fingerprint: fpFuelFormFingerprint() };
   const grades = FP_GRADES.includes(p.grade) ? FP_GRADES : FP_GRADES.concat([p.grade]);
   openGenericModal('Заправка ' + fmtDate(p.date), `
     <div class="form-row">
@@ -576,19 +612,22 @@ function fpEdit(id) {
       <div class="form-group"><label>Машина</label><select id="fpe_vehicle">${fuelImportVehicleOptions(p.vehicleId, true)}</select></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Литры</label><input type="number" id="fpe_qty" step="0.01" value="${p.qty ?? ''}" oninput="fpEditRecalc('qty')"></div>
+      <div class="form-group"><label>Литры</label><input type="number" id="fpe_qty" min="0.001" step="0.001" value="${p.qty ?? ''}" oninput="fpEditRecalc('qty')"></div>
       <div class="form-group"><label>Цена, ₽/л</label><input type="number" id="fpe_price" step="0.01" value="${p.price ?? ''}" oninput="fpEditRecalc('price')"></div>
       <div class="form-group"><label>Сумма, ₽</label><input type="number" id="fpe_sum" step="0.01" value="${p.sum ?? ''}"></div>
     </div>
     <div class="form-group"><label>Комментарий</label><input type="text" id="fpe_comment" value="${fpEsc(p.comment || '')}"></div>
     <div class="form-row">
       <div class="form-group"><label>Карта</label><input id="fpe_card" value="${fpEsc(p.cardNo || '')}"></div>
-      <div class="form-group"><label>Организация поступления (если карта не определена)</label><input id="fpe_org" value="${fpEsc(p.sourceOrg || gsmCardAt(data, p.cardNo, p.date).org)}"></div>
+      <div class="form-group"><label for="fpe_org">Организация поступления</label><input id="fpe_org" value="${fpEsc(p.sourceOrg || gsmCardAt(data, p.cardNo, p.date).org)}"></div>
     </div>
+    <div class="form-group"><label><input type="checkbox" id="fpe_correct_org" onchange="fpEditOrgToggle()"> Уточнить организацию исторической покупки</label>
+      <div style="font-size:12px;color:var(--text3)">Если организация уже определена, её сохранённое значение меняется только с этой отметкой и основанием. Для неизвестной карты заполните организацию поступления.</div></div>
+    <div class="form-group"><label for="fpe_org_reason">Основание уточнения организации</label><input id="fpe_org_reason" disabled placeholder="Документ или причина исправления"></div>
     <div style="font-size:12px;color:var(--text3);margin:4px 0 12px">Изменения сразу переносятся в журнал пробега: старые литры и сумма снимаются с записи, новые добавляются в запись этого дня и вида топлива.</div>
     <div style="display:flex;justify-content:flex-end;gap:8px">
       <button class="btn btn-ghost" onclick="closeModal('genericModal')">Отмена</button>
-      <button class="btn btn-primary" onclick="fpEditSave('${p.id}')">Сохранить</button>
+      <button id="fpe_save" class="btn btn-primary" onclick="fpEditSave('${p.id}')">Сохранить</button>
     </div>`, 620);
 }
 
@@ -600,19 +639,26 @@ function fpEditRecalc() {
 }
 
 async function fpEditSave(id) {
+  if (fpEditSaving) return;
   const p = fpById(id);
   if (!p) return;
+  if (!fpEditContext || fpEditContext.id !== id || fpEditContext.fingerprint !== fpFuelFormFingerprint()) {
+    showFieldError('Данные изменились. Откройте заправку заново и проверьте изменения', 'fpe_qty'); return;
+  }
   const date = parseDate(document.getElementById('fpe_date').value.trim());
   if (!fuelEditAllowed(p.date, date)) return;
-  const qty = parseFloat(document.getElementById('fpe_qty').value);
+  const qty = Number(document.getElementById('fpe_qty').value);
   if (!date) { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'fpe_date'); return; }
-  if (!Number.isFinite(qty) || !(qty > 0)) { showFieldError('Укажите литры', 'fpe_qty'); return; }
+  if (!Number.isFinite(qty) || !(qty > 0) || Math.abs(qty - fpQtyRound(qty)) > 0.000001) { showFieldError('Укажите положительные литры, до трёх знаков после запятой', 'fpe_qty'); return; }
   if (!gsmValidDate(date)) { showFieldError('Некорректная дата', 'fpe_date'); return; }
   const cardNo = document.getElementById('fpe_card').value.trim();
   const owner = gsmCardAt(data, cardNo, date);
   const sameSource = fcNorm(cardNo) === fcNorm(p.cardNo) && date === p.date;
-  const sourceOrg = owner.org ? sameSource && p.sourceOrg || owner.org : document.getElementById('fpe_org').value.trim();
-  if (!sourceOrg) { showFieldError('Укажите организацию поступления', 'fpe_org'); return; }
+  const sourceOrgOverride = !!document.getElementById('fpe_correct_org')?.checked;
+  const sourceOrgReason = document.getElementById('fpe_org_reason')?.value.trim() || '';
+  let sourceChanges;
+  try { sourceChanges = fpSourceOrgEdit(p, { date, cardNo, sourceOrg: document.getElementById('fpe_org').value.trim(), sourceOrgOverride, sourceOrgReason }, data); }
+  catch (e) { showFieldError(e.message, sourceOrgOverride && !sourceOrgReason ? 'fpe_org_reason' : 'fpe_org'); return; }
   const grade = document.getElementById('fpe_grade').value, vehicleId = document.getElementById('fpe_vehicle').value || null;
   if (p.manualStatement || p.statementReviewed) {
     const problem = gsmManualRecipientError(data, vehicleId, cardNo, date, grade);
@@ -622,42 +668,113 @@ async function fpEditSave(id) {
   if ([sum, price].some(n => n != null && (!Number.isFinite(n) || n < 0))) { showFieldError('Сумма и цена должны быть неотрицательными', 'fpe_sum'); return; }
   const before = JSON.stringify(data);
   const changes = {
-    date, qty: fpRound(qty), sum: sum != null ? fpRound(sum) : null,
-    price,
+    date, qty: fpQtyRound(qty), sum: sum != null ? fpRound(sum) : null,
+    price: price != null ? fpRound(price) : null,
     time: document.getElementById('fpe_time').value.trim(),
     grade,
     vehicleId,
     comment: document.getElementById('fpe_comment').value.trim(),
-    restored: false,
-    cardNo, sourceOrg, sourceProvider: sameSource && p.sourceProvider ? p.sourceProvider : owner.provider,
+    cardNo, ...sourceChanges, sourceProvider: sameSource && p.sourceProvider ? p.sourceProvider : owner.provider,
     cardVehicleId: sameSource && p.cardVehicleId ? p.cardVehicleId : owner.vehicleId,
   };
-  if (vehicleId && typeof gsmStatementPlan === 'function') {
-    try {
-      const plan = gsmStatementPlan(data, id, changes);
+  let submitted = data;
+  fpEditSaving = true;
+  const button = document.getElementById('fpe_save'); if (button) button.disabled = true;
+  try {
+    if (vehicleId && typeof gsmStatementPlan === 'function') {
+      const plan = gsmStatementPlan(data, id, { ...changes, sourceOrgOverride, sourceOrgReason });
       data = gsmStatementApply(data, plan);
+      submitted = data;
       const updated = data.fuelPurchases.find(x => x.id === id);
-      Object.assign(updated, { time: changes.time, comment: changes.comment, restored: false });
+      Object.assign(updated, { time: changes.time, comment: changes.comment });
       rebuildIndex();
-    } catch (e) { showFieldError(e.message, 'fpe_vehicle'); return; }
-  } else fpUpdate(p, changes);
-  if (!await saveData(data, { noMerge: true })) { data = JSON.parse(before); rebuildIndex(); return; }
-  if (typeof gsmStatementDrafts !== 'undefined') gsmStatementDrafts.delete(id);
-  closeModal('genericModal');
-  if (fpView === 'vehicle' && p.vehicleId !== fpVehicle) showToast && showToast('Заправка перенесена на ' + fpVehicleTitle((data.vehicles || []).find(v => v.id === p.vehicleId)));
-  renderFuelPurchases();
+    } else fpUpdate(p, changes);
+    submitted = data;
+    if (!await saveData(data, { noMerge: true })) {
+      if (data === submitted) { data = JSON.parse(before); rebuildIndex(); }
+      showFieldError('Не записано. Изменения сохранены в форме; проверьте соединение и повторите.', 'fpe_qty'); return;
+    }
+    if (typeof gsmStatementDrafts !== 'undefined') gsmStatementDrafts.delete(id);
+    fpEditContext = null;
+    closeModal('genericModal');
+    if (fpView === 'vehicle' && vehicleId !== fpVehicle) showToast && showToast('Заправка перенесена на ' + fpVehicleTitle((data.vehicles || []).find(v => v.id === vehicleId)));
+    renderFuelPurchases();
+  } catch (e) {
+    if (data === submitted) { data = JSON.parse(before); rebuildIndex(); }
+    showFieldError(e.message, 'fpe_vehicle');
+  } finally { fpEditSaving = false; if (button) button.disabled = false; }
 }
 
+let fpDeletePending = null, fpDeleteSaving = false;
+function fpDeleteFingerprint() {
+  return fpFuelFormFingerprint();
+}
+function fpDeleteRemaining(p, rec) {
+  return rec ? fpLive().filter(other => other.id !== p.id && fpLinkedRecord(other)?.id === rec.id) : [];
+}
 async function fpDelete(id) {
+  if (fpDeleteSaving) return;
   const p = fpById(id);
-  if (!p || !fuelEditAllowed(p.date)) return;
-  if (!await confirmAction('Удалить заправку ' + fmtDate(p.date) + ' на ' + fpNum(p.qty) + ' л?' + (p.vehicleId ? '\nЛитры и сумма будут сняты с журнала пробега.' : ''))) return;
-  const before = JSON.stringify(data);
-  fpApply(p, -1);
-  p.deleted = true;
-  p.editedAt = new Date().toISOString();
-  if (!await saveData(data, { noMerge: !!p.manualStatement })) { data = JSON.parse(before); rebuildIndex(); return; }
-  renderFuelPurchases();
+  if (!p || p.deleted || !fuelEditAllowed(p.date)) return;
+  const rec = fpLinkedRecord(p), canKeep = fpDeleteRemaining(p, rec).length > 0;
+  fpDeletePending = { id, fingerprint: fpDeleteFingerprint(), recordId: rec?.id || null };
+  openGenericModal('Удалить заправку ' + fmtDate(p.date), `
+    <p>${fpEsc(fpVehicleTitle((data.vehicles || []).find(v => v.id === p.vehicleId)))} · ${fpEsc(p.grade)} · ${fpNum(p.qty, 3)} л</p>
+    <div class="form-group"><label for="fpd_mode">Что изменить</label><select id="fpd_mode" onchange="fpDeletePreview()">
+      <option value="remove">Удалить заправку и снять её литры и сумму с журнала</option>
+      ${canKeep ? '<option value="keep">Убрать лишнюю строку выписки, сохранить правильный журнал</option>' : ''}
+    </select></div>
+    ${rec && !canKeep ? '<p class="gsm-status">Последнюю связанную покупку нельзя убрать с сохранением журнала: сначала проверьте источник поступления. Иначе организация или марка ручного прихода могут измениться.</p>' : ''}
+    <div id="fpd_preview" class="gsm-status"></div>
+    <div class="form-group"><label for="fpd_reason">Причина удаления</label><input id="fpd_reason" required placeholder="Что проверено по исходнику"></div>
+    <label><input id="fpd_confirm" type="checkbox"> Подтверждаю выбранное действие после сверки с исходником</label>
+    <div id="fpd_error" class="gsm-error" role="alert"></div>
+    <div class="gsm-actions"><button class="btn btn-ghost" onclick="closeModal('genericModal')">Отмена</button>
+      <button id="fpd_commit" class="btn btn-danger" onclick="fpDeleteCommit()">Удалить выбранным способом</button></div>`, 720);
+  fpDeletePreview();
+}
+function fpDeletePreview() {
+  const p = fpDeletePending && fpById(fpDeletePending.id), el = document.getElementById('fpd_preview');
+  if (!p || !el) return;
+  const rec = fpLinkedRecord(p), keep = document.getElementById('fpd_mode')?.value === 'keep';
+  if (!rec) { el.textContent = 'Связанная строка журнала не найдена: литры и сумма журнала не изменятся. Поступление в учёте уменьшится на ' + fpNum(p.qty, 3) + ' л.'; return; }
+  const before = +rec.fuelIssued || 0, after = keep ? before : Math.max(0, fpQtyRound(before - (+p.qty || 0)));
+  const organization = row => row.sourceOrg || gsmCardAt(data, row.cardNo, row.date).org || GSM_UNKNOWN_ORG;
+  const remaining = fpDeleteRemaining(p, rec), orgBefore = [...new Set([p, ...remaining].map(organization))].join(', '), orgAfter = [...new Set(remaining.map(organization))].join(', ') || 'Нет связанных покупок';
+  el.textContent = 'Выдано в журнале: ' + fpNum(before, 3) + ' → ' + fpNum(after, 3) + ' л. ' +
+    'Организации связанных покупок: ' + orgBefore + ' → ' + orgAfter + '. ' +
+    (keep ? 'Литры, сумма, пробег, расход и замер журнала сохранятся. Убирайте только подтверждённую лишнюю строку выписки.' : 'Из журнала снимается доля этой заправки; пробег, расход и замер сохранятся.');
+}
+async function fpDeleteCommit() {
+  if (fpDeleteSaving || !fpDeletePending) return;
+  const error = document.getElementById('fpd_error');
+  const fail = message => { if (error) error.textContent = message; };
+  const p = fpById(fpDeletePending.id), mode = document.getElementById('fpd_mode')?.value;
+  if (!p || p.deleted) { fail('Заправка больше не существует'); return; }
+  if (!fuelEditAllowed(p.date)) return;
+  if (fpDeleteFingerprint() !== fpDeletePending.fingerprint) { fail('Данные изменились. Откройте удаление заново и проверьте итог'); return; }
+  const rec = fpLinkedRecord(p), reason = document.getElementById('fpd_reason')?.value.trim();
+  if (!['keep', 'remove'].includes(mode) || mode === 'keep' && !rec) { fail('Выберите допустимый способ удаления'); return; }
+  if (mode === 'keep' && !fpDeleteRemaining(p, rec).length) { fail('Нельзя убрать последнюю связанную покупку с сохранением журнала. Сначала проверьте источник поступления'); return; }
+  if (!reason) { fail('Укажите причину удаления'); return; }
+  if (!document.getElementById('fpd_confirm')?.checked) { fail('Подтвердите действие после сверки с исходником'); return; }
+  const before = JSON.stringify(data), submitted = data, at = new Date().toISOString(), recordId = rec?.id || null, issuedBefore = rec?.fuelIssued ?? null;
+  const button = document.getElementById('fpd_commit');
+  fpDeleteSaving = true; if (button) button.disabled = true;
+  try {
+    if (mode === 'remove') fpApply(p, -1);
+    p.deleted = true; p.editedAt = at;
+    p.deletion = { mode: mode === 'keep' ? 'preserve-journal' : 'remove-journal', reason, at, recordId,
+      journalIssuedBefore: issuedBefore, journalIssuedAfter: rec?.fuelIssued ?? null };
+    if (!await saveData(data, { noMerge: true })) {
+      if (data === submitted) { data = JSON.parse(before); rebuildIndex(); }
+      fail('Не записано. Выбор и причина сохранены в форме; проверьте соединение и повторите.'); return;
+    }
+    fpDeletePending = null; closeModal('genericModal'); renderFuelPurchases();
+  } catch (e) {
+    if (data === submitted) { data = JSON.parse(before); rebuildIndex(); }
+    fail(e.message || 'Не удалось удалить заправку');
+  } finally { fpDeleteSaving = false; if (button) button.disabled = false; }
 }
 
 async function fpAssign(id) {
@@ -689,7 +806,7 @@ async function fpSyncRecord(recordId) {
   const rec = (data.records || []).find(r => r.id === recordId);
   if (!rec || !fuelEditAllowed(rec.date)) return;
   const list = fpLive().filter(p => fpLinkedRecord(p)?.id === recordId);
-  const qty = fpRound(list.reduce((s, p) => s + (+p.qty || 0), 0));
+  const qty = fpQtyRound(list.reduce((s, p) => s + (+p.qty || 0), 0));
   const sum = fpRound(list.reduce((s, p) => s + (+p.sum || 0), 0));
   if (!confirm(`Поставить в журнал за ${fmtDate(rec.date)}: ${fpNum(qty)} л вместо ${fpNum(rec.fuelIssued)} л?`)) return;
   list.forEach(p => { p.recordId = recordId; });
@@ -724,9 +841,9 @@ function fpDoubles() {
     const v = (data.vehicles || []).find(x => x.id === list[0].vehicleId);
     if (!v || fpIsOffice(v)) return;
     list.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-    const litres = fpRound(list.reduce((s, p) => s + (+p.qty || 0), 0));
+    const litres = fpQtyRound(list.reduce((s, p) => s + (+p.qty || 0), 0));
     const sum = fpRound(list.reduce((s, p) => s + (+p.sum || 0), 0));
-    const journal = fpRound(recsFor(v.id).filter(r => r.date === list[0].date).reduce((s, r) => s + (+r.fuelIssued || 0), 0));
+    const journal = fpQtyRound(recsFor(v.id).filter(r => r.date === list[0].date).reduce((s, r) => s + (+r.fuelIssued || 0), 0));
     const own = fpFuelFamily(vehicleFuelGrade(v));
     const grades = [...new Set(list.map(p => p.grade).filter(Boolean))];
     const flags = [];
@@ -1073,9 +1190,9 @@ function fpExportNegative() {
     const R = i + 3, fill = i % 2 ? { fill: { patternType: 'solid', fgColor: { rgb: P.gray1 } } } : {};
     const s = st(fill), n = st(Object.assign({ alignment: { horizontal: 'right' } }, fill));
     const neg = x => st(Object.assign({ alignment: { horizontal: 'right' }, font: { sz: 10, bold: x < -0.05, color: { rgb: x < -0.05 ? P.red : P.text } } }, fill));
-    const vals = [r.v.plate, r.v.make, r.v.org, r.v.object, r.v.status, fpRound(r.now), fpRound(r.min), fmtDate(r.minDate), fmtDate(r.firstNeg)]
-      .concat(months.map(m => r.monthEnd[m] != null ? fpRound(r.monthEnd[m]) : null))
-      .concat([fpRound(r.start), fpRound(r.issued), fpRound(r.spent), r.hint]);
+    const vals = [r.v.plate, r.v.make, r.v.org, r.v.object, r.v.status, fpQtyRound(r.now), fpQtyRound(r.min), fmtDate(r.minDate), fmtDate(r.firstNeg)]
+      .concat(months.map(m => r.monthEnd[m] != null ? fpQtyRound(r.monthEnd[m]) : null))
+      .concat([fpQtyRound(r.start), fpQtyRound(r.issued), fpQtyRound(r.spent), r.hint]);
     vals.forEach((v, c) => {
       const isBal = c === 5 || c === 6 || (c >= 9 && c < 9 + months.length);
       put(R, c, v, c === vals.length - 1 ? st(Object.assign({ font: { sz: 10, color: { rgb: P.amber } } }, fill))
@@ -1115,7 +1232,6 @@ function fpMonthlyHtml() {
   const months = [...mSet].sort().reverse();
   if (!months.length) return '<div class="welcome" style="padding:60px 0"><p>Нет данных. Загрузите выписку или добавьте записи пробега.</p></div>';
   const selMonth = fpMonth && fpMonth !== 'all' && months.includes(fpMonth) ? fpMonth : months[0];
-  if (!data.monthlyFuel) data.monthlyFuel = [];
 
   const vehicles = (data.vehicles || []).filter(v => {
     const ft = v.fuel || 'diesel';
@@ -1135,7 +1251,7 @@ function fpMonthlyHtml() {
     const vPurchases = fpLive().filter(p => p.vehicleId === v.id && (p.date || '').startsWith(selMonth));
     const stmtLitersTotal = vPurchases.reduce((s, p) => s + (+p.qty || 0), 0);
 
-    const mfRecs = data.monthlyFuel.filter(m => m.vehicleId === v.id && m.month === selMonth);
+    const mfRecs = (data.monthlyFuel || []).filter(m => m.vehicleId === v.id && m.month === selMonth);
     const vCardNum = v.fuelcard && typeof fcNorm === 'function' ? fcNorm(v.fuelcard) : '';
 
     const cardRows = mfRecs.length ? mfRecs : [null];
@@ -1200,7 +1316,7 @@ function fpMonthlyHtml() {
   return `
     ${monthSel}
     <div style="font-size:13px;color:var(--text3);margin-bottom:10px">
-      Общий литраж получения за месяц. Если поле «Получено» заполнено — акт списания ГСМ берёт эту цифру. Иначе — сумму из выписок или журнала.
+      Месячные поля — контрольные значения для сверки. Акт списания ГСМ строится по операциям поступления и журналу; заполненное поле «Получено» их не заменяет. При расхождении проверьте исходную выписку и записи журнала.
     </div>
     <div id="mf-toolbar" style="display:none;margin-bottom:8px">
       <button onclick="mfDeleteSelected()" style="padding:4px 14px;font-size:13px;background:var(--red);color:#fff;border:none;border-radius:4px;cursor:pointer">Удалить выбранные (<span id="mf-sel-count">0</span>)</button>

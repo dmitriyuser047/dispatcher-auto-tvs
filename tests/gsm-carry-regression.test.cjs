@@ -274,8 +274,8 @@ test('one-grade exports retain real receipts and spending while exposing the ana
   const actData = ctx.XLSX.utils.sheet_to_json(act.Sheets['Акт списания ГСМ'], { header: 1 }).filter(row => typeof row[0] === 'number');
   assert.equal(actData.length, 1);
   assert.equal(actData[0][4], 'АИ-95');
-  close(actData[0][13], 45.56); close(actData[0][19], 289.99);
-  close(actData[0][21], 318.3); close(actData[0][23], 17.25);
+  close(actData[0][13], 45.562); close(actData[0][19], 289.99);
+  close(actData[0][21], 318.3); close(actData[0][23], 17.252);
   assert.equal(JSON.stringify(db), original);
 });
 

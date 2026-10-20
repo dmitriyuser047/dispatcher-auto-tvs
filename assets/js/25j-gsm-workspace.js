@@ -1,6 +1,6 @@
 let gsmOrg = '', gsmFuel = '', gsmActNo = '', gsmActDate = new Date().toISOString().slice(0, 10);
 let gsmMovementSearch = '', gsmMovementType = '', gsmMovementLimit = 30, gsmMovementLedger = null;
-const GSM_MAIN_VIEWS = [['barrels', 'Бочки и остатки'], ['receipts', 'Выписка'], ['manual', 'Добавить вручную'], ['journal', 'Журнал и остатки'], ['writeoff', 'Списание']];
+const GSM_MAIN_VIEWS = [['barrels', 'Бочки и остатки'], ['diagnostics', 'Проверка данных'], ['receipts', 'Выписка'], ['manual', 'Добавить вручную'], ['journal', 'Журнал и остатки'], ['writeoff', 'Списание']];
 const GSM_EXTRA_VIEWS = [['fcards', 'Топливные карты'], ['cards', 'По машинам'], ['doubles', 'Повторные заправки'], ['checks', 'Проверки'],
   ['measures', 'Замеры'], ['compare', 'Сравнение месяцев'], ['negative', 'Отрицательные остатки'], ['recon', 'Сверка с 1С'],
   ['monthly', 'Старая месячная сверка'], ['close', 'Закрытие месяца'], ['unmatched', 'Без машины'], ['history', 'История загрузок'], ['glonass', 'ГЛОНАСС']];
@@ -217,6 +217,7 @@ function gsmRenderWorkspace() {
   const mainView = GSM_MAIN_VIEWS.some(([id]) => id === fpView) && fpView !== 'manual';
   let body;
   if (fpView === 'barrels') body = gsmBarrelOverviewHtml(ledger);
+  else if (fpView === 'diagnostics') body = typeof gsmDiagnosticsHtml === 'function' ? gsmDiagnosticsHtml(ledger) : '<p class="gsm-status">Модуль проверки данных не подключён.</p>';
   else if (fpView === 'manual') body = gsmManualHtml();
   else if (fpView === 'receipts') body = gsmReceiptsHtml(ledger);
   else if (fpView === 'journal') body = gsmJournalHtml(ledger);
@@ -227,6 +228,7 @@ function gsmRenderWorkspace() {
     body = (renderers[fpView] || fpCardsHtml)();
   }
   document.getElementById('mainContent').innerHTML = '<div class="gsm-workspace"><div class="gsm-heading"><h2>ГСМ</h2><div class="gsm-actions">' +
+    '<button type="button" class="btn btn-primary" onclick="gsmOpenDiagnostics()">Проверить ГСМ</button>' +
     '<button class="btn btn-ghost" onclick="document.getElementById(\'fuelImportInput\').click()">Загрузить выписку</button>' +
     '<button class="btn btn-ghost" onclick="document.getElementById(\'officeFuelImportInput\').click()">Машины офис</button>' +
     '<button class="btn btn-ghost" onclick="gsmExportReconciliation()">Выгрузить сверку</button></div></div>' +
@@ -236,7 +238,7 @@ function gsmRenderWorkspace() {
     (fpView === 'manual' ? '' : '<div class="gsm-filters"><select aria-label="Месяц" class="fsel" onchange="fpMonth=this.value;renderFuelPurchases()">' + [...new Set([fpMonth, ...months, 'all'])].map(m => '<option value="' + fpEsc(m) + '"' + (m === fpMonth ? ' selected' : '') + '>' + fpMonthLabel(m) + '</option>').join('') + '</select>' +
     (mainView ? '<select aria-label="Организация" class="fsel" onchange="gsmOrg=this.value;renderFuelPurchases()"><option value="">Все организации</option>' + orgs.map(o => '<option' + (o === gsmOrg ? ' selected' : '') + '>' + fpEsc(o) + '</option>').join('') + '</select>' +
       '<select aria-label="Топливо" class="fsel" onchange="gsmFuel=this.value;renderFuelPurchases()"><option value="">Все марки топлива</option>' + grades.map(g => '<option' + (g === gsmFuel ? ' selected' : '') + '>' + fpEsc(g) + '</option>').join('') + '</select>' : '') + '</div>') +
-    (mainView && fpView !== 'barrels' ? (fpView === 'receipts' ? gsmReceiptSummaryHtml(ledger) : gsmBarrelsHtml(ledger)) + gsmIssuesHtml(ledger) : '') + '<div id="fpBody">' + body + '</div></div>';
+    (mainView && !['barrels', 'diagnostics'].includes(fpView) ? (fpView === 'receipts' ? gsmReceiptSummaryHtml(ledger) : gsmBarrelsHtml(ledger)) + gsmIssuesHtml(ledger) : '') + '<div id="fpBody">' + body + '</div></div>';
   if (fpView === 'manual') gsmManualTotals();
 }
 function gsmEditRecord(id) {
@@ -271,7 +273,7 @@ function gsmOpeningDialog(vid) {
   if (!v) return;
   const sources = v.fuelBalanceSources || [{ org: v.org || '', grade: gsmVehicleGrade(v), qty: gsmNumber(v.fuelBalance) }];
   openGenericModal('Распределение начального остатка', '<div class="form-group"><label>Машина</label><select id="gsm_open_vehicle" onchange="gsmOpeningDialog(this.value)">' + fuelImportVehicleOptions(v.id, false) + '</select></div>' +
-    '<p>Начальный остаток по карточке: <strong>' + fpNum(v.fuelBalance, 3) + ' л</strong></p><div id="gsm_open_rows">' + sources.map(gsmOpeningRow).join('') + '</div>' +
+    '<p>Начальный остаток по карточке: <strong>' + fpNum(v.fuelBalance, 3) + ' л</strong></p><p class="gsm-status">Это исходный остаток за всё время учёта. Остаток на конкретную дату подтверждается замером в журнале. Здесь меняется только распределение источников, общая сумма сохраняется.</p><div id="gsm_open_rows">' + sources.map(gsmOpeningRow).join('') + '</div>' +
     '<div class="gsm-actions"><button class="btn btn-ghost" onclick="document.getElementById(\'gsm_open_rows\').insertAdjacentHTML(\'beforeend\',gsmOpeningRow({}))">Добавить источник</button>' +
     '<button class="btn btn-primary" onclick="gsmSaveOpening()">Сохранить</button></div>', 720);
 }

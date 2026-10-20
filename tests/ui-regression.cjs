@@ -312,7 +312,8 @@ test('saved manual receipt remains editable after failed persistence and removab
   await page.locator('#genericModal').getByRole('button', { name: 'Сохранить', exact: true }).click();
   await page.waitForFunction(() => data.fuelPurchases[0].qty === 50);
   assert.equal(await page.evaluate(() => data.records.find(r => r.id === data.fuelPurchases[0].recordId).fuelIssued), 50);
-  await page.locator('#fpBody').getByRole('button', { name: 'Удалить', exact: true }).click(); await page.locator('#confirmYes').click();
+  await page.locator('#fpBody').getByRole('button', { name: 'Удалить', exact: true }).click();
+  await page.locator('#fpd_reason').fill('Ошибочная ручная заправка'); await page.locator('#fpd_confirm').check(); await page.locator('#fpd_commit').click();
   await page.waitForFunction(() => data.fuelPurchases[0].deleted);
   await fillManualReceipt('2026-10-04', '10'); await reviewManualReceipt(); await page.locator('#gsmManualCommit').click();
   await page.waitForFunction(() => data.fuelPurchases.filter(p => !p.deleted).length === 1);
@@ -332,6 +333,76 @@ test('manual review refuses stale data and concurrent server changes instead of 
   });
   await page.locator('#gsmManualCommit').click(); await page.waitForFunction(() => document.getElementById('gsmManualReviewError').textContent.includes('Не записано'));
   assert.equal(await page.evaluate(() => window.__mergeReads), 0); assert.equal(await page.evaluate(() => data.fuelPurchases.length), 0);
+});
+
+async function openPreciseHistoricalPurchase() {
+  await page.evaluate(() => {
+    data.vehicles[0].object = 'Site';
+    data.records = [{ id: 'precise-r', vehicleId: 'v', date: '2026-09-01', fuelGrade: 'АИ-95', fuelIssued: 55.563, fuelSum: 5000.34,
+      km: 123, odoStart: 1000, odoEnd: 1123, fuelActual: 17.256, tankMeasured: 138.307, note: 'Original journal' }];
+    data.fuelPurchases = [{ id: 'precise-p', recordId: 'precise-r', vehicleId: 'v', date: '2026-09-01', grade: 'АИ-95', product: 'АИ-95',
+      qty: 45.562, sum: 4556.2, price: 100, cardNo: '111111', sourceOrg: 'A', restored: true,
+      sourceTransaction: { qty: 45.562, sum: 4556.2, product: 'АИ-95' } }];
+    data.fuelCards = [{ number: '111111', org: 'A', assignments: [{ vehicleId: 'v', from: '', to: '' }] }];
+    rebuildIndex(); _lastPersisted = JSON.stringify(data); fpEdit('precise-p');
+  });
+}
+
+test('historical comment form preserves millilitres, measured stock, actual consumption and restoration provenance', async () => {
+  await openPreciseHistoricalPurchase(); const before = await page.evaluate(() => JSON.stringify(data.records));
+  assert.equal(await page.locator('#fpe_qty').getAttribute('step'), '0.001'); assert.equal(await page.locator('#fpe_sum').getAttribute('step'), '0.01');
+  await page.locator('#fpe_comment').fill('Сверено с оригиналом'); await page.locator('#fpe_save').click();
+  await page.waitForFunction(() => !document.getElementById('genericModal').classList.contains('open'));
+  assert.equal(await page.evaluate(() => JSON.stringify(data.records)), before);
+  assert.deepEqual(await page.evaluate(() => ({ qty: data.fuelPurchases[0].qty, restored: data.fuelPurchases[0].restored,
+    sourceQty: data.fuelPurchases[0].sourceTransaction.qty })), { qty: 45.562, restored: true, sourceQty: 45.562 });
+});
+
+test('explicit historical organization correction requires a reason and retains all inputs across failed persistence', async () => {
+  await openPreciseHistoricalPurchase(); await page.locator('#fpe_org').fill('B'); await page.locator('#fpe_correct_org').check();
+  assert.equal(await page.locator('#fpe_org_reason').isEnabled(), true);
+  await page.locator('#fpe_save').click(); assert.equal(await page.evaluate(() => data.fuelPurchases[0].sourceOrg), 'A');
+  assert.equal(await page.locator('#genericModal').evaluate(el => el.classList.contains('open')), true);
+  await page.locator('#fpe_org_reason').fill('Организация B в первичном документе'); await page.locator('#fpe_qty').fill('45.564');
+  await page.evaluate(() => { window.electronAPI.writeData = async () => false; }); await page.locator('#fpe_save').click();
+  await page.waitForFunction(() => !fpEditSaving);
+  assert.equal(await page.locator('#fpe_qty').inputValue(), '45.564'); assert.equal(await page.locator('#fpe_org_reason').inputValue(), 'Организация B в первичном документе');
+  assert.deepEqual(await page.evaluate(() => ({ qty: data.fuelPurchases[0].qty, org: data.fuelPurchases[0].sourceOrg })), { qty: 45.562, org: 'A' });
+  await page.evaluate(() => { window.electronAPI.writeData = async json => { window.__disk = json; return true; }; }); await page.locator('#fpe_save').click();
+  await page.waitForFunction(() => !document.getElementById('genericModal').classList.contains('open'));
+  assert.deepEqual(await page.evaluate(() => ({ qty: data.fuelPurchases[0].qty, org: data.fuelPurchases[0].sourceOrg, history: data.fuelPurchases[0].sourceOrgCorrections.length,
+    issued: data.records[0].fuelIssued, km: data.records[0].km, measured: data.records[0].tankMeasured, actual: data.records[0].fuelActual,
+    sourceQty: data.fuelPurchases[0].sourceTransaction.qty })),
+    { qty: 45.564, org: 'B', history: 1, issued: 55.565, km: 123, measured: 138.307, actual: 17.256, sourceQty: 45.562 });
+});
+
+test('confirmed redundant purchase deletion previews and preserves correct journal after failure and retry', async () => {
+  await openPreciseHistoricalPurchase(); const before = await page.evaluate(() => JSON.stringify(data.records));
+  await page.evaluate(() => {
+    data.fuelPurchases.push({ ...data.fuelPurchases[0], id: 'correct-original', restored: false });
+    _lastPersisted = JSON.stringify(data); fpDelete('precise-p');
+  }); await page.locator('#fpd_mode').selectOption('keep');
+  assert.match(await page.locator('#fpd_preview').innerText(), /55,563 → 55,563/);
+  await page.locator('#fpd_reason').fill('Лишняя восстановленная строка, оригинал проверен'); await page.locator('#fpd_confirm').check();
+  await page.evaluate(() => { window.electronAPI.writeData = async () => false; }); await page.locator('#fpd_commit').click();
+  await page.waitForFunction(() => document.getElementById('fpd_error').textContent.includes('Не записано'));
+  assert.equal(await page.evaluate(() => JSON.stringify(data.records)), before); assert.equal(await page.evaluate(() => data.fuelPurchases[0].deleted), undefined);
+  assert.equal(await page.locator('#fpd_mode').inputValue(), 'keep');
+  await page.evaluate(() => { window.electronAPI.writeData = async json => { window.__disk = json; return true; }; }); await page.locator('#fpd_commit').click();
+  await page.waitForFunction(() => data.fuelPurchases[0].deleted);
+  assert.equal(await page.evaluate(() => JSON.stringify(data.records)), before);
+  assert.equal(await page.evaluate(() => data.fuelPurchases[0].deletion.mode), 'preserve-journal');
+});
+
+test('old purchase modal refuses to overwrite changed quantities from a newer snapshot', async () => {
+  await openPreciseHistoricalPurchase(); await page.locator('#fpe_comment').fill('Комментарий из старой формы');
+  await page.evaluate(() => { data.fuelPurchases[0].qty = 50.564; data.records[0].fuelIssued = 60.565; window.__preciseWrites = 0;
+    window.electronAPI.writeData = async () => { window.__preciseWrites++; return true; }; });
+  await page.locator('#fpe_save').click();
+  assert.deepEqual(await page.evaluate(() => ({ qty: data.fuelPurchases[0].qty, issued: data.records[0].fuelIssued, writes: window.__preciseWrites })),
+    { qty: 50.564, issued: 60.565, writes: 0 });
+  assert.equal(await page.locator('#fpe_comment').inputValue(), 'Комментарий из старой формы');
+  assert.equal(await page.locator('#genericModal').evaluate(el => el.classList.contains('open')), true);
 });
 test('note-only edit preserves manually stored normative fuel and zero mileage', async () => {
   const out = await page.evaluate(async () => {

@@ -1,6 +1,38 @@
 let gsmPendingAct = null;
+function gsmExportIssueVisible(issue, org, grade) {
+  return (!grade || !issue.grade || grade === issue.grade) && (!org || !issue.org && !(issue.orgs || []).length ||
+    gsmOrgKey(issue.org) === gsmOrgKey(org) || (issue.orgs || []).some(owner => gsmOrgKey(owner) === gsmOrgKey(org)));
+}
 function gsmRelevantIssues(ledger, org, grade) {
-  return ledger.issues.filter(i => (!grade || !i.grade || grade === i.grade) && (!org || !i.org && !i.orgs || gsmOrgKey(i.org) === gsmOrgKey(org) || (i.orgs || []).some(o => gsmOrgKey(o) === gsmOrgKey(org))));
+  const issues = (ledger.issues || []).slice();
+  // Invalid source quantities and orphaned records can be excluded by the
+  // ledger. They still prevent a final act; opening the audit UI is optional.
+  if (typeof gsmAuditModel === 'function') {
+    const audit = gsmAuditModel(data, { from: ledger.from, to: ledger.to, ledger, coverage: false });
+    audit.items.filter(item => item.category === 'error').forEach(item => {
+      const existingIndex = issues.findIndex(issue => issue.code === item.code && (issue.purchaseId || '') === (item.purchaseId || '') &&
+        (issue.recordId || '') === (item.recordId || '') && (issue.vehicleId || '') === (item.vehicleId || '') &&
+        (issue.message === item.message || !item.impact?.field));
+      if (existingIndex >= 0) {
+        const issue = issues[existingIndex];
+        issues[existingIndex] = { ...issue, org: issue.org || item.org, orgs: (issue.orgs || []).length ? issue.orgs : item.orgs,
+          grade: issue.grade || item.grade, date: issue.date || item.observedDate || '', sourceRefs: item.sourceRefs };
+        return;
+      }
+      issues.push({ ...item, severity: 'error', date: item.observedDate || '',
+        message: [item.title, item.message].filter(Boolean).join(': ') });
+    });
+  }
+  return issues.filter(issue => gsmExportIssueVisible(issue, org, grade));
+}
+function gsmAppendExportIssues(wb, issues) {
+  const vehicle = id => fpVehicleTitle((data.vehicles || []).find(row => row.id === id));
+  const sources = issue => [...new Set([...(issue.sourceRefs || []).filter(ref => ref.id).map(ref => ref.type + ': ' + ref.id),
+    issue.purchaseId ? 'purchase: ' + issue.purchaseId : '', issue.recordId ? 'record: ' + issue.recordId : ''].filter(Boolean))].join('; ');
+  const ws = gsmExportSheet(wb, 'Расхождения', [['Уровень', 'Дата', 'Организация', 'Машина', 'Топливо', 'Расхождение', 'Покупка', 'Запись', 'Источники'],
+    ...issues.map(issue => [issue.severity === 'error' ? 'Ошибка' : 'Проверить', issue.date, issue.org || (issue.orgs || []).join(', '),
+      vehicle(issue.vehicleId), issue.grade, issue.message, issue.purchaseId, issue.recordId, sources(issue)])], 9);
+  ws['!cols'][5] = { wch: 65 }; ws['!cols'][8] = { wch: 50 };
 }
 function gsmExportSheet(wb, name, values, numericFrom) {
   const ws = XLSX.utils.aoa_to_sheet(values);
@@ -41,7 +73,7 @@ function gsmAppendGradeReconciliation(wb, ledger, org, grade, vehicleIds) {
 }
 function gsmAppendConsumptionBasis(wb, ledger, org, grade, vehicleIds) {
   const movements = (ledger.movements || []).filter(row => row.kind === 'consumption' && gsmExportVisible(row, org, grade, vehicleIds));
-  if (!movements.some(row => row.source !== 'actual')) return false;
+  if (!movements.some(row => row.source !== 'actual' || row.norm == null && (row.qty || row.km))) return false;
   const vehicle = id => fpVehicleTitle((data.vehicles || []).find(row => row.id === id));
   gsmExportSheet(wb, 'Основание расхода', [['Дата', 'Организация', 'Машина', 'Марка топлива', 'К списанию, л (х/х включён)', 'В т.ч. х/х, л', 'Основание расхода', 'Код основания', 'Запись журнала'],
     ...movements.map(row => [row.date, row.org, vehicle(row.vehicleId), row.grade, gsmRound(row.qty), gsmRound(row.idle), gsmConsumptionSourceLabel(row.source), row.source || 'unknown', row.recordId])], 4);
@@ -56,22 +88,70 @@ function gsmAppendReconciliation(wb, ledger, org, grade) {
     ...ledger.receipts.filter(relevant).map(p => [p.date, p.cardNo, p.org, vehicle(p.cardVehicleId), vehicle(p.vehicleId), p.grade, p.provider, p.qty, p.sum, p.recordId])], 7);
   gsmExportSheet(wb, 'Расход по партиям', [['Дата', 'Организация', 'Машина', 'Топливо', 'К списанию, л (х/х включён)', 'Строка журнала', 'Основание расхода'],
     ...ledger.movements.filter(m => m.kind === 'consumption' && relevant(m)).map(m => [m.date, m.org, vehicle(m.vehicleId), m.grade, gsmRound(m.qty), m.recordId, gsmConsumptionSourceLabel(m.source)])], 4);
-  gsmExportSheet(wb, 'Расхождения', [['Уровень', 'Дата', 'Организация', 'Машина', 'Топливо', 'Расхождение', 'Покупка', 'Запись'],
-    ...gsmRelevantIssues(ledger, org, grade).map(i => [i.severity === 'error' ? 'Ошибка' : 'Проверить', i.date, i.org || (i.orgs || []).join(', '), vehicle(i.vehicleId), i.grade, i.message, i.purchaseId, i.recordId])], 8);
+  gsmAppendExportIssues(wb, gsmRelevantIssues(ledger, org, grade));
   gsmAppendGradeReconciliation(wb, ledger, org, grade);
   gsmAppendConsumptionBasis(wb, ledger, org, grade);
 }
 function gsmActRows(ledger, org, grade) {
-  const eligible = v => v && ['diesel', 'gasoline'].includes(v.fuel || 'diesel');
+  const eligible = v => v && ['diesel', 'gasoline'].includes(gsmFamily(gsmVehicleGrade(v)));
   const rows = ledger.rows.filter(r => eligible(r.vehicle)).slice();
   const represented = new Set(ledger.rows.map(r => r.vehicleId));
   // Стоящие машины сохраняются в старом бланке, но не создают движения в расчёте.
   (data.vehicles || []).filter(v => eligible(v) && !represented.has(v.id)).forEach(v => {
-    const owner = gsmCardAt(data, v.fuelcard, ledger.to).org || gsmVehicleOrgAt(v, ledger.to) || GSM_UNKNOWN_ORG;
+    const owner = gsmVehicleOrgAt(v, ledger.to) || GSM_UNKNOWN_ORG;
     rows.push({ vehicle: v, vehicleId: v.id, org: owner, grade: gsmVehicleGrade(v), providers: {},
       start: 0, issued: 0, spent: 0, idle: 0, norm: 0, km: 0, glonass: 0, end: 0, correction: 0 });
   });
   return rows.filter(r => (!org || gsmOrgKey(r.org) === gsmOrgKey(org)) && (!grade || r.grade === grade));
+}
+function gsmActSupplierSplit(providers, issued) {
+  const patterns = [/газпром/i, /волга/i, /спс/i, /наличк|наличн|cash/i];
+  const buckets = Array.from({ length: 5 }, () => ({ qty: 0, providers: [] }));
+  Object.entries(providers || {}).forEach(([name, qty]) => {
+    const matched = patterns.findIndex(pattern => pattern.test(name)), index = matched < 0 ? 4 : matched;
+    buckets[index].qty += gsmNumber(qty); buckets[index].providers.push(name);
+  });
+  const sourceTotal = buckets.reduce((sum, bucket) => sum + bucket.qty, 0);
+  const units = buckets.map(bucket => Math.floor(bucket.qty * 1000 + 1e-9));
+  const remainder = Math.round(gsmNumber(issued) * 1000) - units.reduce((sum, value) => sum + value, 0);
+  // Only allocate the display rounding. A real provider/source mismatch must
+  // stay visible instead of being forced into the invoice total.
+  if (Math.abs(sourceTotal - issued) <= 0.0005001 && remainder >= 0 && remainder <= buckets.length) {
+    const order = buckets.map((bucket, index) => ({ index, fraction: bucket.qty * 1000 - units[index] }))
+      .sort((a, b) => b.fraction - a.fraction || a.index - b.index);
+    for (let i = 0; i < remainder; i++) units[order[i].index]++;
+  } else buckets.forEach((bucket, index) => { units[index] = Math.round(bucket.qty * 1000); });
+  const values = units.map(value => value / 1000);
+  return { buckets, values, rounded: buckets.some((bucket, index) => Math.abs(bucket.qty - values[index]) > 1e-9),
+    mismatch: Math.abs(values.reduce((sum, value) => sum + value, 0) - issued) > 0.0000001 };
+}
+function gsmAppendActBalances(wb, actRows) {
+  const rows = actRows.filter(item => Math.abs(item.row.correction) > 0.0000001 ||
+    Math.abs(item.row.start + item.row.issued + item.row.correction - item.row.spent - item.row.end) > 0.0000001 || item.supplier.mismatch);
+  if (!rows.length) return;
+  gsmExportSheet(wb, 'Баланс строк акта', [['Организация', 'Строка акта', 'Машина', 'Топливо', 'Пробег, км', 'Начало, л', 'Приход, л', 'Корректировка ±, л', 'К списанию, л (х/х включён)', 'Конец, л', 'Контроль баланса, л', 'Проверка поставщиков'],
+    ...rows.map(({ row, number, supplier }) => [row.org, number, fpVehicleTitle(row.vehicle), row.grade, row.km, row.start, row.issued,
+      row.correction, row.spent, row.end, gsmRound(row.start + row.issued + row.correction - row.spent - row.end), supplier.mismatch ? 'Сумма поставщиков не совпадает с приходом' : ''])], 4);
+}
+function gsmAppendMeasurementCorrections(wb, ledger, org, grade, vehicleIds) {
+  const rows = (ledger.movements || []).filter(row => row.kind === 'measurement-correction' && gsmExportVisible(row, org, grade, vehicleIds));
+  if (!rows.length) return;
+  gsmExportSheet(wb, 'Корректировки по замерам', [['Дата', 'Организация', 'Машина', 'Топливо', 'Корректировка ±, л', 'Основание', 'Запись замера', 'Запись применения'],
+    ...rows.map(row => [row.date, row.org, fpVehicleTitle((data.vehicles || []).find(vehicle => vehicle.id === row.vehicleId)), row.grade,
+      row.delta, row.reason || 'Остаток по замеру выше расчётного; приход требует проверки', row.measurementRecordId || row.recordId || '', row.recordId || ''])], 4);
+}
+function gsmAppendSupplierRounding(wb, actRows) {
+  const labels = ['Газпром', 'Волга-Интер', 'СПС', 'Наличка', 'Другой'], rows = [];
+  actRows.filter(item => item.supplier.rounded).forEach(({ row, number, supplier }) => {
+    supplier.buckets.forEach((bucket, index) => {
+      if (!bucket.qty && !supplier.values[index]) return;
+      rows.push([row.org, number, fpVehicleTitle(row.vehicle), row.grade, labels[index], bucket.providers.join(', '), bucket.qty,
+        supplier.values[index], supplier.values[index] - bucket.qty]);
+    });
+  });
+  if (!rows.length) return;
+  const ws = gsmExportSheet(wb, 'Округление поставщиков', [['Организация', 'Строка акта', 'Машина', 'Топливо', 'Колонка поставщика', 'Поставщики', 'Исходные литры', 'Показано в акте, л', 'Округление отображения, л'], ...rows], 6);
+  rows.forEach((_, index) => { for (const column of [6, 8]) ws[XLSX.utils.encode_cell({ r: index + 1, c: column })].z = '0.000000'; });
 }
 function gsmActPeriod(from, to) {
   const months = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
@@ -84,6 +164,7 @@ function gsmActPeriod(from, to) {
 function gsmActWorkbook(ledger, org, opts) {
   opts = opts || {};
   const rows = gsmActRows(ledger, org, opts.fuelGrade);
+  const errors = gsmRelevantIssues(ledger, org, opts.fuelGrade).filter(issue => issue.severity === 'error');
   const organizations = [...new Map(rows.map(r => [gsmOrgKey(r.org), r.org])).values()].sort((a, b) => a.localeCompare(b, 'ru'));
   const wb = XLSX.utils.book_new(), ws = { '!merges': [], '!rows': [] };
   const P = { navy: '1B3A6B', navyMid: '2D5A8E', navyLight: 'D6E4F7', white: 'FFFFFF', gray1: 'F8FAFC',
@@ -111,10 +192,10 @@ function gsmActWorkbook(ledger, org, opts) {
   function line(text, s, height, column) {
     const c = column || 0;
     for (let j = c; j <= 25; j++) put(n, j, j === c ? text : '', s);
-    merge(n, c, n, 25); ws['!rows'][n++] = { hpt: height };
+    const lines = Math.ceil(String(text || '').length / (c ? 55 : 175));
+    merge(n, c, n, 25); ws['!rows'][n++] = { hpt: Math.max(height, lines * 13 + 2) };
   }
-  const numeric = (value, decimals) => +gsmNumber(value).toFixed(decimals == null ? 2 : decimals);
-  const suppliers = [/газпром/i, /волга/i, /спс/i, /наличк|наличн|cash/i];
+  const numeric = value => gsmRound(value), actSourceRows = [];
   const periodRecords = new Map();
   (data.records || []).filter(r => gsmValidDate(r.date) && gsmInPeriod(r.date, ledger.from, ledger.to)).forEach(r => {
     if (!periodRecords.has(r.vehicleId)) periodRecords.set(r.vehicleId, []);
@@ -125,8 +206,8 @@ function gsmActWorkbook(ledger, org, opts) {
     const orgRows = rows.filter(r => gsmOrgKey(r.org) === gsmOrgKey(owner)).sort((a, b) =>
       (a.vehicle.object || '\uffff').localeCompare(b.vehicle.object || '\uffff', 'ru'));
     if (section) line('', {}, 10);
-    if (opts.draft) {
-      const count = gsmRelevantIssues(ledger, owner, opts.fuelGrade).filter(i => i.severity === 'error').length;
+    const count = errors.filter(issue => gsmExportIssueVisible(issue, owner, opts.fuelGrade)).length;
+    if (opts.draft || count) {
       line('ЧЕРНОВИК. Не утверждён. Расхождений: ' + count,
         style({ bold: true, sz: 12, color: { rgb: P.red } }, P.redPale, { horizontal: 'center', vertical: 'center' }), 22);
     }
@@ -148,35 +229,53 @@ function gsmActWorkbook(ledger, org, opts) {
     gh(20, 22, 'Списано, л', ['по норме', 'к списанию', 'в т.ч. х/х']);
     vh(23, 'Остаток на кон., л'); vh(24, 'Экономия(+)/ Перерасход(-), л'); vh(25, 'Поставщик');
     ws['!rows'][h1] = { hpt: 16 }; ws['!rows'][h2] = { hpt: 30 }; n += 2;
-    const totals = Array(26).fill(0), measuredPlates = new Set();
+    const totals = Array(26).fill(0), measuredPlates = new Set(), missingNormRows = [], odometerNotes = new Map();
     const vehicleIds = new Set(orgRows.map(row => row.vehicleId));
     const consumption = (ledger.movements || []).filter(row => row.kind === 'consumption' && gsmExportVisible(row, owner, opts.fuelGrade, vehicleIds));
     orgRows.forEach((r, i) => {
-      const v = r.vehicle, per = periodRecords.get(v.id) || [], split = [0, 0, 0, 0, 0];
-      Object.entries(r.providers).forEach(([provider, qty]) => { const k = suppliers.findIndex(re => re.test(provider)); split[k < 0 ? 4 : k] += qty; });
-      const eco = numeric(r.norm - (r.spent - r.idle));
+      const v = r.vehicle, per = periodRecords.get(v.id) || [], supplier = gsmActSupplierSplit(r.providers, r.issued);
+      const firstOdo = per.find(record => fqValue(record.odoStart) != null), lastOdo = per.slice().reverse().find(record => fqValue(record.odoEnd) != null);
+      const rowConsumption = consumption.filter(row => row.vehicleId === v.id && row.grade === r.grade && (row.qty || row.km));
+      const normKnown = rowConsumption.every(row => row.norm != null);
+      if (!normKnown) missingNormRows.push(i + 1);
+      if (per.length && (firstOdo !== per[0] || lastOdo !== per[per.length - 1])) odometerNotes.set(v.id,
+        (v.plate || v.id) + ': начало ' + (firstOdo ? fmtDate(firstOdo.date) : 'не указано') + ', конец ' + (lastOdo ? fmtDate(lastOdo.date) : 'не указано'));
+      const eco = normKnown ? numeric(r.norm - (r.spent - r.idle)) : '—';
+      actSourceRows.push({ row: r, number: i + 1, supplier });
       const values = [i + 1, v.make || '—', v.plate || '—', v.object || '—', r.grade, (v.driver || '—').replace(/\r?\n/g, ', '),
-        (per.length ? per[0].odoStart : v.odometer) ?? '—', (per.length ? per[per.length - 1].odoEnd : v.odometer) ?? '—',
-        v.normCity ?? v.norm ?? '—', v.normHighway ?? '—', v.normIdle ?? '—', numeric(r.km, 1), r.glonass > 0 ? numeric(r.glonass, 1) : '—', numeric(r.start),
-        ...split.map(q => q ? numeric(q) : ''), numeric(r.issued), numeric(r.norm), numeric(r.spent), numeric(r.idle), numeric(r.end), eco,
+        firstOdo ? fqValue(firstOdo.odoStart) : '—', lastOdo ? fqValue(lastOdo.odoEnd) : '—',
+        v.normCity ?? v.norm ?? '—', v.normHighway ?? '—', v.normIdle ?? '—', numeric(r.km), r.glonass > 0 ? numeric(r.glonass) : '—', numeric(r.start),
+        ...supplier.values.map(q => q || ''), numeric(r.issued), normKnown ? numeric(r.norm) : '—', numeric(r.spent), numeric(r.idle), numeric(r.end), eco,
         Object.keys(r.providers).join(', ') || v.supplier || '—'];
       const bg = i % 2 === 0 ? P.white : P.gray1;
       values.forEach((value, c) => {
         let s = ST.cell(bg, [1, 3, 5].includes(c) ? 'left' : c >= 6 && c <= 24 ? 'right' : 'center');
+        if (typeof value === 'number' && c >= 11 && c <= 24) s.alignment.indent = 0;
         if (c === 24) s = style({ bold: true, sz: 9, color: { rgb: eco < 0 ? P.red : eco > 0 ? P.green : P.text } },
           eco < 0 ? P.redPale : eco > 0 ? P.greenPale : bg, { horizontal: 'right', vertical: 'center', indent: 1 }, border('thin', P.gray3));
         put(n, c, value, s);
+        if (typeof value === 'number' && c >= 11 && c <= 24) ws[XLSX.utils.encode_cell({ r: n, c })].z = c <= 12 ? '0.###' : '0.000';
         if (c >= 11 && c <= 24) totals[c] += gsmNumber(value);
       });
       if (consumption.some(row => row.vehicleId === v.id && row.source === 'measurement')) measuredPlates.add(v.plate);
-      ws['!rows'][n++] = { hpt: 16 };
+      const wrapped = [1, 3, 5, 25].map(column => Math.ceil(String(values[column] || '').length / (column === 3 ? 14 : column === 25 ? 13 : 18)));
+      ws['!rows'][n++] = { hpt: Math.max(16, Math.max(...wrapped) * 12 + 4) };
     });
-    for (let c = 0; c <= 25; c++) put(n, c, c === 0 ? 'ИТОГО:' : c >= 11 && c <= 24 ? numeric(totals[c], c <= 12 ? 1 : 2) : '', c < 11 ? ST.totalLabel : ST.total);
+    for (let c = 0; c <= 25; c++) {
+      put(n, c, c === 0 ? 'ИТОГО:' : c >= 11 && c <= 24 ? missingNormRows.length && [20, 24].includes(c) ? '—' : numeric(totals[c]) : '', c < 11 ? ST.totalLabel : ST.total);
+      if (c >= 11 && c <= 24 && typeof ws[XLSX.utils.encode_cell({ r: n, c })].v === 'number') ws[XLSX.utils.encode_cell({ r: n, c })].z = c <= 12 ? '0.###' : '0.000';
+    }
     if (!totals[12]) put(n, 12, '—', ST.total);
     merge(n, 0, n, 10); ws['!rows'][n++] = { hpt: 18 };
     line('«К списанию» — итоговый расход, включая холостой ход. Колонка «в т.ч. х/х» входит в этот итог и повторно не прибавляется.', ST.plain, 28);
     if (consumption.some(row => row.source !== 'actual')) line('Факт, расчёт по норме и расчёт по замеру разделены на листе «Основание расхода».', ST.plain, 24);
     if (measuredPlates.size) line('Расход рассчитан по замерам остатка в баке: ' + [...measuredPlates].join(', ') + '.', ST.plain, 24);
+    if (missingNormRows.length) line('В строках № ' + missingNormRows.join(', ') + ' норма расхода не определена. Экономия/перерасход и их итог не рассчитываются; «—» не является нулевой нормой.', ST.plain, 36);
+    if (odometerNotes.size) line('Показания спидометра приведены по известным записям внутри периода, а не восстановлены из пробега. Даты при пропусках: ' + [...odometerNotes.values()].join('; ') + '.', ST.plain, 40);
+    const corrected = orgRows.map((row, index) => Math.abs(row.correction) > 0.0000001 ? index + 1 : null).filter(Boolean);
+    if (corrected.length) line('В строках № ' + corrected.join(', ') + ' баланс: начало + приход + корректировка − к списанию = конец. Суммы по каждой машине и марке — на листе «Баланс строк акта».', ST.plain, 36);
+    if (actSourceRows.some(item => gsmOrgKey(item.row.org) === gsmOrgKey(owner) && item.supplier.rounded)) line('Колонки поставщиков округлены до 0,001 л с сохранением общего прихода. Исходные литры и округление отображения — на листе «Округление поставщиков»; покупки не изменены.', ST.plain, 36);
+    if ((ledger.movements || []).some(row => row.kind === 'measurement-correction' && gsmExportVisible(row, owner, opts.fuelGrade, vehicleIds))) line('Корректировка по замеру остатка не является подтверждённым приходом. Источник замера и причина расхождения — на листе «Корректировки по замерам».', ST.plain, 32);
     const corrections = gsmGradeReconciliations(ledger, owner, opts.fuelGrade, vehicleIds);
     if (corrections.length) {
       const byGrade = new Map(); corrections.forEach(row => byGrade.set(row.grade, gsmRound((byGrade.get(row.grade) || 0) + gsmNumber(row.delta))));
@@ -193,6 +292,10 @@ function gsmActWorkbook(ledger, org, opts) {
   const vehicleIds = new Set(rows.map(row => row.vehicleId));
   gsmAppendGradeReconciliation(wb, ledger, org, opts.fuelGrade, vehicleIds);
   gsmAppendConsumptionBasis(wb, ledger, org, opts.fuelGrade, vehicleIds);
+  gsmAppendActBalances(wb, actSourceRows);
+  gsmAppendMeasurementCorrections(wb, ledger, org, opts.fuelGrade, vehicleIds);
+  gsmAppendSupplierRounding(wb, actSourceRows);
+  if (errors.length) gsmAppendExportIssues(wb, errors);
   return wb;
 }
 function gsmReviewActExport(ledger, org, opts) {

@@ -213,7 +213,7 @@ test('GSM write-off preserves the measured carry and exports its source without 
   await page.evaluate(()=>{window.__gsmExport=null;});
   await page.getByRole('button',{name:'Выгрузить акт',exact:true}).click();
   const exported=await page.evaluate(()=>window.__gsmExport),act=exported.act.find(row=>typeof row[0]==='number');
-  assert.equal(act[13],45.56);assert.equal(act[19],289.99);assert.equal(act[21],318.3);assert.equal(act[23],17.25);
+  assert.equal(act[13],45.562);assert.equal(act[19],289.99);assert.equal(act[21],318.3);assert.equal(act[23],17.252);
   assert.ok(exported.sheets.includes('Основание расхода'));
   assert.equal(Math.round(exported.basis.filter(row=>row[6]==='Расчёт по норме').reduce((sum,row)=>sum+row[4],0)*1000)/1000,318.3);
   await page.getByRole('combobox',{name:'Месяц',exact:true}).selectOption('2026-08');
@@ -320,4 +320,197 @@ test('barrel filters survive an empty month and stocks and operations fit 1280 l
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  }
  assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__barrelBefore,writes:window.__writes})),{same:true,writes:0});
+});
+
+async function loadGsmDiagnosticsFixture(controlledRoutes=false){
+ await page.evaluate(controlledRoutes=>{
+  Object.assign(data,{
+   vehicles:[{id:'diag-v',plate:'AUDIT001',make:'Synthetic vehicle',driver:'Synthetic driver',org:'Аудит A',fuel:'gasoline',fuelGrade:'АИ-95',fuelBalance:10,norm:10,
+    fuelBalanceSources:[{org:'Аудит A',grade:'АИ-95',qty:10}],note:''},
+    {id:'diag-invalid',plate:'AUDIT002',make:'Synthetic invalid source',driver:'Synthetic driver',org:'Аудит A',fuel:'gasoline',fuelGrade:'АИ-95',fuelBalance:0,norm:10},
+    {id:'diag-confirmed',plate:'N260SYNTH',make:'Synthetic confirmed source',driver:'Synthetic driver',org:'Аудит A',fuel:'gasoline',fuelGrade:'АИ-95',fuelBalance:923.537}],
+   records:[{id:'diag-august',vehicleId:'diag-v',date:'2026-08-01',km:0,fuelActual:40,fuelGrade:'АИ-95'},
+    {id:'diag-record',vehicleId:'diag-v',date:'2026-09-01',km:50,fuelActual:5,fuelIssued:0,fuelGrade:'АИ-95',note:''},
+    {id:'diag-negative',vehicleId:'diag-invalid',date:'2026-09-03',km:0,fuelActual:0,fuelIdle:-1,fuelGrade:'АИ-95'},
+    {id:'diag-confirmed-measurement',vehicleId:'diag-confirmed',date:'2026-08-31',km:0,fuelActual:0,tankMeasured:923.537,fuelGrade:'АИ-95'}],
+   fuelPurchases:[{id:'diag-purchase',vehicleId:'diag-v',recordId:'diag-record',date:'2026-09-01',qty:10.123,grade:'АИ-95',manual:true,sourceOrg:'Аудит A',cardNo:'111111'}],
+   fuelCards:[{id:'diag-card',number:'111111',org:'Аудит A',provider:'Synthetic supplier',assignments:[{vehicleId:'diag-v',from:'',to:''}]}],
+   monthlyFuel:[],fuelPeriods:[{month:'2026-08',closed:true,history:[]}]
+  });
+  rebuildIndex();fpMonth='2026-09';fpView='barrels';gsmOrg='Аудит A';gsmFuel='АИ-95';gsmDiagnosticsCategory='all';gsmDiagnosticsSearch='';gsmDiagnosticsLimit=30;
+  if(controlledRoutes){
+   window.__unsafeRefExecuted=false;
+   gsmAuditModel=db=>({from:'2026-09-01',to:'2026-09-30',summary:{error:0,evidence:1,warning:0,total:1},items:[{
+    id:'typed-routes',code:'synthetic-manual-source',category:'evidence',severity:'warning',title:'Сверить первичные документы',
+    message:'Примечание: '+(db.vehicles.find(v=>v.id==='diag-v').note||'не заполнено'),whatToCheck:'Открыть исходную форму и проверить документ.',vehicleId:'diag-v',org:'Аудит A',grade:'АИ-95',observedDate:'2026-09-01',impact:{},sourceRefs:[],chronology:[],
+    repairRefs:[{type:'purchase',id:'diag-purchase',label:'Открыть покупку'},
+     {type:'record',id:'diag-record',label:'Открыть запись'},
+     {type:'vehicle',id:'diag-v',vehicleId:'diag-v',label:'Открыть карточку ТС'},
+     {type:'opening',id:'diag-v',vehicleId:'diag-v',label:'Открыть начальные источники'},
+     {type:'card',id:'diag-card',cardNo:'111111',label:'Открыть карту'},
+     {type:'period',id:'2026-08',month:'2026-08',label:'Открыть закрытый месяц'},
+     {type:'receipts',month:'2026-09',label:'Открыть выписку'},
+     {type:'monthly',month:'2026-09',label:'Открыть месячную сверку'},
+     {type:'journal',id:'diag-v',vehicleId:'diag-v',date:'2026-08-01',label:'Открыть историю машины'},
+     {type:'eval',id:'window.__unsafeRefExecuted=true',label:'Небезопасная команда'}]
+   }]});
+  }
+  window.__writes=0;window.__disk=JSON.stringify(data);window.__diagBefore=window.__disk;_lastPersisted=window.__disk;
+ },controlledRoutes);
+ await page.locator('#unifiedNav [data-section="fuelPurchases"]').click();
+ await page.getByRole('button',{name:'Проверить ГСМ',exact:true}).click();
+}
+
+test('GSM diagnostics shows source causes and keeps live search, scope and supported viewports read-only',async()=>{
+ await loadGsmDiagnosticsFixture();
+ const model=await page.evaluate(()=>({items:gsmDiagnosticsModel.items.map(item=>({category:item.category,earliest:item.earliestCauseDate,vehicleId:item.vehicleId,code:item.code,family:item.family,grade:item.grade})),source:JSON.stringify(data)===window.__diagBefore}));
+ assert.equal(model.source,true);assert.ok(model.items.some(item=>item.category==='error'));assert.ok(model.items.some(item=>item.category==='warning'));
+ assert.ok(model.items.some(item=>item.earliest&&item.earliest<'2026-09-01'));
+ assert.equal(model.items.some(item=>item.vehicleId==='diag-confirmed'&&item.category==='error'&&/capacity|large|volume/.test(item.code)),false);
+ assert.equal(await page.locator('#gsmBarrelCards').count(),0);
+ assert.match(await page.locator('#gsmDiagnostics').innerText(),/Аудит A · АИ-95/);
+ const familyCoverage=model.items.filter(item=>item.code==='ending-unmeasured'&&item.family==='gasoline'&&!item.grade);
+ assert.ok(familyCoverage.length>0);
+ assert.equal(await page.locator('.gsm-audit-item[data-audit-code="ending-unmeasured"]').count(),familyCoverage.length);
+ for(const [width,theme]of[[1280,'light'],[960,'dark']]){
+  await page.setViewportSize({width,height:width===960?700:900});await page.evaluate(theme=>applyTheme(theme),theme);
+  await page.getByRole('combobox',{name:'Категория проверки',exact:true}).selectOption('all');
+  const search=page.getByRole('searchbox',{name:'Поиск проверок ГСМ',exact:true});
+  await search.fill('AUDIT001');await search.type(' ');
+  assert.ok(await page.locator('.gsm-audit-item').count()>0);
+  assert.equal(await search.evaluate(el=>document.activeElement===el),true);
+  assert.equal(await search.inputValue(),'AUDIT001 ');
+  await search.fill('no synthetic issue matches');assert.equal(await page.locator('.gsm-audit-item').count(),0);
+  await search.fill('');
+  await page.getByRole('combobox',{name:'Категория проверки',exact:true}).selectOption('warning');
+  assert.equal(await page.locator('.gsm-audit-item:not([data-audit-category="warning"])').count(),0);
+  await page.getByRole('combobox',{name:'Категория проверки',exact:true}).selectOption('all');
+  const chronology=page.locator('.gsm-audit-chronology').first();await chronology.locator('summary').click();
+  assert.ok(await chronology.locator('tbody tr').count()>0);
+  assert.match(await page.locator('#gsmDiagnosticsResults').innerText(),/01\.08\.2026/);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ }
+ await page.locator('.gsm-audit-item[data-audit-code="negative-ending"]').filter({hasText:'AUDIT001'}).getByRole('button',{name:'История машины',exact:true}).click();
+ assert.deepEqual(await page.evaluate(()=>({year:selectedYear,month:selectedMonth})),{year:2026,month:8});
+ await page.locator('#unifiedNav [data-section="fuelPurchases"]').click();
+ assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__diagBefore,writes:window.__writes,view:fpView,month:fpMonth,org:gsmOrg,grade:gsmFuel})),{same:true,writes:0,view:'diagnostics',month:'2026-09',org:'Аудит A',grade:'АИ-95'});
+});
+
+test('GSM diagnostic typed repair links open existing source forms and cancellation never changes data',async()=>{
+ await loadGsmDiagnosticsFixture(true);
+ assert.equal(await page.getByRole('button',{name:'Небезопасная команда',exact:true}).count(),0);
+ const cases=[['Открыть покупку','genericModal'],['Открыть запись','recordModal'],['Открыть карточку ТС','vehicleModal'],['Открыть начальные источники','genericModal'],['Открыть карту','genericModal'],['Открыть закрытый месяц','genericModal']];
+ for(const [label,modalId]of cases){
+  await page.getByRole('button',{name:label,exact:true}).click();
+  const modal=page.locator('#'+modalId);assert.equal(await modal.evaluate(el=>el.classList.contains('open')),true);
+  if(label==='Открыть покупку')assert.equal(await page.locator('#fpe_qty').inputValue(),'10.123');
+  if(label==='Открыть карту')assert.equal(await page.locator('#fc_move').isChecked(),false);
+  if(label==='Открыть начальные источники')assert.match(await modal.innerText(),/исходный остаток за всё время учёта/);
+  await modal.locator('.modal-header .icon-btn').click();
+  await page.waitForFunction(()=>!document.querySelector('.modal-overlay.open'));
+  assert.equal(await page.locator('#gsmDiagnostics').isVisible(),true);
+ }
+ await page.getByRole('button',{name:'Открыть выписку',exact:true}).click();assert.equal(await page.locator('#gsmReceiptOperations').count(),1);
+ await page.getByRole('button',{name:'Проверить ГСМ',exact:true}).click();
+ await page.getByRole('button',{name:'Открыть месячную сверку',exact:true}).click();
+ assert.deepEqual(await page.evaluate(()=>({view:fpView,month:fpMonth})),{view:'monthly',month:'2026-09'});
+ await page.getByRole('button',{name:'Проверить ГСМ',exact:true}).click();
+ await page.getByRole('button',{name:'Открыть историю машины',exact:true}).click();
+ assert.equal(await page.evaluate(()=>activeSection),'vehicles');
+ assert.deepEqual(await page.evaluate(()=>({year:selectedYear,month:selectedMonth})),{year:2026,month:8});
+ await page.locator('#unifiedNav [data-section="fuelPurchases"]').click();assert.equal(await page.locator('#gsmDiagnostics').count(),1);
+ assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__diagBefore,writes:window.__writes,unsafe:window.__unsafeRefExecuted})),{same:true,writes:0,unsafe:false});
+});
+
+test('an explicit vehicle form save returns to GSM diagnosis and refreshes evidence without changing fuel or mileage',async()=>{
+ await loadGsmDiagnosticsFixture(true);
+ await page.evaluate(()=>{selectedVehicleId='diag-v';window.__diagNumbers=JSON.stringify({records:data.records,purchases:data.fuelPurchases,balance:data.vehicles[0].fuelBalance,sources:data.vehicles[0].fuelBalanceSources});});
+ await page.getByRole('button',{name:'Открыть карточку ТС',exact:true}).click();
+ await page.locator('#vm_note').fill('Подтверждено синтетическим документом');
+ await page.locator('#vehicleModal').getByRole('button',{name:'Сохранить',exact:true}).click();
+ await page.waitForFunction(()=>document.getElementById('gsmDiagnostics')&&document.querySelector('#gsmDiagnosticsResults')?.innerText.includes('Подтверждено синтетическим документом'));
+ assert.deepEqual(await page.evaluate(()=>({sameNumbers:JSON.stringify({records:data.records,purchases:data.fuelPurchases,balance:data.vehicles[0].fuelBalance,sources:data.vehicles[0].fuelBalanceSources})===window.__diagNumbers,writes:window.__writes,view:fpView,open:!!document.querySelector('.modal-overlay.open')})),{sameNumbers:true,writes:1,view:'diagnostics',open:false});
+});
+
+async function loadOrphanDiagnosticsFixture(){
+ await loadGsmDiagnosticsFixture();
+ await page.evaluate(()=>{
+  data.records.push({id:'diag-orphan',vehicleId:'missing-source-vehicle',date:'2026-09-12',km:123.4,kmGlonass:122.9,fuelGrade:'АИ-95',fuelIssued:12.345,fuelActual:null,fuelUsed:7.123,fuelIdle:0.111,tankMeasured:4.567,note:'Исходный документ'});
+  data.fuelPurchases.push({id:'diag-orphan-purchase',recordId:'diag-orphan',vehicleId:'missing-source-vehicle',date:'2026-09-12',grade:'АИ-95',qty:12.345,manual:true,sourceOrg:'Аудит A'});
+  rebuildIndex();window.__diagOrphanBefore=JSON.stringify(data);window.__disk=window.__diagOrphanBefore;_lastPersisted=window.__disk;window.__writes=0;gsmOpenDiagnostics();
+ });
+}
+async function previewOrphanLink(){
+ await page.locator('.gsm-audit-item[data-audit-code="record-vehicle-missing"] [data-audit-ref="orphan-record"]').first().click();
+ await page.locator('#gsm_orphan_vehicle').selectOption('diag-v');
+ await page.locator('#gsm_orphan_reason').fill('Первичный документ: подтверждена машина AUDIT001');
+ await page.locator('#gsmOrphanPreview').click();
+ await page.locator('#gsmOrphanCommit').waitFor({state:'visible'});
+}
+
+test('orphan journal assignment previews an explicit manual link and preserves every quantity and related purchase',async()=>{
+ await loadOrphanDiagnosticsFixture();
+ await page.locator('.gsm-audit-item[data-audit-code="record-vehicle-missing"] [data-audit-ref="orphan-record"]').first().click();
+ assert.equal(await page.locator('#gsm_orphan_vehicle').inputValue(),'');
+ assert.match(await page.locator('#genericModal').innerText(),/Связанных покупок:\s*1/);
+ await page.locator('#gsmOrphanPreview').click();assert.match(await page.locator('#gsmOrphanError').innerText(),/Выберите существующую машину/);
+ await page.locator('#genericModal .modal-header .icon-btn').click();
+ await previewOrphanLink();
+ assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__diagOrphanBefore,writes:window.__writes})),{same:true,writes:0});
+ await page.locator('#genericModal').getByRole('button',{name:'Отмена',exact:true}).click();
+ assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__diagOrphanBefore,writes:window.__writes})),{same:true,writes:0});
+ await previewOrphanLink();
+ await page.evaluate(()=>{const original=saveData;saveData=async(d,options)=>{window.__orphanSaveOptions=options;return original(d,options);};});
+ await page.locator('#gsmOrphanCommit').click();
+ await page.waitForFunction(()=>!document.querySelector('.modal-overlay.open'));
+ const result=await page.evaluate(()=>{
+  const before=JSON.parse(window.__diagOrphanBefore),current=data.records.find(row=>row.id==='diag-orphan');
+  return{record:current,expected:{...before.records.find(row=>row.id==='diag-orphan'),vehicleId:'diag-v'},purchasesSame:JSON.stringify(data.fuelPurchases)===JSON.stringify(before.fuelPurchases),writes:window.__writes,
+   noMerge:window.__orphanSaveOptions.noMerge,reason:data.appMeta.find(row=>row.rowType==='gsm-record-vehicle-correction')?.reason,view:fpView};
+ });
+ assert.deepEqual(result.record,result.expected);assert.equal(result.purchasesSame,true);assert.equal(result.writes,1);assert.equal(result.noMerge,true);
+ assert.match(result.reason,/Первичный документ/);assert.equal(result.view,'diagnostics');
+});
+
+test('orphan journal assignment rejects stale sources, changed database and closed months and rolls back failed saving',async()=>{
+ await loadOrphanDiagnosticsFixture();
+ const cancel=()=>page.locator('#genericModal .modal-header .icon-btn').click();
+ await previewOrphanLink();
+ await page.evaluate(()=>{data.records.find(row=>row.id==='diag-orphan').note='Изменено другим оператором';window.__orphanCurrent=JSON.stringify(data);});
+ await page.locator('#gsmOrphanCommit').click();assert.match(await page.locator('#gsmOrphanError').innerText(),/Исходная запись уже изменена/);
+ assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__orphanCurrent,writes:window.__writes})),{same:true,writes:0});await cancel();
+ await previewOrphanLink();
+ await page.evaluate(()=>{data.fuelPurchases.find(row=>row.id==='diag-orphan-purchase').qty=12.346;window.__orphanCurrent=JSON.stringify(data);});
+ await page.locator('#gsmOrphanCommit').click();assert.match(await page.locator('#gsmOrphanError').innerText(),/связанные покупки уже изменены/);
+ assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__orphanCurrent,writes:window.__writes})),{same:true,writes:0});await cancel();
+ await page.evaluate(()=>{window.__orphanIdentity='synthetic-db-A';window.electronAPI.getDataIdentity=async()=>window.__orphanIdentity;});
+ await previewOrphanLink();await page.evaluate(()=>{window.__orphanIdentity='synthetic-db-B';});
+ await page.locator('#gsmOrphanCommit').click();assert.match(await page.locator('#gsmOrphanError').innerText(),/Открытая база изменилась/);
+ assert.equal(await page.evaluate(()=>window.__writes),0);await cancel();
+ await page.evaluate(()=>{window.__orphanIdentity='synthetic-db-A';window.__holdOrphanIdentity=false;window.electronAPI.getDataIdentity=async()=>window.__holdOrphanIdentity?new Promise(resolve=>window.__releaseOrphanIdentity=resolve):window.__orphanIdentity;});
+ await previewOrphanLink();await page.evaluate(()=>{window.__holdOrphanIdentity=true;window.__orphanCurrent=JSON.stringify(data);});
+ await page.locator('#gsmOrphanCommit').click();await cancel();
+ await page.evaluate(()=>{window.__releaseOrphanIdentity('synthetic-db-A');});
+ await page.waitForFunction(()=>!gsmOrphanSaving);
+ assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__orphanCurrent,writes:window.__writes})),{same:true,writes:0});
+ await page.evaluate(()=>{window.__holdOrphanIdentity=false;});
+ await page.evaluate(()=>{window.__orphanIdentity='synthetic-db-A';});await previewOrphanLink();
+ await page.evaluate(()=>{data.fuelPeriods.push({month:'2026-09',closed:true});window.__orphanCurrent=JSON.stringify(data);});
+ await page.locator('#gsmOrphanCommit').click();
+ assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__orphanCurrent,writes:window.__writes})),{same:true,writes:0});await cancel();
+ await page.evaluate(()=>{data.fuelPeriods=data.fuelPeriods.filter(row=>row.month!=='2026-09');});await previewOrphanLink();
+ await page.evaluate(()=>{window.__orphanCurrent=JSON.stringify(data);window.__disk=window.__orphanCurrent;_lastPersisted=window.__orphanCurrent;window.__orphanDisk=window.__disk;window.__reject=true;});
+ await page.locator('#gsmOrphanCommit').click();assert.match(await page.locator('#gsmOrphanError').innerText(),/не записана/);
+ assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__orphanCurrent,diskSame:window.__disk===window.__orphanDisk,writes:window.__writes})),{same:true,diskSame:true,writes:1});
+ await cancel();
+ for(const mode of['false','throw']){
+  await previewOrphanLink();
+  await page.evaluate(mode=>{
+   const canonical=JSON.parse(JSON.stringify(data));canonical.records.find(row=>row.id==='diag-orphan').note='Каноническая версия '+mode;window.__orphanCanonical=JSON.stringify(canonical);
+   saveData=async()=>{data=JSON.parse(window.__orphanCanonical);rebuildIndex();if(mode==='throw')throw Error('Synthetic canonical conflict');return false;};
+  },mode);
+  await page.locator('#gsmOrphanCommit').click();assert.match(await page.locator('#gsmOrphanError').innerText(),/База обновилась/);
+  assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__orphanCanonical,writes:window.__writes})),{same:true,writes:1});
+  await cancel();
+ }
 });

@@ -190,7 +190,8 @@ test('validation opens an actionable review; explicit draft export preserves the
     assert.match(wb.Sheets['Акт списания ГСМ'].A1.v, /ЧЕРНОВИК.*Не утверждён/);
     assert.ok(rows.some(r => /^Акт списания ГСМ по A за /.test(r[0])));
     assert.ok(rows.some(r => /^Акт № 123/.test(r[0])));
-    assert.deepEqual(Array.from(wb.SheetNames), ['Акт списания ГСМ']);
+    assert.deepEqual(Array.from(wb.SheetNames), ['Акт списания ГСМ', 'Расхождения']);
+    assert.ok(ctx.XLSX.utils.sheet_to_json(wb.Sheets['Расхождения'], { header: 1 }).length > 1);
     assert.equal(JSON.stringify(db), before);
     assert.equal(closed, true);
     assert.equal(ctx.gsmExportActDraft(), null);

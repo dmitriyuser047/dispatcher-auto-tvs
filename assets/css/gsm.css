@@ -129,6 +129,40 @@
 .gsm-barrel-reconciliation { margin-bottom: 18px; }
 .gsm-barrel-reconciliation > summary { padding: 12px 0; color: var(--text2); font-size: 13px; cursor: pointer; }
 .gsm-barrel-reconciliation .gsm-band { margin-top: 4px; }
+.gsm-diagnostics { min-width: 0; }
+.gsm-audit-intro { margin: 0 0 18px; }
+.gsm-workspace .gsm-audit-intro h3 { font-size: 17px; margin: 0 0 7px; }
+.gsm-audit-intro p { margin: 5px 0; color: var(--text2); font-size: 13px; line-height: 1.7; }
+.gsm-audit-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+.gsm-workspace .gsm-audit-summary-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 17px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg2); color: var(--text); text-align: left; font: inherit; font-size: 13px; cursor: pointer; }
+.gsm-workspace .gsm-audit-summary-card strong { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.gsm-audit-summary-card.is-error strong { color: var(--red); }
+.gsm-audit-summary-card.is-evidence strong { color: var(--yellow); }
+.gsm-workspace .gsm-audit-summary-card.active, .gsm-workspace .gsm-audit-summary-card:hover { border-color: var(--accent); }
+.gsm-audit-filters { padding: 14px 16px; margin: 0 0 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg2); }
+.gsm-audit-count { margin: 0 0 12px; color: var(--text2); font-size: 12px; }
+.gsm-audit-item { padding: 18px; margin-bottom: 12px; border: 1px solid var(--border); border-left: 3px solid var(--border2); border-radius: 7px; background: var(--bg2); }
+.gsm-audit-item.is-error { border-left-color: var(--red); }
+.gsm-audit-item.is-evidence { border-left-color: var(--yellow); }
+.gsm-audit-item-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }
+.gsm-workspace .gsm-audit-item-heading h3 { margin: 0; font-size: 14px; line-height: 1.6; }
+.gsm-audit-category { color: var(--text2); font-size: 11px; line-height: 1.8; }
+.gsm-audit-item.is-error .gsm-audit-category { color: var(--red); }
+.gsm-audit-item.is-evidence .gsm-audit-category { color: var(--yellow); }
+.gsm-audit-context { margin: 5px 0 8px; color: var(--text); font-size: 12px; line-height: 1.7; }
+.gsm-audit-dates, .gsm-audit-impact { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 11px; color: var(--text2); line-height: 1.7; }
+.gsm-audit-message, .gsm-audit-next { margin: 10px 0; color: var(--text); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.gsm-audit-impact { margin: 11px 0; padding: 9px 11px; border-radius: 5px; background: var(--bg3); font-size: 12px; }
+.gsm-audit-impact strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.gsm-audit-next strong { font-weight: 600; }
+.gsm-audit-repairs { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.gsm-audit-sources, .gsm-audit-chronology { margin-top: 12px; color: var(--text2); font-size: 12px; }
+.gsm-audit-sources > summary, .gsm-audit-chronology > summary { padding: 5px 0; cursor: pointer; }
+.gsm-audit-sources > summary span, .gsm-audit-chronology > summary span { margin-left: 7px; color: var(--text3); font-size: 11px; }
+.gsm-audit-chronology .gsm-table-scroll { margin-top: 8px; }
+.gsm-audit-chronology .gsm-table { min-width: 680px; }
+.gsm-audit-chronology .gsm-table td:last-child { min-width: 120px; }
+.gsm-audit-chronology .btn { margin: 0 4px 4px 0; }
 @media (max-width: 1100px) {
   .gsm-workspace .gsm-barrel-intro { flex-wrap: wrap; gap: 10px; }
   .gsm-barrel-cards { grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); }
@@ -142,4 +176,6 @@
   .gsm-barrel-cards { grid-template-columns: minmax(0, 1fr); }
   .gsm-workspace .gsm-barrel-card { padding: 16px; }
   .gsm-movement-filters > label { flex: 1 1 100%; }
+  .gsm-audit-summary { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .gsm-audit-item { padding: 15px; }
 }

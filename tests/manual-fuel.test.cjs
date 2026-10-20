@@ -187,7 +187,7 @@ test('cross-object recipients and unknown objects cannot be used for another car
 
 test('invalid dates, invalid amounts, incompatible fuel and closed months are rejected before mutation', () => {
   const db = base(), before = JSON.stringify(db);
-  for (const change of [{ date: '2026-10-32' }, { date: '2026-09-30' }, { qty: '-1' }, { qty: 'Infinity' }, { qty: '0' }, { qty: '1.234' }, { sum: '-1' }, { sum: 'NaN' }, { grade: 'ДТ' }, { vehicleId: '' }, { cardNo: '222222' }])
+  for (const change of [{ date: '2026-10-32' }, { date: '2026-09-30' }, { qty: '-1' }, { qty: 'Infinity' }, { qty: '0' }, { qty: '1.2345' }, { sum: '-1' }, { sum: 'NaN' }, { grade: 'ДТ' }, { vehicleId: '' }, { cardNo: '222222' }])
     assert.throws(() => ctx.gsmManualPlan(db, draft([row(change)])));
   assert.equal(JSON.stringify(db), before);
   db.fuelPeriods.push({ month: '2026-10', closed: true }); assert.throws(() => ctx.gsmManualPlan(db, draft()), /закрыт/);
