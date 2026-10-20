@@ -181,41 +181,8 @@ function renderObjStatusHtml() {
 
 // ─── FUEL BALANCE ───────────────────────────────────────
 function computeFuelBalances(vehicleId, dateFrom, dateTo) {
-  // Кэшируем частый случай без диапазона дат (используется в списках)
-  const cacheable = !dateFrom && !dateTo;
-  if (cacheable && _fuelBalCache[vehicleId]) return _fuelBalCache[vehicleId];
-  const vehicle = data.vehicles.find(v => v.id === vehicleId);
-  const recs = recsFor(vehicleId)
-    .filter(r => {
-      if (dateTo   && r.date > dateTo)   return false;
-      return true;
-    })
-    .sort((a, b) => cmpDateAsc(a.date, b.date));
-  const opening = fqValue(vehicle && vehicle.fuelBalance) || 0;
-  const defaultFamily = fqFuelFamily(vehicleFuelGrade(vehicle));
-  const familyBalances = new Map([[defaultFamily, opening]]);
-  const sources = vehicle && vehicle.fuelBalanceSources;
-  if (Array.isArray(sources) && sources.length && Math.abs(sources.reduce((sum, source) => sum + (fqValue(source.qty) || 0), 0) - opening) < 0.011) {
-    familyBalances.clear();
-    sources.forEach(source => {
-      const family = fqRecordFuelFamily({ fuelGrade: source.grade }, vehicle);
-      familyBalances.set(family, (familyBalances.get(family) || 0) + (fqValue(source.qty) || 0));
-    });
-  }
-  const { keyFor, lastOnDate, measurements } = fqMeasurementPlan(recs, vehicle);
-  const balMap = {};
-  recs.forEach(r => {
-    // Остаток считается по фактическому расходу; если не введён — по норме
-    const fuel = fqRecord(r, vehicle);
-    const family = fqRecordFuelFamily(r, vehicle);
-    let balance = (familyBalances.get(family) || 0) + (fqValue(r.fuelIssued) || 0) - (fuel.total || 0);
-    // Замер остатка в баке — фактическое значение: расчёт с него начинается заново
-    const key = keyFor(r);
-    if (lastOnDate.get(key) === r.id && measurements.has(key)) balance = Number(measurements.get(key).tankMeasured);
-    familyBalances.set(family, balance);
-    balMap[r.id] = +[...familyBalances.values()].reduce((sum, qty) => sum + qty, 0).toFixed(2);
-  });
-  if (cacheable) _fuelBalCache[vehicleId] = balMap;
-  return balMap;
+  const options = { vehicleId, from: dateFrom || '', to: dateTo || '' };
+  return typeof dispatcherQuery === 'function' ? dispatcherQuery('fuelRecords', options)
+    : TvsFuelEngine.recordBalances(data, vehicleId, options);
 }
 

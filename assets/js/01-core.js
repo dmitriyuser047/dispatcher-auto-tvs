@@ -226,6 +226,9 @@ async function saveData(d = data, options) {
     }
     _lastPersisted = JSON.stringify(d);
     scheduleLocalBackup(_lastPersisted);
+    // A successful section save can replace rows with the server's canonical
+    // values even when there was no merge and the indexes were not rebuilt.
+    rebuildIndex();
     return true;
   } catch (e) {
     if (d === data && _lastPersisted) {
@@ -248,10 +251,10 @@ let recsByVid = {};
 let genRecsByGid = {};
 let vehicleToByVid = {};
 let repairsByVid = {};
-// Кэши балансов (сбрасываются при любом изменении данных через rebuildIndex)
-let _fuelBalCache = {};
+// Кеш остатков ДЭС. Расчёты транспорта кешируются общим ядром.
 let _genBalCache = {};
 function rebuildIndex() {
+  if (typeof dispatcherInvalidate === 'function') dispatcherInvalidate();
   recsByVid = {};
   data.records.forEach(r => {
     if (!recsByVid[r.vehicleId]) recsByVid[r.vehicleId] = [];
@@ -272,7 +275,6 @@ function rebuildIndex() {
     if (!repairsByVid[r.vehicleId]) repairsByVid[r.vehicleId] = [];
     repairsByVid[r.vehicleId].push(r);
   });
-  _fuelBalCache = {};
   _genBalCache = {};
 }
 function recsFor(vid) { return recsByVid[vid] || []; }
@@ -315,36 +317,10 @@ function plateKey(s) {
 
 // Марка из произвольной строки: «ДТ-Л-К5», «Аи 95 Евро», «Дизельное топливо»…
 // Пустая строка — марку распознать не удалось.
-function parseFuelGrade(text) {
-  const source = String(text || '').toUpperCase().replace(/Ё/g, 'Е')
-    .replace(/A/g, 'А').replace(/I/g, 'И').replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, '-');
-  const g = source.replace(/[\s_]+/g, '');
-  if (/(^|[^А-Я])ДТ|ДИЗ|^DT/.test(g)) return 'ДТ';
-  // Keep the separator before a receipt quantity: «Аи-92 30л» is АИ-92,
-  // not АИ-923. Preserve already stored 2/3-digit legacy grade tokens.
-  const ai = source.match(/А[\s_]*И[\s_]*-?[\s_]*(\d{2,3})(?!\d)/);
-  if (ai) return 'АИ-' + ai[1];
-  if (/ГАЗ|ГБО|ПРОПАН|МЕТАН|СУГ/.test(g)) return 'Газ';
-  // Фирменные бензины: «G-Drive 95», «Бензин 92», «Ultimate 98»
-  const oct = source.match(/(?:^|\D)(92|95|98|100)(?:\D|$)/);
-  if (oct) return 'АИ-' + oct[1];
-  return '';
-}
-// Вид топлива машины. Марка (ДТ, АИ-92…) — главное поле, общий признак
-// fuel (diesel/gasoline/gas) выводится из неё: по нему работают фильтры и сводки.
-function vehicleFuelGrade(v) {
-  const g = parseFuelGrade(v && v.fuelGrade);
-  if (g) return g;
-  const f = v && v.fuel;
-  return f === 'gasoline' ? 'Бензин' : f === 'gas' ? 'Газ' : 'ДТ';
-}
-function fuelTypeFromGrade(grade) {
-  return grade === 'ДТ' ? 'diesel' : grade === 'Газ' ? 'gas' : 'gasoline';
-}
-// Вид топлива записи пробега: своя марка из записи, иначе — марка машины
-function recordFuelGrade(r, v) {
-  return parseFuelGrade(r && r.fuelGrade) || vehicleFuelGrade(v || (data.vehicles || []).find(x => x.id === (r && r.vehicleId)));
-}
+function parseFuelGrade(text) { return TvsFuelEngine.parseFuelGrade(text); }
+function vehicleFuelGrade(vehicle) { return TvsFuelEngine.vehicleFuelGrade(vehicle); }
+function fuelTypeFromGrade(grade) { return TvsFuelEngine.fuelTypeFromGrade(grade); }
+function recordFuelGrade(record, vehicle) { return TvsFuelEngine.recordFuelGrade(record, vehicle, data); }
 // Марка по строкам выписки: берём ту, что залита в наибольшем объёме
 function fuelGradeFromTransactions(transactions, v) {
   const byGrade = {};

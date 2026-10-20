@@ -2,6 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const context=vm.createContext({console,window:{},document:{addEventListener(){},documentElement:{removeAttribute(){}},getElementById(){}},localStorage:{getItem(){}}});
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core/fuel-engine.js'),'utf8'),context,{filename:'assets/core/fuel-engine.js'});
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/js/01-core.js'),'utf8'),context,{filename:'assets/js/01-core.js'});
 const parse=text=>context.parseFuelGrade(text);
 

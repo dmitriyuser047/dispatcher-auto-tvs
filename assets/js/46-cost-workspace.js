@@ -24,7 +24,7 @@ function renderCostsSection() {
   const content = document.getElementById('mainContent');
   if (!costCanRead('costEntries')) { content.innerHTML = '<div class="cost-workspace"><h2>Затраты техники</h2><p>Для вашей роли финансовые расчёты недоступны.</p></div>'; return; }
   let report;
-  try { report = TvsCostEngine.buildReport(data, { from:costPeriodFrom, to:costPeriodTo, assetRef:costAssetRef, readable:costReadable() }); }
+  try { report = dispatcherQuery('costs', { from:costPeriodFrom, to:costPeriodTo, assetRef:costAssetRef, readable:costReadable() }); }
   catch (error) { showToast(error.message); return; }
   const selected = costAssetRef ? report.rows[0] : null;
   const metric = (label, value, note) => `<article class="cost-metric"><span>${htmlEsc(label)}</span><strong>${htmlEsc(value)}</strong><small>${htmlEsc(note)}</small></article>`;

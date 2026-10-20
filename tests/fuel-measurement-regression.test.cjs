@@ -4,6 +4,7 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const root=path.resolve(__dirname,'..');
 function context(db){
   const ctx=vm.createContext({console,window:{},document:{addEventListener(){},documentElement:{removeAttribute(){}},getElementById(){}},localStorage:{getItem(){}}});
+  vm.runInContext(fs.readFileSync(path.join(root,'assets/core/fuel-engine.js'),'utf8'),ctx,{filename:'assets/core/fuel-engine.js'});
   for(const file of ['01-core.js','29-fuel-quality.js','07-summary.js','25i-gsm-ledger.js'])vm.runInContext(fs.readFileSync(path.join(root,'assets/js',file),'utf8'),ctx,{filename:file});
   ctx.input=db;vm.runInContext('data=input;rebuildIndex();',ctx);return ctx;
 }

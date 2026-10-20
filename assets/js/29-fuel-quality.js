@@ -1,47 +1,13 @@
-// Числа и происхождение расхода для отчётов. Ноль является введённым значением.
-function fqValue(value) {
-  if (value == null || typeof value === 'string' && value.trim() === '') return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-function fqRecord(record, vehicle) {
-  const km = Math.max(0, fqValue(record.km) || 0);
-  const storedNorm = fqValue(record.fuelUsed), rate = fqValue(vehicle && vehicle.norm);
-  const norm = storedNorm != null ? storedNorm : rate != null ? km * rate / 100 : null;
-  const actual = fqValue(record.fuelActual), idleValue = fqValue(record.fuelIdle), idle = idleValue || 0;
-  const driving = actual != null ? actual : norm;
-  return { driving, norm, idle, total: driving == null ? idleValue : driving + idle, partial:driving == null && idleValue != null,
-    source: actual != null ? 'actual' : norm != null ? 'norm' : 'missing',
-    actual, actualKm: actual != null ? km : 0,
-    normSource: storedNorm != null ? 'record' : norm != null ? 'vehicle' : 'missing' };
-}
-function fqFuelFamily(grade) {
-  return grade === 'ДТ' ? 'diesel' : grade === 'Газ' ? 'gas' : /^АИ-\d+$/.test(grade || '') || grade === 'Бензин' ? 'gasoline' : 'unknown';
-}
-function fqRecordFuelFamily(record, vehicle) {
-  const grade = parseFuelGrade(record.fuelGrade) || (String(record.fuelGrade || '').trim() === 'Бензин' ? 'Бензин' : vehicleFuelGrade(vehicle));
-  return fqFuelFamily(grade);
-}
-function fqMeasurementPlan(records, vehicle) {
-  const keyFor = record => record.date + '|' + fqRecordFuelFamily(record, vehicle);
-  const lastOnDate = new Map(records.map(record => [keyFor(record), record.id]));
-  const measurements = new Map(records.filter(record => fqValue(record.tankMeasured) != null && Number(record.tankMeasured) >= 0)
-    .map(record => [keyFor(record), record]));
-  return { keyFor, lastOnDate, measurements };
-}
-function fqDate(value) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return false;
-  const date = new Date(value + 'T12:00:00Z');
-  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
-function fqShiftDate(value, days) {
-  const date = new Date(value + 'T12:00:00Z');
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-function fqDays(from, to) {
-  return fqDate(from) && fqDate(to) && to >= from ? Math.round((new Date(to + 'T12:00:00Z') - new Date(from + 'T12:00:00Z')) / 86400000) + 1 : 0;
-}
+// Числа и происхождение расхода для отчётов: единое переносимое ядро ГСМ.
+if (typeof TvsFuelEngine === 'undefined' || TvsFuelEngine.apiVersion !== 1) throw new Error('Не загружено ядро расчётов ГСМ (assets/core/fuel-engine.js)');
+function fqValue(value) { return TvsFuelEngine.fqValue(value); }
+function fqRecord(record, vehicle) { return TvsFuelEngine.fqRecord(record, vehicle); }
+function fqFuelFamily(grade) { return TvsFuelEngine.fqFuelFamily(grade); }
+function fqRecordFuelFamily(record, vehicle) { return TvsFuelEngine.fqRecordFuelFamily(record, vehicle); }
+function fqMeasurementPlan(records, vehicle) { return TvsFuelEngine.fqMeasurementPlan(records, vehicle); }
+function fqDate(value) { return TvsFuelEngine.fqDate(value); }
+function fqShiftDate(value, days) { return TvsFuelEngine.fqShiftDate(value, days); }
+function fqDays(from, to) { return TvsFuelEngine.fqDays(from, to); }
 function fqSourceLabel(source) {
   return ({ actual: 'Введённый факт', norm: 'Расчёт по норме', missing: 'Нет расхода' })[source] || source;
 }

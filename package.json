@@ -6,7 +6,9 @@
   "main": "electron/main.js",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "test:ui": "node --test --test-concurrency=2 tests/ui-regression.cjs tests/unified-ui.cjs tests/cost-accounting-ui.cjs tests/procurement-ui.cjs",
+    "test:ui": "node --test --test-concurrency=2 tests/ui-regression.cjs tests/unified-ui.cjs tests/cost-accounting-ui.cjs tests/procurement-ui.cjs tests/engine-integration-ui.cjs",
+    "test:engine": "node --test tests/dispatcher-core.test.cjs tests/fuel-engine.test.cjs tests/fuel-records-query.test.cjs",
+    "engine:demo": "node scripts/engine-demo.cjs",
     "test:electron": "node --test tests/unified-electron.cjs",
     "start": "electron .",
     "build": "node scripts/build-installer.cjs"
