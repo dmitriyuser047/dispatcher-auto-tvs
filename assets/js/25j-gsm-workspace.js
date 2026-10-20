@@ -11,6 +11,21 @@ function gsmTable(head, rows, footer) {
     '</tr></thead><tbody>' + (rows.join('') || '<tr><td colspan="' + head.length + '" class="gsm-empty">Нет данных за выбранный период</td></tr>') + '</tbody>' + (footer ? '<tfoot>' + footer + '</tfoot>' : '') + '</table></div>';
 }
 function gsmCell(value, number) { return '<td' + (number ? ' class="gsm-number"' : '') + '>' + (number ? fpNum(value, 3) : fpEsc(value)) + '</td>'; }
+function gsmConsumptionBasisHtml(ledger, recordId) {
+  const sources = [...new Set((ledger.movements || []).filter(row => row.kind === 'consumption' && row.recordId === recordId).map(row => row.source))];
+  return sources.length ? '<small>' + sources.map(source => fpEsc(gsmConsumptionSourceLabel(source))).join(' · ') + '</small>' : '';
+}
+function gsmGradeReconciliationHtml(ledger) {
+  const movements = gsmGradeReconciliations(ledger, gsmOrg, gsmFuel);
+  if (!movements.length) return '';
+  const rows = movements.map(row => '<tr>' + gsmCell(fmtDate(row.date)) + gsmCell(fpVehicleTitle(gsmVehicle(row.vehicleId))) + gsmCell(row.org) + gsmCell(row.fromGrade + ' → ' + row.toGrade) + gsmCell(row.grade) +
+    '<td class="gsm-number">' + (row.delta > 0 ? '+' : '') + fpNum(row.delta, 3) + '</td><td>' +
+    fpEsc((row.purchaseId ? 'Заправка' : 'Замер остатка') + ' от ' + fmtDate(row.date) + '; ранее учтённый расход' + (row.debtDate ? ' от ' + fmtDate(row.debtDate) : '')) +
+    '<details><summary>Связанные записи</summary>' + fpEsc(gsmReconciliationBasis(row)) + '<small>Пара: ' + fpEsc(row.pairId) + '</small></details></td></tr>');
+  return '<section class="gsm-band" aria-label="Сверка марок топлива"><h3>Сверка марок <span>аналитическое перераспределение остатков</span></h3>' +
+    '<p class="gsm-status">Корректировки идут парой −/+ в одной машине и организации. Они не меняют марку покупки, приход или расход. При фильтре по топливу показана только сторона выбранной марки; направление и номер пары сохранены.</p>' +
+    gsmTable(['Дата', 'Машина', 'Организация', 'Направление пары', 'Марка строки', 'Корректировка ±, л', 'Основание'], rows) + '</section>';
+}
 function gsmReceiptSummary(ledger, org) {
   const receipts = ledger.receipts.filter(p => !org || gsmOrgKey(p.org) === gsmOrgKey(org));
   const grades = [...new Set([...FP_GRADES, ...receipts.map(p => p.grade || 'Не указано')])];
@@ -53,7 +68,7 @@ function gsmBarrelsHtml(ledger) {
   const rows = ledger.barrels.filter(gsmVisible).map(b => '<tr>' + gsmCell(b.org) + gsmCell(b.grade) +
     ['start', 'issued', 'spent', 'correction', 'end'].map(k => gsmCell(b[k], true)).join('') + '</tr>');
   return '<section class="gsm-band"><h3>Общие бочки организаций <span>литры</span></h3>' +
-    gsmTable(['Организация', 'Топливо', 'На начало', 'Поступило', 'Списано', 'Неразобранный приход', 'Остаток в машинах'], rows) + '</section>';
+    gsmTable(['Организация', 'Топливо', 'На начало', 'Поступило', 'К списанию', 'Корректировка/сверка, л', 'Остаток в машинах'], rows) + '</section>' + gsmGradeReconciliationHtml(ledger);
 }
 function gsmIssuesHtml(ledger) {
   const issues = gsmRelevantIssues(ledger, gsmOrg).filter(i => !gsmFuel || !i.grade || i.grade === gsmFuel);
@@ -71,9 +86,9 @@ function gsmReceiptsHtml(ledger) {
 function gsmJournalHtml(ledger) {
   const visibleVehicles = new Set(ledger.rows.filter(gsmVisible).map(r => r.vehicleId));
   return '<div class="gsm-section-title"><h3>Журнал пробега</h3><button class="btn btn-ghost" onclick="gsmOpeningDialog()">Начальные остатки</button></div>' +
-    gsmTable(['Дата', 'Машина', 'Топливо', 'Пробег, км', 'Журнал, л', 'Покупки, л', 'Расход, л', 'Бак после строки, л', ''],
+    gsmTable(['Дата', 'Машина', 'Топливо', 'Пробег, км', 'Журнал, л', 'Покупки, л', 'К списанию, л', 'Бак после строки, л', ''],
       ledger.journal.filter(r => visibleVehicles.has(r.vehicleId)).slice().sort((a, b) => b.date.localeCompare(a.date)).map(r => '<tr>' + gsmCell(fmtDate(r.date)) + gsmCell(fpVehicleTitle(gsmVehicle(r.vehicleId))) +
-        gsmCell(r.grade) + gsmCell(r.km, true) + gsmCell(r.issued, true) + (r.hasPurchases ? gsmCell(r.statement, true) : gsmCell('Ручной приход')) + gsmCell(r.spent, true) + gsmCell(r.balance, true) +
+        gsmCell(r.grade) + gsmCell(r.km, true) + gsmCell(r.issued, true) + (r.hasPurchases ? gsmCell(r.statement, true) : gsmCell('Ручной приход')) + '<td class="gsm-number">' + fpNum(r.spent, 3) + gsmConsumptionBasisHtml(ledger, r.recordId) + '</td>' + gsmCell(r.balance, true) +
         '<td><button class="btn btn-ghost btn-sm" onclick="gsmEditRecord(' + gsmArg(r.recordId) + ')">Изменить</button>' +
         (r.hasPurchases && Math.abs(r.issued - r.statement) > 0.011 ? '<button class="btn btn-ghost btn-sm" onclick="fpSyncRecord(' + gsmArg(r.recordId) + ')">По выписке</button>' : '') + '</td></tr>'));
 }
@@ -82,9 +97,10 @@ function gsmWriteoffHtml(ledger) {
   return '<div class="gsm-section-title"><h3>Акт списания</h3><button class="btn btn-primary" onclick="gsmExportCurrentAct()">Выгрузить акт</button></div>' +
     '<div class="gsm-filters"><label>Номер акта <input aria-label="Номер акта" value="' + fpEsc(gsmActNo) + '" onchange="gsmActNo=this.value"></label><label>Дата акта <input aria-label="Дата акта" type="date" value="' + gsmActDate + '" onchange="gsmActDate=this.value"></label></div>' +
     (errors.length ? '<div class="gsm-status gsm-error">Акт требует проверки: расхождений ' + errors.length + '</div>' : '') +
-    gsmTable(['Организация списания', 'Машина', 'Организация машины', 'Топливо', 'На начало, л', 'Поступило, л', 'Списано, л', 'В т.ч. х/х, л', 'Остаток, л'],
+    '<p class="gsm-status">К списанию — итоговый расход с учётом холостого хода. Расчёт по норме или замеру не обозначается как введённый факт; основания указаны в журнале и приложении к выгрузке.</p>' +
+    gsmTable(['Организация списания', 'Машина', 'Организация машины', 'Топливо', 'На начало, л', 'Поступило, л', 'К списанию, л', 'В т.ч. х/х, л', 'Корректировка/сверка, л', 'Остаток, л'],
       ledger.rows.filter(gsmVisible).map(r => '<tr>' + gsmCell(r.org) + gsmCell(fpVehicleTitle(r.vehicle)) + gsmCell(r.vehicle.org || '') + gsmCell(r.grade) +
-        ['start', 'issued', 'spent', 'idle', 'end'].map(k => gsmCell(r[k], true)).join('') + '</tr>'));
+        ['start', 'issued', 'spent', 'idle', 'correction', 'end'].map(k => gsmCell(r[k], true)).join('') + '</tr>'));
 }
 function gsmRenderWorkspace() {
   if (fpView === 'vehicle' && fpVehicle) return fpRenderVehicle();

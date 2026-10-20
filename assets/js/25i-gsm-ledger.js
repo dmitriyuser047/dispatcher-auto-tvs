@@ -184,13 +184,35 @@ function gsmBuildLedger(db, options) {
     const initialSources = Array.isArray(v.fuelBalanceSources) && v.fuelBalanceSources.length ? v.fuelBalanceSources : [{ org: defaultOrg, grade: defaultGrade, qty: initial }];
     if (Math.abs(initialSources.reduce((s, x) => s + gsmNumber(x.qty), 0) - initial) > 0.011) issue('opening-difference', 'error', {
       vehicleId: v.id, date: '', org: defaultOrg, message: 'Распределение начального остатка не совпадает с карточкой машины' });
-    const supply = (source, qty) => {
+    let reconciliationSequence = 0;
+    const supply = (source, qty, context) => {
       let left = qty;
       for (const lot of lots) {
         if (left <= 0) break;
         if (lot.qty < 0 && gsmOrgKey(lot.org) === gsmOrgKey(source.org) && lot.grade === source.grade) { const q = Math.min(left, -lot.qty); lot.qty += q; left -= q; }
       }
-      if (Math.abs(left) > 0.0000001) lots.push({ org: source.org || defaultOrg, grade: source.grade || defaultGrade, qty: left, provider: source.provider || '' });
+      const org = source.org || defaultOrg, grade = source.grade || defaultGrade;
+      if (left > 0.0000001 && context && gsmOrgKey(org) && gsmOrgKey(org) !== gsmOrgKey(GSM_UNKNOWN_ORG) &&
+          ['Бензин', 'АИ-92', 'АИ-95', 'АИ-98', 'АИ-100'].includes(grade)) {
+        for (const debt of lots) {
+          if (left <= 0.0000001) break;
+          if (debt.qty >= 0 || debt.origin !== 'shortage' || gsmOrgKey(debt.org) !== gsmOrgKey(org) || debt.grade === grade ||
+              !['Бензин', 'АИ-92', 'АИ-95', 'АИ-98', 'АИ-100'].includes(debt.grade)) continue;
+          const q = Math.min(left, -debt.qty);
+          debt.qty += q; left -= q;
+          if (gsmInPeriod(context.date, from, to)) {
+            rowFor(v.id, org, debt.grade).correction += q;
+            rowFor(v.id, org, grade).correction -= q;
+            const pairId = 'grade:' + v.id + ':' + (++reconciliationSequence);
+            const movement = { kind: 'grade-reconciliation', pairId, date: context.date, vehicleId: v.id, org,
+              fromGrade: grade, toGrade: debt.grade, qty: q, purchaseId: context.purchaseId || '', recordId: context.recordId || '',
+              debtRecordId: debt.recordId || '', debtDate: debt.date || '', reason: 'Уточнение марки топлива ранее неподкреплённого расхода' };
+            movements.push({ ...movement, grade: debt.grade, delta: q }, { ...movement, grade, delta: -q });
+          }
+        }
+      }
+      if (Math.abs(left) > 0.0000001) lots.push({ org, grade, qty: left, provider: source.provider || '',
+        origin: source.origin || '', recordId: source.recordId || '', date: source.date || '' });
     };
     initialSources.forEach(s => supply({ org: s.org || defaultOrg, grade: gsmGrade(s.grade, defaultGrade), provider: 'Начальный остаток' }, gsmNumber(s.qty)));
     const snapshot = field => {
@@ -200,8 +222,7 @@ function gsmBuildLedger(db, options) {
     if (started) snapshot('start');
     const events = [];
     const vr = records.filter(r => r.vehicleId === v.id && gsmValidDate(r.date)).sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    const lastOnDate = new Map(vr.map(r => [r.date, r.id]));
-    const dailyMeasurements=new Map(vr.filter(r => fqValue(r.tankMeasured) != null && Number(r.tankMeasured) >= 0).map(r => [r.date,r]));
+    const measurementPlan = fqMeasurementPlan(vr, v);
     receipts.filter(p => p.vehicleId === v.id).forEach(p => events.push({ date: p.date, order: 0, time: p.time, receipt: p }));
     vr.forEach(r => events.push({ date: r.date, order: 1, time: '', record: r }));
     events.sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.order - b.order || a.time.localeCompare(b.time));
@@ -216,7 +237,7 @@ function gsmBuildLedger(db, options) {
         used.push({ org: lot.org, grade: lot.grade, qty: q });
       }
       if (left > 0.0000001) {
-        supply({ org: defaultOrg, grade }, -left);
+        supply({ org: defaultOrg, grade, origin: 'shortage', recordId, date }, -left);
         used.push({ org: defaultOrg, grade, qty: left });
         issue('shortage', 'error', { vehicleId: v.id, date, recordId, org: defaultOrg, grade, qty: gsmRound(left),
           message: 'Для списания не хватает ' + gsmRound(left) + ' л ' + grade });
@@ -229,7 +250,7 @@ function gsmBuildLedger(db, options) {
       if (!started && event.date >= from) { snapshot('start'); started = true; }
       const included = gsmInPeriod(event.date, from, to);
       if (event.receipt) {
-        const p = event.receipt; supply(p, p.qty);
+        const p = event.receipt; supply(p, p.qty, p);
         if (included) {
           const row = rowFor(v.id, p.org, p.grade); row.issued += p.qty; row.active = true;
           row.providers[p.provider || 'Поставщик не указан'] = (row.providers[p.provider || 'Поставщик не указан'] || 0) + p.qty;
@@ -247,7 +268,8 @@ function gsmBuildLedger(db, options) {
         vehicleId: v.id, date: r.date, recordId: r.id, org: defaultOrg, orgs: [...new Set(lots.map(l => l.org))], grade, message: 'Отрицательные литры в журнале' });
       let spent = Math.max(0, fuel.total || 0);
       const measured = fqValue(r.tankMeasured) != null;
-      const appliedMeasurement=lastOnDate.get(r.date) === r.id ? dailyMeasurements.get(r.date) : null;
+      const measurementKey = measurementPlan.keyFor(r);
+      const appliedMeasurement=measurementPlan.lastOnDate.get(measurementKey) === r.id ? measurementPlan.measurements.get(measurementKey) : null;
       if (fuel.source === 'missing' && gsmNumber(r.km) > 0 && !appliedMeasurement) issue('consumption-missing','error',{vehicleId:v.id,date:r.date,recordId:r.id,grade,message:'Есть пробег, но не указан факт расхода и нет нормы для расчёта'});
       if (measured && Number(r.tankMeasured) < 0) issue('negative-measurement','error',{vehicleId:v.id,date:r.date,recordId:r.id,grade,message:'Отрицательный замер остатка'});
       if (appliedMeasurement) {
@@ -256,7 +278,7 @@ function gsmBuildLedger(db, options) {
         if (measuredSpent >= 0) spent = measuredSpent;
         else {
           const correction = -measuredSpent;
-          supply({ org: defaultOrg, grade }, correction); spent = 0;
+          supply({ org: defaultOrg, grade }, correction, { date: r.date, recordId: r.id }); spent = 0;
           if (included) rowFor(v.id, defaultOrg, grade).correction += correction;
           issue('measurement-surplus', 'error', { vehicleId: v.id, date: r.date, recordId: r.id, org: defaultOrg, grade,
             qty: gsmRound(correction), message: 'Замер выше расчётного остатка: нужен приход ' + gsmRound(correction) + ' л' });

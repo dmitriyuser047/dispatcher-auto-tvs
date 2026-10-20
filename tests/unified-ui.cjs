@@ -186,3 +186,41 @@ test('transport summary export remains visible and exports the chosen period at 
   }
  }
 });
+
+test('GSM write-off preserves the measured carry and exports its source without a phantom grade deficit',async()=>{
+ await page.evaluate(()=>{
+  Object.assign(data.vehicles[0],{fuelGrade:'АИ-100',fuel:'gasoline',fuelBalance:0,norm:10});
+  data.records=[
+   {id:'debt',vehicleId:'v',date:'2026-08-01',fuelGrade:'АИ-100',fuelActual:210.588,km:0},
+   {id:'opening',vehicleId:'v',date:'2026-08-31',fuelGrade:'АИ-95',fuelIssued:256.15,fuelActual:0,tankMeasured:45.562,km:0},
+   {id:'september',vehicleId:'v',date:'2026-09-30',fuelGrade:'АИ-95',fuelIssued:289.99,fuelUsed:318.3,km:2460}
+  ];
+  data.fuelPurchases=[
+   {id:'august-buy',vehicleId:'v',recordId:'opening',date:'2026-08-31',grade:'АИ-95',qty:256.15,manual:true,sourceOrg:'ТВС'},
+   {id:'september-buy',vehicleId:'v',recordId:'september',date:'2026-09-30',grade:'АИ-95',qty:289.99,manual:true,sourceOrg:'ТВС'}
+  ];
+  rebuildIndex();fpMonth='2026-09';fpView='writeoff';gsmOrg='';gsmFuel='';
+  window.__gsmBefore=JSON.stringify(data);window.__gsmExport=null;
+  XLSX.writeFile=(wb,fileName)=>{window.__gsmExport={fileName,sheets:wb.SheetNames.slice(),act:XLSX.utils.sheet_to_json(wb.Sheets['Акт списания ГСМ'],{header:1}),basis:XLSX.utils.sheet_to_json(wb.Sheets['Основание расхода'],{header:1})};};
+ });
+ for(const [width,theme] of [[1280,'light'],[960,'dark']]){
+  await page.setViewportSize({width,height:width===960?700:900});await page.evaluate(theme=>applyTheme(theme),theme);
+  await page.locator('#unifiedNav [data-section="fuelPurchases"]').click();
+  await page.getByRole('button',{name:'Списание',exact:true}).click();
+  await page.getByRole('combobox',{name:'Месяц',exact:true}).selectOption('2026-09');
+  const rows=page.locator('#fpBody tbody tr').filter({hasText:'ТЕСТ001'});
+  assert.equal(await rows.count(),1);assert.match(await rows.innerText(),/17,252/);assert.doesNotMatch(await rows.innerText(),/-210/);
+  await page.evaluate(()=>{window.__gsmExport=null;});
+  await page.getByRole('button',{name:'Выгрузить акт',exact:true}).click();
+  const exported=await page.evaluate(()=>window.__gsmExport),act=exported.act.find(row=>typeof row[0]==='number');
+  assert.equal(act[13],45.56);assert.equal(act[19],289.99);assert.equal(act[21],318.3);assert.equal(act[23],17.25);
+  assert.ok(exported.sheets.includes('Основание расхода'));
+  assert.equal(Math.round(exported.basis.filter(row=>row[6]==='Расчёт по норме').reduce((sum,row)=>sum+row[4],0)*1000)/1000,318.3);
+  await page.getByRole('combobox',{name:'Месяц',exact:true}).selectOption('2026-08');
+  const reconciliation=page.getByRole('region',{name:'Сверка марок топлива'});
+  assert.equal(await reconciliation.count(),1);assert.match(await reconciliation.innerText(),/\+210,588/);assert.match(await reconciliation.innerText(),/-210,588/);
+  assert.match(await reconciliation.innerText(),/Заправка от 31\.08\.2026/);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__gsmBefore,writes:window.__writes})),{same:true,writes:0});
+ }
+});

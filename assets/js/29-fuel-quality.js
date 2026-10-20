@@ -15,6 +15,20 @@ function fqRecord(record, vehicle) {
     actual, actualKm: actual != null ? km : 0,
     normSource: storedNorm != null ? 'record' : norm != null ? 'vehicle' : 'missing' };
 }
+function fqFuelFamily(grade) {
+  return grade === 'ДТ' ? 'diesel' : grade === 'Газ' ? 'gas' : /^АИ-\d+$/.test(grade || '') || grade === 'Бензин' ? 'gasoline' : 'unknown';
+}
+function fqRecordFuelFamily(record, vehicle) {
+  const grade = parseFuelGrade(record.fuelGrade) || (String(record.fuelGrade || '').trim() === 'Бензин' ? 'Бензин' : vehicleFuelGrade(vehicle));
+  return fqFuelFamily(grade);
+}
+function fqMeasurementPlan(records, vehicle) {
+  const keyFor = record => record.date + '|' + fqRecordFuelFamily(record, vehicle);
+  const lastOnDate = new Map(records.map(record => [keyFor(record), record.id]));
+  const measurements = new Map(records.filter(record => fqValue(record.tankMeasured) != null && Number(record.tankMeasured) >= 0)
+    .map(record => [keyFor(record), record]));
+  return { keyFor, lastOnDate, measurements };
+}
 function fqDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return false;
   const date = new Date(value + 'T12:00:00Z');

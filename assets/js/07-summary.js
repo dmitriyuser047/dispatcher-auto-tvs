@@ -191,17 +191,29 @@ function computeFuelBalances(vehicleId, dateFrom, dateTo) {
       return true;
     })
     .sort((a, b) => cmpDateAsc(a.date, b.date));
-  let balance = fqValue(vehicle && vehicle.fuelBalance) || 0;
-  const lastOnDate=new Map(recs.map(record => [record.date,record.id]));
-  const measurements=new Map(recs.filter(record => fqValue(record.tankMeasured) != null && Number(record.tankMeasured) >= 0).map(record => [record.date,Number(record.tankMeasured)]));
+  const opening = fqValue(vehicle && vehicle.fuelBalance) || 0;
+  const defaultFamily = fqFuelFamily(vehicleFuelGrade(vehicle));
+  const familyBalances = new Map([[defaultFamily, opening]]);
+  const sources = vehicle && vehicle.fuelBalanceSources;
+  if (Array.isArray(sources) && sources.length && Math.abs(sources.reduce((sum, source) => sum + (fqValue(source.qty) || 0), 0) - opening) < 0.011) {
+    familyBalances.clear();
+    sources.forEach(source => {
+      const family = fqRecordFuelFamily({ fuelGrade: source.grade }, vehicle);
+      familyBalances.set(family, (familyBalances.get(family) || 0) + (fqValue(source.qty) || 0));
+    });
+  }
+  const { keyFor, lastOnDate, measurements } = fqMeasurementPlan(recs, vehicle);
   const balMap = {};
   recs.forEach(r => {
     // Остаток считается по фактическому расходу; если не введён — по норме
     const fuel = fqRecord(r, vehicle);
-    balance += (fqValue(r.fuelIssued) || 0) - (fuel.total || 0);
+    const family = fqRecordFuelFamily(r, vehicle);
+    let balance = (familyBalances.get(family) || 0) + (fqValue(r.fuelIssued) || 0) - (fuel.total || 0);
     // Замер остатка в баке — фактическое значение: расчёт с него начинается заново
-    if (lastOnDate.get(r.date) === r.id && measurements.has(r.date)) balance = measurements.get(r.date);
-    balMap[r.id] = +balance.toFixed(2);
+    const key = keyFor(r);
+    if (lastOnDate.get(key) === r.id && measurements.has(key)) balance = Number(measurements.get(key).tankMeasured);
+    familyBalances.set(family, balance);
+    balMap[r.id] = +[...familyBalances.values()].reduce((sum, qty) => sum + qty, 0).toFixed(2);
   });
   if (cacheable) _fuelBalCache[vehicleId] = balMap;
   return balMap;

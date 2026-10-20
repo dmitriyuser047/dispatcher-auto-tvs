@@ -310,12 +310,13 @@ test('act keeps the original approval, two-level headings, column widths and com
   assert.equal(ws.A7.v, '№ п/п'); assert.equal(ws.D7.v, 'Объект'); assert.equal(ws.G7.v, 'Спидометр');
   assert.equal(ws.G8.v, 'на нач'); assert.equal(ws.H8.v, 'на кон');
   assert.equal(ws.O7.v, 'Получено, л'); assert.equal(ws.O8.v, 'Газпром'); assert.equal(ws.T8.v, 'Всего');
-  assert.equal(ws.U7.v, 'Списано, л'); assert.equal(ws.U8.v, 'по норме'); assert.equal(ws.V8.v, 'по факту'); assert.equal(ws.W8.v, 'х/х');
+  assert.equal(ws.U7.v, 'Списано, л'); assert.equal(ws.U8.v, 'по норме'); assert.equal(ws.V8.v, 'к списанию'); assert.equal(ws.W8.v, 'в т.ч. х/х');
   assert.equal(ws.D9.v, 'УНГКМ'); assert.equal(ws.G9.v, 0); assert.equal(ws.H9.v, 100);
   assert.equal(ws.O9.v, 30); assert.equal(ws.T9.v, 30); assert.equal(ws.V9.v, 10); assert.equal(ws.X9.v, 20);
   assert.equal(ws.A10.v, 'ИТОГО:'); assert.equal(ws.T10.v, 30);
-  assert.equal(ws.A12.v, 'Комиссия:   Главный механик _______________ / ________________ /');
-  assert.equal(ws.A13.v, 'Управляющий директор _______________ / ________________ /');
+  const textRows = actRows(wb).map(row => row[0]);
+  assert.equal(textRows.filter(text => text === 'Комиссия:   Главный механик _______________ / ________________ /').length, 1);
+  assert.equal(textRows.filter(text => text === 'Управляющий директор _______________ / ________________ /').length, 1);
   assert.deepEqual(Array.from(ws['!cols'], c => c.wch), [4, 18, 12, 14, 8, 18, 9, 9, 7, 7, 6, 9, 10, 9, 9, 10, 8, 8, 8, 9, 9, 9, 8, 9, 11, 13]);
   assert.ok(ws['!merges'].some(m => ctx.XLSX.utils.encode_range(m) === 'O7:T7'));
   assert.ok(ws['!merges'].some(m => ctx.XLSX.utils.encode_range(m) === 'A10:K10'));
