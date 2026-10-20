@@ -13,7 +13,7 @@
 // Удалённая покупка не стирается, а помечается deleted: иначе повторная
 // загрузка той же выписки вернула бы её обратно.
 
-let fpView    = 'receipts';
+let fpView    = 'barrels';
 let fpMonth   = '';        // 'ГГГГ-ММ' или 'all'
 let fpVehicle = null;
 let fpSearch  = '';

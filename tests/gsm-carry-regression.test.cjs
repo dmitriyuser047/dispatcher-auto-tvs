@@ -278,3 +278,48 @@ test('one-grade exports retain real receipts and spending while exposing the ana
   close(actData[0][21], 318.3); close(actData[0][23], 17.25);
   assert.equal(JSON.stringify(db), original);
 });
+
+test('a physical surplus has one traceable movement in addition to its paired grade reallocation', () => {
+  const db = database();
+  record(db, 'debt', '2026-08-01', { spent: 20 });
+  record(db, 'measurement-source', '2026-08-02', { grade: 'АИ-95', tankMeasured: 10 });
+  record(db, 'applied-last-row', '2026-08-02', { grade: 'АИ-95' });
+  record(db, 'ordinary-consumption', '2026-08-03', { grade: 'АИ-95', issued: 20, spent: 5 });
+  receipt(db, 'ordinary-receipt', 'ordinary-consumption', '2026-08-03', 20);
+  const original = JSON.stringify(db), result = ledger(db);
+  const corrections = result.movements.filter(movement => movement.kind === 'measurement-correction');
+  assert.equal(corrections.length, 1);
+  const correction = corrections[0];
+  assert.equal(correction.source, 'measurement'); assert.equal(correction.date, '2026-08-02');
+  assert.equal(correction.vehicleId, 'synthetic-vehicle'); assert.equal(correction.org, 'A'); assert.equal(correction.grade, 'АИ-95');
+  assert.equal(correction.recordId, 'applied-last-row'); assert.equal(correction.measurementRecordId, 'measurement-source');
+  close(correction.qty, 30); close(correction.delta, 30); assert.match(correction.reason, /замеру/);
+  assert.equal(pairs(result).length, 2, 'physical gain does not replace or duplicate its cross-grade pair');
+  close(amount(result.rows, 'issued'), 20); close(amount(result.rows, 'spent'), 25); close(amount(result.rows, 'end'), 25);
+  close(result.receipts.reduce((sum, row) => sum + row.qty, 0), 20, 'a measured correction is not a fuel purchase');
+  assert.ok(result.errors.some(issue => issue.code === 'measurement-surplus' && Math.abs(issue.qty - 30) < .002));
+  balanced(result, 30); assert.equal(JSON.stringify(db), original);
+});
+
+test('measurement correction replay affects period opening without duplicate movements for known or unknown owners', () => {
+  for (const org of ['A', 'Организация не определена']) {
+    const db = database(org);
+    record(db, 'before-period', '2026-07-31', { grade: 'АИ-95', tankMeasured: 8 });
+    record(db, 'august-gain', '2026-08-02', { grade: 'АИ-95', tankMeasured: 10 });
+    record(db, 'september-gain', '2026-09-02', { grade: 'АИ-95', tankMeasured: 15 });
+    const original = JSON.stringify(db), august = ledger(db), after = ledger(db, '2026-08-03', '2026-08-31');
+    const september = ledger(db, '2026-09-01', '2026-09-30');
+    for (const [result, expected, sourceId] of [[august, 2, 'august-gain'], [september, 5, 'september-gain']]) {
+      const corrections = result.movements.filter(movement => movement.kind === 'measurement-correction');
+      assert.equal(corrections.length, 1); close(corrections[0].qty, expected); close(corrections[0].delta, expected);
+      assert.equal(corrections[0].org, org); assert.equal(corrections[0].recordId, sourceId); assert.equal(corrections[0].measurementRecordId, sourceId);
+      assert.ok(corrections.every(movement => movement.date >= result.from && movement.date <= result.to));
+      assert.equal(result.receipts.length, 0); balanced(result, expected);
+    }
+    close(amount(august.rows, 'start'), 8); close(amount(august.rows, 'end'), 10);
+    close(amount(september.rows, 'start'), 10); close(amount(september.rows, 'end'), 15);
+    close(amount(after.rows, 'start'), 10); close(amount(after.rows, 'end'), 10); balanced(after);
+    assert.equal(after.movements.some(movement => movement.kind === 'measurement-correction'), false);
+    assert.equal(JSON.stringify(db), original);
+  }
+});

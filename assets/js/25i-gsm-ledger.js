@@ -279,7 +279,12 @@ function gsmBuildLedger(db, options) {
         else {
           const correction = -measuredSpent;
           supply({ org: defaultOrg, grade }, correction, { date: r.date, recordId: r.id }); spent = 0;
-          if (included) rowFor(v.id, defaultOrg, grade).correction += correction;
+          if (included) {
+            rowFor(v.id, defaultOrg, grade).correction += correction;
+            movements.push({ kind: 'measurement-correction', source: 'measurement', date: r.date, vehicleId: v.id,
+              recordId: r.id, measurementRecordId: appliedMeasurement.id, org: defaultOrg, grade,
+              qty: correction, delta: correction, reason: 'Остаток по замеру выше расчётного' });
+          }
           issue('measurement-surplus', 'error', { vehicleId: v.id, date: r.date, recordId: r.id, org: defaultOrg, grade,
             qty: gsmRound(correction), message: 'Замер выше расчётного остатка: нужен приход ' + gsmRound(correction) + ' л' });
         }

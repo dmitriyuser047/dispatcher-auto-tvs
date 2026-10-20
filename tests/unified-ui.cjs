@@ -224,3 +224,100 @@ test('GSM write-off preserves the measured carry and exports its source without 
   assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__gsmBefore,writes:window.__writes})),{same:true,writes:0});
  }
 });
+
+function barrelOverviewFixture(){
+ const vehicle=(id,plate,org)=>({id,plate,make:'Synthetic',org,fuel:'gasoline',fuelGrade:'АИ-95',fuelBalance:0,norm:10});
+ const record=(id,vehicleId,date,fuelGrade,fuelIssued,fuelActual)=>({id,vehicleId,date,fuelGrade,fuelIssued,fuelActual,km:0});
+ const purchase=(id,recordId,vehicleId,date,grade,qty,cardNo,sourceOrg)=>({id,recordId,vehicleId,date,grade,qty,cardNo,...(sourceOrg?{sourceOrg}:{})});
+ return{
+  vehicles:[vehicle('stock-v','STOCK001','A'),vehicle('stock-w','OTHER002','B'),vehicle('stock-z','DEPLETED003','C'),vehicle('stock-measured','MEASURED004','D')],
+  fuelCards:[{number:'111111',org:'A',provider:'Synthetic supplier A'},{number:'222222',org:'B',provider:'Synthetic supplier B'},{number:'333333',org:'C',provider:'Synthetic supplier C'}],
+  records:[record('stock-debt','stock-v','2026-08-01','АИ-100',0,10),record('stock-fill','stock-v','2026-08-02','АИ-95',40,5),
+   record('stock-other','stock-w','2026-08-03','АИ-95',30,10),record('stock-92','stock-v','2026-08-04','АИ-92',15,0),
+   record('stock-unknown','stock-v','2026-08-05','АИ-95',6,0),record('stock-depleted','stock-z','2026-08-06','АИ-95',10,10),
+   {...record('stock-measurement','stock-measured','2026-08-07','АИ-95',0,0),tankMeasured:5},
+   record('stock-september','stock-w','2026-09-01','АИ-95',0,0)],
+  fuelPurchases:[purchase('stock-purchase','stock-fill','stock-v','2026-08-02','АИ-95',40,'111111'),
+   purchase('stock-other-purchase','stock-other','stock-w','2026-08-03','АИ-95',30,'222222'),
+   purchase('stock-92-purchase','stock-92','stock-v','2026-08-04','АИ-92',15,'111111'),
+   purchase('stock-unknown-purchase','stock-unknown','stock-v','2026-08-05','АИ-95',6,'','Организация не определена'),
+   purchase('stock-unassigned',null,'','2026-08-05','АИ-95',7,'111111','A'),
+   purchase('stock-missing-vehicle',null,'missing-vehicle','2026-08-05','АИ-95',9,'111111','A'),
+   purchase('stock-depleted-purchase','stock-depleted','stock-z','2026-08-06','АИ-95',10,'333333')],
+  monthlyFuel:[]
+ };
+}
+async function loadBarrelOverviewFixture(){
+ await page.evaluate(fixture=>{
+  data={...data,...fixture};rebuildIndex();fpMonth='';
+  window.__disk=JSON.stringify(data);window.__barrelBefore=window.__disk;window.__writes=0;_lastPersisted=window.__disk;
+ },barrelOverviewFixture());
+ await page.locator('#unifiedNav [data-section="fuelPurchases"]').click();
+}
+
+test('GSM opens barrel stocks first and drill-down exposes real movements and their sources without writes',async()=>{
+ await loadBarrelOverviewFixture();
+ assert.deepEqual(await page.evaluate(()=>({view:fpView,month:fpMonth})),{view:'barrels',month:'2026-09'});
+ assert.equal(await page.locator('.gsm-nav .sec-tab').first().innerText(),'Бочки и остатки');
+ assert.equal(await page.locator('.gsm-nav .sec-tab.active').innerText(),'Бочки и остатки');
+ await page.getByRole('combobox',{name:'Месяц',exact:true}).selectOption('2026-08');
+ const barrel=page.locator('#gsmBarrelCards [data-org="A"][data-grade="АИ-95"]');
+ assert.match(await barrel.locator('.gsm-barrel-value').innerText(),/25,000/);
+ assert.match(await page.locator('#gsmBarrelCards [data-org="Организация не определена"][data-grade="АИ-95"] .gsm-barrel-value').innerText(),/6,000/);
+ assert.match(await page.locator('#gsmUnassignedReceipts').innerText(),/16,000/);
+ assert.equal(await page.locator('#gsmUnassignedReceipts tbody tr').count(),2);
+ const stock=await page.evaluate(()=>{const ledger=gsmBuildLedger(data,{from:'2026-08-01',to:'2026-08-31'});return{total:ledger.barrels.reduce((sum,row)=>sum+row.end,0),a95:ledger.barrels.find(row=>row.org==='A'&&row.grade==='АИ-95').end};});
+ assert.equal(stock.total,71);assert.equal(stock.a95,25);
+ await barrel.click();
+ assert.deepEqual(await page.evaluate(()=>({org:gsmOrg,grade:gsmFuel,month:fpMonth})),{org:'A',grade:'АИ-95',month:'2026-08'});
+ assert.equal(await page.locator('#gsmBarrelVehicles [data-vehicle-id]').count(),1);
+ assert.match(await page.locator('#gsmBarrelVehicles [data-vehicle-id="stock-v"]').innerText(),/STOCK001/);
+ assert.match(await page.locator('#gsmBarrelVehicles [data-vehicle-id="stock-v"] td').last().innerText(),/25,000/);
+ const movements=page.locator('#gsmBarrelMovements [data-movement-kind]');
+ assert.equal(await movements.count(),3);
+ await page.evaluate(()=>{window.__barrelSources=[];fpEdit=id=>window.__barrelSources.push('purchase:'+id);gsmEditRecord=id=>window.__barrelSources.push('record:'+id);});
+ await page.getByRole('combobox',{name:'Вид операции',exact:true}).selectOption('receipt');
+ assert.equal(await movements.count(),1);
+ const search=page.getByRole('searchbox',{name:'Поиск операций',exact:true});
+ await search.fill('supplier A');assert.equal(await movements.count(),1);
+ await search.fill('no synthetic operation matches this');assert.equal(await movements.count(),0);
+ await search.fill('');
+ await page.locator('#gsmBarrelMovements').getByRole('button',{name:'Покупка',exact:true}).click();
+ await page.getByRole('combobox',{name:'Вид операции',exact:true}).selectOption('consumption');
+ assert.equal(await movements.count(),1);
+ await movements.filter({hasText:/−5,000/}).getByRole('button',{name:'Журнал',exact:true}).click();
+ await page.getByRole('combobox',{name:'Вид операции',exact:true}).selectOption('grade-reconciliation');
+ assert.equal(await movements.count(),1);
+ assert.match(await movements.innerText(),/АИ-95 → АИ-100/);
+ await page.locator('#gsmBarrelMovements').getByRole('button',{name:'Расход',exact:true}).click();
+ await page.getByRole('button',{name:'Показать все бочки',exact:true}).click();
+ await page.locator('#gsmBarrelCards [data-org="D"][data-grade="АИ-95"]').click();
+ await page.getByRole('combobox',{name:'Вид операции',exact:true}).selectOption('measurement-correction');
+ assert.equal(await movements.count(),1);
+ assert.match(await movements.innerText(),/Корректировка по замеру/);assert.match(await movements.innerText(),/\+5,000/);
+ await page.locator('#gsmBarrelMovements').getByRole('button',{name:'Журнал',exact:true}).click();
+ assert.deepEqual(await page.evaluate(()=>window.__barrelSources),['purchase:stock-purchase','record:stock-fill','record:stock-debt','record:stock-measurement']);
+ assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__barrelBefore,writes:window.__writes})),{same:true,writes:0});
+});
+
+test('barrel filters survive an empty month and stocks and operations fit 1280 light and 960 dark',async()=>{
+ await loadBarrelOverviewFixture();
+ for(const [width,theme]of[[1280,'light'],[960,'dark']]){
+  await page.setViewportSize({width,height:width===960?700:900});await page.evaluate(theme=>applyTheme(theme),theme);
+  await page.getByRole('combobox',{name:'Месяц',exact:true}).selectOption('2026-08');
+  await page.getByRole('button',{name:'Показать все бочки',exact:true}).click();
+  const geometry=await page.evaluate(()=>{const cards=document.getElementById('gsmBarrelCards').getBoundingClientRect();return{overflow:document.documentElement.scrollWidth>innerWidth,cardsInside:cards.left>=0&&cards.right<=innerWidth};});
+  assert.deepEqual(geometry,{overflow:false,cardsInside:true});
+  await page.locator('#gsmBarrelCards [data-org="C"][data-grade="АИ-95"]').click();
+  await page.getByRole('combobox',{name:'Месяц',exact:true}).selectOption('2026-09');
+  await page.getByRole('button',{name:'Бочки и остатки',exact:true}).click();
+  assert.deepEqual(await page.evaluate(()=>({view:fpView,month:fpMonth,org:gsmOrg,grade:gsmFuel})),{view:'barrels',month:'2026-09',org:'C',grade:'АИ-95'});
+  assert.equal(await page.getByRole('combobox',{name:'Организация',exact:true}).inputValue(),'C');
+  assert.equal(await page.getByRole('combobox',{name:'Топливо',exact:true}).inputValue(),'АИ-95');
+  assert.equal(await page.locator('#gsmBarrelCards [data-org]').count(),0);
+  assert.equal(await page.locator('#gsmBarrelMovements [data-movement-kind]').count(),0);
+  assert.match(await page.locator('#gsmBarrelCards').innerText(),/Выбор организации и топлива сохранён/);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ }
+ assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__barrelBefore,writes:window.__writes})),{same:true,writes:0});
+});

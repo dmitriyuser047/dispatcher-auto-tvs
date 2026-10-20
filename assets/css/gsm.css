@@ -78,10 +78,68 @@
 .gsm-act-review p + p { margin-top: 8px; }
 .gsm-act-review ul { margin: 12px 0; padding-left: 20px; }
 .gsm-act-review .gsm-actions { padding-top: 12px; }
+.gsm-workspace .gsm-barrel-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 16px 18px; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg2); }
+.gsm-workspace .gsm-barrel-intro h3 { margin: 0 0 6px; font-size: 14px; }
+.gsm-barrel-intro p { max-width: 780px; margin: 0; color: var(--text2); font-size: 13px; line-height: 1.65; }
+.gsm-barrel-intro > .btn { flex-shrink: 0; }
+.gsm-workspace .gsm-barrel-title { align-items: center; margin: 0 0 12px; }
+.gsm-workspace .gsm-barrel-title h3 { margin: 0; font-size: 15px; }
+.gsm-barrel-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(245px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.gsm-workspace .gsm-barrel-card { display: flex; flex-direction: column; align-items: stretch; gap: 12px; min-width: 0; padding: 18px; border: 1px solid var(--border2); border-radius: 8px; background: var(--bg2); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.gsm-workspace .gsm-barrel-card:hover { border-color: var(--accent); background: var(--bg2); }
+.gsm-workspace .gsm-barrel-card.is-selected { border-color: var(--accent); box-shadow: inset 3px 0 var(--accent); }
+.gsm-workspace .gsm-barrel-card.is-negative { border-color: var(--red); }
+.gsm-barrel-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.gsm-barrel-card-heading > strong { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; line-height: 1.5; }
+.gsm-barrel-grade { flex-shrink: 0; padding: 3px 7px; border-radius: 4px; background: var(--bg3); color: var(--text2); font-size: 12px; font-weight: 600; }
+.gsm-barrel-date { font-size: 11px; color: var(--text2); line-height: 1.6; }
+.gsm-barrel-value { display: block; font-size: 28px; font-weight: 650; line-height: 1.1; letter-spacing: -.6px; font-variant-numeric: tabular-nums; }
+.gsm-barrel-value small { display: inline; margin-left: 7px; color: var(--text2); font-size: 14px; font-weight: 400; letter-spacing: 0; }
+.gsm-barrel-card.is-negative .gsm-barrel-value, .gsm-barrel-deficit { color: var(--red); }
+.gsm-barrel-deficit { font-size: 11px; line-height: 1.5; }
+.gsm-barrel-card-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
+.gsm-barrel-card-stats > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.gsm-barrel-card-stats > span > span { color: var(--text2); font-size: 11px; }
+.gsm-barrel-card-stats strong { font-size: 13px; font-weight: 550; font-variant-numeric: tabular-nums; }
+.gsm-barrel-open { color: var(--accent); font-size: 12px; font-weight: 500; padding-top: 2px; }
+.gsm-overview-empty { grid-column: 1 / -1; padding: 24px; border: 1px dashed var(--border2); border-radius: 8px; background: var(--bg2); color: var(--text2); line-height: 1.7; }
+.gsm-overview-note { margin: 0 0 14px; color: var(--text2); font-size: 12px; line-height: 1.7; }
+.gsm-workspace .gsm-unassigned { border-left: 3px solid var(--yellow); }
+.gsm-unassigned-notice { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; padding: 12px 14px; border: 1px solid var(--border); border-left: 3px solid var(--yellow); border-radius: 6px; background: var(--bg2); color: var(--text2); font-size: 12px; line-height: 1.6; }
+.gsm-workspace .gsm-barrel-vehicles, .gsm-workspace .gsm-barrel-movements, .gsm-workspace .gsm-unassigned { min-width: 0; }
+.gsm-barrel-vehicles .gsm-table { min-width: 860px; }
+.gsm-barrel-vehicles .gsm-table td:first-child { min-width: 165px; }
+.gsm-barrel-vehicles .gsm-table td:last-child { font-weight: 600; }
+.gsm-movement-filters { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.gsm-movement-filters > label { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--text2); font-size: 11px; }
+.gsm-movement-filters .gsm-movement-search { flex: 1 1 290px; }
+.gsm-movement-filters .gsm-movement-search input { width: 100%; box-sizing: border-box; }
+.gsm-movement-filters select { min-width: 180px; }
+.gsm-movement-count { margin: 0 0 10px; color: var(--text2); font-size: 11px; }
+.gsm-barrel-movements .gsm-table { min-width: 820px; }
+.gsm-barrel-movements .gsm-table td:nth-child(3) { min-width: 140px; }
+.gsm-barrel-movements .gsm-table td:nth-child(6) { min-width: 160px; }
+.gsm-workspace .gsm-date { white-space: nowrap; overflow-wrap: normal; }
+.gsm-movement-kind { display: inline-block; padding: 4px 7px; border-radius: 4px; background: var(--bg3); color: var(--text2); font-size: 11px; line-height: 1.5; white-space: nowrap; }
+.gsm-movement-receipt { color: var(--green); }
+.gsm-movement-grade-reconciliation, .gsm-movement-measurement-correction { color: var(--accent); }
+.gsm-workspace .gsm-movement-links { min-width: 80px; }
+.gsm-movement-links .btn + .btn { margin-top: 5px; }
+.gsm-show-more { display: flex; justify-content: center; margin-top: 14px; }
+.gsm-barrel-reconciliation { margin-bottom: 18px; }
+.gsm-barrel-reconciliation > summary { padding: 12px 0; color: var(--text2); font-size: 13px; cursor: pointer; }
+.gsm-barrel-reconciliation .gsm-band { margin-top: 4px; }
+@media (max-width: 1100px) {
+  .gsm-workspace .gsm-barrel-intro { flex-wrap: wrap; gap: 10px; }
+  .gsm-barrel-cards { grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); }
+}
 @media (max-width: 760px) {
   .gsm-workspace { padding: 14px; }
   .gsm-nav select { margin-left: 0; }
   .gsm-nav select { flex-basis: 100%; max-width: none; }
   .gsm-actions { justify-content: flex-start; }
   .gsm-workspace .btn { white-space: normal; }
+  .gsm-barrel-cards { grid-template-columns: minmax(0, 1fr); }
+  .gsm-workspace .gsm-barrel-card { padding: 16px; }
+  .gsm-movement-filters > label { flex: 1 1 100%; }
 }
