@@ -113,17 +113,19 @@ async function writeRequest(req,res,full,principal) {
           respond(res,403,{ok:false,error:'Сохранённую историю нельзя изменять или удалять. Обновите данные.'}); return;
         }
       }
+      const writeContext = { principal, now:new Date().toISOString() };
+      Object.assign(sections, storage.prepareWriteoffSections(previous, sections, writeContext));
       // Client events are hints only. The server records actual changes and
       // supplies the authenticated author, time, before and after values.
       if (storage.SECTIONS.includes('auditLog')) sections.auditLog = canonicalAudit(previous,sections,principal);
       if (backup) backup();
       const result = full
-        ? {ok:true,...storage.writeAll(dataDir,{...previous,...sections},{databaseToken:payload.databaseToken})}
-        : storage.writeSections(dataDir,{base:{...(payload.base || {}),auditLog:revisions.auditLog || 0},sections,databaseToken:payload.databaseToken});
+        ? {ok:true,...storage.writeAll(dataDir,{...previous,...sections},{databaseToken:payload.databaseToken,...writeContext})}
+        : storage.writeSections(dataDir,{base:{...(payload.base || {}),auditLog:revisions.auditLog || 0},sections,databaseToken:payload.databaseToken},writeContext);
       result.databaseToken = token;
       if (result.ok) {
         result.revisions = filteredRevisions(result.revisions,principal);
-        if (storage.SECTIONS.includes('auditLog')) result.canonicalSections = {auditLog:visibleAudit(sections.auditLog,principal)};
+        if (storage.SECTIONS.includes('auditLog')) result.canonicalSections = { ...(result.canonicalSections || {}), auditLog:visibleAudit(sections.auditLog,principal) };
       }
       respond(res,result.ok ? 200 : 409,result);
       });

@@ -16,7 +16,7 @@ const SYNC_SECTIONS = [
   'vehicles', 'records', 'generators', 'genRecords', 'toRecords',
   'tanks', 'tankIncomes', 'vehicleTo', 'repairs',
   'reestrRows', 'savedReestrs', 'payments', 'budget', 'contragents',
-  'fuelPurchases', 'fuelImports', 'fuelCards', 'fuelPeriods', 'monthlyFuel', 'appMeta',
+  'fuelPurchases', 'fuelImports', 'fuelCards', 'fuelPeriods', 'fuelWriteoffs', 'monthlyFuel', 'appMeta',
   'dispatchJobs', 'drivers', 'assetAssignments', 'workOrders', 'opsTasks',
   'assetDocuments', 'fuelMovements', 'parts', 'partMovements', 'shiftReports',
   'connectors', 'auditLog', 'savedViews', 'glonassTrips', 'glonassImports',
@@ -27,7 +27,7 @@ const SYNC_NAMES = {
   toRecords: 'график ТО', tanks: 'ёмкости', tankIncomes: 'приход в ёмкости', vehicleTo: 'ТО машин',
   repairs: 'ремонты', reestrRows: 'реестр', savedReestrs: 'реестры', payments: 'платежи', budget: 'бюджет',
   contragents: 'контрагенты', fuelPurchases: 'заправки', fuelImports: 'история загрузок',
-  fuelCards: 'топливные карты', fuelPeriods: 'закрытие месяцев', monthlyFuel: 'топливо за месяц', appMeta: 'настройки',
+  fuelCards: 'топливные карты', fuelPeriods: 'закрытие месяцев', fuelWriteoffs:'акты списания ГСМ', monthlyFuel: 'топливо за месяц', appMeta: 'настройки',
   dispatchJobs:'заявки', drivers:'сотрудники', assetAssignments:'назначения', workOrders:'заказы на ремонт', opsTasks:'задачи',
   assetDocuments:'документы', fuelMovements:'движения топлива', parts:'запчасти и шины', partMovements:'движения запчастей', shiftReports:'сменные формы',
   connectors:'обмен', auditLog:'история действий', savedViews:'представления', glonassTrips:'исходные рейсы', glonassImports:'импорты ГЛОНАСС',
@@ -143,6 +143,9 @@ function syncSave(d, options) {
 }
 
 async function syncSaveNow(d, options) {
+  const requiredCanonical = options && options.requiredCanonicalSections || [];
+  if (!Array.isArray(requiredCanonical) || requiredCanonical.some(name => !SYNC_SECTIONS.includes(name)))
+    throw new Error('Некорректный список разделов для подтверждённого сохранения.');
   let cur = {};
   const changedNow = () => SYNC_SECTIONS.filter(n => {
     cur[n] = JSON.stringify(d[n] || []);
@@ -157,11 +160,15 @@ async function syncSaveNow(d, options) {
     const res = await window.electronAPI.writeSections(JSON.stringify(payload));
     if (res && (res.databaseToken != null || res.ok || res.conflicts || res.databaseChanged)) syncAssertDatabase(res);
     if (res && res.unsupported) {
+      if (requiredCanonical.length) throw new Error('Сервер не поддерживает подтверждённое сохранение актов. Обновите сервер перед проведением или аннулированием.');
       // Сервер старой версии — сохраняем по-старому, целиком
       _sync.enabled = false;
       return await window.electronAPI.writeData(JSON.stringify(_sync.databaseToken ? {databaseToken:_sync.databaseToken,data:d} : d)) !== false;
     }
     if (res && res.ok) {
+      if (requiredCanonical.some(name => !Array.isArray(res.canonicalSections?.[name]) ||
+        !Number.isSafeInteger(res.revisions?.[name]) || res.revisions[name] < 0))
+        throw new Error('Сервер не подтвердил сохранённый акт. Обновите данные и проверьте журнал актов; повторное проведение пока не подтверждено.');
       changed.forEach(n => {
         _sync.synced[n] = cur[n];
         if (res.revisions && n in res.revisions) _sync.revs[n] = res.revisions[n];

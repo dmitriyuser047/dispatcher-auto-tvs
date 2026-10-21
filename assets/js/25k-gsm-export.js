@@ -3,12 +3,13 @@ function gsmExportIssueVisible(issue, org, grade) {
   return (!grade || !issue.grade || grade === issue.grade) && (!org || !issue.org && !(issue.orgs || []).length ||
     gsmOrgKey(issue.org) === gsmOrgKey(org) || (issue.orgs || []).some(owner => gsmOrgKey(owner) === gsmOrgKey(org)));
 }
-function gsmRelevantIssues(ledger, org, grade) {
+function gsmRelevantIssues(ledger, org, grade, sourceData) {
+  const db = sourceData || data;
   const issues = (ledger.issues || []).slice();
   // Invalid source quantities and orphaned records can be excluded by the
   // ledger. They still prevent a final act; opening the audit UI is optional.
   if (typeof gsmAuditModel === 'function') {
-    const audit = gsmAuditModel(data, { from: ledger.from, to: ledger.to, ledger, coverage: false });
+    const audit = gsmAuditModel(db, { from: ledger.from, to: ledger.to, ledger, coverage: false });
     audit.items.filter(item => item.category === 'error').forEach(item => {
       const existingIndex = issues.findIndex(issue => issue.code === item.code && (issue.purchaseId || '') === (item.purchaseId || '') &&
         (issue.recordId || '') === (item.recordId || '') && (issue.vehicleId || '') === (item.vehicleId || '') &&
@@ -25,8 +26,8 @@ function gsmRelevantIssues(ledger, org, grade) {
   }
   return issues.filter(issue => gsmExportIssueVisible(issue, org, grade));
 }
-function gsmAppendExportIssues(wb, issues) {
-  const vehicle = id => fpVehicleTitle((data.vehicles || []).find(row => row.id === id));
+function gsmAppendExportIssues(wb, issues, sourceData) {
+  const vehicle = id => fpVehicleTitle(((sourceData || data).vehicles || []).find(row => row.id === id));
   const sources = issue => [...new Set([...(issue.sourceRefs || []).filter(ref => ref.id).map(ref => ref.type + ': ' + ref.id),
     issue.purchaseId ? 'purchase: ' + issue.purchaseId : '', issue.recordId ? 'record: ' + issue.recordId : ''].filter(Boolean))].join('; ');
   const ws = gsmExportSheet(wb, 'Расхождения', [['Уровень', 'Дата', 'Организация', 'Машина', 'Топливо', 'Расхождение', 'Покупка', 'Запись', 'Источники'],
@@ -61,43 +62,43 @@ function gsmReconciliationBasis(movement) {
   const source = [movement.purchaseId ? 'покупка ' + movement.purchaseId : '', movement.recordId ? 'журнал ' + movement.recordId : ''].filter(Boolean).join(', ');
   return (movement.purchaseId ? 'Заправка: ' : 'Замер остатка: ') + (source || 'источник не указан') + '; ранее учтённый расход: ' + (movement.debtRecordId ? 'журнал ' + movement.debtRecordId : 'запись не указана');
 }
-function gsmAppendGradeReconciliation(wb, ledger, org, grade, vehicleIds) {
+function gsmAppendGradeReconciliation(wb, ledger, org, grade, vehicleIds, sourceData) {
   const movements = gsmGradeReconciliations(ledger, org, grade, vehicleIds);
   if (!movements.length) return;
-  const vehicle = id => fpVehicleTitle((data.vehicles || []).find(row => row.id === id));
+  const vehicle = id => fpVehicleTitle(((sourceData || data).vehicles || []).find(row => row.id === id));
   const ws = gsmExportSheet(wb, 'Сверка марок', [['Дата', 'Организация', 'Машина', 'Из марки', 'В марку', 'Марка строки', 'Корректировка ±, л', 'Объём пары, л', 'Основание', 'Пара', 'Покупка', 'Журнал поступления', 'Журнал долга'],
     ...movements.map(row => [row.date, row.org, vehicle(row.vehicleId), row.fromGrade, row.toGrade, row.grade, gsmRound(row.delta), gsmRound(row.qty),
       gsmReconciliationBasis(row), row.pairId, row.purchaseId || '', row.recordId || '', row.debtRecordId || ''])], 6);
   movements.forEach((_, index) => { const cell = ws[XLSX.utils.encode_cell({ r: index + 1, c: 6 })]; if (cell) cell.z = '+0.000;-0.000;0.000'; });
   ws['!cols'][8] = { wch: 65 }; ws['!cols'][9] = { wch: 32 };
 }
-function gsmAppendConsumptionBasis(wb, ledger, org, grade, vehicleIds) {
+function gsmAppendConsumptionBasis(wb, ledger, org, grade, vehicleIds, sourceData) {
   const movements = (ledger.movements || []).filter(row => row.kind === 'consumption' && gsmExportVisible(row, org, grade, vehicleIds));
   if (!movements.some(row => row.source !== 'actual' || row.norm == null && (row.qty || row.km))) return false;
-  const vehicle = id => fpVehicleTitle((data.vehicles || []).find(row => row.id === id));
+  const vehicle = id => fpVehicleTitle(((sourceData || data).vehicles || []).find(row => row.id === id));
   gsmExportSheet(wb, 'Основание расхода', [['Дата', 'Организация', 'Машина', 'Марка топлива', 'К списанию, л (х/х включён)', 'В т.ч. х/х, л', 'Основание расхода', 'Код основания', 'Запись журнала'],
     ...movements.map(row => [row.date, row.org, vehicle(row.vehicleId), row.grade, gsmRound(row.qty), gsmRound(row.idle), gsmConsumptionSourceLabel(row.source), row.source || 'unknown', row.recordId])], 4);
   return true;
 }
-function gsmAppendReconciliation(wb, ledger, org, grade) {
+function gsmAppendReconciliation(wb, ledger, org, grade, sourceData, issues) {
   const relevant = r => (!org || gsmOrgKey(r.org) === gsmOrgKey(org)) && (!grade || r.grade === grade);
   gsmExportSheet(wb, 'Бочки организаций', [['Организация', 'Топливо', 'На начало, л', 'Приход, л', 'Расход, л', 'Корректировка, л', 'На конец, л'],
     ...ledger.barrels.filter(relevant).map(b => [b.org, b.grade, b.start, b.issued, b.spent, b.correction, b.end])], 2);
-  const vehicle = id => fpVehicleTitle((data.vehicles || []).find(v => v.id === id));
+  const vehicle = id => fpVehicleTitle(((sourceData || data).vehicles || []).find(v => v.id === id));
   gsmExportSheet(wb, 'Поступления', [['Дата', 'Карта', 'Организация карты', 'Закреплённая машина', 'Заправленная машина', 'Топливо', 'Поставщик', 'Литры', 'Сумма', 'Строка журнала'],
     ...ledger.receipts.filter(relevant).map(p => [p.date, p.cardNo, p.org, vehicle(p.cardVehicleId), vehicle(p.vehicleId), p.grade, p.provider, p.qty, p.sum, p.recordId])], 7);
   gsmExportSheet(wb, 'Расход по партиям', [['Дата', 'Организация', 'Машина', 'Топливо', 'К списанию, л (х/х включён)', 'Строка журнала', 'Основание расхода'],
     ...ledger.movements.filter(m => m.kind === 'consumption' && relevant(m)).map(m => [m.date, m.org, vehicle(m.vehicleId), m.grade, gsmRound(m.qty), m.recordId, gsmConsumptionSourceLabel(m.source)])], 4);
-  gsmAppendExportIssues(wb, gsmRelevantIssues(ledger, org, grade));
-  gsmAppendGradeReconciliation(wb, ledger, org, grade);
-  gsmAppendConsumptionBasis(wb, ledger, org, grade);
+  gsmAppendExportIssues(wb, issues || gsmRelevantIssues(ledger, org, grade, sourceData), sourceData);
+  gsmAppendGradeReconciliation(wb, ledger, org, grade, undefined, sourceData);
+  gsmAppendConsumptionBasis(wb, ledger, org, grade, undefined, sourceData);
 }
-function gsmActRows(ledger, org, grade) {
+function gsmActRows(ledger, org, grade, sourceData) {
   const eligible = v => v && ['diesel', 'gasoline'].includes(gsmFamily(gsmVehicleGrade(v)));
   const rows = ledger.rows.filter(r => eligible(r.vehicle)).slice();
   const represented = new Set(ledger.rows.map(r => r.vehicleId));
   // Стоящие машины сохраняются в старом бланке, но не создают движения в расчёте.
-  (data.vehicles || []).filter(v => eligible(v) && !represented.has(v.id)).forEach(v => {
+  ((sourceData || data).vehicles || []).filter(v => eligible(v) && !represented.has(v.id)).forEach(v => {
     const owner = gsmVehicleOrgAt(v, ledger.to) || GSM_UNKNOWN_ORG;
     rows.push({ vehicle: v, vehicleId: v.id, org: owner, grade: gsmVehicleGrade(v), providers: {},
       start: 0, issued: 0, spent: 0, idle: 0, norm: 0, km: 0, glonass: 0, end: 0, correction: 0 });
@@ -133,11 +134,11 @@ function gsmAppendActBalances(wb, actRows) {
     ...rows.map(({ row, number, supplier }) => [row.org, number, fpVehicleTitle(row.vehicle), row.grade, row.km, row.start, row.issued,
       row.correction, row.spent, row.end, gsmRound(row.start + row.issued + row.correction - row.spent - row.end), supplier.mismatch ? 'Сумма поставщиков не совпадает с приходом' : ''])], 4);
 }
-function gsmAppendMeasurementCorrections(wb, ledger, org, grade, vehicleIds) {
+function gsmAppendMeasurementCorrections(wb, ledger, org, grade, vehicleIds, sourceData) {
   const rows = (ledger.movements || []).filter(row => row.kind === 'measurement-correction' && gsmExportVisible(row, org, grade, vehicleIds));
   if (!rows.length) return;
   gsmExportSheet(wb, 'Корректировки по замерам', [['Дата', 'Организация', 'Машина', 'Топливо', 'Корректировка ±, л', 'Основание', 'Запись замера', 'Запись применения'],
-    ...rows.map(row => [row.date, row.org, fpVehicleTitle((data.vehicles || []).find(vehicle => vehicle.id === row.vehicleId)), row.grade,
+    ...rows.map(row => [row.date, row.org, fpVehicleTitle(((sourceData || data).vehicles || []).find(vehicle => vehicle.id === row.vehicleId)), row.grade,
       row.delta, row.reason || 'Остаток по замеру выше расчётного; приход требует проверки', row.measurementRecordId || row.recordId || '', row.recordId || ''])], 4);
 }
 function gsmAppendSupplierRounding(wb, actRows) {
@@ -163,8 +164,9 @@ function gsmActPeriod(from, to) {
 }
 function gsmActWorkbook(ledger, org, opts) {
   opts = opts || {};
-  const rows = gsmActRows(ledger, org, opts.fuelGrade);
-  const errors = gsmRelevantIssues(ledger, org, opts.fuelGrade).filter(issue => issue.severity === 'error');
+  const sourceData = opts.sourceData || data;
+  const rows = gsmActRows(ledger, org, opts.fuelGrade, sourceData);
+  const errors = (opts.issues || gsmRelevantIssues(ledger, org, opts.fuelGrade, sourceData)).filter(issue => issue.severity === 'error');
   const organizations = [...new Map(rows.map(r => [gsmOrgKey(r.org), r.org])).values()].sort((a, b) => a.localeCompare(b, 'ru'));
   const wb = XLSX.utils.book_new(), ws = { '!merges': [], '!rows': [] };
   const P = { navy: '1B3A6B', navyMid: '2D5A8E', navyLight: 'D6E4F7', white: 'FFFFFF', gray1: 'F8FAFC',
@@ -197,7 +199,7 @@ function gsmActWorkbook(ledger, org, opts) {
   }
   const numeric = value => gsmRound(value), actSourceRows = [];
   const periodRecords = new Map();
-  (data.records || []).filter(r => gsmValidDate(r.date) && gsmInPeriod(r.date, ledger.from, ledger.to)).forEach(r => {
+  (sourceData.records || []).filter(r => gsmValidDate(r.date) && gsmInPeriod(r.date, ledger.from, ledger.to)).forEach(r => {
     if (!periodRecords.has(r.vehicleId)) periodRecords.set(r.vehicleId, []);
     periodRecords.get(r.vehicleId).push(r);
   });
@@ -207,6 +209,10 @@ function gsmActWorkbook(ledger, org, opts) {
       (a.vehicle.object || '\uffff').localeCompare(b.vehicle.object || '\uffff', 'ru'));
     if (section) line('', {}, 10);
     const count = errors.filter(issue => gsmExportIssueVisible(issue, owner, opts.fuelGrade)).length;
+    if (opts.voided) {
+      line('АННУЛИРОВАН. Акт № ' + (opts.actNo || '') + '. Причина: ' + (opts.voidReason || ''),
+        style({ bold: true, sz: 12, color: { rgb: P.red } }, P.redPale, { horizontal: 'center', vertical: 'center', wrapText:true }), 28);
+    }
     if (opts.draft || count) {
       line('ЧЕРНОВИК. Не утверждён. Расхождений: ' + count,
         style({ bold: true, sz: 12, color: { rgb: P.red } }, P.redPale, { horizontal: 'center', vertical: 'center' }), 22);
@@ -290,12 +296,12 @@ function gsmActWorkbook(ledger, org, opts) {
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(n - 1, 0), c: 25 } });
   XLSX.utils.book_append_sheet(wb, ws, 'Акт списания ГСМ');
   const vehicleIds = new Set(rows.map(row => row.vehicleId));
-  gsmAppendGradeReconciliation(wb, ledger, org, opts.fuelGrade, vehicleIds);
-  gsmAppendConsumptionBasis(wb, ledger, org, opts.fuelGrade, vehicleIds);
+  gsmAppendGradeReconciliation(wb, ledger, org, opts.fuelGrade, vehicleIds, sourceData);
+  gsmAppendConsumptionBasis(wb, ledger, org, opts.fuelGrade, vehicleIds, sourceData);
   gsmAppendActBalances(wb, actSourceRows);
-  gsmAppendMeasurementCorrections(wb, ledger, org, opts.fuelGrade, vehicleIds);
+  gsmAppendMeasurementCorrections(wb, ledger, org, opts.fuelGrade, vehicleIds, sourceData);
   gsmAppendSupplierRounding(wb, actSourceRows);
-  if (errors.length) gsmAppendExportIssues(wb, errors);
+  if (errors.length) gsmAppendExportIssues(wb, errors, sourceData);
   return wb;
 }
 function gsmReviewActExport(ledger, org, opts) {
@@ -310,7 +316,9 @@ function gsmReviewActExport(ledger, org, opts) {
     const label = labels[i.code] || i.message;
     groups.set(label, (groups.get(label) || 0) + 1);
   });
-  gsmPendingAct = { from: ledger.from, to: ledger.to, opts: { ...opts, org } };
+  gsmPendingAct = { from: ledger.from, to: ledger.to, opts: { ...opts, org },
+    ledger:JSON.parse(JSON.stringify(ledger)), sourceData:JSON.parse(JSON.stringify(data)), issues:JSON.parse(JSON.stringify(errors)),
+    identity:typeof dispatcherContext === 'function' ? dispatcherContext().identity : null };
   openGenericModal('Проверка акта ГСМ', '<div class="gsm-act-review"><p>' + fpEsc(org || 'Все организации') + ' · ' +
     fpEsc(opts.fuelGrade || 'Все марки топлива') + '</p><p>Период: ' + fpEsc(fmtDate(ledger.from) || 'Начало учёта') + ' — ' +
     fpEsc(fmtDate(ledger.to) || 'Все даты') + '</p><div class="gsm-status gsm-error">Расчёт требует проверки: ' + errors.length +
@@ -321,18 +329,27 @@ function gsmReviewActExport(ledger, org, opts) {
   return null;
 }
 function gsmCancelActExport() { gsmPendingAct = null; closeModal('genericModal'); }
+function gsmPendingActCurrent(pending) {
+  if (pending.identity !== (typeof dispatcherContext === 'function' ? dispatcherContext().identity : null) ||
+      ['vehicles','records','fuelPurchases','fuelCards','monthlyFuel'].some(name => JSON.stringify(data[name] || []) !== JSON.stringify(pending.sourceData[name] || []))) {
+    alert('Источники или выбранная база изменились. Откройте проверку акта заново.'); return false;
+  }
+  return true;
+}
 function gsmExportActDraft() {
   const pending = gsmPendingAct;
-  if (!pending) return null;
-  const wb = exportFuelWriteOffAct(pending.from, pending.to, { ...pending.opts, draft: true });
-  if (wb) gsmCancelActExport();
-  return wb;
+  if (!pending || !gsmPendingActCurrent(pending)) return null;
+  try {
+    const wb = gsmActWorkbook(pending.ledger, pending.opts.org, { ...pending.opts, draft:true, sourceData:pending.sourceData, issues:pending.issues });
+    const suffix = pending.opts.org ? pending.opts.org.replace(/[<>:"/\\|?*]/g, '').slice(0,40) + '_' : '';
+    XLSX.writeFile(wb, 'Черновик_акта_ГСМ_' + suffix + (pending.from || 'начало') + '_' + (pending.to || 'всё') + '.xlsx');
+    gsmCancelActExport(); return wb;
+  } catch (error) { alert('Не удалось сохранить файл акта: ' + error.message); return null; }
 }
 function gsmExportPendingActReconciliation() {
-  if (!gsmPendingAct) return null;
+  if (!gsmPendingAct || !gsmPendingActCurrent(gsmPendingAct)) return null;
   const pending = gsmPendingAct, wb = XLSX.utils.book_new();
-  const ledger = gsmBuildLedger(data, { from: pending.from, to: pending.to });
-  gsmAppendReconciliation(wb, ledger, pending.opts.org, pending.opts.fuelGrade);
+  gsmAppendReconciliation(wb, pending.ledger, pending.opts.org, pending.opts.fuelGrade, pending.sourceData, pending.issues);
   XLSX.writeFile(wb, 'Сверка_акта_ГСМ_' + (pending.from || 'начало') + '_' + (pending.to || 'всё') + '.xlsx');
   return wb;
 }

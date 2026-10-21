@@ -163,11 +163,43 @@
 .gsm-audit-chronology .gsm-table { min-width: 680px; }
 .gsm-audit-chronology .gsm-table td:last-child { min-width: 120px; }
 .gsm-audit-chronology .btn { margin: 0 4px 4px 0; }
+.gsm-writeoff-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 4px 0 16px; }
+.gsm-workspace .gsm-writeoff-intro h3 { font-size: 21px; margin: 0 0 7px; }
+.gsm-writeoff-intro p { color: var(--text2); font-size: 13px; line-height: 1.7; margin: 0; }
+.gsm-writeoff-state { display: inline-block; padding: 5px 9px; background: var(--bg3); border: 1px solid var(--border); border-radius: 5px; color: var(--green); font-size: 11px; line-height: 1.5; }
+.gsm-writeoff-state.is-error { color: var(--red); }
+.gsm-writeoff-state.is-void { color: var(--text2); }
+.gsm-writeoff-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 18px 0 12px; }
+.gsm-writeoff-metrics > div { background: var(--bg2); border: 1px solid var(--border); border-radius: 7px; padding: 17px; }
+.gsm-writeoff-metrics span { display: block; color: var(--text2); font-size: 12px; margin-bottom: 9px; }
+.gsm-writeoff-metrics strong { display: block; color: var(--text); font-size: 23px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.gsm-writeoff-metrics small { font-size: 12px; color: var(--text2); }
+.gsm-writeoff-basis { display: flex; flex-wrap: wrap; gap: 8px 24px; line-height: 1.7; color: var(--text2); font-size: 12px; }
+.gsm-writeoff-basis strong { color: var(--text); font-weight: 600; }
+.gsm-workspace .gsm-writeoff-toolbar { margin: 17px 0; justify-content: flex-start; }
+.gsm-writeoff-checks { margin: 14px 0 20px; border: 1px solid var(--border); border-radius: 7px; padding: 14px 17px; background: var(--bg2); }
+.gsm-writeoff-checks summary { font-size: 13px; cursor: pointer; color: var(--text); }
+.gsm-writeoff-checks ul { list-style: none; padding: 0; margin: 14px 0; max-height: 400px; overflow: auto; }
+.gsm-writeoff-checks li { border-top: 1px solid var(--border); padding: 10px 0; color: var(--text2); font-size: 12px; }
+.gsm-writeoff-checks li p { margin: 7px 0; line-height: 1.7; color: var(--text); }
+.gsm-writeoff-registry { margin-top: 27px; }
+.gsm-writeoff-document { border: 1px solid var(--border); border-radius: 7px; background: var(--bg2); padding: 17px; margin: 10px 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; }
+.gsm-writeoff-document .gsm-writeoff-state { margin-left: 12px; }
+.gsm-writeoff-document p { margin: 8px 0; font-size: 12px; line-height: 1.6; color: var(--text2); overflow-wrap: anywhere; }
+.gsm-writeoff-document small { color: var(--text2); font-size: 11px; }
+.gsm-writeoff-document .gsm-actions { flex-shrink: 0; }
+.gsm-writeoff-equation { padding: 14px; border: 1px solid var(--border); background: var(--bg2); font-size: 17px; line-height: 1.6; font-variant-numeric: tabular-nums; }
+#gsmWriteoffPostForm p, #gsmWriteoffVoidForm p { font-size: 13px; line-height: 1.7; }
+#gsmWriteoffPostForm .form-group, #gsmWriteoffVoidForm .form-group { display: flex; flex-direction: column; gap: 7px; margin: 14px 0; }
+#gsmWriteoffPostError, #gsmWriteoffVoidError { font-size: 13px; line-height: 1.7; margin: 10px 0; }
 @media (max-width: 1100px) {
   .gsm-workspace .gsm-barrel-intro { flex-wrap: wrap; gap: 10px; }
   .gsm-barrel-cards { grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); }
 }
 @media (max-width: 760px) {
+  .gsm-writeoff-intro, .gsm-writeoff-document { flex-direction: column; }
+  .gsm-writeoff-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .gsm-writeoff-metrics strong { font-size: 19px; }
   .gsm-workspace { padding: 14px; }
   .gsm-nav select { margin-left: 0; }
   .gsm-nav select { flex-basis: 100%; max-width: none; }

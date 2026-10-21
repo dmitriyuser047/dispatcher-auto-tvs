@@ -211,12 +211,14 @@ test('GSM write-off preserves the measured carry and exports its source without 
   const rows=page.locator('#fpBody tbody tr').filter({hasText:'ТЕСТ001'});
   assert.equal(await rows.count(),1);assert.match(await rows.innerText(),/17,252/);assert.doesNotMatch(await rows.innerText(),/-210/);
   await page.evaluate(()=>{window.__gsmExport=null;});
-  await page.getByRole('button',{name:'Выгрузить акт',exact:true}).click();
+  await page.getByRole('button',{name:'Выгрузить черновик',exact:true}).click();
   const exported=await page.evaluate(()=>window.__gsmExport),act=exported.act.find(row=>typeof row[0]==='number');
   assert.equal(act[13],45.562);assert.equal(act[19],289.99);assert.equal(act[21],318.3);assert.equal(act[23],17.252);
   assert.ok(exported.sheets.includes('Основание расхода'));
   assert.equal(Math.round(exported.basis.filter(row=>row[6]==='Расчёт по норме').reduce((sum,row)=>sum+row[4],0)*1000)/1000,318.3);
   await page.getByRole('combobox',{name:'Месяц',exact:true}).selectOption('2026-08');
+  await page.getByRole('button',{name:'Бочки и остатки',exact:true}).click();
+  await page.locator('.gsm-barrel-reconciliation > summary').click();
   const reconciliation=page.getByRole('region',{name:'Сверка марок топлива'});
   assert.equal(await reconciliation.count(),1);assert.match(await reconciliation.innerText(),/\+210,588/);assert.match(await reconciliation.innerText(),/-210,588/);
   assert.match(await reconciliation.innerText(),/Заправка от 31\.08\.2026/);

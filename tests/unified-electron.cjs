@@ -82,6 +82,53 @@ test('hidden Electron application persists synthetic journals, isolates registry
   assert.equal(featureData.costEntries[0].amount,1000);assert.equal(featureData.costProfiles[0].salaryRate,5);assert.equal(featureData.procurementOrders[0].receivedQty,2);assert.equal(featureData.procurementRules[0].reserveQty,2);assert.deepEqual(featureData.partMovements,[]);
   for (const request of ['/electron/main.js','/package.json','/bundled-data/data-2.0.57.json']) assert.equal(await page.evaluate(url => fetch(url).then(res => res.status), request), 403);
 
+  // The actual native section protocol must acknowledge the backend's document,
+  // protect its source facts and retain the snapshot after explicit cancellation.
+  const postedAct = await page.evaluate(async () => {
+    const sourceNames = ['vehicles','records','fuelPurchases','fuelCards','monthlyFuel','fuelPeriods'];
+    const sourceBytes = () => JSON.stringify(Object.fromEntries(sourceNames.map(name => [name,data[name] || []])));
+    const before = sourceBytes();
+    fpMonth = '2026-10'; fpView = 'writeoff'; gsmOrg = 'A'; gsmFuel = 'ДТ'; gsmActNo = 'NATIVE-2026-10'; gsmActDate = '2026-10-31';
+    switchSection('fuelPurchases'); gsmPostWriteoffDialog();
+    const form = document.getElementById('gsmWriteoffPostForm');
+    if (!form) throw Error('Native posting dialog did not open');
+    form.elements.actNo.value = 'NATIVE-2026-10'; form.elements.actDate.value = '2026-10-31'; form.elements.basisNote.value = 'Native synthetic confirmed sources';
+    await gsmPostWriteoff({ preventDefault() {} });
+    const doc = data.fuelWriteoffs?.[0];
+    if (!doc) throw Error('Native posting failed: ' + (document.getElementById('gsmWriteoffPostError')?.textContent || 'missing document'));
+    return { before, after:sourceBytes(), doc, synced:JSON.parse(_sync.synced.fuelWriteoffs), revision:_sync.revs.fuelWriteoffs };
+  });
+  assert.equal(postedAct.after, postedAct.before);
+  assert.equal(postedAct.doc.status, 'posted'); assert.equal(postedAct.doc.number, 'NATIVE-2026-10');
+  assert.equal(postedAct.doc.postedBy.id, 'local-profile'); assert.equal(postedAct.doc.postedBy.name, 'Test A'); assert.equal(postedAct.doc.postedBy.role, 'admin');
+  assert.deepEqual(postedAct.doc.events, [{ type:'posted',at:postedAct.doc.postedAt,by:postedAct.doc.postedBy }]);
+  assert.equal(postedAct.doc.totals.spent, 10); assert.equal(postedAct.doc.totals.end, 90);
+  assert.deepEqual(postedAct.synced, [postedAct.doc]); assert.ok(Number.isSafeInteger(postedAct.revision));
+  const nativePosted = storage.readAll(dataA);
+  assert.deepEqual(nativePosted.fuelWriteoffs, [postedAct.doc]);
+  for (const name of ['vehicles','records','fuelPurchases','fuelCards','monthlyFuel','fuelPeriods']) assert.deepEqual(nativePosted[name], featureData[name], name);
+  const blockedSource = await page.evaluate(async () => {
+    data.records.find(row => row.id === 'native-journal').fuelActual = 11;
+    const saved = await saveData(data, { noMerge:true });
+    return { saved,actual:data.records.find(row => row.id === 'native-journal').fuelActual };
+  });
+  assert.equal(blockedSource.saved, false); assert.equal(blockedSource.actual, 10);
+  assert.deepEqual(storage.readAll(dataA).records, nativePosted.records);
+  assert.deepEqual(storage.readAll(dataA).fuelWriteoffs, [postedAct.doc]);
+  const voidedAct = await page.evaluate(async id => {
+    gsmVoidWriteoffDialog(id);
+    const form = document.getElementById('gsmWriteoffVoidForm');
+    if (!form) throw Error('Native cancellation dialog did not open');
+    form.elements.reason.value = 'Native synthetic correction after explicit cancellation';
+    await gsmVoidWriteoff({ preventDefault() {} });
+    return { doc:data.fuelWriteoffs.find(row => row.id === id), synced:JSON.parse(_sync.synced.fuelWriteoffs) };
+  }, postedAct.doc.id);
+  assert.equal(voidedAct.doc.status, 'void'); assert.deepEqual(voidedAct.doc.snapshot, postedAct.doc.snapshot);
+  assert.equal(voidedAct.doc.voidedBy.id, 'local-profile'); assert.equal(voidedAct.doc.voidedBy.name, 'Test A');
+  assert.deepEqual(voidedAct.doc.events[0], postedAct.doc.events[0]); assert.equal(voidedAct.doc.events[1].type, 'void');
+  assert.deepEqual(voidedAct.synced, [voidedAct.doc]); assert.deepEqual(storage.readAll(dataA).fuelWriteoffs, [voidedAct.doc]);
+  assert.deepEqual(storage.readAll(dataA).records, nativePosted.records);
+
   // A second process with the same profile exits without running another writer.
   if (!process.env.TVS_PACKAGED_EXE) {
     const child = spawn(executablePath, args, { cwd:root, windowsHide:true, stdio:'ignore' });

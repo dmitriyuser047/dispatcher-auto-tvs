@@ -92,15 +92,16 @@ test('act dialog rejects invalid dates without exporting or closing', async () =
 test('GSM workspace exports the restored act and does not change the database', async () => {
   await page.evaluate(() => { fpMonth = '2026-10'; fpView = 'writeoff'; switchSection('fuelPurchases'); window.__actBefore = JSON.stringify(data);
     XLSX.writeFile = (wb, name) => { window.__actWorkbook = wb; window.__actFilename = name; }; });
-  await page.getByRole('button', { name: 'Выгрузить акт', exact: true }).click();
+  await page.getByRole('button', { name: 'Выгрузить черновик', exact: true }).click();
   const out = await page.evaluate(() => {
     const wb = window.__actWorkbook, ws = wb.Sheets['Акт списания ГСМ'];
-    return { names: wb.SheetNames, approval: ws.S1.v, title: ws.A4.v, header: ws.O6.v,
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    return { names: wb.SheetNames, approval: rows.some(row => row.includes('Утверждаю:')), title: rows.find(row => /^Акт списания ГСМ по /.test(row[0]))[0], header: rows.some(row => row.includes('Получено, л')),
       signatures: XLSX.utils.sheet_to_json(ws, { header: 1 }).filter(r => /Главный механик|Управляющий директор/.test(r[0])).length,
       same: window.__actBefore === JSON.stringify(data), filename: window.__actFilename };
   });
-  assert.deepEqual(out, { names: ['Акт списания ГСМ'], approval: 'Утверждаю:', title: 'Акт списания ГСМ по A за октябрь 2026г.',
-    header: 'Получено, л', signatures: 2, same: true, filename: 'Акт_ГСМ_2026-10-01_2026-10-31.xlsx' });
+  assert.deepEqual(out, { names: ['Акт списания ГСМ', 'Паспорт акта'], approval: true, title: 'Акт списания ГСМ по A за октябрь 2026г.',
+    header: true, signatures: 2, same: true, filename: 'Черновик_акта_ГСМ_2026-10.xlsx' });
 });
 
 test('receipt overview shows organization totals for all fuels and drills into the selected operations', async () => {

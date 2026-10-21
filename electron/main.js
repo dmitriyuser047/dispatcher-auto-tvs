@@ -332,7 +332,8 @@ app.whenReady().then(() => {
     ensureDirs();
     createDailyBackup();
     try {
-      const res = storage.writeAll(getDataDir(), data);
+      const res = storage.writeAll(getDataDir(), data, { databaseToken:binding.databaseToken,
+        principal:{ id:'local-profile', name:getActiveUser().name || 'Локальный пользователь', role:'admin' } });
       if (res.changed.length) console.log('[write-data] разделы: ' + res.changed.join(', '));
       return true;
     } catch (e) {
@@ -412,7 +413,8 @@ app.whenReady().then(() => {
     ensureDirs();
     createDailyBackup();
     try {
-      const res = storage.writeSections(getDataDir(), payload);
+      const res = storage.writeSections(getDataDir(), payload, {
+        principal:{ id:'local-profile', name:getActiveUser().name || 'Локальный пользователь', role:'admin' } });
       if (res.ok && res.changed.length) console.log('[write-sections] ' + res.changed.join(', '));
       return res;
     } catch (e) {

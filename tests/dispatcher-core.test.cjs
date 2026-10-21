@@ -27,7 +27,7 @@ test('the standalone application catalog exposes all four working calculation se
   assert.equal(core.apiVersion, 1); assert.equal(application.apiVersion, 1);
   assert.ok(Object.isFrozen(core)); assert.ok(Object.isFrozen(application));
   const engine = application.create(), db = frozen(fixture()), range = { from: '2026-09-01', to: '2026-09-30' };
-  assert.deepEqual(engine.describe().map(row => row.name), ['fuel', 'fuelRecords', 'costs', 'procurement']);
+  assert.deepEqual(engine.describe().map(row => row.name), ['fuel', 'fuelRecords', 'writeoff', 'costs', 'procurement']);
   assert.deepEqual(engine.query('fuel', db, range), fuel.buildLedger(db, range));
   assert.deepEqual(engine.query('fuelRecords', db, { ...range, vehicleId: 'v' }), fuel.recordBalances(db, 'v', range));
   assert.deepEqual(engine.query('costs', db, range), costs.buildReport(db, range));

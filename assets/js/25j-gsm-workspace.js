@@ -194,14 +194,7 @@ function gsmJournalHtml(ledger) {
         (r.hasPurchases && Math.abs(r.issued - r.statement) > 0.011 ? '<button class="btn btn-ghost btn-sm" onclick="fpSyncRecord(' + gsmArg(r.recordId) + ')">По выписке</button>' : '') + '</td></tr>'));
 }
 function gsmWriteoffHtml(ledger) {
-  const errors = gsmRelevantIssues(ledger, gsmOrg, gsmFuel).filter(i => i.severity === 'error');
-  return '<div class="gsm-section-title"><h3>Акт списания</h3><button class="btn btn-primary" onclick="gsmExportCurrentAct()">Выгрузить акт</button></div>' +
-    '<div class="gsm-filters"><label>Номер акта <input aria-label="Номер акта" value="' + fpEsc(gsmActNo) + '" onchange="gsmActNo=this.value"></label><label>Дата акта <input aria-label="Дата акта" type="date" value="' + gsmActDate + '" onchange="gsmActDate=this.value"></label></div>' +
-    (errors.length ? '<div class="gsm-status gsm-error">Акт требует проверки: расхождений ' + errors.length + '</div>' : '') +
-    '<p class="gsm-status">К списанию — итоговый расход с учётом холостого хода. Расчёт по норме или замеру не обозначается как введённый факт; основания указаны в журнале и приложении к выгрузке.</p>' +
-    gsmTable(['Организация списания', 'Машина', 'Организация машины', 'Топливо', 'На начало, л', 'Поступило, л', 'К списанию, л', 'В т.ч. х/х, л', 'Корректировка/сверка, л', 'Остаток, л'],
-      ledger.rows.filter(gsmVisible).map(r => '<tr>' + gsmCell(r.org) + gsmCell(fpVehicleTitle(r.vehicle)) + gsmCell(r.vehicle.org || '') + gsmCell(r.grade) +
-        ['start', 'issued', 'spent', 'idle', 'correction', 'end'].map(k => gsmCell(r[k], true)).join('') + '</tr>'));
+  return gsmWriteoffWorkspaceHtml(ledger);
 }
 function gsmRenderWorkspace() {
   if (fpView === 'vehicle' && fpVehicle) return fpRenderVehicle();
@@ -238,7 +231,7 @@ function gsmRenderWorkspace() {
     (fpView === 'manual' ? '' : '<div class="gsm-filters"><select aria-label="Месяц" class="fsel" onchange="fpMonth=this.value;renderFuelPurchases()">' + [...new Set([fpMonth, ...months, 'all'])].map(m => '<option value="' + fpEsc(m) + '"' + (m === fpMonth ? ' selected' : '') + '>' + fpMonthLabel(m) + '</option>').join('') + '</select>' +
     (mainView ? '<select aria-label="Организация" class="fsel" onchange="gsmOrg=this.value;renderFuelPurchases()"><option value="">Все организации</option>' + orgs.map(o => '<option' + (o === gsmOrg ? ' selected' : '') + '>' + fpEsc(o) + '</option>').join('') + '</select>' +
       '<select aria-label="Топливо" class="fsel" onchange="gsmFuel=this.value;renderFuelPurchases()"><option value="">Все марки топлива</option>' + grades.map(g => '<option' + (g === gsmFuel ? ' selected' : '') + '>' + fpEsc(g) + '</option>').join('') + '</select>' : '') + '</div>') +
-    (mainView && !['barrels', 'diagnostics'].includes(fpView) ? (fpView === 'receipts' ? gsmReceiptSummaryHtml(ledger) : gsmBarrelsHtml(ledger)) + gsmIssuesHtml(ledger) : '') + '<div id="fpBody">' + body + '</div></div>';
+    (mainView && !['barrels', 'diagnostics', 'writeoff'].includes(fpView) ? (fpView === 'receipts' ? gsmReceiptSummaryHtml(ledger) : gsmBarrelsHtml(ledger)) + gsmIssuesHtml(ledger) : '') + '<div id="fpBody">' + body + '</div></div>';
   if (fpView === 'manual') gsmManualTotals();
 }
 function gsmEditRecord(id) {

@@ -28,7 +28,7 @@ const SECTIONS = [
   'vehicles', 'records', 'generators', 'genRecords', 'toRecords',
   'tanks', 'tankIncomes', 'vehicleTo', 'repairs',
   'reestrRows', 'savedReestrs', 'payments', 'budget', 'contragents',
-  'fuelPurchases', 'fuelImports', 'fuelCards', 'fuelPeriods', 'monthlyFuel', 'appMeta',
+  'fuelPurchases', 'fuelImports', 'fuelCards', 'fuelPeriods', 'fuelWriteoffs', 'monthlyFuel', 'appMeta',
   'dispatchJobs', 'drivers', 'assetAssignments', 'workOrders', 'opsTasks',
   'assetDocuments', 'fuelMovements', 'parts', 'partMovements', 'shiftReports',
   'connectors', 'auditLog', 'savedViews', 'glonassTrips', 'glonassImports',
@@ -167,6 +167,46 @@ function validatePlanningChanges(previous, sections) {
       }
     }
   }
+}
+
+// Run inside the existing database lock. First validate the submitted snapshot
+// without rewriting it; only then replace untrusted authors/times with backend
+// metadata. A forged quantity, source fingerprint or old event remains an error.
+function prepareWriteoffSections(previous, sections, options = {}) {
+  const oldRows = previous.fuelWriteoffs || [];
+  const rows = Object.hasOwn(sections, 'fuelWriteoffs') ? sections.fuelWriteoffs : oldRows;
+  if (!oldRows.length && !rows.length) return sections;
+  const access = require('./access-control');
+  const principal = options.principal || { id:'local-profile', name:'Локальный пользователь', role:'admin' };
+  for (const name of SECTIONS.filter(name => Object.hasOwn(sections, name))) {
+    if (JSON.stringify(previous[name] || []) === JSON.stringify(sections[name])) continue;
+    if (!access.authorize(principal, 'write', name)) throw new Error('Роль не разрешает изменение раздела: ' + name);
+    access.validateAssetChanges(principal, name, previous[name] || [], sections[name]);
+  }
+  const documentSources = ['fuelWriteoffs', 'vehicles', 'records', 'fuelPurchases', 'fuelCards', 'monthlyFuel'];
+  if (!documentSources.some(name => Object.hasOwn(sections, name) &&
+    JSON.stringify(previous[name] || []) !== JSON.stringify(sections[name]))) return sections;
+  const engine = require('../assets/core/writeoff-engine.js');
+  const next = { ...previous, ...sections };
+  engine.validateWriteoffChanges(previous, next);
+  if (!Object.hasOwn(sections, 'fuelWriteoffs')) return sections;
+  const oldById = new Map(oldRows.map(row => [row.id, row]));
+  const at = options.now || new Date().toISOString();
+  const actor = { id:principal.id, name:principal.name, role:principal.role };
+  const canonical = rows.map(row => {
+    const old = oldById.get(row.id);
+    if (!old) {
+      const withoutOwnDocument = { ...next, fuelWriteoffs:rows.filter(other => other.id !== row.id) };
+      return engine.post(withoutOwnDocument, { ...row.scope, date:row.date, basisNote:row.basisNote },
+        { id:row.id, number:row.number, postedAt:at, postedBy:actor, expectedFingerprint:row.sourceFingerprint });
+    }
+    if (old.status === 'posted' && row.status === 'void')
+      return engine.voidDocument(old, { voidedAt:at, voidedBy:actor, reason:row.voidReason });
+    return row;
+  });
+  const result = { ...sections, fuelWriteoffs:canonical };
+  engine.validateWriteoffChanges(previous, { ...previous, ...result });
+  return result;
 }
 
 // Revisions are the commit point. Before that point a failed or interrupted
@@ -328,6 +368,7 @@ function writeAll(dataDir, data, options = {}) {
   if (!data || !Array.isArray(data.vehicles) || !Array.isArray(data.records)) throw new Error('Неполная база: нужны vehicles и records');
   SECTIONS.forEach(n => { if (n in data) validateRows(n, data[n]); });
   const previous = readAll(dataDir);
+  data = prepareWriteoffSections(previous, data, options);
   validatePlanningChanges(previous, data);
   checkClosedPeriods(previous, data);
   if (!isSplit(dataDir)) migrate(dataDir);
@@ -348,7 +389,7 @@ function writeAll(dataDir, data, options = {}) {
   });
 
   commitSections(dataDir, sections, revisions);
-  return { changed, revisions };
+  return { changed, revisions, ...(changed.includes('fuelWriteoffs') ? { canonicalSections:{ fuelWriteoffs:sections.fuelWriteoffs } } : {}) };
 }
 
 /** Один раздел и его версия */
@@ -371,19 +412,20 @@ function readSnapshot(dataDir) {
  * и возвращаем список конфликтов — клиент сольёт правки и повторит.
  * Так правки двух людей не затирают друг друга молча.
  */
-function writeSections(dataDir, payload) {
+function writeSections(dataDir, payload, options = {}) {
   const token = databaseToken(dataDir);
   if (payload && payload.databaseToken != null && payload.databaseToken !== token) return { ok: false, databaseChanged: true, databaseToken: token, error: 'База данных изменилась. Заново откройте её перед сохранением.' };
   const previous = readAll(dataDir);
   if (!isSplit(dataDir)) migrate(dataDir);
   const base = (payload && payload.base) || {};
-  const sections = (payload && payload.sections) || {};
+  let sections = (payload && payload.sections) || {};
   const names = Object.keys(sections);
   if (names.some(n => !SECTIONS.includes(n) || !Array.isArray(sections[n]))) throw new Error('Некорректные разделы');
   names.forEach(n => validateRows(n, sections[n]));
   const revisions = readRevisions(dataDir);
   const conflicts = names.filter(n => (revisions[n] || 0) !== (base[n] || 0));
   if (conflicts.length) return { ok: false, conflicts, revisions, databaseToken: token };
+  sections = prepareWriteoffSections(previous, sections, options);
   validatePlanningChanges(previous, sections);
   checkClosedPeriods(previous, sections);
   const changed = [];
@@ -400,7 +442,8 @@ function writeSections(dataDir, payload) {
     changed.push(name);
   });
   commitSections(dataDir, pending, revisions);
-  return { ok: true, changed, revisions, databaseToken: token };
+  return { ok: true, changed, revisions, databaseToken: token,
+    ...(changed.includes('fuelWriteoffs') ? { canonicalSections:{ fuelWriteoffs:pending.fuelWriteoffs } } : {}) };
 }
 
 /** Ежедневная резервная копия: складываем разделы обратно в один файл */
@@ -424,6 +467,6 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
 
 module.exports = {
   SECTIONS, sectionsDir, sectionFile, revisionsFile,
-  databaseToken, withDatabaseLock, validateRows,
+  databaseToken, withDatabaseLock, validateRows, prepareWriteoffSections,
   ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, () => operation(dataDir, ...args))])),
 };

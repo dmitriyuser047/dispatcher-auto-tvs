@@ -180,6 +180,7 @@ async function loadData() {
   if (!_loadWriteBlocked&&!cashTouchesClosedHistory&&(typeof _sync==='undefined'||!_sync.access||_sync.access.writable.includes('fuelCards'))&&!d.fuelCards.some(c => /наличк/i.test(c.number) || /наличк/i.test(c.provider)))
     d.fuelCards.push({ id: 'fc_cash', number: 'НАЛИЧКА', provider: 'Наличка', org: '', status: 'active', limit: null, assignments: [], note: 'Для учёта наличных закупок топлива' });
   if (!d.fuelPeriods)   d.fuelPeriods   = [];
+  if (!d.fuelWriteoffs)  d.fuelWriteoffs  = [];
   if (!d.monthlyFuel)   d.monthlyFuel   = [];
   if (!d.appMeta)       d.appMeta       = [];
   if (typeof wfInitData === 'function') wfInitData(d);

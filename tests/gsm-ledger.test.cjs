@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const ctx = vm.createContext({ console, window: {}, document: { addEventListener() {}, documentElement: { removeAttribute() {} }, getElementById() {} }, localStorage: { getItem() {} } });
-for (const file of ['assets/core/fuel-engine.js', 'assets/js/01-core.js', 'assets/js/29-fuel-quality.js', 'vendor/xlsx.bundle.js', 'assets/js/10-pdf-reports.js', 'assets/js/25-fuel-report.js', 'assets/js/25b-fuel-purchases.js', 'assets/js/25c-fuel-control.js', 'assets/js/25i-gsm-ledger.js', 'assets/js/25j-gsm-workspace.js', 'assets/js/25k-gsm-export.js']) {
+for (const file of ['assets/core/fuel-engine.js', 'assets/core/writeoff-engine.js', 'assets/js/01-core.js', 'assets/js/29-fuel-quality.js', 'vendor/xlsx.bundle.js', 'assets/js/10-pdf-reports.js', 'assets/js/25-fuel-report.js', 'assets/js/25b-fuel-purchases.js', 'assets/js/25c-fuel-control.js', 'assets/js/25i-gsm-ledger.js', 'assets/js/25j-gsm-workspace.js', 'assets/js/25k-gsm-export.js', 'assets/js/25o-writeoff-workflow.js']) {
   vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), ctx, { filename: file });
 }
 function base() {
@@ -161,13 +161,15 @@ test('legacy act export works without optional settings and does not modify the 
   } finally { ctx.XLSX.writeFile = originalWrite; }
 });
 
-test('write-off button stays clickable when validation reports errors', () => {
+test('invalid sources allow a draft export while the posting command remains disabled', () => {
   const db = base(); record(db, 'r', '2026-08-01', 100, 20); purchase(db, 'p', 'r', '2026-08-01', 30, '111111');
-  ctx.inputData = db; vm.runInContext('data=inputData;gsmOrg="";gsmFuel=""', ctx);
-  const html = ctx.gsmWriteoffHtml(ledger(db));
-  assert.ok(html.includes('Акт требует проверки'));
-  assert.match(html, /onclick="gsmExportCurrentAct\(\)">Выгрузить акт/);
-  assert.doesNotMatch(html, /\sdisabled(?:[\s>]|$)/);
+  ctx.inputData = db; vm.runInContext('data=inputData;gsmOrg="";gsmFuel="";fpMonth="2026-08";gsmActDate="2026-08-31"', ctx);
+  ctx.dispatcherQuery = (name, options) => ctx.TvsWriteoffEngine.prepare(db, options);
+  const html = ctx.gsmWriteoffHtml(ctx.TvsFuelEngine.buildLedger(db, {from:"2026-08-01",to:"2026-08-31"}));
+  delete ctx.dispatcherQuery;
+  assert.ok(html.includes('Проведение заблокировано'));
+  assert.match(html, /onclick="gsmExportWriteoffDraft\(\)">Выгрузить черновик/);
+  assert.match(html, /data-writeoff-action="post"[^>]*disabled/);
 });
 
 test('validation opens an actionable review; explicit draft export preserves the journal and marks every act', () => {
