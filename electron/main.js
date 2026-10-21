@@ -106,7 +106,8 @@ function capturedOperationContext(event,binding=assertDataBinding(event)){
   ])).digest('hex');
   return {scope,identity,senderId:event.sender.id,databaseToken:binding.databaseToken,principal,client,
     directory:getDataDir(),host:settings.remoteHost,port:settings.remotePort||3377,
-    supportsOperations:binding.platform?.apiVersion===1&&binding.platform?.operations===1&&binding.platform?.outbox===1&&!!principal};
+    supportsOperations:binding.platform?.apiVersion===1&&binding.platform?.operations===1&&binding.platform?.outbox===1&&!!principal,
+    supportsCommands:binding.platform?.apiVersion===1&&binding.platform?.commands===1&&!!principal};
 }
 function assertOperationContext(context){
   const binding=dataBindings.get(context.senderId);
@@ -130,9 +131,12 @@ function operationRecovery(){
     recoveryService=require('./operation-recovery.cjs').createOperationRecovery({outbox,
       send:async(context,json)=>{
         assertOperationContext(context);
-        if(context.client){if(networkConfigError)throw Error(networkConfigError);return server.postSections(context.host,context.port,json);}
-        ensureDirs();createDailyBackup();
-        return storage.writeSections(context.directory,JSON.parse(json),{principal:context.principal});
+        const payload=JSON.parse(json),command=Object.hasOwn(payload,'command');
+        if(command&&!context.supportsCommands)throw Object.assign(Error('Подключение не поддерживает атомарные команды'),{code:'UNSUPPORTED_COMMANDS',definitive:true});
+        if(context.client){if(networkConfigError)throw Error(networkConfigError);return command?server.postCommands(context.host,context.port,json):server.postSections(context.host,context.port,json);}
+        ensureDirs();
+        if(command)return storage.executeCommand(context.directory,payload,{principal:context.principal,beforeCommit:createDailyBackup});
+        createDailyBackup();return storage.writeSections(context.directory,payload,{principal:context.principal});
       },
       lookup:async(context,id,digest)=>{
         assertOperationContext(context);
@@ -524,6 +528,18 @@ app.whenReady().then(() => {
       console.error('[write-sections] ' + e.message);
       return { ok: false, error: e.message };
     }
+  });
+  ipcMain.handle('execute-command',async(event,json)=>{
+    try{
+      const contracts=require('../assets/core/platform-contracts.js');
+      const payload=contracts.parseCommandEnvelope(typeof json==='string'?JSON.parse(json):json,storage.SECTIONS);
+      const binding=assertDataBinding(event,payload.databaseToken),context=capturedOperationContext(event,binding);
+      if(!context.supportsOperations||!context.supportsCommands)
+        return {ok:false,unsupported:true,code:'UNSUPPORTED_COMMANDS',error:'Подключение не поддерживает атомарные команды. Загрузите данные из совместимой версии программы.'};
+      const result=await operationRecovery().execute(context,payload);
+      assertOperationContext(context);
+      return result;
+    }catch(error){return {ok:false,code:error.code||'COMMAND_FAILED',error:error.message,...(Array.isArray(error.issues)?{issues:error.issues}:{})};}
   });
   ipcMain.handle('get-pending-operations',async event=>{try{
     const context=await verifiedOperationContext(event);

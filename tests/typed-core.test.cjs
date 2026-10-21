@@ -10,7 +10,12 @@ const plain=value=>JSON.parse(JSON.stringify(value));
 let compilation;
 const compiled=()=>compilation||(compilation=compileTypedCore());
 function browserAPI(entry){
-  const context=vm.createContext({});vm.runInContext(entry.artifact,context,{filename:entry.output});
+  const context=vm.createContext({});
+  for(const dependency of entry.dependencies||[]){
+    const file=path.join(path.dirname(entry.outputPath),dependency.path);
+    vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
+  }
+  vm.runInContext(entry.artifact,context,{filename:entry.output});
   return {api:context[entry.global],context};
 }
 function probeDiagnostics(text){
@@ -26,7 +31,7 @@ function probeDiagnostics(text){
   return ts.getPreEmitDiagnostics(ts.createProgram([filename],options,host));
 }
 
-test('strict TypeScript is the real source of each dependency-free UMD artifact',()=>{
+test('strict TypeScript is the real source of each UMD artifact with only explicit adapter dependencies',()=>{
   const config=JSON.parse(fs.readFileSync(path.join(ROOT,'tsconfig.core.json'),'utf8'));
   assert.equal(config.compilerOptions.strict,true);assert.equal(config.compilerOptions.noUncheckedIndexedAccess,true);
   assert.equal(config.compilerOptions.exactOptionalPropertyTypes,true);assert.deepEqual(config.compilerOptions.lib,['ES2020']);assert.deepEqual(config.compilerOptions.types,[]);
@@ -34,7 +39,9 @@ test('strict TypeScript is the real source of each dependency-free UMD artifact'
   for(const entry of compiled().artifacts){
     assert.equal(normalize(fs.readFileSync(entry.outputPath,'utf8')),entry.artifact);
     assert.ok(entry.artifact.includes('Generated from '+entry.source));
-    assert.ok(entry.artifact.includes('exports.'+entry.factory));assert.ok(!/\brequire\s*\(/.test(entry.artifact));
+    assert.ok(entry.artifact.includes('exports.'+entry.factory));
+    const required=[...entry.artifact.matchAll(/\brequire\('([^']+)'\)/g)].map(match=>match[1]);
+    assert.deepEqual(required,(entry.dependencies||[]).map(dependency=>dependency.path));
     const source=fs.readFileSync(path.join(ROOT,entry.source),'utf8');
     assert.match(source,/export function create/);assert.match(source,/: unknown/);
   }
@@ -46,7 +53,7 @@ test('browser and CommonJS loaders expose identical frozen API without leaking f
     const {api,context}=browserAPI(entry),native=require(entry.outputPath);
     assert.ok(Object.isFrozen(api));assert.ok(Object.isFrozen(native));assert.equal(api.apiVersion,native.apiVersion);
     assert.deepEqual(Object.keys(api).sort(),Object.keys(native).sort());
-    assert.deepEqual(Object.keys(context),[entry.global]);assert.equal(context[entry.factory],undefined);
+    assert.deepEqual(Object.keys(context),[...(entry.dependencies||[]).map(dependency=>dependency.global),entry.global]);assert.equal(context[entry.factory],undefined);
   }
   const entry=result.artifacts.find(value=>value.global==='DomainSources'),{api}=browserAPI(entry),native=require(entry.outputPath);
   const db={repairs:[{id:1,vehicleId:'v',invoiceDate:'2026-10-20',cost:'10000'}],workOrders:[{id:'w',status:'accepted',actualCost:10000,repairId:1}]};
@@ -57,6 +64,8 @@ test('browser and CommonJS loaders expose identical frozen API without leaking f
 test('public DTO types reject incompatible amounts, source names and identifiers',()=>{
   const diagnostics=probeDiagnostics(`
     import {createDomainSources, type FinancialProjection, type TankFlowEntry} from './src/core/financial-recognition';
+    import type {IssueFuelInput,PlatformCommand,CommandEnvelope} from './src/core/platform-contracts';
+    import type {CommandContext,CommandPlan} from './src/core/platform-commands';
     const api=createDomainSources();
     const projection:FinancialProjection=api.projectFinancialSources({});
     const amount:number|undefined=projection.sources[0]?.sum;
@@ -69,6 +78,20 @@ test('public DTO types reject incompatible amounts, source names and identifiers
     const invalidSource:'other-source'=projection.sources[0]!.source;
     // @ts-expect-error objects cannot identify source documents
     api.sourceKey('repair',{});
+    const issue:IssueFuelInput={tankId:7,target:{section:'generators',id:9},date:'2026-10-22',qty:100,reason:'Synthetic'};
+    const command:PlatformCommand={type:'IssueFuel',version:1,input:issue};
+    const envelope:CommandEnvelope={protocolVersion:1,databaseToken:'synthetic',operation:{id:'test'},base:{tanks:7},command};
+    const context:CommandContext={id:'test',now:'2026-10-22T12:00:00Z',today:'2026-10-22',actor:{id:'user',name:'User',role:'admin'}};
+    const plan:CommandPlan={sections:{},readSections:[],writeSections:[],entityIds:{}};
+    // @ts-expect-error command litres must be a number
+    issue.qty='100';
+    // @ts-expect-error assets use explicit typed IDs, never an untyped string reference
+    issue.target='g:9';
+    // @ts-expect-error acceptance author is supplied by the trusted context, never editable business input
+    const forged:PlatformCommand={type:'AcceptShift',version:1,input:{shiftId:7,changes:{acceptedBy:'Manual',acceptedActor:'forged'}}};
+    // @ts-expect-error version changes require a new supported DTO contract
+    command.version=2;
+    void envelope;void context;void plan;void forged;
     void invalidAmount;void invalidSource;
   `);
   assert.deepEqual(diagnostics.map(value=>ts.flattenDiagnosticMessageText(value.messageText,'\n')),[]);

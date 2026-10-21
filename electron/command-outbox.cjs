@@ -126,10 +126,12 @@ function createCommandOutbox(configuration={}){
     // JSON projections byte-for-byte, including nested historical row keys.
     const json=JSON.stringify(payload);
     if(Buffer.byteLength(json)>maxPayloadBytes)fail('OUTBOX_PAYLOAD_LIMIT','Операция превышает предел локальной очереди');
-    if(Object.keys(payload).some(key=>!['base','sections','databaseToken','operation'].includes(key)))fail('OUTBOX_PAYLOAD','Неожиданные поля запроса сохранения');
-    let parsed;try{parsed=contracts.parseSectionWrite(payload,schema.sections);}catch{fail('OUTBOX_PAYLOAD','Некорректный запрос сохранения в очереди');}
+    const command=Object.hasOwn(payload,'command');
+    const allowed=command?['protocolVersion','base','command','databaseToken','operation']:['base','sections','databaseToken','operation'];
+    if(Object.keys(payload).some(key=>!allowed.includes(key)))fail('OUTBOX_PAYLOAD','Неожиданные поля запроса сохранения');
+    let parsed;try{parsed=command?contracts.parseCommandEnvelope(payload,schema.sections):contracts.parseSectionWrite(payload,schema.sections);}catch{fail('OUTBOX_PAYLOAD','Некорректный запрос сохранения в очереди');}
     if(!parsed.operation||typeof parsed.databaseToken!=='string'||!parsed.databaseToken)fail('OUTBOX_PROTOCOL','Нужны ID операции и идентификатор базы');
-    const sections=Object.keys(parsed.sections).sort();
+    const sections=(command?require('../assets/core/platform-commands.js').footprint(parsed.command):Object.keys(parsed.sections)).sort();
     if(!sections.length||sections.some(section=>!Object.hasOwn(parsed.base,section)))fail('OUTBOX_PAYLOAD','Нужны исходные версии всех изменённых разделов');
     const requestDigest=kernel.requestDigest(parsed);
     if(parsed.operation.digest&&parsed.operation.digest!==requestDigest)fail('OUTBOX_DIGEST','Отпечаток не соответствует запросу');

@@ -7,6 +7,21 @@ export type SectionRows = Record<string, JsonRow[]>;
 export type Revisions = Record<string, number>;
 export interface OperationDescriptor { id: string; digest?: string }
 export interface SectionWrite { base: Revisions; sections: SectionRows; operation?: OperationDescriptor; databaseToken?: string }
+export interface AssetTarget { section: 'vehicles' | 'generators'; id: Identifier }
+export interface IssueFuelInput { tankId: Identifier; target: AssetTarget; date: string; qty: number; reason: string; legacyOverlapConfirmed?: boolean }
+export interface AcceptShiftChanges {
+  acceptedBy: string; title?: string; date?: string; target?: AssetTarget; driverId?: Identifier; jobId?: Identifier | null;
+  odoStart?: number | null; odoEnd?: number | null; hours?: number | null; fuelIssued?: number | null; tankMeasured?: number | null;
+  defect?: string; result?: string;
+}
+export interface AssignPersonInput {
+  assignmentId?: Identifier; driverId: Identifier; target: AssetTarget; from: string; to?: string; site: string; org?: string;
+  status?: string; reason: string; replacesAssignmentId?: Identifier;
+}
+export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelInput }
+  | { type: 'AcceptShift'; version: 1; input: { shiftId: Identifier; changes: AcceptShiftChanges } }
+  | { type: 'AssignPerson'; version: 1; input: AssignPersonInput };
+export interface CommandEnvelope { protocolVersion: 1; databaseToken: string; operation: OperationDescriptor; base: Revisions; command: PlatformCommand }
 export interface ContractError extends Error { code: string; field: string; status: number }
 
 export function createPlatformContracts() {
@@ -78,5 +93,110 @@ export function createPlatformContracts() {
     }
     return result;
   }
-  return Object.freeze({ apiVersion: 1 as const, identifier, validateOperation, validateSections, validateRevisions, parseSectionWrite });
+  // Commands have an exact, owned JSON boundary. Never execute getters, toJSON
+  // or coercion hooks while interpreting an action or computing its identity.
+  function commandJson(value: unknown, field: string, parents = new Set<object>(), depth = 0): JsonValue {
+    if (depth > 100) fail('INVALID_COMMAND', field, 'Слишком глубокая структура команды');
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (value === null || typeof value !== 'object') fail('INVALID_COMMAND', field, 'Команда должна содержать только значения JSON');
+    const array = Array.isArray(value), prototype: unknown = Object.getPrototypeOf(value);
+    if (!array && !(prototype === null || typeof prototype === 'object' && prototype !== null && Object.getPrototypeOf(prototype) === null))
+      fail('INVALID_COMMAND', field, 'Недопустимый объект команды');
+    if (parents.has(value)) fail('INVALID_COMMAND', field, 'Циклическая структура команды');
+    parents.add(value);
+    const result: JsonRow = {}, items: JsonValue[] = [];
+    for (const key of Reflect.ownKeys(value)) {
+      if (array && key === 'length') continue;
+      if (typeof key !== 'string' || ['__proto__', 'constructor', 'prototype'].includes(key)) fail('INVALID_COMMAND', field, 'Недопустимое поле команды');
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !descriptor.enumerable || descriptor.get || descriptor.set) fail('INVALID_COMMAND', field + '.' + key, 'Исполняемые и скрытые свойства недопустимы');
+      if (array && (!/^(?:0|[1-9]\d*)$/.test(key) || Number(key) >= value.length)) fail('INVALID_COMMAND', field, 'Недопустимый массив команды');
+      const child = commandJson(descriptor.value, field + '.' + key, parents, depth + 1);
+      if (array) items[Number(key)] = child; else result[key] = child;
+    }
+    parents.delete(value);
+    if (array && items.length !== value.length || array && Object.keys(items).length !== value.length) fail('INVALID_COMMAND', field, 'Разреженный массив команды недопустим');
+    return array ? items : result;
+  }
+  function commandObject(value: unknown, field: string): Record<string, unknown> {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) fail('INVALID_COMMAND', field, 'Нужен объект команды');
+    return value as Record<string, unknown>;
+  }
+  function keys(value: Record<string, unknown>, allowed: readonly string[], field: string): void {
+    for (const name of Object.keys(value)) if (!allowed.includes(name)) fail('INVALID_COMMAND', field + '.' + name, 'Неизвестное поле команды: ' + name);
+  }
+  function commandId(value: unknown, field: string): Identifier {
+    if (!identifier(value) || typeof value === 'string' && (value.length > 500 || ['__proto__','constructor','prototype'].includes(value)))
+      fail('INVALID_COMMAND', field, 'Некорректный идентификатор');
+    return value;
+  }
+  function commandText(value: unknown, field: string, required: boolean, max = 4000): string {
+    if (typeof value !== 'string' || value.length > max || required && !value.trim()) fail('INVALID_COMMAND', field, 'Проверьте текстовое поле команды');
+    return value;
+  }
+  function commandDate(value: unknown, field: string, empty = false): string {
+    if (empty && value === '') return '';
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) fail('INVALID_COMMAND', field, 'Проверьте дату команды');
+    const day = new Date(value + 'T12:00:00Z');
+    if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0,10) !== value) fail('INVALID_COMMAND', field, 'Проверьте дату команды');
+    return value;
+  }
+  function target(value: unknown, field: string): AssetTarget {
+    const row = commandObject(value, field); keys(row, ['section','id'], field);
+    if (row.section !== 'vehicles' && row.section !== 'generators') fail('INVALID_COMMAND', field + '.section', 'Выберите транспорт или ДЭС');
+    return {section:row.section,id:commandId(row.id,field + '.id')};
+  }
+  function validateCommand(value: unknown): PlatformCommand {
+    const row = commandObject(commandJson(value,'command'),'command'); keys(row,['type','version','input'],'command');
+    if (row.version !== 1) fail('COMMAND_VERSION', 'command.version', 'Версия команды не поддерживается');
+    const input = commandObject(row.input,'command.input'), path = 'command.input.';
+    if (row.type === 'IssueFuel') {
+      keys(input,['tankId','target','date','qty','reason','legacyOverlapConfirmed'],'command.input');
+      if (typeof input.qty !== 'number' || !Number.isFinite(input.qty) || input.qty <= 0) fail('INVALID_COMMAND',path+'qty','Количество топлива должно быть больше нуля');
+      const result: IssueFuelInput = {tankId:commandId(input.tankId,path+'tankId'),target:target(input.target,path+'target'),date:commandDate(input.date,path+'date'),qty:input.qty,reason:commandText(input.reason,path+'reason',true)};
+      if (input.legacyOverlapConfirmed !== undefined) {
+        if (typeof input.legacyOverlapConfirmed !== 'boolean') fail('INVALID_COMMAND',path+'legacyOverlapConfirmed','Нужно явное подтверждение отдельной выдачи');
+        result.legacyOverlapConfirmed = input.legacyOverlapConfirmed;
+      }
+      return {type:'IssueFuel',version:1,input:result};
+    }
+    if (row.type === 'AcceptShift') {
+      keys(input,['shiftId','changes'],'command.input');
+      const changes=commandObject(input.changes,path+'changes');
+      keys(changes,['acceptedBy','title','date','target','driverId','jobId','odoStart','odoEnd','hours','fuelIssued','tankMeasured','defect','result'],path+'changes');
+      const result: AcceptShiftChanges = {acceptedBy:commandText(changes.acceptedBy,path+'changes.acceptedBy',true,200)};
+      if (changes.title !== undefined) result.title=commandText(changes.title,path+'changes.title',true,200);
+      if (changes.date !== undefined) result.date=commandDate(changes.date,path+'changes.date');
+      if (changes.target !== undefined) result.target=target(changes.target,path+'changes.target');
+      if (changes.driverId !== undefined) result.driverId=commandId(changes.driverId,path+'changes.driverId');
+      if (changes.jobId !== undefined) result.jobId=changes.jobId===null||changes.jobId===''?null:commandId(changes.jobId,path+'changes.jobId');
+      for (const field of ['odoStart','odoEnd','hours','fuelIssued','tankMeasured'] as const) if (changes[field] !== undefined) {
+        const amount=changes[field];
+        if (amount !== null && (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0)) fail('INVALID_COMMAND',path+'changes.'+field,'Нужно неотрицательное число или пустое значение');
+        result[field]=amount;
+      }
+      for (const field of ['defect','result'] as const) if (changes[field] !== undefined) result[field]=commandText(changes[field],path+'changes.'+field,false);
+      return {type:'AcceptShift',version:1,input:{shiftId:commandId(input.shiftId,path+'shiftId'),changes:result}};
+    }
+    if (row.type === 'AssignPerson') {
+      keys(input,['assignmentId','driverId','target','from','to','site','org','status','reason','replacesAssignmentId'],'command.input');
+      const result: AssignPersonInput = {driverId:commandId(input.driverId,path+'driverId'),target:target(input.target,path+'target'),from:commandDate(input.from,path+'from'),site:commandText(input.site,path+'site',true,200),reason:commandText(input.reason,path+'reason',true)};
+      if (input.assignmentId !== undefined) result.assignmentId=commandId(input.assignmentId,path+'assignmentId');
+      if (input.replacesAssignmentId !== undefined) result.replacesAssignmentId=commandId(input.replacesAssignmentId,path+'replacesAssignmentId');
+      if (input.to !== undefined) result.to=commandDate(input.to,path+'to',true);
+      for (const field of ['org','status'] as const) if (input[field] !== undefined) result[field]=commandText(input[field],path+field,false,200);
+      if (result.to && result.to < result.from) fail('INVALID_COMMAND',path+'to','Дата окончания раньше начала');
+      return {type:'AssignPerson',version:1,input:result};
+    }
+    return fail('UNKNOWN_COMMAND','command.type','Неизвестная команда платформы');
+  }
+  function parseCommandEnvelope(value: unknown, registry: readonly string[]): CommandEnvelope {
+    const row=commandObject(commandJson(value,''),''); keys(row,['protocolVersion','databaseToken','operation','base','command'],'');
+    if (row.protocolVersion !== 1) fail('COMMAND_VERSION','protocolVersion','Версия протокола команд не поддерживается');
+    const operation=commandObject(row.operation,'operation'); keys(operation,['id','digest'],'operation');
+    const token=commandText(row.databaseToken,'databaseToken',true,16384);
+    return {protocolVersion:1,databaseToken:token,operation:validateOperation(operation),base:validateRevisions(row.base,registry),command:validateCommand(row.command)};
+  }
+  return Object.freeze({ apiVersion: 1 as const, identifier, validateOperation, validateSections, validateRevisions, parseSectionWrite, validateCommand, parseCommandEnvelope });
 }

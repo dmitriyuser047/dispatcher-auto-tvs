@@ -73,9 +73,9 @@ function wfValidDate(value,withTime=false) {
   return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===value.slice(0,10)&&(!withTime||Number.isFinite(new Date(value).getTime()));
 }
 const WF_TRANSITIONS={dispatchJobs:{new:['assigned','cancelled'],assigned:['new','started','cancelled'],started:['done','cancelled'],done:['confirmed'],confirmed:[],cancelled:['new']},workOrders:{new:['approved','cancelled'],approved:['new','repairing','cancelled'],repairing:['accepted','cancelled'],accepted:[],cancelled:['new']},opsTasks:{open:['started','snoozed','closed'],started:['open','snoozed','closed'],snoozed:['open','started','closed'],closed:['open']},shiftReports:{prepared:['sent'],sent:['accepted','rejected'],accepted:[],rejected:['prepared','sent']}};
-function wfValidate(section,row,old) {
+function wfValidate(section,row,old,options={}) {
   if(!WF_SECTIONS.includes(section)||section==='auditLog'||!row||typeof row!=='object'||Array.isArray(row))throw Error('Недопустимый раздел или запись');
-  if(typeof row.id!=='string'||!row.id||row.id.length>200||['__proto__','constructor','prototype'].includes(row.id))throw Error('Некорректный ID записи');
+  if(!(typeof row.id==='number'&&Number.isFinite(row.id))&&(typeof row.id!=='string'||!row.id||row.id.length>200||['__proto__','constructor','prototype'].includes(row.id)))throw Error('Некорректный ID записи');
   const scan=value=>{if(!value||typeof value!=='object')return;for(const key of Object.keys(value)){if(['__proto__','prototype','constructor'].includes(key))throw Error('Недопустимое поле пакета');scan(value[key]);}};scan(row);
   for(const [key,label,type='text',required] of (typeof WF_FIELDS!=='undefined'?WF_FIELDS[section]||[]:[])) {
     const value=row[key];
@@ -94,14 +94,14 @@ function wfValidate(section,row,old) {
         if(!wfPersonnelMatches(ref,wfPersonnelKind(row.assetRef)))throw Error('Для выбранной техники требуется '+wfPersonnelFieldLabel(row.assetRef).toLowerCase());
       }
     }
-    if(!['number','checkbox','driver'].includes(type)&&typeof value!=='string')throw Error('Поле «'+label+'» должно быть текстом');
+    if(!['number','checkbox','driver','tank'].includes(type)&&typeof value!=='string')throw Error('Поле «'+label+'» должно быть текстом');
   }
   const transitions=WF_TRANSITIONS[section];
   if(transitions&&old&&old.status!==row.status&&transitions[old.status]&&!transitions[old.status].includes(row.status))throw Error('Недопустимый переход: '+(WF_STATUS[old.status]||old.status)+' → '+(WF_STATUS[row.status]||row.status));
   if(section==='dispatchJobs') {const p=wfDispatchProblems(row,old);if(p.length)throw Error(p.join('\n'));}
   if(section==='assetAssignments') {
     if(row.to&&row.from>row.to)throw Error('Дата окончания раньше начала');
-    if((data.assetAssignments||[]).some(r=>!r.archived&&r.id!==row.id&&r.assetRef===row.assetRef&&r.from<=(row.to||'9999')&&(r.to||'9999')>=row.from))throw Error('Период назначения пересекается с существующим. Сначала завершите прежнее назначение.');
+    if((data.assetAssignments||[]).some(r=>!r.archived&&r.id!==row.id&&r.id!==options.replacesAssignmentId&&r.assetRef===row.assetRef&&r.from<=(row.to||'9999')&&(r.to||'9999')>=row.from))throw Error('Период назначения пересекается с существующим. Выберите заменяемое назначение или уточните даты.');
   }
   if(section==='fuelMovements') {
     if(!(row.qty>0))throw Error('Количество должно быть больше нуля');
@@ -139,23 +139,80 @@ function wfValidate(section,row,old) {
   if(section==='assetDocuments'&&row.date&&row.expires&&row.expires<row.date)throw Error('Документ истекает раньше даты выдачи');
   if(section==='connectors'&&row.kind==='api'&&row.endpoint){let url;try{url=new URL(row.endpoint);}catch{throw Error('Проверьте адрес API');}if(url.protocol!=='https:'||url.username||url.password)throw Error('API адрес должен использовать HTTPS без пароля в адресе');}
 }
-async function wfSave(section,row) {
-  wfInitData(data);const old=data[section].find(r=>r.id===row.id);wfValidate(section,row,old);
-  row.updatedAt=new Date().toISOString();if(!old)row.createdAt=row.updatedAt;
-  if(section==='fuelMovements'&&row.kind==='issue'&&row.assetRef) {
-    const tank=(data.tanks||[]).find(t=>t.id===row.fromTankId);
-    const id='fuel-movement:'+row.id,vehicle=row.assetRef.startsWith('v:');
-    const records=vehicle?data.records:data.genRecords;
-    if(records.some(r=>r.id===id||r.fuelMovementId===row.id))throw Error('Связанная выдача уже существует в журнале');
-    row.recordId=id;
-    const linked={id,date:row.date,fuelIssued:row.qty,fuelUsed:0,fuelActual:null,fuelMovementId:row.id,note:'Выдача из ёмкости: '+(tank?.name||'')+'. '+row.reason};
-    const sourceSnapshot={tankId:tank?.id||null,tankName:tank?.name||'',tankOrg:tank?.org||'',assetOrg:wfContext(row.assetRef,row.date).org||'',fuel:tank?.fuel||'diesel'};
-    Object.assign(linked,{fuelOrg:tank?.org||sourceSnapshot.assetOrg,fuelProvider:'Ёмкость '+(tank?.name||''),fuelSourceSnapshot:sourceSnapshot});
-    row.sourceSnapshot=sourceSnapshot;
-    if(vehicle)Object.assign(linked,{vehicleId:row.assetRef.slice(2),km:0,fuelGrade:tank?.fuel==='gasoline'?'Бензин':tank?.fuel==='gas'?'Газ':'ДТ'});
-    else Object.assign(linked,{generatorId:row.assetRef.slice(2),hours:0,tankId:null,fuelActualSource:'movement'});
-    records.push(linked);
+function wfCommandContextStamp(){
+  const context=typeof platformSessionContext==='function'?platformSessionContext():dispatcherContext();
+  const list=value=>Array.isArray(value)?[...new Set(value)].sort():null;
+  return JSON.stringify({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
+}
+function wfCommandState(section,id,original){return {context:wfCommandContextStamp(),section,id,original:JSON.stringify(original||null),operationId:null,commandText:null,pending:false};}
+function wfLockCommandForm(form){
+  const controls=[...form.querySelectorAll('input,select,textarea,button[type="submit"]')].map(control=>[control,control.disabled]);
+  for(const[control]of controls)control.disabled=true;
+  return()=>{for(const[control,disabled]of controls)control.disabled=disabled;};
+}
+function wfAssertCommandState(state){
+  if(state.context!==wfCommandContextStamp())throw Error('База, пользователь или права изменились. Откройте форму заново. Введённые значения остаются в полях.');
+  if(state.section&&JSON.stringify((data[state.section]||[]).find(row=>row.id===state.id)||null)!==state.original)throw Error('Исходная запись уже изменена. Откройте актуальную форму; введённые значения остаются в полях.');
+}
+function wfCommandTarget(assetRef){
+  const section=typeof assetRef==='string'?(assetRef.startsWith('v:')?'vehicles':assetRef.startsWith('g:')?'generators':null):null;
+  const matches=section?(data[section]||[]).filter(row=>String(row.id)===assetRef.slice(2)):[];
+  if(matches.length!==1)throw Error(matches.length?'Нельзя однозначно определить технику. Проверьте её ID.':'Выберите машину или ДЭС');
+  return {section,id:matches[0].id};
+}
+function wfCommandReference(section,value,label,fromSelect=false){
+  const exact=(data[section]||[]).filter(row=>row.id===value);if(!fromSelect&&exact.length===1)return exact[0].id;
+  const matches=(data[section]||[]).filter(row=>String(row.id)===String(value));
+  if(matches.length!==1)throw Error('Проверьте поле «'+label+'»: объект не найден или ID неоднозначен');return matches[0].id;
+}
+async function wfExecuteSemanticCommand(command,state){
+  state=state||wfCommandState();wfAssertCommandState(state);
+  if(state.pending)throw Error('Дождитесь подтверждения текущего действия');
+  if(typeof platformExecuteCommand!=='function')throw Error('Эта версия программы не поддерживает безопасное выполнение действия. Обновите основную программу.');
+  const text=JSON.stringify(command);if(state.commandText!==text){state.commandText=text;state.operationId=wfId('command');}
+  state.pending=true;
+  try{
+    const result=await platformExecuteCommand(command,{operationId:state.operationId});
+    if(state.context!==wfCommandContextStamp())throw Error('База, пользователь или права изменились. Проверьте результат в исходной базе; введённые значения остаются в форме.');
+    if(result?.ok!==true){
+      const detail=(result?.issues||[]).slice(0,3).map(issue=>issue.message).filter(Boolean).join('; ');
+      const message=String(result?.message||result?.error||'Действие не подтверждено. Введённые значения остаются в форме.');
+      throw Object.assign(Error(message+(detail&&!message.includes(detail)?': '+detail:'')+(result?.unknown?' Проверьте очередь сохранения: результат ещё не подтверждён.':'')+(result?.committed&&result?.needsReload?' Сервер подтвердил операцию, но локальные данные не обновлены. Сверьте историю перед повтором.':'')),{code:result?.code||'COMMAND_FAILED',unknown:!!result?.unknown});
+    }
+    return result;
+  }finally{state.pending=false;}
+}
+function wfShowCommandError(node,error){
+  if(!node)return;node.textContent=error.message;
+  if(!error.unknown||!window.electronAPI?.getPendingOperations)return;
+  const stamp=wfCommandContextStamp(),queue=document.createElement('p');queue.className='wf-note';queue.setAttribute('role','status');queue.textContent='Проверяю очередь сохранения…';node.append(queue);
+  void(async()=>{
+    try{
+      const result=await window.electronAPI.getPendingOperations();if(!node.isConnected||stamp!==wfCommandContextStamp())return;
+      if(!result?.ok||result.supported===false){queue.textContent=result?.error||'Очередь недоступна в этом подключении.';return;}
+      const rows=(result.operations||[]).filter(row=>row.status!=='committed');
+      queue.textContent=rows.length?'В очереди: '+rows.map(row=>(({pending:'ожидает проверки',unknown:'нет подтверждения',conflict:'нужна сверка',rejected:'отклонено'})[row.status]||'требует проверки')+' · '+String(row.id)).join('; ')+'. Повтор неизменённой формы использует ту же операцию.':'Неподтверждённых операций в очереди нет. Проверьте историю исходной базы.';
+    }catch{if(node.isConnected&&stamp===wfCommandContextStamp())queue.textContent='Не удалось прочитать очередь. Введённые значения сохранены в форме.';}
+  })();
+}
+function wfAssignmentInput(row,old,replacesAssignmentId){
+  if(row.driverId==null||row.driverId==='')throw Error('Выберите сотрудника');
+  return {...(old?{assignmentId:old.id}:{}),driverId:row.driverId,target:wfCommandTarget(row.assetRef),from:row.from,to:row.to||'',
+    site:row.site,org:row.org||'',...(row.status!==undefined?{status:row.status}:{}),reason:row.reason,
+    ...(replacesAssignmentId!==undefined?{replacesAssignmentId}: {})};
+}
+async function wfSave(section,row,state,options={}) {
+  const old=(data[section]||[]).find(r=>r.id===row.id);if(state)wfAssertCommandState(state);wfValidate(section,row,old,options);
+  let command=null;
+  if(section==='fuelMovements'&&row.kind==='issue')command={type:'IssueFuel',version:1,input:{tankId:wfCommandReference('tanks',row.fromTankId,'Из ёмкости'),target:wfCommandTarget(row.assetRef),date:row.date,qty:row.qty,reason:row.reason,...(row.legacyOverlapConfirmed?{legacyOverlapConfirmed:true}:{})}};
+  if(section==='assetAssignments')command={type:'AssignPerson',version:1,input:wfAssignmentInput(row,old,options.replacesAssignmentId)};
+  if(section==='shiftReports'&&row.status==='accepted'){
+    if(!old||old.status!=='sent')throw Error('Принять можно только ранее отправленную сменную форму');
+    const changes={};for(const field of ['title','date','driverId','jobId','odoStart','odoEnd','hours','fuelIssued','tankMeasured','defect','result','acceptedBy'])if(row[field]!==undefined)changes[field]=row[field];
+    changes.target=wfCommandTarget(row.assetRef);command={type:'AcceptShift',version:1,input:{shiftId:old.id,changes}};
   }
+  if(command){await wfExecuteSemanticCommand(command,state);if(!state?.form||document.getElementById('wfModal')?.contains(state.form))closeModal('wfModal');if((activeSection==='drivers'||activeSection==='operators')&&typeof renderPersonnelSection==='function')renderPersonnelSection();else renderWorkflows();showToast('Действие подтверждено и сохранено');return true;}
+  wfInitData(data);row.updatedAt=new Date().toISOString();if(!old)row.createdAt=row.updatedAt;
   if(old)Object.assign(old,row);else data[section].push(row);
   if(await saveData(data)){closeModal('wfModal');if((activeSection==='drivers'||activeSection==='operators')&&typeof renderPersonnelSection==='function')renderPersonnelSection();else renderWorkflows();showToast('Сохранено');return true;}return false;
 }

@@ -40,11 +40,14 @@ function createOperationRecovery({outbox,send,lookup,onWarning=()=>{}}){
     }
   }
   async function execute(context,payload){
+    const command=payload&&Object.hasOwn(payload,'command');
+    if(command&&(!context.supportsOperations||context.supportsCommands!==true||!payload.operation))
+      return {ok:false,unsupported:true,code:'UNSUPPORTED_COMMANDS',error:'Это подключение не поддерживает атомарные команды. Загрузите данные из совместимой версии программы.'};
     if(!context.supportsOperations||!payload?.operation){
       try{return await send(context,JSON.stringify(payload));}catch(error){return errorResult(error,false);}
     }
     try{
-      const sections=new Set(Object.keys(payload.sections||{}).filter(name=>name!=='auditLog'));
+      const sections=new Set((command?require('../assets/core/platform-commands.js').dependencies(payload.command):Object.keys(payload.sections||{})).filter(name=>name!=='auditLog'));
       const unresolved=outbox.list(context.scope).some(row=>row.id!==payload.operation.id&&['pending','unknown'].includes(row.status)&&row.sections.some(name=>sections.has(name)));
       if(unresolved)return {ok:false,queued:false,needsReload:true,code:'PENDING_OPERATION',error:'В этом разделе есть операция с неподтверждённым результатом. Откройте «Состояние программы» и проверьте её перед новым сохранением.'};
       outbox.stage(context.scope,payload,{supportsOperations:true});
@@ -74,6 +77,8 @@ function createOperationRecovery({outbox,send,lookup,onWarning=()=>{}}){
     const stored=outbox.getForRetry(context.scope,id);
     if(!stored)throw Error('Операция больше не находится в очереди');
     if(!stored.payload||!stored.json)throw Error('Сохранённый запрос недоступен');
+    if(Object.hasOwn(stored.payload,'command')&&context.supportsCommands!==true)
+      return {ok:false,unsupported:true,code:'UNSUPPORTED_COMMANDS',error:'Подключение не поддерживает сохранённую команду. Повтор не выполнялся.'};
     return sendSaved(context,stored.payload,stored.json,stored.requestDigest);
   }
   return Object.freeze({execute,reconcile,retry,list:context=>outbox.list(context.scope),discard:(context,id)=>outbox.discard(context.scope,id)});

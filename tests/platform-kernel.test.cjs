@@ -67,6 +67,19 @@ test('canonical SHA256 digests agree with Node and ignore client audit hints in 
   assert.notEqual(kernel.requestDigest({ ...payload,base:{ vehicles:6 } }), expected);
 });
 
+test('semantic command digest binds immutable intent and every dependency revision with a distinct protocol domain',()=>{
+  const command={type:'IssueFuel',version:1,input:{tankId:7,target:{section:'vehicles',id:'7'},date:'2026-09-01',qty:923.537,reason:'Synthetic issue'}};
+  const payload={protocolVersion:1,base:{tanks:3,records:4,vehicles:5},command,databaseToken:'synthetic-A',operation:{id:'intent-1'}};
+  const expected='sha256:'+crypto.createHash('sha256').update(kernel.stableSerialize({kind:'semantic-command',version:1,base:payload.base,command}),'utf8').digest('hex');
+  assert.equal(kernel.requestDigest(payload),expected);
+  assert.equal(kernel.requestDigest({...payload,databaseToken:'synthetic-B',operation:{id:'different-transport-id'}}),expected);
+  assert.notEqual(kernel.requestDigest({...payload,base:{...payload.base,tanks:4}}),expected);
+  assert.notEqual(kernel.requestDigest({...payload,command:{...command,input:{...command.input,qty:923.538}}}),expected);
+  assert.notEqual(kernel.requestDigest({...payload,command:{...command,input:{...command.input,target:{section:'vehicles',id:7}}}}),expected);
+  assert.throws(()=>kernel.requestDigest({...payload,sections:{records:[]}}),{code:'INVALID_ARGUMENT'});
+  assert.throws(()=>kernel.requestDigest({...payload,protocolVersion:2}),{code:'INVALID_ARGUMENT'});
+});
+
 test('commands persist serially and duplicate in-flight operation IDs write and emit once', async () => {
   const bus = runtime(), gate = deferred(), events = [], writes = [];
   bus.subscribe(event => events.push(event));

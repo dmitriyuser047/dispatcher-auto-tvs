@@ -92,6 +92,24 @@ async function writeRequest(req,res,full,authenticateRequest) {
     } finally { _writeLock = false; }
   } catch (e) { respond(res,e.status || 400,{ok:false,error:e.message,...(e.code ? {code:e.code} : {})}); }
 }
+async function commandRequest(req,res,authenticateRequest) {
+  const dataDir=_dataDir,backup=_backupFn;
+  try {
+    const envelope=await readBody(req);
+    if(_writeLock){respond(res,423,{ok:false,error:'Повторите сохранение'});return;}
+    _writeLock=true;
+    try {
+      return storage.withDatabaseLock(dataDir,()=>{
+        // A token accepted before a slow upload may have been revoked or had
+        // its role changed. Only this current principal owns the command.
+        const principal=authenticateRequest();
+        if(!principal){respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'});return;}
+        const result=storage.executeCommand(dataDir,envelope,{principal,now:new Date().toISOString(),beforeCommit:backup || undefined});
+        respond(res,result.ok?200:409,result);
+      });
+    } finally {_writeLock=false;}
+  } catch(error){respond(res,error.status||400,{ok:false,error:error.message,...(error.code?{code:error.code}:{})});}
+}
 
 function getLocalIPs() {
   return Object.values(os.networkInterfaces()).flat().filter(net => net && net.family === 'IPv4' && !net.internal).map(net => net.address);
@@ -119,6 +137,9 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls}) {
     }
     if (req.method === 'POST' && ['/api/sections','/api/data'].includes(req.url)) {
       void writeRequest(req,res,req.url === '/api/data',authenticateRequest); return;
+    }
+    if(req.method==='POST'&&req.url==='/api/commands'){
+      void commandRequest(req,res,authenticateRequest);return;
     }
     if (req.method !== 'GET') { respond(res,404,{ok:false,error:'Неизвестный запрос'}); return; }
     try {
@@ -237,6 +258,11 @@ async function postSections(host,port,jsonStr) {
   if (response.status === 404) return {ok:false,unsupported:true};
   return parseResponse(response,true);
 }
+async function postCommands(host,port,jsonStr) {
+  const response=await request(host,port,'/api/commands',jsonStr);
+  if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_COMMANDS'};
+  return parseResponse(response,true);
+}
 async function ping(host,port) { try { return parseResponse(await request(host,port,'/api/ping',null,5000)); } catch { return null; } }
 
-module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,configureKey,configureTransport,configureAccess};
+module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,postCommands,configureKey,configureTransport,configureAccess};

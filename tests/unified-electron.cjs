@@ -61,7 +61,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
       ...(saved?{}:{failure:platformRuntimeStatus().lastError,syncResult:_sync.lastResult}) };
   });
   assert.equal(first.saved, true,JSON.stringify(first));
-  assert.deepEqual(first.platform, {apiVersion:1,operations:1,outbox:1,receiptQuery:1});
+  assert.deepEqual(first.platform, {apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1});
   assert.equal(first.operationReceipt?.status, 'committed'); assert.ok(first.operationReceipt.id);
   assert.equal(storage.readAll(dataA).records[0].id, 'native-journal');
   assert.match(first.token, /^[a-f0-9]{64}$/);

@@ -464,7 +464,7 @@ function readSection(dataDir, name) {
 
 function readSnapshot(dataDir) {
   const data = readAll(dataDir);
-  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1 } };
+  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1 } };
 }
 function readOperation(dataDir,query,principal){
   const token=databaseToken(dataDir),audit=readSection(dataDir,'auditLog');
@@ -514,6 +514,13 @@ function writeSections(dataDir, payload, options = {}) {
     revisions[name] = (revisions[name] || 0) + 1;
     changed.push(name);
   });
+  // Trusted maintenance hooks run only for a new, fully validated commit. A
+  // replay, conflict or refused command must not create a backup as a side effect.
+  if (changed.length && options.beforeCommit !== undefined) {
+    if (typeof options.beforeCommit !== 'function') throw new Error('Ожидалась синхронная подготовка записи');
+    const preparedCommit = options.beforeCommit();
+    if (preparedCommit && typeof preparedCommit.then === 'function') throw new Error('Подготовка записи должна быть синхронной');
+  }
   commitSections(dataDir, pending, revisions);
   return { ok: true, changed, revisions, databaseToken: token,
     canonicalSections:pending, ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) };
@@ -541,6 +548,7 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
 module.exports = {
   SECTIONS, sectionsDir, sectionFile, revisionsFile,
   databaseToken, withDatabaseLock, validateRows, prepareWriteoffSections,
+  executeCommand:(dataDir,envelope,options)=>require('./command-service.cjs').execute(dataDir,envelope,options),
   ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot,readOperation }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, () => {
     const sqlite = sqliteBackend(dataDir), action = () => operation(dataDir,...args);
     if (!sqlite || ['isSplit','migrate'].includes(name)) return action();

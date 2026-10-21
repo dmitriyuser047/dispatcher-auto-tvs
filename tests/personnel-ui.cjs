@@ -1,12 +1,14 @@
 const {test,before,after,beforeEach,afterEach}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {pathToFileURL}=require('node:url'),{createRequire}=require('node:module');
+const commands=require('../assets/core/platform-commands.js');
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
 let browser,page,errors;
 before(async()=>{const edge='C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';browser=await pw.chromium.launch({headless:true,executablePath:process.env.TVS_TEST_BROWSER||(!process.env.CI&&fs.existsSync(edge)?edge:undefined)});});
 after(async()=>{await browser?.close();});
 beforeEach(async()=>{
  page=await browser.newPage({viewport:{width:1280,height:900}});errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());
+ await page.exposeFunction('__planPersonnelCommand',request=>commands.plan(request.data,request.command,{id:request.id,now:'2026-10-22T12:00:00.000Z',today:'2026-10-22',actor:{id:'synthetic-personnel-user',name:'Synthetic personnel user',role:'admin'}}));
  await page.addInitScript(()=>{
   const seed={
    vehicles:[{id:'personnel-v',plate:'SYNTHETIC-001',make:'Тестовый автомобиль',org:'Тестовая организация',fuelGrade:'ДТ',norm:10}],
@@ -27,12 +29,17 @@ beforeEach(async()=>{
   window.__disk=JSON.stringify(seed);window.__writes=0;window.__reject=false;window.__token='personnel-synthetic-db';window.__revisions={};window.__scriptExecuted=false;
   window.electronAPI={readSnapshot:async()=>{
    const db=JSON.parse(window.__disk);for(const name of PlatformSchema.sections){db[name]??=[];window.__revisions[name]??=1;}window.__disk=JSON.stringify(db);
-   return JSON.stringify({data:db,revisions:{...window.__revisions},databaseToken:window.__token,platform:{apiVersion:1,operations:1}});
+   return JSON.stringify({data:db,revisions:{...window.__revisions},databaseToken:window.__token,platform:{apiVersion:1,operations:1,outbox:1,commands:1}});
   },writeSections:async raw=>{
    window.__writes++;if(window.__reject)return{ok:false,error:'Synthetic personnel save failure'};
    const request=JSON.parse(raw),db=JSON.parse(window.__disk);
    for(const [name,rows]of Object.entries(request.sections)){db[name]=rows;window.__revisions[name]++;}
    window.__disk=JSON.stringify(db);return{ok:true,revisions:{...window.__revisions},databaseToken:request.databaseToken,canonicalSections:request.sections,operationReceipt:{id:request.operation?.id,status:'committed'}};
+  },executeCommand:async raw=>{
+   window.__writes++;if(window.__reject)return{ok:false,error:'Synthetic personnel command failure'};
+   const request=JSON.parse(raw),db=JSON.parse(window.__disk),planned=await window.__planPersonnelCommand({data:db,command:request.command,id:request.operation.id});
+   const canonical={...planned.sections,auditLog:db.auditLog};for(const[name,rows]of Object.entries(canonical)){db[name]=rows;window.__revisions[name]++;}
+   window.__disk=JSON.stringify(db);return{ok:true,databaseToken:request.databaseToken,revisions:{...window.__revisions},canonicalSections:canonical,operationReceipt:{id:request.operation.id,digest:request.operation.digest,status:'committed'}};
   }};
  });
  await page.goto(pathToFileURL(path.resolve(__dirname,'../index.html')).href);

@@ -31,7 +31,10 @@ function operationInfo(previous, sections, options = {}) {
   if (!options.operation) return null;
   const operation = contracts().validateOperation(options.operation);
   const actor = principalOf(options.principal);
-  const digest = kernel().requestDigest({ base:options.base || {}, sections });
+  // commandIntent is a trusted internal option, never accepted from the raw
+  // sections/full-write transport. Generated rows and server clocks must not
+  // change the identity of a semantic command or prevent its receipt replay.
+  const digest = kernel().requestDigest(options.commandIntent || { base:options.base || {}, sections });
   if (operation.digest != null && operation.digest !== digest) fail('OPERATION_DIGEST', 'Состав операции изменился после подготовки', 409);
   const receipt = (previous.auditLog || []).find(row => row.source === 'platform' && row.type === 'transaction' && row.operationId === operation.id);
   if (receipt && (receipt.requestDigest !== digest || receipt.actorId !== actor.id || receipt.actorRole !== actor.role || receipt.databaseToken !== options.databaseToken))
@@ -57,6 +60,26 @@ function assertAuditPrefix(previous, sections, actor) {
   if (!Array.isArray(received) || !unchanged(previous.auditLog || []) && !unchanged(prefix))
     fail('AUDIT_IMMUTABLE', 'Сохранённую историю нельзя изменять или удалять. Обновите данные.', 403);
 }
+function canonicalShiftAcceptance(previous,sections,actor,at) {
+  if(!Object.hasOwn(sections,'shiftReports'))return sections;
+  const old=new Map();
+  for(const row of previous.shiftReports || []){const key=typeof row.id+':'+JSON.stringify(row.id);if(!old.has(key))old.set(key,[]);old.get(key).push(row);}
+  const rows=sections.shiftReports.map(row=>{
+    const matches=old.get(typeof row.id+':'+JSON.stringify(row.id)) || [],before=matches.length===1?matches[0]:null;
+    if(row.status==='accepted'&&matches.some(item=>item.status!=='accepted')) {
+      if(matches.length!==1)fail('SHIFT_ACCEPTANCE_AMBIGUOUS','Нельзя принять сменную форму с неоднозначным ID. Сначала проверьте её историю.',409);
+      if(before.status!=='sent')fail('SHIFT_ACCEPTANCE_TRANSITION','Принять можно только отправленную сменную форму.',409);
+      return {...row,acceptedActor:{...actor},acceptedAt:at};
+    }
+    if(row.status==='accepted'&&!matches.length)return {...row,acceptedActor:{...actor},acceptedAt:at};
+    // An accepted historical row remains immutable, including its old metadata.
+    // Unaccepted rows cannot manufacture approval metadata in advance.
+    if(row.status!=='accepted'&&['acceptedActor','acceptedAt'].some(field=>JSON.stringify(row[field])!==JSON.stringify(before?.[field])))
+      fail('SHIFT_ACCEPTANCE_METADATA','Реквизиты учётной записи и времени приёмки формируются программой.',403);
+    return row;
+  });
+  return {...sections,shiftReports:rows};
+}
 function prepareTransaction(previous, supplied, options = {}) {
   const registry = schema().sections, actor = principalOf(options.principal);
   contracts().validateSections(supplied,registry);
@@ -71,9 +94,10 @@ function prepareTransaction(previous, supplied, options = {}) {
     try { access.validateAssetChanges(actor, name, previous[name] || [], rows); }
     catch (error) { fail('ACCESS_DENIED', error.message, 403); }
   }
-  if (options.prepareSections) sections = options.prepareSections(sections);
   const at = options.now || new Date().toISOString();
   if (!Number.isFinite(Date.parse(at))) fail('INVALID_CLOCK', 'Некорректное время операции');
+  sections=canonicalShiftAcceptance(previous,sections,actor,at);
+  if (options.prepareSections) sections = options.prepareSections(sections);
   const id = info?.id || 'backend:' + crypto.randomUUID();
   const plan = kernel().prepare(previous, sections, { id, identity:options.databaseToken || 'local-storage', actor,
     revisions:options.revisions || {}, now:at,

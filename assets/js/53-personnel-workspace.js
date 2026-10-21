@@ -253,6 +253,7 @@ function personnelEditAssignment(personId,assignmentId) {
   if (!existing && !TvsPersonnelEngine.availability(person,wfToday()).available) { showToast('Сотрудник сейчас недоступен для назначения. Проверьте состояние карточки.'); return; }
   const identity = personnelIdentity(), original = existing ? JSON.parse(JSON.stringify(existing)) : null;
   const row = original || {id:wfId('person-assignment'),driverId:personId,from:wfToday(),to:'',site:person.site || '',org:person.org || '',reason:''};
+  const commandState=wfCommandState('assetAssignments',row.id,original);
   const validFrom = typeof row.from === 'string' && PlatformIntegrity.dateValid(row.from,'date');
   const presentText = value => typeof value === 'string' && !!value.trim();
   const assets = ['vehicles','generators'].flatMap(section => personnelCanRead(section) ? (data[section] || []).filter(asset => !asset.archived).map(asset => personnelAsset((section === 'vehicles' ? 'v:' : 'g:')+asset.id)).filter(Boolean) : [])
@@ -260,12 +261,15 @@ function personnelEditAssignment(personId,assignmentId) {
   if (existing && !assets.some(asset => asset.ref === row.assetRef)) assets.push({ref:row.assetRef,label:personnelAsset(row.assetRef)?.label || 'Прежняя техника'});
   wfShowDialog(existing ? 'Дата завершения назначения' : 'Закрепить технику · '+person.name,`<form id="personnelAssignmentForm" class="wf-form personnel-form"><label class="wf-wide"><span>Техника *</span><select name="assetRef" required ${existing ? 'disabled' : ''}><option value="">Выберите технику</option>${assets.map(asset => `<option value="${htmlEsc(asset.ref)}" ${asset.ref === row.assetRef ? 'selected' : ''}>${htmlEsc(asset.label)}</option>`).join('')}</select></label>
     ${personnelInput('С даты *','from','date',row.from,existing && validFrom ? 'required readonly' : 'required')}${personnelInput('По дату включительно','to','date',row.to,existing ? 'required' : '')}${personnelInput('Объект *','site','text',row.site,'required maxlength="200" '+(existing && presentText(row.site) ? 'readonly' : ''))}${personnelInput('Организация','org','text',row.org,'maxlength="200" '+(existing ? 'readonly' : ''))}
-    <label class="wf-wide"><span>Основание *</span><textarea name="reason" required maxlength="4000" rows="3" ${existing && presentText(row.reason) ? 'readonly' : ''}>${htmlEsc(row.reason || '')}</textarea></label><p class="personnel-caption wf-wide">${existing ? 'Исходное назначение остаётся в истории. Укажите последний день закрепления и заполните отсутствующие обязательные сведения.' : 'Периоды закрепления одной машины или ДЭС не должны пересекаться. Прежнее назначение можно завершить в карточке сотрудника.'}</p><div id="personnelAssignmentError" class="wf-error wf-wide" role="alert"></div><div class="personnel-actions wf-wide"><button type="button" class="btn btn-ghost" data-personnel-cancel>Отмена</button><button type="submit" class="btn btn-primary">${existing ? 'Сохранить дату' : 'Закрепить технику'}</button></div></form>`);
+    <label class="wf-wide"><span>Основание *</span><textarea name="reason" required maxlength="4000" rows="3" ${existing && presentText(row.reason) ? 'readonly' : ''}>${htmlEsc(row.reason || '')}</textarea></label>${existing?'':wfAssignmentReplacementField()}<p class="personnel-caption wf-wide">${existing ? 'Исходное назначение остаётся в истории. Укажите последний день закрепления и заполните отсутствующие обязательные сведения.' : 'Для смены сотрудника выберите прежнее назначение. Оно завершится одновременно с сохранением нового закрепления.'}</p><div id="personnelAssignmentError" class="wf-error wf-wide" role="alert"></div><div class="personnel-actions wf-wide"><button type="button" class="btn btn-ghost" data-personnel-cancel>Отмена</button><button type="submit" class="btn btn-primary">${existing ? 'Сохранить дату' : 'Закрепить технику'}</button></div></form>`);
   const form = document.getElementById('personnelAssignmentForm'); form.querySelector('[data-personnel-cancel]').onclick = () => closeModal('wfModal');
+  commandState.form=form;
+  const refreshReplacement=()=>wfRefreshAssignmentReplacements(form,form.elements.assetRef.value,form.elements.from.value,form.elements.to.value);
+  for(const field of ['assetRef','from','to'])form.elements[field].addEventListener('change',refreshReplacement);refreshReplacement();
   let pending = false;
   form.onsubmit = async event => {
     event.preventDefault(); if (pending) return;
-    const button = form.querySelector('[type="submit"]'), errorNode = form.querySelector('#personnelAssignmentError'); pending = true; button.disabled = true; errorNode.textContent = '';
+    const errorNode = form.querySelector('#personnelAssignmentError'); pending = true;const unlock=wfLockCommandForm(form);errorNode.textContent = '';
     try {
       personnelAssertIdentity(identity);
       const candidate = {...row};
@@ -277,11 +281,12 @@ function personnelEditAssignment(personId,assignmentId) {
       }
       else for (const field of ['assetRef','from','to','site','org','reason']) candidate[field] = form.elements[field].value.trim();
       if (!candidate.to && existing) throw Error('Укажите дату завершения');
-      wfValidate('assetAssignments',candidate,original);
-      await personnelStore('assetAssignments',candidate,original,identity);
-      closeModal('wfModal'); personnelOpenPerson(personId); showToast(existing ? 'Дата завершения сохранена' : 'Техника закреплена');
-    } catch (error) { errorNode.textContent = error.message; }
-    finally { pending = false; button.disabled = false; }
+      const replacesAssignmentId=wfSelectedAssignmentReplacement(form);
+      wfAssertCommandState(commandState);wfValidate('assetAssignments',candidate,original,{replacesAssignmentId});
+      await wfExecuteSemanticCommand({type:'AssignPerson',version:1,input:wfAssignmentInput(candidate,original,replacesAssignmentId)},commandState);
+      if(document.getElementById('wfModal')?.contains(form)){closeModal('wfModal');personnelOpenPerson(personId);}showToast(existing ? 'Дата завершения сохранена' : 'Техника закреплена');
+    } catch (error) { wfShowCommandError(errorNode,error); }
+    finally { pending = false;unlock(); }
   };
 }
 function personnelCancelAssignment(personId,assignmentId) {

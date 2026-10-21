@@ -84,6 +84,11 @@
     return h.map(value => (value >>> 0).toString(16).padStart(8, '0')).join('');
   }
   function requestDigest(payload) {
+    if(plain(payload)&&Object.prototype.hasOwnProperty.call(payload,'command')) {
+      if(payload.protocolVersion!==1||!plain(payload.base)||!plain(payload.command)||Object.prototype.hasOwnProperty.call(payload,'sections'))
+        fail('INVALID_ARGUMENT','Для отпечатка команды нужны её версия и исходные версии разделов');
+      return 'sha256:'+sha256(stableSerialize({kind:'semantic-command',version:1,base:payload.base,command:payload.command}));
+    }
     if (!plain(payload) || !plain(payload.base || {}) || !plain(payload.sections || {})) fail('INVALID_ARGUMENT', 'Для отпечатка нужны разделы и версии');
     const omitAudit = object => Object.fromEntries(Object.entries(object).filter(([name]) => name !== 'auditLog'));
     return 'sha256:' + sha256(stableSerialize({ base:omitAudit(payload.base || {}), sections:omitAudit(payload.sections || {}) }));

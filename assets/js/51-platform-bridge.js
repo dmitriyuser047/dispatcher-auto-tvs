@@ -66,6 +66,7 @@ function platformSessionContext() {
   const user = access?.user;
   return { identity:base.identity, readable:base.readable,
     writable:access && Array.isArray(access.writable) ? access.writable.slice() : undefined,
+    fieldPermissions:access?.fieldPermissions || null,
     actor:user ? { id:user.id, name:user.name || user.id, role:user.role } : { id:'local', name:'Локальный пользователь', role:'admin' },
     revisions:typeof _sync === 'undefined' ? {} : { ..._sync.revs },
     today:dispatcherLocalDate(),
@@ -123,6 +124,97 @@ async function platformExecuteSave(database, options, persist) {
     showToast('Сохранение остановлено: '+message);
     return false;
   }
+}
+const _platformCommandIntents=new Map(),PLATFORM_COMMAND_HISTORY=64;
+function platformCommandFailure(code,message,extra={}){return {ok:false,code,error:message,message,...extra};}
+function platformCompactCommandResult(result){
+  const retained={};
+  for(const key of ['ok','unknown','queued','committed','needsReload','code','databaseToken'])if(Object.hasOwn(result,key))retained[key]=result[key];
+  for(const key of ['error','message'])if(typeof result[key]==='string')retained[key]=result[key].slice(0,2000);
+  if(result.operationReceipt)retained.operationReceipt=Object.fromEntries(['id','digest','status','at'].filter(key=>Object.hasOwn(result.operationReceipt,key)).map(key=>[key,result.operationReceipt[key]]));
+  return retained;
+}
+function platformExecuteCommand(value,options={}){
+  let command,id,stamp,signature,entry;
+  try{
+    command=PlatformCommands.parseCommand(value);
+    id=options.operationId||crypto.randomUUID();PlatformContracts.validateOperation({id});
+    stamp=syncSessionStamp();signature=PlatformKernel.stableSerialize(command);
+    entry=_platformCommandIntents.get(id);
+    if(entry&&(entry.signature!==signature||entry.stamp!==stamp))
+      return Promise.resolve(platformCommandFailure('COMMAND_ID_REUSED','Этот ID уже связан с другой командой или сеансом. Откройте форму заново.'));
+    if(entry?.pending)return entry.pending;
+    if(entry?.result?.ok===true)return Promise.resolve({...entry.result,alreadyApplied:true});
+    if(!entry){
+      if(_platformCommandIntents.size>=PLATFORM_COMMAND_HISTORY){
+        const removable=[..._platformCommandIntents].find(([,item])=>!item.pending&&!item.result?.unknown&&!item.result?.queued);
+        if(!removable)return Promise.resolve(platformCommandFailure('COMMAND_LIMIT','Разберите неподтверждённые операции перед новым сохранением.'));
+        _platformCommandIntents.delete(removable[0]);
+      }
+      entry={signature,stamp,command};_platformCommandIntents.set(id,entry);
+    }
+    const source=data,context=platformSessionContext(),access=platformPrepareAccessStamp(context);
+    const dependencies=PlatformCommands.dependencies(command),writes=PlatformCommands.footprint(command),names=[...new Set([...dependencies,'auditLog'])];
+    const captured=Object.fromEntries(names.map(name=>[name,JSON.stringify(source[name]||[])]));
+    const guard=()=>{
+      syncEnsureSession(stamp);
+      if(source!==data||platformPrepareAccessStamp(platformSessionContext())!==access)throw platformPrepareError('STALE_ACCESS','База, пользователь или права изменились. Откройте форму заново.');
+      if(names.some(name=>JSON.stringify(source[name]||[])!==captured[name]))throw platformPrepareError('STALE_COMMAND','Исходные данные изменились во время операции. Обновите данные и проверьте результат в истории.');
+    };
+    const operation=_sync.chain.then(async()=>{
+      let acknowledged=false,sent=false;
+      try{
+        guard();
+        if(context.blocked||!_sync.enabled||!_sync.databaseToken)throw platformPrepareError('COMMAND_CONNECTION_REQUIRED','Для команды нужно подтверждённое подключение к основной базе.');
+        if(_sync.platform?.apiVersion!==1||_sync.platform?.commands!==1||_sync.platform?.operations!==1||_sync.platform?.outbox!==1||!window.electronAPI?.executeCommand)
+          throw platformPrepareError('UNSUPPORTED_COMMANDS','Подключение не поддерживает атомарные команды. Загрузите данные из совместимой версии программы.');
+        if(names.some(name=>captured[name]!==(_sync.synced[name]||'[]')))
+          throw platformPrepareError('UNSAVED_COMMAND_SOURCE','Сначала сохраните или отмените изменения исходных данных команды.');
+        const persisted=platformSaveBaseline();
+        if(!entry.envelope){
+          const base=Object.fromEntries(dependencies.map(name=>[name,_sync.revs[name]||0]));
+          entry.envelope={protocolVersion:1,databaseToken:_sync.databaseToken,base,operation:{id},command};
+          entry.envelope.operation.digest=PlatformKernel.requestDigest(entry.envelope);
+        }
+        const envelope=entry.envelope;
+        if(envelope.databaseToken!==_sync.databaseToken)throw platformPrepareError('STALE_IDENTITY','Команда относится к другой базе.');
+        sent=true;const response=await window.electronAPI.executeCommand(JSON.stringify(envelope));
+        syncEnsureSession(stamp);
+        if(response&&(response.databaseToken||response.databaseChanged))syncAssertDatabase(response);
+        if(response?.ok!==true)return {...platformCommandFailure(response?.code||'COMMAND_FAILED',response?.error||'Операция не подтверждена.'),...response,ok:false,unknown:response?.queued===true||response?.unknown===true};
+        const receipt=response.operationReceipt;
+        if(response.databaseToken!==envelope.databaseToken||receipt?.id!==id||receipt.digest!==envelope.operation.digest||!['committed','replayed'].includes(receipt.status))
+          return platformCommandFailure('ACK_REQUIRED','Ответ не подтвердил именно эту команду. Проверьте её в очереди операций.',{unknown:true,queued:true});
+        acknowledged=true;guard();
+        let canonical=response.canonicalSections,revisions=response.revisions;
+        const expected=[...new Set([...writes,'auditLog'])];
+        if(!canonical||writes.some(name=>!Array.isArray(canonical[name]))){
+          const raw=await window.electronAPI.readSnapshot();syncEnsureSession(stamp);
+          const snapshot=typeof raw==='string'?JSON.parse(raw):raw;
+          syncAssertDatabase(snapshot);guard();
+          if(JSON.stringify(snapshot?.access||null)!==JSON.stringify(_sync.access||null))throw platformPrepareError('STALE_ACCESS','Права изменились. Загрузите базу заново.');
+          canonical=Object.fromEntries(expected.filter(name=>Array.isArray(snapshot?.data?.[name])).map(name=>[name,snapshot.data[name]]));revisions=snapshot?.revisions;
+        }
+        if(!canonical||Object.keys(canonical).some(name=>!expected.includes(name))||writes.some(name=>!Array.isArray(canonical[name]))||Object.keys(canonical).some(name=>!Number.isSafeInteger(revisions?.[name])||revisions[name]<0))
+          throw platformPrepareError('CANONICAL_ACK_REQUIRED','Операция сохранена, но её данные не удалось подтвердить. Загрузите базу заново.');
+        PlatformContracts.validateSections(canonical,PlatformSchema.sections);guard();
+        // Only acknowledged sections become persisted. Other unsaved local
+        // editors keep their values and are absent from the backup baseline.
+        for(const [name,rows]of Object.entries(canonical)){
+          const copy=JSON.parse(JSON.stringify(rows));source[name]=copy;persisted[name]=JSON.parse(JSON.stringify(rows));
+          _sync.synced[name]=JSON.stringify(rows);_sync.revs[name]=revisions[name];
+        }
+        _lastPersisted=JSON.stringify(persisted);scheduleLocalBackup(_lastPersisted);_sync.lastResult=response;
+        rebuildIndex();dispatcherInvalidate();_platformLastError=null;
+        return {...response,ok:true,canonicalSections:canonical,revisions};
+      }catch(error){return platformCommandFailure(error.code||'COMMAND_FAILED',error.message,{...(acknowledged?{committed:true,needsReload:true}:sent?{unknown:true,queued:true}:{}),...(Array.isArray(error.issues)?{issues:error.issues}:{})});}
+    });
+    entry.pending=operation;_sync.chain=operation.then(()=>true,()=>false);
+    const barrier=operation.then(result=>result.ok===true);
+    if(typeof _pendingSaveOperations!=='undefined')_pendingSaveOperations.add(barrier);
+    operation.then(result=>{entry.result=platformCompactCommandResult(result);entry.pending=null;if(typeof _pendingSaveOperations!=='undefined')_pendingSaveOperations.delete(barrier);});
+    return operation;
+  }catch(error){return Promise.resolve(platformCommandFailure(error.code||'INVALID_COMMAND',error.message));}
 }
 async function platformFlushForClose(){
   let ready=typeof frcFlush==='function'?await frcFlush():true;

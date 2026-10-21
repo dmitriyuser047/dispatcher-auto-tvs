@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readSection:    (name)    => ipcRenderer.invoke('read-section', name),
   queryRows:      (query)   => ipcRenderer.invoke('query-rows', query),
   writeSections:  (json)    => ipcRenderer.invoke('write-sections', json),
+  executeCommand:(json)    => ipcRenderer.invoke('execute-command', json),
   getPendingOperations:()=>ipcRenderer.invoke('get-pending-operations'),
   reconcileOperation:id=>ipcRenderer.invoke('reconcile-operation',id),
   retryOperation:id=>ipcRenderer.invoke('retry-operation',id),

@@ -28,6 +28,21 @@ test('durable stage keeps exact canonical body, base, operation ID and fractiona
   assert.notEqual(JSON.stringify(original),before);assert.equal(entryFiles(f.rootDir).length,1);
 });
 
+test('typed command survives restart with exact dependency versions, numeric IDs, fractional quantity and write footprint',t=>{
+  const commands=require('../assets/core/platform-commands.js'),kernel=require('../assets/core/platform-kernel.js'),f=fixture(t);
+  const command={type:'IssueFuel',version:1,input:{tankId:7,target:{section:'generators',id:'7'},date:'2026-09-01',qty:923.537,reason:'Synthetic command'}};
+  const body={protocolVersion:1,databaseToken:'synthetic-database-token',base:Object.fromEntries(commands.dependencies(command).map(name=>[name,12])),command,operation:{id:'semantic-command'}};
+  body.operation.digest=kernel.requestDigest(body);
+  const exact=JSON.stringify(body),meta=f.box.stage(scope,exact,support);
+  assert.deepEqual(meta.sections,['fuelMovements','genRecords']);
+  const saved=createCommandOutbox(f.configuration).getForRetry(scope,body.operation.id);
+  assert.equal(saved.json,exact);assert.deepEqual(saved.payload,body);assert.equal(saved.requestDigest,body.operation.digest);
+  assert.equal(typeof saved.payload.command.input.tankId,'number');assert.equal(typeof saved.payload.command.input.target.id,'string');
+  assert.equal(saved.payload.command.input.qty,923.537);
+  assert.throws(()=>f.box.stage(scope,{...body,sections:{records:[]}},support),{code:'OUTBOX_PAYLOAD'});
+  assert.throws(()=>f.box.stage(scope,{...body,protocolVersion:2},support),{code:'OUTBOX_PAYLOAD'});
+});
+
 test('unknown acknowledgement survives a separate process and replays the same immutable request',t=>{
   const f=fixture(t),body=payload('process-restart'),code="const {createCommandOutbox}=require(process.argv[1]);const b=createCommandOutbox({rootDir:process.argv[2]});b.stage(process.argv[3],JSON.parse(process.argv[4]),{supportsOperations:true});b.updateOutcome(process.argv[3],'process-restart',{status:'unknown',code:'TRANSPORT_TIMEOUT'});";
   const child=spawnSync(process.execPath,['-e',code,require.resolve('../electron/command-outbox.cjs'),f.rootDir,scope,JSON.stringify(body)],{encoding:'utf8',windowsHide:true,timeout:10000});
