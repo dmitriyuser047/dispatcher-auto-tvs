@@ -8,13 +8,13 @@ const clone=value=>JSON.parse(JSON.stringify(value));
 const violation=expected=>error=>error.name==='PlatformIntegrityError'&&Array.isArray(error.issues)&&(!expected||error.issues.some(issue=>issue.code===expected));
 function validGraph(){
   const db=Object.fromEntries(schema.sections.map(section=>[section,[]]));
-  db.vehicles=[{id:'v',fuelBalance:100}];db.generators=[{id:'g',tankId:'t'}];db.tanks=[{id:'t',capacity:1000}];db.parts=[{id:'p',minStock:1}];db.drivers=[{id:'d',name:'Тестовый сотрудник',personnelRoles:['driver','operator']}];db.contragents=[{id:'c'}];
-  db.records=[{id:'r',vehicleId:'v',date:'2026-09-01',km:100,fuelActual:10,fuelMovementId:'fm',glonassProvenance:{importId:'gi',rawIds:['gt']}}];
+  db.vehicles=[{id:'v',fuelBalance:100}];db.generators=[{id:'g',tankId:'t'}];db.tanks=[{id:'t',capacity:1000,balanceInit:100}];db.parts=[{id:'p',minStock:1}];db.drivers=[{id:'d',name:'Тестовый сотрудник',personnelRoles:['driver','operator']}];db.contragents=[{id:'c'}];
+  db.records=[{id:'r',vehicleId:'v',date:'2026-09-01',km:100,fuelActual:10,fuelIssued:20,fuelMovementId:'fm',glonassProvenance:{importId:'gi',rawIds:['gt']}}];
   db.genRecords=[{id:'gr',generatorId:'g',tankId:'t',date:'2026-09-01',hours:10}];db.vehicleTo=[{id:'vt',vehicleId:'v',date:'2026-09-01'}];db.toRecords=[{id:'tr',generatorId:'g',date:'2026-09-01'}];db.repairs=[{id:'rp',vehicleId:'v',invoiceDate:'2026-09-01',cost:10}];
   db.fuelImports=[{id:'fi',at:'2026-10-01T10:00:00.000Z'}];db.fuelPurchases=[{id:'fp',vehicleId:'v',recordId:'r',importId:'fi',date:'2026-09-01',grade:'АИ-95',qty:20,cardNo:'123'}];db.fuelCards=[{id:'fc',number:'123',assignments:[{vehicleId:'v',from:'2026-09-01',to:''}]}];db.fuelPeriods=[{month:'2026-09'}];db.monthlyFuel=[{vehicleId:'v',month:'2026-09',liters:20}];
   db.dispatchJobs=[{id:'j',status:'new',assetRef:'v:v',driverId:'d',start:'2026-10-21T08:00',end:'2026-10-21T16:00',partRequirements:[{partId:'p',qty:1}]}];db.assetAssignments=[{id:'a',assetRef:'g:g',driverId:'d',from:'2026-09-01'}];
   db.workOrders=[{id:'w',assetRef:'v:v',repairId:'rp',status:'new'}];db.opsTasks=[{id:'task',assetRef:'v:v',status:'open',due:'2026-10-21'}];db.assetDocuments=[{id:'doc',assetRef:'v:v',driverId:'d',date:'2026-01-01',expires:'2026-12-31'}];
-  db.fuelMovements=[{id:'fm',assetRef:'v:v',fromTankId:'t',recordId:'r',qty:20,date:'2026-09-01'}];db.partMovements=[{id:'pm',partId:'p',workOrderId:'w',assetRef:'v:v',kind:'receipt',qty:1,date:'2026-09-01'}];db.shiftReports=[{id:'sr',jobId:'j',driverId:'d',assetRef:'v:v',status:'prepared',date:'2026-09-01'}];
+  db.fuelMovements=[{id:'fm',kind:'issue',reason:'Синтетическая выдача',assetRef:'v:v',fromTankId:'t',recordId:'r',qty:20,date:'2026-09-01'}];db.partMovements=[{id:'pm',partId:'p',workOrderId:'w',assetRef:'v:v',kind:'receipt',qty:1,date:'2026-09-01'}];db.shiftReports=[{id:'sr',jobId:'j',driverId:'d',assetRef:'v:v',status:'prepared',date:'2026-09-01'}];
   db.payments=[{id:'pay',vehicleId:'v',contragentId:'c',source:'repair',sourceId:'rp',sum:10,date:'2026-09-01'}];db.budget=[{id:'b',contragentId:'c',year:2026,month:9,sum:10}];db.costEntries=[{id:'ce',assetRef:'v:v',source:'workOrder',sourceId:'w',amount:10,date:'2026-09-01'}];db.costProfiles=[{id:'cp',assetRef:'g:g',fuelPrice:10}];
   db.procurementRules=[{id:'rule',kind:'tank',itemId:'t',leadDays:3}];db.procurementOrders=[{id:'order',kind:'part',itemId:'p',status:'draft',quantity:3,deliveryDate:'2026-10-23'}];
   db.glonassImports=[{id:'gi',at:'2026-10-21T10:00:00Z'}];db.glonassTrips=[{id:'gt',vehicleId:'v',importId:'gi',importIds:['gi'],date:'2026-09-01',km:100}];
@@ -30,7 +30,7 @@ test('one immutable platform registry covers every current section and ten appli
 });
 
 test('CommonJS and browser modules inspect a graph without DOM, storage or global application data',()=>{
-  const context=vm.createContext({});for(const name of ['platform-schema.js','personnel-engine.js','platform-policies.js','platform-integrity.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name),'utf8'),context);
+  const context=vm.createContext({});for(const name of ['platform-schema.js','personnel-engine.js','fuel-engine.js','fuel-movement-policy.js','document-lifecycle.js','workflow-policy.js','platform-policies.js','platform-integrity.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name),'utf8'),context);
   const db=validGraph(),before=JSON.stringify(db);assert.equal(context.PlatformIntegrity.inspect(db).counts.error,0);assert.equal(JSON.stringify(db),before);
   assert.equal(integrity.inspect([]).issues[0].code,'invalid-database');
 });
@@ -123,7 +123,7 @@ test('monthly fuel composite identities and completed service timestamps match e
 });
 
 test('signed legacy tank transfer is valid while ordinary negative receipts remain invalid',()=>{
-  const db={tanks:[{id:'a'},{id:'b'}],tankIncomes:[{id:'out',tankId:'a',counterTankId:'b',kind:'out',linkId:'pair',amount:-20,date:'2026-09-01'},{id:'in',tankId:'b',counterTankId:'a',kind:'in',linkId:'pair',amount:20,date:'2026-09-01'}]};
+  const db={tanks:[{id:'a',balanceInit:20},{id:'b'}],tankIncomes:[{id:'out',tankId:'a',counterTankId:'b',kind:'out',linkId:'pair',amount:-20,date:'2026-09-01'},{id:'in',tankId:'b',counterTankId:'a',kind:'in',linkId:'pair',amount:20,date:'2026-09-01'}]};
   assert.equal(integrity.validateChanges({},db),true);const next=clone(db);delete next.tankIncomes[0].kind;assert.throws(()=>integrity.validateChanges(db,next),violation('invalid-number'));
 });
 

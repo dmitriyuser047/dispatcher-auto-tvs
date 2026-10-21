@@ -70,10 +70,11 @@ try{configureNetwork(settings);}catch(e){networkConfigError=e.message;server.con
 const dataBindings = new Map();
 let notificationService = null;
 const settingsIdentity = () => databaseIdentity(settings);
-function bindData(event, token, access = null) {
+function bindData(event, token, access = null, revisions = null) {
   const previous=dataBindings.get(event.sender.id);
   if(previous&&(previous.identity!==settingsIdentity()||previous.databaseToken!==(token||null)||JSON.stringify(previous.notificationAccess)!==JSON.stringify(access)))notificationService?.invalidate();
-  dataBindings.set(event.sender.id, { identity:settingsIdentity(), databaseToken:token || null, notificationAccess:access });
+  dataBindings.set(event.sender.id, { identity:settingsIdentity(), databaseToken:token || null, notificationAccess:access,
+    revisions:revisions && { ...revisions } });
 }
 function assertDataBinding(event, token) {
   const binding = dataBindings.get(event.sender.id);
@@ -295,7 +296,7 @@ app.whenReady().then(() => {
         try { snapshot = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/snapshot', 15000); }
         catch { snapshot = { data:JSON.parse(await server.fetchData(settings.remoteHost, settings.remotePort || 3377)) }; }
         if (identity !== settingsIdentity()) throw new Error('База переключена во время чтения');
-        bindData(event, snapshot.databaseToken, snapshot.access);
+        bindData(event, snapshot.databaseToken, snapshot.access, snapshot.revisions);
         return JSON.stringify(snapshot.data);
       } catch (e) {
         return null;
@@ -303,7 +304,7 @@ app.whenReady().then(() => {
     }
     try {
       const snapshot = storage.readSnapshot(getDataDir());
-      bindData(event, snapshot.databaseToken);
+      bindData(event, snapshot.databaseToken, null, snapshot.revisions);
       return JSON.stringify(snapshot.data);
     } catch (e) {
       console.error('[read-data] ' + e.message);
@@ -322,10 +323,12 @@ app.whenReady().then(() => {
     if (isClientMode()) {
       if(networkConfigError)return false;
       try {
-        const body = binding.databaseToken ? { databaseToken:binding.databaseToken, data,
+        const body = binding.databaseToken ? { databaseToken:binding.databaseToken, data, base:payload.base ?? binding.revisions,
           ...(payload.operation ? {operation:payload.operation} : {}) } : data;
         const res = await server.postData(settings.remoteHost, settings.remotePort || 3377, JSON.stringify(body));
-        return identity === settingsIdentity() && res && res.ok;
+        if (identity !== settingsIdentity() || !res?.ok) return false;
+        binding.revisions = res.revisions && { ...res.revisions };
+        return true;
       } catch (e) {
         return false;
       }
@@ -334,7 +337,10 @@ app.whenReady().then(() => {
     createDailyBackup();
     try {
       const res = storage.writeAll(getDataDir(), data, { databaseToken:binding.databaseToken, operation:payload.operation,
+        base:payload.base ?? binding.revisions, requireBase:true,
         principal:{ id:'local-profile', name:getActiveUser().name || 'Локальный пользователь', role:'admin' } });
+      if (!res.ok) return false;
+      binding.revisions = { ...res.revisions };
       if (res.changed.length) console.log('[write-data] разделы: ' + res.changed.join(', '));
       return true;
     } catch (e) {
@@ -354,7 +360,7 @@ app.whenReady().then(() => {
       try {
         const snapshot = await server.getJson(host, port, '/api/snapshot', 15000);
         if (identity !== settingsIdentity()) return null;
-        bindData(event, snapshot.databaseToken, snapshot.access);
+        bindData(event, snapshot.databaseToken, snapshot.access, snapshot.revisions);
         return JSON.stringify(snapshot);
       }
       catch (e) {
@@ -370,7 +376,7 @@ app.whenReady().then(() => {
     try {
       const dir = getDataDir();
       const snapshot = storage.readSnapshot(dir);
-      bindData(event, snapshot.databaseToken);
+      bindData(event, snapshot.databaseToken, null, snapshot.revisions);
       return JSON.stringify(snapshot);
     } catch (e) {
       console.error('[read-snapshot] ' + e.message);

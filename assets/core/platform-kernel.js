@@ -2,9 +2,9 @@
 (function (root, factory) {
   'use strict';
   if (typeof module === 'object' && module.exports)
-    module.exports = factory(require('./platform-schema.js'), require('./platform-integrity.js'));
-  else root.PlatformKernel = factory(root.PlatformSchema, root.PlatformIntegrity);
-})(typeof globalThis === 'object' ? globalThis : this, function (schema, integrity) {
+    module.exports = factory(require('./platform-schema.js'), require('./platform-integrity.js'), require('./platform-contracts.js'));
+  else root.PlatformKernel = factory(root.PlatformSchema, root.PlatformIntegrity, root.PlatformContracts);
+})(typeof globalThis === 'object' ? globalThis : this, function (schema, integrity, contracts) {
   'use strict';
   const tag = value => Object.prototype.toString.call(value);
   const plain = value => value != null && tag(value) === '[object Object]';
@@ -123,7 +123,7 @@
     return changes;
   }
   function prepare(previous, next, context) {
-    if (!schema || schema.apiVersion !== 1 || !integrity || integrity.apiVersion !== 1) fail('MODULE_UNAVAILABLE', 'Не загружены правила платформы');
+    if (!schema || schema.apiVersion !== 1 || !integrity || integrity.apiVersion !== 1 || contracts?.apiVersion !== 1) fail('MODULE_UNAVAILABLE', 'Не загружены правила платформы');
     if (!plain(previous) || !plain(next)) fail('INVALID_ARGUMENT', 'Источник и изменения должны быть объектами');
     const ctx = validateContext(context);
     if (typeof ctx.id !== 'string' || !ctx.id || ctx.id.length > 200 || !/^[a-z0-9_.:-]+$/i.test(ctx.id)) fail('INVALID_OPERATION_ID', 'Некорректный ID операции');
@@ -142,6 +142,9 @@
       if (!Number.isSafeInteger(revision) || revision < 0) fail('INVALID_REVISION', 'Некорректная версия раздела: ' + name, { section:name });
       changed.push(name); sections[name] = after; sourceSnapshot[name] = before; base[name] = revision;
     }
+    contracts.validateOperation({ id:ctx.id });
+    contracts.validateSections(sections,names);
+    contracts.validateRevisions(base,names);
     try { integrity.validateChanges(prior, target, ctx); }
     catch (error) {
       if (error?.name === 'PlatformKernelError') throw error;

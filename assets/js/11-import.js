@@ -1472,7 +1472,7 @@ function normPlate(s) {
   return (s || '').replace(/[\s\-]/g, '').toUpperCase();
 }
 
-function doSvodkaImport() {
+async function doSvodkaImport() {
   if (!_svodkaParsed || !_svodkaParsed.length) return;
   const checked = new Set();
   document.querySelectorAll('.svodka-chk:checked').forEach(el => checked.add(+el.dataset.idx));
@@ -1540,7 +1540,7 @@ function doSvodkaImport() {
     }
   });
 
-  saveData(data);
+  if (!await saveData(data)) return false;
   closeModal('svodkaImportModal');
   populateOrgSelect();
   renderVehicleList();
@@ -1615,7 +1615,7 @@ function showImportPreview(res) {
   openModal('rarImportModal');
 }
 
-function doRarMerge() {
+async function doRarMerge() {
   if (!_rarImport) return;
   const includeBackups = document.getElementById('rarIncludeBackups').checked;
   RAR_KEYS.forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
@@ -1642,7 +1642,7 @@ function doRarMerge() {
   mergeSrc(_rarImport.main);
   if (includeBackups) mergeSrc(_rarImport.backupExtra);
 
-  saveData(data);
+  if (!await saveData(data)) return false;
   populateOrgSelect();
   updateFilterUI();
   renderVehicleList();

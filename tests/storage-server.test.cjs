@@ -124,7 +124,7 @@ test('authenticated server preserves split UTF-8 and survives malformed and abor
   assert.equal((await request(port, '/api/data', {})).status, 400);
   for (const route of ['/api/data', '/api/sections']) {
     const rows = [{ id: 'v', driver: 'Уренгой Ёж 中文' }];
-    const payload = route.endsWith('sections') ? { databaseToken:storage.databaseToken(dir), base: storage.readRevisions(dir), sections: { vehicles: rows } } : { databaseToken:storage.databaseToken(dir), data:{ ...storage.readAll(dir), vehicles: rows } };
+    const payload = route.endsWith('sections') ? { databaseToken:storage.databaseToken(dir), base: storage.readRevisions(dir), sections: { vehicles: rows } } : { databaseToken:storage.databaseToken(dir), base:storage.readRevisions(dir), data:{ ...storage.readAll(dir), vehicles: rows } };
     const bytes = Buffer.from(JSON.stringify(payload)), split = bytes.indexOf(Buffer.from('У')) + 1;
     assert.equal((await request(port, route, payload, undefined, split)).status, 200);
     assert.equal(storage.readAll(dir).vehicles[0].driver, rows[0].driver);

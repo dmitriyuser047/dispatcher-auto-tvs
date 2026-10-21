@@ -62,6 +62,38 @@ test('hidden Electron application persists synthetic journals, isolates registry
   assert.equal(storage.readAll(dataA).records[0].id, 'native-journal');
   assert.match(first.token, /^[a-f0-9]{64}$/);
   assert.ok(first.identity.endsWith(':'+first.token));
+
+  // Full-write IPC must use the revisions bound by readSnapshot, even when
+  // the renderer sends neither base nor auditLog. An old audit prefix would
+  // independently reject the save and conceal a missing CAS check.
+  const staleFull = await page.evaluate(async () => {
+    const snapshot = JSON.parse(await window.electronAPI.readSnapshot());
+    const { auditLog, ...source } = snapshot.data;
+    source.vehicles[0].note = 'Stale full IPC description';
+    return { databaseToken:snapshot.databaseToken, data:source };
+  });
+  const concurrentBase = storage.readSnapshot(dataA);
+  const concurrentFull = storage.writeSections(dataA, { databaseToken:concurrentBase.databaseToken,
+    base:{ vehicles:concurrentBase.revisions.vehicles },
+    sections:{ vehicles:concurrentBase.data.vehicles.map(row => ({ ...row,note:'Concurrent native description' })) } });
+  assert.equal(concurrentFull.ok, true);
+  const beforeStaleFull = storage.readSnapshot(dataA);
+  assert.equal(await page.evaluate(payload => window.electronAPI.writeData(JSON.stringify(payload)), staleFull), false);
+  assert.deepEqual(storage.readSnapshot(dataA), beforeStaleFull);
+  const freshFull = await page.evaluate(async () => {
+    const snapshot = JSON.parse(await window.electronAPI.readSnapshot());
+    const { auditLog, ...source } = snapshot.data;
+    source.vehicles[0].note = 'Fresh full IPC description';
+    const saved = await window.electronAPI.writeData(JSON.stringify({ databaseToken:snapshot.databaseToken,data:source }));
+    data = await loadData(); rebuildIndex();
+    return { saved,note:data.vehicles[0].note };
+  });
+  assert.deepEqual(freshFull, { saved:true,note:'Fresh full IPC description' });
+  const afterFreshFull = storage.readSnapshot(dataA);
+  assert.equal(afterFreshFull.data.vehicles[0].note, freshFull.note);
+  assert.equal(afterFreshFull.revisions.vehicles, beforeStaleFull.revisions.vehicles + 1);
+  assert.ok(afterFreshFull.data.auditLog.some(row => row.section === 'vehicles' && row.after?.note === freshFull.note));
+
   const features = await page.evaluate(async () => {
     data.costEntries.push({id:'native-cost',date:'2026-10-01',assetRef:'v:A',kind:'expense',amount:1000,title:'Synthetic standalone cost',category:'Прочее',independent:true});
     data.costProfiles.push({id:'native-profile',assetRef:'v:A',salaryRate:5,fuelRate:10,fuelPrice:60});

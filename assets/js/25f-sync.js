@@ -55,23 +55,36 @@ function syncAssertDatabase(response) {
   throw error;
 }
 
-function syncKey(row) { return row && typeof row === 'object' ? (row.id ?? row.month ?? null) : null; }
+function syncKey(row, section) {
+  if (!row || typeof row !== 'object') return null;
+  if (row.id != null) return row.id;
+  if (section && typeof PlatformIntegrity !== 'undefined') {
+    const key = PlatformIntegrity.rowIdentity(section,row,0);
+    return key.startsWith('@') ? null : key;
+  }
+  if (section === 'monthlyFuel' || !section && row.vehicleId != null && row.month != null)
+    return 'monthlyFuel:'+JSON.stringify([row.vehicleId ?? '',row.month ?? '',row.cardNumber ?? '']);
+  if (section === 'fuelCards' && row.number != null)
+    return 'fuelCards:'+(String(row.number).replace(/\D/g,'') || String(row.number).trim().toUpperCase());
+  return row.month ?? null;
+}
 
 // Слияние раздела: base — как было при последней синхронизации, local — наше
 // сейчас, remote — на сервере сейчас. Результат: серверные данные плюс наши
 // изменения относительно base.
-function syncMerge(base, local, remote, choose) {
+function syncMerge(base, local, remote, choose, section) {
   base = base || []; local = local || []; remote = remote || [];
-  const keyed = a => a.every(r => syncKey(r) != null);
+  const keyOf = row => syncKey(row,section);
+  const keyed = rows => rows.every(row => keyOf(row) != null) && new Set(rows.map(keyOf)).size === rows.length;
   if (!keyed(base) || !keyed(local) || !keyed(remote)) {
     // Без ключей по записям слить нельзя: если мы меняли раздел — берём своё
     if (JSON.stringify(local) === JSON.stringify(base)) return remote;
     if (JSON.stringify(remote) === JSON.stringify(base) || JSON.stringify(local) === JSON.stringify(remote)) return local;
     return syncConflictValue({key:'section',field:'Весь раздел',base,local,remote},choose);
   }
-  const bMap = new Map(base.map(r => [syncKey(r), r]));
-  const lMap = new Map(local.map(r => [syncKey(r), r]));
-  const out = new Map(remote.map(r => [syncKey(r), r]));
+  const bMap = new Map(base.map(r => [keyOf(r), r]));
+  const lMap = new Map(local.map(r => [keyOf(r), r]));
+  const out = new Map(remote.map(r => [keyOf(r), r]));
   lMap.forEach((l, k) => {
     const b = bMap.get(k);
     if (!b) {
@@ -93,16 +106,16 @@ function syncMerge(base, local, remote, choose) {
   });
   bMap.forEach((b,k)=>{if(!lMap.has(k)){const r=out.get(k);if(r&&JSON.stringify(r)!==JSON.stringify(b)){const value=syncConflictValue({key:k,field:'Локальное удаление',base:b,local:null,remote:r},choose);if(value!=null)out.set(k,value);else out.delete(k);}else out.delete(k);}});
   // Порядок: как на сервере, новые наши — в конце, в своём порядке
-  const order = remote.map(syncKey).filter(k => out.has(k));
-  local.forEach(r => { const k = syncKey(r); if (!order.includes(k) && out.has(k)) order.push(k); });
+  const order = remote.map(keyOf).filter(k => out.has(k));
+  local.forEach(r => { const k = keyOf(r); if (!order.includes(k) && out.has(k)) order.push(k); });
   return order.map(k => out.get(k));
 }
 
 function syncConflictValue(conflict,choose){if(choose)return choose(conflict);const error=new Error('Требуется решение конфликта: '+conflict.key+' · '+conflict.field);error.syncConflict=conflict;throw error;}
 async function syncResolveMerge(section,base,local,remote){
   const conflicts=[];
-  syncMerge(base,local,remote,c=>{conflicts.push(c);return c.remote;});
-  if(!conflicts.length)return syncMerge(base,local,remote);
+  syncMerge(base,local,remote,c=>{conflicts.push(c);return c.remote;},section);
+  if(!conflicts.length)return syncMerge(base,local,remote,undefined,section);
   if(typeof wfShowDialog!=='function')throw Error('Конфликт данных. Откройте программу заново для выбора версии.');
   const resolution=await new Promise(resolve=>{
     wfShowDialog('Совместное изменение · '+(SYNC_NAMES[section]||section),`<p>Выберите значение каждого поля. Остальные изменения объединятся автоматически.</p><form id="syncConflictForm">${conflicts.map((c,i)=>`<article class="wf-card"><strong>${htmlEsc(c.key)} · ${htmlEsc(c.field)}</strong><details><summary>Было</summary><pre>${htmlEsc(JSON.stringify(c.base,null,2))}</pre></details><div class="wf-grid"><div><b>Моя версия</b><pre>${htmlEsc(JSON.stringify(c.local,null,2))}</pre></div><div><b>На сервере</b><pre>${htmlEsc(JSON.stringify(c.remote,null,2))}</pre></div></div><select name="choice${i}" required><option value="">Выберите версию</option><option value="local">Моя версия</option><option value="remote">На сервере</option></select></article>`).join('')}<button class="btn btn-primary">Объединить и сохранить</button></form>`);
@@ -110,7 +123,7 @@ async function syncResolveMerge(section,base,local,remote){
     document.getElementById('syncConflictForm').onsubmit=e=>{e.preventDefault();const fd=new FormData(e.target);finish(conflicts.map((_,i)=>fd.get('choice'+i)));closeModal('wfModal');};
   });
   if(!resolution)throw Error('Сохранение отменено: конфликт требует решения');
-  let index=0;return syncMerge(base,local,remote,c=>c[resolution[index++]]);
+  let index=0;return syncMerge(base,local,remote,c=>c[resolution[index++]],section);
 }
 
 async function syncLoad() {
@@ -249,7 +262,7 @@ async function syncPoll() {
       const localStr = JSON.stringify(data[n] || []);
       if (localStr !== _sync.synced[n]) {
         // У нас есть несохранённые правки в этом разделе — сливаем
-        try { data[n] = syncMerge(JSON.parse(_sync.synced[n] || '[]'), data[n] || [], remote.rows || []); }
+        try { data[n] = syncMerge(JSON.parse(_sync.synced[n] || '[]'), data[n] || [], remote.rows || [],undefined,n); }
         catch(e) { if(e.syncConflict){showToast('Есть конфликт в разделе «'+(SYNC_NAMES[n]||n)+'». При сохранении выберите значения.');continue;}throw e; }
       } else {
         data[n] = remote.rows || [];

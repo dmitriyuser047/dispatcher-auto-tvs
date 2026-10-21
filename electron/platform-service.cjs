@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const access = require('./access-control');
 const kernel = () => require('../assets/core/platform-kernel.js');
 const schema = () => require('../assets/core/platform-schema.js');
+const contracts = () => require('../assets/core/platform-contracts.js');
 
 function fail(code, message, status) {
   const error = new Error(message); error.code = code; error.status = status || 400; throw error;
@@ -21,9 +22,7 @@ function visibleAudit(rows, principal) {
 }
 function operationInfo(previous, sections, options = {}) {
   if (!options.operation) return null;
-  const operation = options.operation;
-  if (!operation || typeof operation !== 'object' || Array.isArray(operation) || typeof operation.id !== 'string' ||
-      !/^[a-zA-Z0-9._:-]{1,200}$/.test(operation.id)) fail('INVALID_OPERATION', 'Некорректный идентификатор операции');
+  const operation = contracts().validateOperation(options.operation);
   const actor = principalOf(options.principal);
   const digest = kernel().requestDigest({ base:options.base || {}, sections });
   if (operation.digest != null && operation.digest !== digest) fail('OPERATION_DIGEST', 'Состав операции изменился после подготовки', 409);
@@ -53,8 +52,7 @@ function assertAuditPrefix(previous, sections, actor) {
 }
 function prepareTransaction(previous, supplied, options = {}) {
   const registry = schema().sections, actor = principalOf(options.principal);
-  if (!supplied || typeof supplied !== 'object' || Array.isArray(supplied) || Object.keys(supplied).some(name => !registry.includes(name)))
-    fail('INVALID_SECTIONS', 'Некорректные разделы платформы');
+  contracts().validateSections(supplied,registry);
   const info = operationInfo(previous, supplied, { ...options, principal:actor });
   if (info?.receipt) return { replayed:true, operation:info };
   assertAuditPrefix(previous, supplied, actor);

@@ -25,6 +25,7 @@ const FP_MONTHS = ['Январь','Февраль','Март','Апрель','М
 function fpEsc(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+function fpJs(value) { return htmlEsc(JSON.stringify(value)); }
 function fpRound(v) { return Math.round((+v || 0) * 100) / 100; }
 // Литры хранятся до миллилитра; денежные суммы по-прежнему округляются до копеек.
 function fpQtyRound(v) { return Math.round((+v || 0) * 1000) / 1000; }
@@ -433,9 +434,9 @@ function fpRenderVehicle() {
     const st = fpJournalState(p, byRecord);
     if (st.state === 'ok') return '<span style="color:var(--green)" title="В журнале совпадает">✓</span>';
     if (st.state === 'missing') return `<span style="color:var(--red)">нет в журнале</span>
-      <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="fpReturnToJournal('${p.id}')">Вернуть</button>`;
+      <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="fpReturnToJournal(${fpJs(p.id)})">Вернуть</button>`;
     return `<span style="color:#d97706" title="Запись журнала поправлена вручную">журнал ${fpNum(st.journal, 2)} л,<br>по выпискам ${fpNum(st.statement, 2)} л</span>
-      <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="fpSyncRecord('${st.rec.id}')" title="Поставить в журнал литры и сумму по выпискам">Как в выписке</button>`;
+      <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="fpSyncRecord(${fpJs(st.rec.id)})" title="Поставить в журнал литры и сумму по выпискам">Как в выписке</button>`;
   };
 
   const rows = list.map(p => `
@@ -451,8 +452,8 @@ function fpRenderVehicle() {
       <td style="max-width:280px;white-space:normal;font-size:12px">${fpEsc(fpPlace(p) || '—')}</td>
       <td style="font-size:12px">${stateHtml(p)}</td>
       <td style="white-space:nowrap">
-        <button class="btn btn-ghost btn-sm" style="padding:3px 8px" onclick="fpEdit('${p.id}')">Изменить</button>
-        <button class="btn btn-ghost btn-sm" style="padding:3px 8px;color:var(--red)" onclick="fpDelete('${p.id}')" title="Удалить заправку и снять её с журнала">✕</button>
+        <button class="btn btn-ghost btn-sm" style="padding:3px 8px" onclick="fpEdit(${fpJs(p.id)})">Изменить</button>
+        <button class="btn btn-ghost btn-sm" style="padding:3px 8px;color:var(--red)" onclick="fpDelete(${fpJs(p.id)})" title="Удалить заправку и снять её с журнала">✕</button>
       </td>
     </tr>`).join('');
 
@@ -484,7 +485,7 @@ function fpRenderVehicle() {
         <select class="fsel" style="margin-left:auto" onchange="fpMonth=this.value;fpRenderVehicle()">
           ${months.concat(['all']).map(m => `<option value="${m}"${m === fpMonth ? ' selected' : ''}>${fpMonthLabel(m)}</option>`).join('')}
         </select>
-        <button class="btn btn-ghost btn-sm" onclick="selectVehicleFromFp('${v.id}')">Журнал пробега</button>
+        <button class="btn btn-ghost btn-sm" onclick="selectVehicleFromFp(${fpJs(v.id)})">Журнал пробега</button>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
         ${card('По выпискам', fpNum(litres, 1) + ' л', list.length + ' заправ.', '#2563eb')}
@@ -531,10 +532,10 @@ function fpUnmatchedHtml(list) {
         <td>${fpEsc(p.vehicleText || '—')}</td>
         <td style="max-width:260px;white-space:normal;font-size:12px">${fpEsc(fpPlace(p) || '—')}</td>
         <td style="white-space:nowrap">
-          <select id="fpAssign_${p.id}" class="fsel" style="max-width:210px">${fuelImportVehicleOptions('', true)}</select>
-          <button class="btn btn-primary btn-sm" onclick="fpAssign('${p.id}')">Привязать</button>
+          <select id="fpAssign_${fpEsc(p.id)}" class="fsel" style="max-width:210px">${fuelImportVehicleOptions('', true)}</select>
+          <button class="btn btn-primary btn-sm" onclick="fpAssign(${fpJs(p.id)})">Привязать</button>
         </td>
-        <td><button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="fpDelete('${p.id}')">✕</button></td>
+        <td><button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="fpDelete(${fpJs(p.id)})">✕</button></td>
       </tr>`).join('')}</tbody>
     </table></div></div>`;
 }
@@ -627,7 +628,7 @@ function fpEdit(id) {
     <div style="font-size:12px;color:var(--text3);margin:4px 0 12px">Изменения сразу переносятся в журнал пробега: старые литры и сумма снимаются с записи, новые добавляются в запись этого дня и вида топлива.</div>
     <div style="display:flex;justify-content:flex-end;gap:8px">
       <button class="btn btn-ghost" onclick="closeModal('genericModal')">Отмена</button>
-      <button id="fpe_save" class="btn btn-primary" onclick="fpEditSave('${p.id}')">Сохранить</button>
+      <button id="fpe_save" class="btn btn-primary" onclick="fpEditSave(${fpJs(p.id)})">Сохранить</button>
     </div>`, 620);
 }
 
@@ -889,7 +890,7 @@ function fpDoublesHtml(all) {
     byCar.set(d.v.id, c);
   });
   const carRows = [...byCar.values()].sort((a, b) => b.days - a.days || b.litres - a.litres).map(c => `
-    <tr style="cursor:pointer" onclick="fpOpenVehicle('${c.v.id}')">
+    <tr style="cursor:pointer" onclick="fpOpenVehicle(${fpJs(c.v.id)})">
       <td style="font-weight:700">${fpEsc(c.v.plate)}</td><td>${fpEsc(c.v.make || '')}</td>
       <td style="font-size:12px;color:var(--text3)">${fpEsc(c.v.object || '')}</td>
       <td style="text-align:right">${c.days}</td><td style="text-align:right">${fpNum(c.litres, 1)}</td>
@@ -899,18 +900,18 @@ function fpDoublesHtml(all) {
   const rows = list.map(d => `
     <tr>
       <td>${fmtDate(d.date)}</td>
-      <td style="cursor:pointer" onclick="fpOpenVehicle('${d.v.id}')"><b>${fpEsc(d.v.plate)}</b><div style="font-size:12px;color:var(--text3)">${fpEsc(d.v.make || '')} · ${fpEsc(vehicleFuelGrade(d.v))}</div></td>
+      <td style="cursor:pointer" onclick="fpOpenVehicle(${fpJs(d.v.id)})"><b>${fpEsc(d.v.plate)}</b><div style="font-size:12px;color:var(--text3)">${fpEsc(d.v.make || '')} · ${fpEsc(vehicleFuelGrade(d.v))}</div></td>
       <td style="font-size:12px;color:var(--text3);max-width:180px;white-space:normal">${fpEsc(d.v.object || '')}</td>
       <td style="text-align:center">${d.list.length}</td>
       <td style="font-size:12px">${d.list.map(p => `<div>${fpEsc(p.time || '—:—')} · <span class="fuel-tag ${fuelTypeFromGrade(p.grade)}" style="font-size:10px;padding:0 5px">${fpEsc(p.grade || '—')}</span> ${fpNum(p.qty)} л${p.sum ? ' · ' + fpNum(p.sum) + ' ₽' + (p.restored ? '≈' : '') : ''}
-        <a href="#" style="margin-left:6px;font-size:11px" onclick="event.preventDefault();fpEdit('${p.id}')">изменить</a>
-        <a href="#" style="margin-left:4px;font-size:11px;color:var(--red)" title="Удалить заправку и снять её с журнала" onclick="event.preventDefault();fpDelete('${p.id}')">✕</a></div>`).join('')}</td>
+        <a href="#" style="margin-left:6px;font-size:11px" onclick="event.preventDefault();fpEdit(${fpJs(p.id)})">изменить</a>
+        <a href="#" style="margin-left:4px;font-size:11px;color:var(--red)" title="Удалить заправку и снять её с журнала" onclick="event.preventDefault();fpDelete(${fpJs(p.id)})">✕</a></div>`).join('')}</td>
       <td style="text-align:right;font-weight:700;${d.litres > FP_DAY_LIMIT ? 'color:var(--red)' : ''}">${fpNum(d.litres)}</td>
       <td style="text-align:right">${d.sum ? fpNum(d.sum) : '—'}</td>
       <td style="font-size:12px;color:#b45309;max-width:220px;white-space:normal">${d.flags.map(fpEsc).join('<br>') || '<span style="color:var(--text3)">—</span>'}
         ${d.checked ? `<div style="color:var(--green);margin-top:4px">✓ проверено${d.checkNote ? ': ' + fpEsc(d.checkNote) : ''}</div>` : ''}</td>
       <td style="white-space:nowrap">
-        <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px" onclick="fpToggleChecked('${d.v.id}','${d.date}')">${d.checked ? 'Снять отметку' : 'Проверено'}</button>
+        <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px" onclick="fpToggleChecked(${fpJs(d.v.id)},${fpJs(d.date)})">${d.checked ? 'Снять отметку' : 'Проверено'}</button>
       </td>
     </tr>`).join('');
 
@@ -1107,7 +1108,7 @@ function fpNegativeHtml() {
     : `<span style="${x < -0.05 ? 'color:var(--red);font-weight:700' : ''}">${fpNum(x, 1)}</span>`;
 
   const rows = list.map(r => `
-    <tr style="cursor:pointer" onclick="fpOpenJournal('${r.v.id}','${(r.firstNeg || r.last).slice(0, 7)}')" title="Открыть журнал пробега с месяца, когда остаток ушёл в минус">
+    <tr style="cursor:pointer" onclick="fpOpenJournal(${fpJs(r.v.id)},${fpJs((r.firstNeg || r.last).slice(0, 7))})" title="Открыть журнал пробега с месяца, когда остаток ушёл в минус">
       <td><b>${fpEsc(r.v.plate)}</b><div style="font-size:12px;color:var(--text3)">${fpEsc(r.v.make || '')}</div></td>
       <td style="font-size:12px">${fpEsc(r.v.org || '')}<div style="color:var(--text3);max-width:180px;white-space:normal">${fpEsc(r.v.object || '')}</div></td>
       <td style="text-align:right;font-size:15px">${b(r.now)}${r.recovered ? '<div style="font-size:11px;color:var(--green)">вышел из минуса</div>' : ''}</td>
@@ -1276,7 +1277,7 @@ function fpMonthlyHtml() {
         ? vPurchases.filter(p => fcNorm(p.cardNo) === cardNum).reduce((s, p) => s + (+p.qty || 0), 0)
         : (isFirst ? stmtLitersTotal : 0);
 
-      return `<tr style="${bg}" data-vid="${v.id}">
+      return `<tr style="${bg}" data-vid="${fpEsc(v.id)}">
         <td style="text-align:center;padding:0;width:28px">${mfId ? '<input type="checkbox" class="mf-check" data-mfid="' + mfId + '" onchange="mfUpdateToolbar()">' : ''}</td>
         <td>${isFirst ? fpEsc(v.plate) : ''}</td>
         <td>${isFirst ? fpEsc(v.make || '—') : ''}</td>
@@ -1285,23 +1286,23 @@ function fpMonthlyHtml() {
         <td style="text-align:right">${isFirst ? (v.norm || '—') : ''}</td>
         <td style="text-align:right">${isFirst ? (normL ? normL.toLocaleString('ru', {maximumFractionDigits:1}) : '—') : ''}</td>
         <td style="padding:2px 4px">
-          <select data-vid="${v.id}" data-month="${selMonth}" data-mfid="${mfId}" style="${selStyle}"
+          <select data-vid="${fpEsc(v.id)}" data-month="${fpEsc(selMonth)}" data-mfid="${fpEsc(mfId)}" style="${selStyle}"
             onchange="mfSaveCard(this)">${mfCardOptions(v.id, cardNum)}</select>
         </td>
         <td style="text-align:right;font-size:12px;color:var(--text3)">${cardStmt ? cardStmt.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td style="text-align:right;padding:0">
           <input type="number" value="${mfVal != null ? mfVal : ''}" placeholder="${cardStmt ? cardStmt.toLocaleString('ru', {maximumFractionDigits:1}) : '0'}"
-            data-vid="${v.id}" data-month="${selMonth}" data-mfid="${mfId}" min="0" step="0.1"
+            data-vid="${fpEsc(v.id)}" data-month="${fpEsc(selMonth)}" data-mfid="${fpEsc(mfId)}" min="0" step="0.1"
             style="${inputStyle}" onchange="mfSaveRow(this)">
         </td>
         <td style="text-align:right;padding:0">
           <input type="number" value="${mfSumVal != null ? mfSumVal : ''}" placeholder="0"
-            data-vid="${v.id}" data-month="${selMonth}" data-mfid="${mfId}" data-field="sum" min="0" step="0.01"
+            data-vid="${fpEsc(v.id)}" data-month="${fpEsc(selMonth)}" data-mfid="${fpEsc(mfId)}" data-field="sum" min="0" step="0.01"
             style="${inputStyle}" onchange="mfSaveRow(this)">
         </td>
         <td style="text-align:right;font-weight:600;color:${ecoColor}">${isFirst ? ((eco > 0 ? '+' : '') + eco.toLocaleString('ru', {maximumFractionDigits:1})) : ''}</td>
         <td style="text-align:center;padding:0">${isFirst
-          ? '<button onclick="mfAddCardRow(\'' + v.id + '\',\'' + selMonth + '\')" title="Добавить карту" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--accent);padding:2px 6px">+</button>'
+          ? '<button onclick="mfAddCardRow(' + fpJs(v.id) + ',' + fpJs(selMonth) + ')" title="Добавить карту" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--accent);padding:2px 6px">+</button>'
           : (mfId ? '<button onclick="mfRemoveRow(\'' + mfId + '\')" title="Удалить строку" style="background:none;border:none;cursor:pointer;font-size:15px;color:var(--red);padding:2px 6px">✕</button>' : '')
         }</td>
       </tr>`;

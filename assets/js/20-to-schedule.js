@@ -617,10 +617,10 @@ function reestrBindEvents() {
       await window.electronAPI.openReestrWindow({ rows: reestrRows, log: [], statyi: reestrStatyi, contracts: reestrContracts, vehicles: data.vehicles || [] });
     }
   });
-  document.getElementById('reestrAddRowBtn').addEventListener('click', () => {
+  document.getElementById('reestrAddRowBtn').addEventListener('click', async () => {
     reestrRows.push({ sum:0, date:new Date().toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'}), category:'', description:'', razdel:'', naz:'', obj:'', dog:'', osn:'', updLabel:'', 'statья':'', sourceFolder:'вручную' });
     data.reestrRows = reestrRows;
-    saveData(data);
+    if (!await saveData(data)) return;
     reestrRenderTable();
   });
   document.getElementById('reestrBackBtn').addEventListener('click', () => {
@@ -883,7 +883,7 @@ function reestrRenderTable() {
     const tdDel = document.createElement('td'); tdDel.style.cssText = 'padding:6px 8px;text-align:center;border-bottom:1px solid var(--border)';
     const delBtn = document.createElement('button'); delBtn.textContent = '✕';
     delBtn.className = 'reestr-action-btn delete';
-    delBtn.addEventListener('click', () => { reestrRows.splice(i, 1); data.reestrRows = reestrRows; saveData(data); reestrRenderTable(); });
+    delBtn.addEventListener('click', async () => { reestrRows.splice(i, 1); data.reestrRows = reestrRows; if (await saveData(data)) reestrRenderTable(); });
     tdDel.appendChild(delBtn); tr.appendChild(tdDel);
 
     tbody.appendChild(tr);
@@ -995,7 +995,7 @@ function reestrRenderSavedList() {
   </div>`;
 }
 
-function reestrSaveCurrent() {
+async function reestrSaveCurrent() {
   if (!reestrRows.length) return;
   const saved = data.savedReestrs || [];
   const nextNum = saved.length > 0 ? Math.max(...saved.map(r => r.number)) + 1 : 1;
@@ -1008,19 +1008,19 @@ function reestrSaveCurrent() {
     rows: JSON.parse(JSON.stringify(reestrRows)),
   });
   data.savedReestrs = saved;
-  saveData(data);
+  if (!await saveData(data)) return false;
   reestrRenderSavedList();
   const btn = document.getElementById('reestrSaveBtn');
   if (btn) { btn.textContent = '✓ Сохранено'; setTimeout(() => { btn.textContent = '💾 Сохранить'; }, 1500); }
 }
 
-function reestrOpenSaved(idx) {
+async function reestrOpenSaved(idx) {
   const saved = data.savedReestrs || [];
   const entry = saved[idx];
   if (!entry) return;
   reestrRows = JSON.parse(JSON.stringify(entry.rows));
   data.reestrRows = reestrRows;
-  saveData(data);
+  if (!await saveData(data)) return false;
   document.getElementById('reestrReviewCard').style.display = '';
   document.getElementById('reestrDoneCard').style.display = 'none';
   document.getElementById('reestrLogCard').style.display = 'none';
@@ -1028,13 +1028,13 @@ function reestrOpenSaved(idx) {
   document.getElementById('reestrReviewCard').scrollIntoView({ behavior: 'smooth' });
 }
 
-function reestrDeleteSaved(idx) {
+async function reestrDeleteSaved(idx) {
   const saved = data.savedReestrs || [];
   const entry = saved[idx];
   if (!entry || !confirm('Удалить реестр №' + entry.number + '?')) return;
   saved.splice(idx, 1);
   data.savedReestrs = saved;
-  saveData(data);
+  if (!await saveData(data)) return false;
   reestrRenderSavedList();
 }
 

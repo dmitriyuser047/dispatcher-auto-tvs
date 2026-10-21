@@ -109,7 +109,7 @@ function renderFinancesSection() {
         <td>${dateStr}</td>
         <td style="font-weight:600">${(p.sum||0).toLocaleString('ru')} ₽</td>
         <td title="${(p.category||'').replace(/"/g,'&quot;')}" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px">${htmlEsc(catShort)}</td>
-        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${htmlEsc(p.description||'—')}${p.sourceMissing ? '<div style="color:var(--red);font-size:11px">Источник удалён или обнулён: проверьте расход</div>' : ''}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${htmlEsc(p.description||'—')}${p.sourceMissing ? '<div style="color:var(--red);font-size:11px">Источник удалён или обнулён: проверьте расход</div>' : ''}${p.sourceReview ? '<div style="color:var(--red);font-size:11px;white-space:normal">Требует сверки: '+htmlEsc(p.sourceReview.message||'Проверьте связь с первичным документом')+'</div>' : ''}</td>
         <td>${htmlEsc(finContragentName(p)||'—')}</td>
         <td>${htmlEsc(vPlate)}</td>
         <td>${htmlEsc(reestrLabel)}</td>
@@ -596,34 +596,46 @@ async function deletePayment(id) {
 }
 
 async function importPaymentsFromJournals() {
+  if(typeof DomainSources==='undefined'||DomainSources.apiVersion!==1){showToast('Модуль признания расходов не загружен. Обновите окно программы.');return;}
   const draft = JSON.parse(JSON.stringify(data.payments || []));
-  const sources = new Map(), existingBySource = new Map();
-  let imported = 0, updated = 0, missing = 0, skipped = 0, preserved = 0;
-  const add = (row, source) => {
-    if (!row.id || finNumber(row.cost) <= 0) return;
-    const rawDate = String(source === 'repair' ? row.invoiceDate || '' : source === 'workOrder' ? (row.downtimeTo || '').slice(0,10) : row.date || '');
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : parseDate(rawDate);
-    if (!date) { skipped++; return; }
-    sources.set(source + ':' + row.id, { source, sourceId: row.id, date, sum: finNumber(row.cost), category: source === 'repair' || source === 'workOrder' ? 'Ремонт' : 'ТО', description: source === 'repair' ? row.description || 'Ремонт' : source === 'workOrder' ? row.title || 'Принятый ремонтный заказ' : 'ТО: ' + (row.type || row.toType || 'Техническое обслуживание'), vehicleId: source === 'workOrder' ? String(row.assetRef || '').startsWith('v:') ? row.assetRef.slice(2) : null : row.vehicleId || null, assetRef:row.assetRef || null, org:row.org || undefined, object:row.site || row.object || undefined, invoiceNo: row.invoiceNo || '', sourcePaid: source === 'workOrder' ? false : !!row.paid });
+  const projection=DomainSources.projectFinancialSources(data);
+  const sources=new Map(projection.sources.map(row=>[row.key,row])),excluded=new Map(projection.excluded.map(row=>[row.key,row])),existingBySource=new Map(),aliasesByPrimary=new Map();
+  let imported = 0, updated = 0, missing = 0, skipped = projection.excluded.filter(row=>row.code==='invalid-source-date').length, preserved = 0, review = 0;
+  const knownSources=['repair','to','toRecord','workOrder'];
+  const keyOf=row=>DomainSources.sourceKey(row.source,row.sourceId);
+  const markReview=(payment,reason)=>{
+    const value={origin:'financial-recognition',code:reason.code,message:reason.message};
+    if(reason.primarySource){value.primarySource=reason.primarySource;value.primarySourceId=reason.primarySourceId;}
+    if(JSON.stringify(payment.sourceReview)!==JSON.stringify(value)){payment.sourceReview=value;review++;}
   };
-  (data.repairs || []).forEach(row => add(row, 'repair'));
-  (data.vehicleTo || []).forEach(row => add(row, 'to'));
-  (data.workOrders || []).filter(row => row.status === 'accepted').forEach(row => {
-    const actual = row.actualCost !== undefined && row.actualCost !== null && row.actualCost !== '' ? finNumber(row.actualCost) : row.incurred === true ? finNumber(row.cost) : 0;
-    if (actual > 0) add({...row,cost:actual}, 'workOrder');
-  });
   draft.forEach(p => {
-    if (!p.sourceId || !['repair','to','workOrder'].includes(p.source)) return;
-    const key = p.source + ':' + p.sourceId;
+    if (p.sourceId==null || !knownSources.includes(p.source)) return;
+    const key = keyOf(p);
     if (!existingBySource.has(key)) existingBySource.set(key, []);
     existingBySource.get(key).push(p);
   });
+  projection.excluded.forEach(reason=>{
+    const payments=existingBySource.get(reason.key)||[];
+    payments.forEach(payment=>markReview(payment,reason));
+    if(reason.primaryKey&&payments.length){
+      if(!aliasesByPrimary.has(reason.primaryKey))aliasesByPrimary.set(reason.primaryKey,[]);
+      aliasesByPrimary.get(reason.primaryKey).push(...payments);
+    }
+  });
   sources.forEach((incoming, key) => {
     const matches = existingBySource.get(key) || [];
-    if (matches.length > 1) { skipped++; return; }
+    if (matches.length > 1) {
+      skipped++;matches.forEach(p=>markReview(p,{code:'duplicate-source',message:'Несколько платежей связаны с одним первичным документом. Сверьте оплаты перед исправлением.'}));return;
+    }
+    const aliases=aliasesByPrimary.get(key)||[];
+    if(aliases.length){
+      // Never create another obligation or erase an existing paid row merely
+      // because a legacy import used the work order instead of its primary.
+      skipped++;matches.forEach(p=>markReview(p,{code:'duplicate-linked-source',message:'Есть платёж по связанному ремонтному заказу. Сверьте оба документа и фактические оплаты.'}));return;
+    }
     const snapshot = {date:incoming.date,sum:incoming.sum,category:incoming.category,description:incoming.description,vehicleId:incoming.vehicleId,assetRef:incoming.assetRef,invoiceNo:incoming.invoiceNo,org:finPaymentOrg(incoming),object:finPaymentObject(incoming)};
     if (!matches.length) {
-      draft.push({ ...snapshot, id: 'pay_' + (globalThis.crypto?.randomUUID?.() || Date.now() + '_' + imported), contragent:'', contragentId:null, reestrNo:null, note:'', paid:incoming.sourcePaid, paidAmount:incoming.sourcePaid ? incoming.sum : 0, paidDate:null, dueDate:null, source:incoming.source, sourceId:incoming.sourceId, sourceSnapshot:snapshot });
+      draft.push({ ...snapshot, id: 'pay_' + (globalThis.crypto?.randomUUID?.() || Date.now() + '_' + imported), contragent:'', contragentId:null, reestrNo:null, note:'', paid:incoming.sourcePaid, paidAmount:incoming.sourcePaid ? incoming.sum : 0, paidDate:null, dueDate:null, source:incoming.source, sourceId:incoming.sourceId, sourceSnapshot:snapshot, sourceMissing:false });
       imported++; return;
     }
     const p = matches[0], before = JSON.stringify(p), paidAmount = finPaidAmount(p);
@@ -635,22 +647,19 @@ async function importPaymentsFromJournals() {
       else p[field] = snapshot[field];
     });
     p.sourceSnapshot = snapshot; p.sourceMissing = false;
+    if(p.sourceReview?.origin==='financial-recognition')delete p.sourceReview;
     // Materialize legacy full-payment flags before changing the source amount.
     p.paidAmount = paidAmount; p.paid = paidAmount >= finNumber(p.sum) - 0.005;
     if (before !== JSON.stringify(p)) updated++;
   });
   draft.forEach(p => {
-    if (!p.sourceId || !['repair','to','workOrder'].includes(p.source) || sources.has(p.source + ':' + p.sourceId)) return;
-    const list = p.source === 'repair' ? data.repairs || [] : p.source === 'workOrder' ? data.workOrders || [] : data.vehicleTo || [];
-    // A missing date is an import error, not evidence that the source was removed.
-    const source = list.find(row => row.id === p.sourceId);
-    if (source && (p.source !== 'workOrder' ? finNumber(source.cost) > 0 : source.status === 'accepted' && (finNumber(source.actualCost) > 0 || source.incurred === true && finNumber(source.cost) > 0))) return;
+    if (p.sourceId==null || !knownSources.includes(p.source) || sources.has(keyOf(p)) || excluded.has(keyOf(p))) return;
     if (!p.sourceMissing) { p.sourceMissing = true; missing++; }
   });
-  if (!(imported + updated + missing)) { showToast('Новых изменений нет' + (skipped ? '. Пропущено спорных записей: ' + skipped : '')); return; }
-  if (!await confirmAction('Добавить расходов: ' + imported + ', обновить: ' + updated + ', пометить удалённые или обнулённые источники: ' + missing + '?\nФактические оплаты, сроки и ручные правки сохраняются.\nПропущено спорных записей: ' + skipped + '. Сохранено ручных значений: ' + preserved + '.')) return;
+  if (!(imported + updated + missing + review)) { showToast('Новых изменений нет' + (skipped ? '. Пропущено спорных записей: ' + skipped : '')); return; }
+  if (!await confirmAction('Добавить расходов: ' + imported + ', обновить: ' + updated + ', пометить отсутствующие источники: ' + missing + ', направить на сверку: '+review+'?\nФактические оплаты, сроки и ручные правки сохраняются. Спорные платежи не удаляются.\nПропущено спорных записей: ' + skipped + '. Сохранено ручных значений: ' + preserved + '.')) return;
   data.payments = draft;
   if (!await saveData(data, {noMerge:true})) return;
-  renderFinancesSection(); showToast('Расходы синхронизированы: добавлено ' + imported + ', обновлено ' + updated + ', источников для проверки ' + missing);
+  renderFinancesSection(); showToast('Расходы синхронизированы: добавлено ' + imported + ', обновлено ' + updated + ', источников для проверки ' + missing+', расходов для сверки '+review);
 }
 

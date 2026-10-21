@@ -54,7 +54,7 @@ function readBody(req) {
   });
 }
 
-async function writeRequest(req,res,full,principal) {
+async function writeRequest(req,res,full,authenticateRequest) {
   const dataDir = _dataDir, backup = _backupFn;
   try {
     const payload = await readBody(req);
@@ -63,6 +63,11 @@ async function writeRequest(req,res,full,principal) {
     _writeLock = true;
     try {
       return storage.withDatabaseLock(dataDir, () => {
+      // The request body may take seconds to arrive. Roles, token rotation and
+      // expiry must be checked again under the write lock, before any backup or
+      // data mutation, and this current principal also owns the audit and ACK.
+      const principal = authenticateRequest();
+      if (!principal) { respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'}); return; }
       const token = storage.databaseToken(dataDir);
       if (full && !access.authorize(principal,'replace')) { respond(res,403,{ok:false,error:'Полная замена базы разрешена только администратору'}); return; }
       const supplied = full ? (payload.data || payload) : payload.sections;
@@ -76,7 +81,7 @@ async function writeRequest(req,res,full,principal) {
       const writeContext = { principal, now:new Date().toISOString() };
       if (backup) backup();
       const result = full
-        ? {ok:true,...storage.writeAll(dataDir,sections,{databaseToken:payload.databaseToken,operation:payload.operation,base:payload.base,...writeContext})}
+        ? storage.writeAll(dataDir,sections,{databaseToken:payload.databaseToken,operation:payload.operation,base:payload.base,requireBase:true,...writeContext})
         : storage.writeSections(dataDir,{base:payload.base || {},sections,databaseToken:payload.databaseToken,operation:payload.operation},writeContext);
       result.databaseToken = token;
       if (result.revisions) result.revisions = filteredRevisions(result.revisions,principal);
@@ -105,14 +110,15 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls}) {
   _dataDir = dataDir; _backupFn = backupFn;
   const handler = (req,res) => {
     const header = String(req.headers.authorization || ''), match = /^Bearer (.+)$/.exec(header);
-    const principal = !req.headers.origin && match ? access.authenticate(match[1],settingsProvider()) : null;
+    const authenticateRequest = () => !req.headers.origin && match ? access.authenticate(match[1],settingsProvider()) : null;
+    const principal = authenticateRequest();
     if (!principal) { respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'}); return; }
     if (req.method === 'GET' && req.url === '/api/ping') {
       try { respond(res,200,{ok:true,name:serverName || os.hostname(),version:require('../package.json').version,sections:true,databaseToken:storage.databaseToken(_dataDir),protocol:tls ? 'https:' : 'http:',access:publicAccess(principal)}); }
       catch (e) { respond(res,500,{ok:false,error:e.message}); } return;
     }
     if (req.method === 'POST' && ['/api/sections','/api/data'].includes(req.url)) {
-      void writeRequest(req,res,req.url === '/api/data',principal); return;
+      void writeRequest(req,res,req.url === '/api/data',authenticateRequest); return;
     }
     if (req.method !== 'GET') { respond(res,404,{ok:false,error:'Неизвестный запрос'}); return; }
     try {

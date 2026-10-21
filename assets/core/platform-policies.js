@@ -1,9 +1,9 @@
 /* Shared dispatch, acceptance and inventory rules from the existing workflows. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'));
-  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine);
-})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'));
+  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy);
+})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow) {
   'use strict';
   const rows = (db, section) => Array.isArray(db?.[section]) ? db[section] : [];
   const present = value => value != null && String(value).trim() !== '';
@@ -65,6 +65,7 @@
     }
     const personnel = getPersonnel();
     if (personnel && personnel.apiVersion === 1) issues.push(...personnel.inspect(db,context).issues);
+    for (const module of [getFuelMovements(),getDocuments(),getWorkflow()]) if (module && module.apiVersion === 1) issues.push(...module.inspect(db,context).issues);
     return { issues,counts:{ error:issues.filter(issue=>issue.severity==='error').length,warning:issues.filter(issue=>issue.severity==='warning').length,total:issues.length } };
   }
   function validateChanges(previous,next,context) {
@@ -74,7 +75,7 @@
     const blocking = current.filter(issue => {
       // Personnel uses field/assignment delta semantics below. Its read-only
       // report may show legacy rows and active links that need manual review.
-      if (issue.code.startsWith('PERSONNEL_')) return false;
+      if (/^(PERSONNEL_|FUEL_|DOCUMENT_|WORKFLOW_)/.test(issue.code)) return false;
       const before = prior.get(key(issue));
       if (!before) return true;
       if (issue.code === 'PART_STOCK_DEFICIT') return issue.deficit > before.deficit + 1e-9;
@@ -89,6 +90,12 @@
       const error = new Error('Не загружено ядро сотрудников');error.code='MODULE_UNAVAILABLE';throw error;
     }
     personnel.validateChanges(previous,next,context);
+    for (const module of [getDocuments(),getFuelMovements(),getWorkflow()]) {
+      if (!module || module.apiVersion !== 1) {
+        const error = new Error('Не загружены правила проведения документов и движения топлива');error.code='MODULE_UNAVAILABLE';throw error;
+      }
+      module.validateChanges(previous,next,context);
+    }
     return true;
   }
   return Object.freeze({ apiVersion:1,inspect,validateChanges });

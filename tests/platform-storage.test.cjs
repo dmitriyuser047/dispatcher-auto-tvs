@@ -165,6 +165,6 @@ test('HTTP section and full writes share native integrity, trusted audit and rep
   assert.equal(first.status, 200); assert.equal(first.body.operationReceipt.status, 'committed');
   assert.equal(audits(dir, 'http-retry-operation').find(row => row.section === 'records').actorId, 'legacy-shared-key');
   const repeated = await request(started.port, '/api/sections', submitted); assert.equal(repeated.status, 200); assert.equal(repeated.body.replayed, true);
-  const invalid = await request(started.port, '/api/data', { databaseToken:storage.databaseToken(dir), data:{ ...before.data, records:records(dir, { vehicleId:'missing' }) } });
+  const invalid = await request(started.port, '/api/data', { databaseToken:storage.databaseToken(dir), base:storage.readRevisions(dir), data:{ ...before.data, records:records(dir, { vehicleId:'missing' }) } });
   assert.equal(invalid.status, 400); assert.deepEqual(storage.readSnapshot(dir), before);
 });

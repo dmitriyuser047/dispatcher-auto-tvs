@@ -422,11 +422,11 @@ function doExportGenAct() {
 function computeTankBalanceAt(tankId, boundary, inclusive) {
   const t = tanksAll().find(x => x.id === tankId);
   if (!t) return 0;
+  if(typeof DomainSources==='undefined'||DomainSources.apiVersion!==1)throw Error('Модуль источников топлива не загружен');
   const okDate = d => !boundary || (inclusive ? d <= boundary : d < boundary);
-  const income = (data.tankIncomes || []).filter(r => r.tankId === tankId && okDate(r.date)).reduce((s, r) => s + (r.amount || 0), 0);
-  const issued = (data.genRecords || []).filter(r => genRecordTankId(r) === tankId && okDate(r.date)).reduce((s, r) => s + (r.fuelIssued || 0), 0);
-  const movements=(data.fuelMovements||[]).filter(r=>!r.cancelled&&okDate(r.date)).reduce((s,r)=>s+(r.toTankId===tankId?(+r.qty||0):0)-(r.fromTankId===tankId?(+r.qty||0):0),0);
-  return +((t.balanceInit || 0) + income - issued + movements).toFixed(2);
+  const flows = DomainSources.projectTankFlows(data,[tankId]).filter(row=>okDate(row.date)).reduce((sum,row)=>sum+row.amount,0);
+  const issued = (data.genRecords || []).filter(r => genRecordTankId(r) === tankId && okDate(r.date)).reduce((s, r) => s + (Number(r.fuelIssued) || 0), 0);
+  return +((Number(t.balanceInit) || 0) + flows - issued).toFixed(2);
 }
 
 function genRecordTankId(r) {
@@ -635,13 +635,14 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
     rowH(n,20); n++;
     put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,6); n++;
 
-    // Приход топлива за период (из привязанных ёмкостей)
-    const incomes = (data.tankIncomes || []).filter(r => linkedTanks.includes(r.tankId) && inPeriod(r)).sort((a,b)=>cmpDateAsc(a.date, b.date));
-    put(n,0,'Приход топлива за отчётный период',ST.totL); merge(n,0,n,3); fillRow(n,ST.totL); rowH(n,18); n++;
-    put(n,0,'Дата привоза',ST.head); merge(n,0,n,1); put(n,2,'Объём, л',ST.head); merge(n,2,n,3); rowH(n,16); n++;
+    // The same signed source projection feeds the balance and its breakdown.
+    // Reversals remain separate opposite entries; internal transfers net to 0.
+    const incomes = DomainSources.projectTankFlows(data,linkedTanks,{from:dateFrom,to:dateTo});
+    put(n,0,'Приход и движения топлива за отчётный период',ST.totL); merge(n,0,n,NC); fillRow(n,ST.totL); rowH(n,18); n++;
+    put(n,0,'Дата операции',ST.head); merge(n,0,n,1); put(n,2,'Изменение, л',ST.head); merge(n,2,n,3); put(n,4,'Источник / основание',ST.head); merge(n,4,n,NC); rowH(n,16); n++;
     if (incomes.length) {
-      incomes.forEach((r,k)=>{ const bg=k%2===0?P.white:P.gray1; put(n,0,fmtDate(r.date),ST.tdC(bg)); merge(n,0,n,1); put(n,2,num(r.amount),ST.tdR(bg)); merge(n,2,n,3); rowH(n,16); n++; });
-    } else { put(n,0,'Нет прихода за период',ST.tdC(P.white)); merge(n,0,n,3); rowH(n,16); n++; }
+      incomes.forEach((r,k)=>{ const bg=k%2===0?P.white:P.gray1; put(n,0,fmtDate(r.date),ST.tdC(bg)); merge(n,0,n,1); put(n,2,num(r.amount),ST.tdR(bg)); merge(n,2,n,3); put(n,4,[r.sourceSection==='tankIncomes'?'Журнал ёмкости':'Движение топлива',r.sourceId,r.originalMovementId?'Сторно '+r.originalMovementId:'',r.reason].filter(Boolean).join(' · '),ST.tdL(bg)); merge(n,4,n,NC); rowH(n,28); n++; });
+    } else { put(n,0,'Нет прихода и движений за период',ST.tdC(P.white)); merge(n,0,n,NC); rowH(n,16); n++; }
     // Остаток ДТ
     // Остаток = топливо в ёмкостях плюс топливо в баках самих ДЭС.
     // Баки берём по всем машинам, а не только по тем, что без ёмкости.

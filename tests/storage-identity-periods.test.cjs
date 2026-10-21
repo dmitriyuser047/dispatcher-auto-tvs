@@ -52,7 +52,7 @@ test('server binds ping, snapshots, revisions, reads and both write protocols to
    const rejected=await request(port,route,payload);assert.equal(rejected.status,409);assert.equal(rejected.body.databaseChanged,true);
    assert.equal(storage.readAll(dir).vehicles.length,1);
  }
- const accepted=await request(port,'/api/data',{databaseToken:token,data:{vehicles:[{id:'v',note:'new'}],records:[]}});assert.equal(accepted.status,200);assert.equal(accepted.body.databaseToken,token);assert.equal(storage.readAll(dir).vehicles[0].note,'new');
+ const accepted=await request(port,'/api/data',{databaseToken:token,base:storage.readRevisions(dir),data:{vehicles:[{id:'v',note:'new'}],records:[]}});assert.equal(accepted.status,200);assert.equal(accepted.body.databaseToken,token);assert.equal(storage.readAll(dir).vehicles[0].note,'new');
 });
 function syncContext(api){const context={window:{electronAPI:api},console,setInterval:()=>1,clearInterval:()=>{},document:{querySelector:()=>null},showToast:()=>{},rebuildIndex:()=>{},data:{vehicles:[{id:'v'}],records:[]}};vm.createContext(context);vm.runInContext('let _loadWriteBlocked=false;\n'+fs.readFileSync(path.join(__dirname,'../assets/js/25f-sync.js'),'utf8')+'\nglobalThis.state=_sync;globalThis.load=syncLoad;globalThis.save=syncSave;globalThis.poll=syncPoll;',context);return context;}
 test('sync refuses a different database before merging rows with equal revisions',async()=>{

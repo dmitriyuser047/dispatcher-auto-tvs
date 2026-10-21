@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "lib": ["ES2020"],
+    "types": [],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": false,
+    "noEmitOnError": true,
+    "declaration": false,
+    "sourceMap": false,
+    "newLine": "lf",
+    "rootDir": "src/core",
+    "outDir": ".typed-core-build"
+  },
+  "files": ["src/core/financial-recognition.ts", "src/core/platform-contracts.ts"]
+}

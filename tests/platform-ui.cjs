@@ -101,3 +101,53 @@ test('a late save response cannot overwrite a newly selected database or its syn
  });
  assert.deepEqual(result,{saved:false,name:'New database value',revisions:{parts:77},synced:'New database value'});
 });
+
+test('monthly fuel merge keeps independent vehicle rows from the same month and surfaces duplicate-key conflicts',async()=>{
+ const result=await page.evaluate(()=>{
+  const base=[{vehicleId:'platform-v',month:'2026-10',cardNumber:'123',liters:10,sum:600},
+    {vehicleId:'second-synthetic-vehicle',month:'2026-10',cardNumber:'123',liters:20,sum:1200}];
+  const local=structuredClone(base),remote=structuredClone(base).reverse();
+  local[0].liters=11;remote[0].sum=1300;
+  const inputs=JSON.stringify([base,local,remote]);
+  const merged=syncMerge(base,local,remote,undefined,'monthlyFuel');
+  const duplicate=[...local,{...local[0],liters:12}];
+  let conflict;
+  try{syncMerge(base,duplicate,remote,undefined,'monthlyFuel');}
+  catch(error){conflict={message:error.message,key:error.syncConflict?.key,field:error.syncConflict?.field,
+    localCount:error.syncConflict?.local.length,remoteCount:error.syncConflict?.remote.length};}
+  const resolved=syncMerge(base,duplicate,remote,choice=>choice.remote,'monthlyFuel');
+  return{merged,conflict,resolved,unchanged:inputs===JSON.stringify([base,local,remote]),writes:window.__writes};
+ });
+ assert.equal(result.merged.length,2);
+ assert.deepEqual(result.merged.find(row=>row.vehicleId==='platform-v'),{vehicleId:'platform-v',month:'2026-10',cardNumber:'123',liters:11,sum:600});
+ assert.deepEqual(result.merged.find(row=>row.vehicleId==='second-synthetic-vehicle'),{vehicleId:'second-synthetic-vehicle',month:'2026-10',cardNumber:'123',liters:20,sum:1300});
+ assert.equal(result.conflict?.key,'section');assert.equal(result.conflict?.field,'Весь раздел');
+ assert.match(result.conflict.message,/конфликт/i);assert.equal(result.conflict.localCount,3);assert.equal(result.conflict.remoteCount,2);
+ assert.equal(result.resolved.length,2);assert.equal(result.resolved.find(row=>row.vehicleId==='platform-v').liters,10);
+ assert.equal(result.resolved.find(row=>row.vehicleId==='second-synthetic-vehicle').sum,1300);
+ assert.equal(result.unchanged,true);assert.equal(result.writes,0);
+});
+
+test('quoted HTML in a fuel purchase id stays inert and real edit buttons pass the exact original id',async()=>{
+ const hostileId='\'\");window.__hostilePurchaseRan=true;//\"><img id="purchaseInjectedNode" src="invalid" onerror="window.__hostilePurchaseRan=true">&';
+ await page.evaluate(id=>{
+  window.__hostilePurchaseRan=false;window.__hostileEditIds=[];
+  data.fuelPurchases=[{id,vehicleId:'platform-v',recordId:'platform-r',date:'2026-10-01',time:'10:00',qty:2,price:60,sum:120,
+    grade:'ДТ',product:'Synthetic fuel',cardNo:'НАЛИЧКА',comment:'Synthetic purchase'}];
+  data.records[0].fuelIssued=2;data.records[0].fuelSum=120;
+  const originalEdit=fpEdit;
+  fpEdit=value=>{window.__hostileEditIds.push(value);return originalEdit(value);};
+  fpVehicle='platform-v';fpMonth='2026-10';fpView='vehicle';fpRenderVehicle();
+ },hostileId);
+ assert.equal(await page.locator('#purchaseInjectedNode').count(),0);
+ assert.equal(await page.evaluate(()=>window.__hostilePurchaseRan),false);
+ await page.locator('#mainContent').getByRole('button',{name:'Изменить',exact:true}).click();
+ assert.equal(await page.locator('#fpe_save').count(),1);
+ assert.deepEqual(await page.evaluate(()=>({ids:window.__hostileEditIds,contextId:fpEditContext.id})),{ids:[hostileId],contextId:hostileId});
+ assert.equal(await page.locator('#purchaseInjectedNode').count(),0);
+ await page.evaluate(()=>{fpEditSave=id=>{window.__hostileSaveId=id;};});
+ await page.locator('#fpe_save').click();
+ assert.equal(await page.evaluate(()=>window.__hostileSaveId),hostileId);
+ assert.equal(await page.evaluate(()=>window.__hostilePurchaseRan),false);
+ assert.equal(await page.evaluate(()=>window.__writes),0);
+});

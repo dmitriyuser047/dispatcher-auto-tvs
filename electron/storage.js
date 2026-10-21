@@ -362,6 +362,41 @@ function writeAll(dataDir, data, options = {}) {
   if (!isSplit(dataDir)) migrate(dataDir);
   const revisions = readRevisions(dataDir);
   const platform = require('./platform-service.cjs'), token = databaseToken(dataDir);
+  if (options.replace === true) {
+    // This is a trusted maintenance option, never a field accepted from HTTP.
+    // It bypasses revision comparison only; domain rules and audit remain intact.
+    if (!options.principal || !require('./access-control').authorize(options.principal, 'replace')) {
+      const error = new Error('Явная замена базы разрешена только действующему администратору');
+      error.code = 'REPLACE_ACCESS_DENIED'; error.status = 403; throw error;
+    }
+  }
+  const operation = platform.operationInfo(previous, data, { ...options, databaseToken:token });
+  // A confirmed command can be retried after its own commit advanced revisions.
+  // Resolve it before CAS, just as writeSections does.
+  if (operation?.receipt) return platform.replayResult(previous, revisions, token, operation, Object.keys(data));
+  if (options.replace !== true && (options.requireBase || options.base !== undefined)) {
+    const base = options.base;
+    if (base === undefined) {
+      const error = new Error('Для сохранения всей базы нужны исходные версии разделов. Загрузите базу заново.');
+      error.code = 'BASE_REQUIRED'; error.status = 428; throw error;
+    }
+    if (!base || Object.prototype.toString.call(base) !== '[object Object]' ||
+        Object.keys(base).some(name => !SECTIONS.includes(name) || !Number.isSafeInteger(base[name]) || base[name] < 0)) {
+      const error = new Error('Некорректные исходные версии разделов');
+      error.code = 'INVALID_BASE'; error.status = 400; throw error;
+    }
+    // A full snapshot may include unchanged sections without their base version.
+    // Only actual application-data changes participate; history is server-owned.
+    const candidates = SECTIONS.filter(name => name !== 'auditLog' && Object.hasOwn(data, name) &&
+      JSON.stringify(previous[name]) !== JSON.stringify(data[name]));
+    const missing = candidates.filter(name => !Object.hasOwn(base, name));
+    if (missing.length) {
+      const error = new Error('Не указаны исходные версии изменённых разделов: ' + missing.join(', '));
+      error.code = 'BASE_REQUIRED'; error.status = 428; throw error;
+    }
+    const conflicts = candidates.filter(name => revisions[name] !== base[name]);
+    if (conflicts.length) return { ok:false, conflicts, revisions, databaseToken:token };
+  }
   const prepared = platform.prepareTransaction(previous, data, { ...options, databaseToken:token, revisions,
     prepareSections:sections => {
       const canonical = prepareWriteoffSections(previous, sections, options);
@@ -385,7 +420,7 @@ function writeAll(dataDir, data, options = {}) {
   });
 
   commitSections(dataDir, sections, revisions);
-  return { changed, revisions, databaseToken:token, canonicalSections:sections,
+  return { ok:true, changed, revisions, databaseToken:token, canonicalSections:sections,
     ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) };
 }
 
