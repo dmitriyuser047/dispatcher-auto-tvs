@@ -55,6 +55,7 @@
   direct('partMovements','partId','parts');direct('partMovements','workOrderId','workOrders');direct('workOrders','repeatOf','workOrders');direct('workOrders','repairId','repairs');direct('workOrders','vehicleToId','vehicleTo');direct('workOrders','toRecordId','toRecords');direct('shiftReports','jobId','dispatchJobs');direct('dispatchJobs','partRequirements[].partId','parts');
   for(const field of ['fromTankId','toTankId'])direct('fuelMovements',field,'tanks');
   for(const field of ['originalMovementId','reversedBy'])direct('fuelMovements',field,'fuelMovements');
+  for(const field of ['originalMovementId','reversedBy'])direct('partMovements',field,'partMovements');
   for(const section of ['records','genRecords']){direct(section,'fuelMovementId','fuelMovements');direct(section,'reversalId','fuelMovements');}
   relations.push({id:'fuelMovements.recordId',from:'fuelMovements',field:'recordId',kind:'discriminator',selector:'assetRef',prefix:true,targets:{v:'records',g:'genRecords'},optional:true,archivePolicy:'existing'});
   direct('fuelPurchases','recordId','records',{resolve:'fuel-purchase-journal'});direct('fuelPurchases','cardVehicleId','vehicles');direct('fuelPurchases','importId','fuelImports');direct('fuelCards','assignments[].vehicleId','vehicles');

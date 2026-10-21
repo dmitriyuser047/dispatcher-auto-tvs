@@ -6,6 +6,7 @@ const path = require('node:path');
 const { createRequire } = require('node:module');
 const { spawn } = require('node:child_process');
 const storage = require('../electron/storage');
+const sqlite = require('../electron/sqlite-storage.cjs');
 const root = path.resolve(__dirname, '..');
 let pw;
 try { pw = require('playwright'); }
@@ -29,7 +30,9 @@ test('hidden Electron application persists synthetic journals, isolates registry
   const profile = path.join(dir, 'profile'), dataA = path.join(dir, 'A'), dataB = path.join(dir, 'B');
   fs.mkdirSync(profile);
   const fixture = id => ({ vehicles:[{ id, make:'Synthetic vehicle', plate:id, driver:'Synthetic driver', org:'A', norm:10, fuelGrade:'ДТ', fuelBalance:100 }], records:[], reestrRows:[{ id:'original-'+id, sum:1 }], appMeta:[] });
-  storage.writeAll(dataA, fixture('A')); storage.writeAll(dataB, fixture('B'));
+  storage.writeAll(dataA, fixture('A'));
+  // The same real Electron shell must support JSON and explicit SQLite profiles.
+  sqlite.create(dataB,{ data:fixture('B') });
   fs.writeFileSync(path.join(profile, 'settings.json'), JSON.stringify({ users:[{ name:'Test A',dataDir:dataA },{ name:'Test B',dataDir:dataB }], activeUser:0, networkMode:'local', serverPort:3377, remotePort:3377, remoteHost:'127.0.0.1', networkKey:'synthetic-native-key-not-a-secret' }));
   const bootstrap = path.join(dir, 'bootstrap.cjs');
   fs.writeFileSync(bootstrap, `const Module=require('node:module');const original=Module._load;const electron=original('electron',module,false);const HiddenWindow=new Proxy(electron.BrowserWindow,{construct(Target,args){const win=new Target({...args[0],show:false});win.show=()=>{};win.showInactive=()=>{};return win;}});Module._load=function(request,parent,isMain){if(request==='electron')return {...electron,BrowserWindow:HiddenWindow};return original.apply(this,arguments);};electron.app.setAppPath(${JSON.stringify(root)});require(${JSON.stringify(path.join(root, 'electron/main.js'))});`);
@@ -234,6 +237,14 @@ test('hidden Electron application persists synthetic journals, isolates registry
   assert.equal((await registers[0].evaluate(() => window.reestrWindow.saveRows([]))).ok, false);
   assert.equal(storage.readAll(dataB).vehicles[0].id, 'B');
   assert.equal(storage.readAll(dataB).reestrRows[0].id, 'original-B');
+  const sqliteSave=await page.evaluate(async()=>{
+    data.records.push({id:'native-sqlite-journal',vehicleId:'B',date:'2026-10-02',km:25.125,fuelIssued:0,fuelActual:2.125,fuelGrade:'ДТ'});
+    return {saved:await saveData(data),receipt:_sync.lastResult?.operationReceipt};
+  });
+  assert.equal(sqliteSave.saved,true);assert.equal(sqliteSave.receipt?.status,'committed');
+  assert.equal(storage.readAll(dataB).records[0].km,25.125);
+  assert.equal(storage.readAll(dataB).records[0].fuelActual,2.125);
+  assert.ok(fs.existsSync(sqlite.filename(dataB)));
 
   const { PDFDocument, StandardFonts } = require('pdf-lib');
   const pdfs = [];

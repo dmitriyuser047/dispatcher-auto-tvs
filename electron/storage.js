@@ -27,6 +27,13 @@ const heldLocks = runtimeProcess[Symbol.for('tvs.storage.databaseLocks')] || (ru
 const SECTIONS = require('../assets/core/platform-schema.js').sections.slice();
 
 const REVISIONS_FILE = 'revisions.json';
+// SQLite is opt-in: only an explicitly created database file selects it. A
+// damaged or unsupported SQLite file never falls back to an empty JSON base.
+function sqliteBackend(dataDir) {
+  try { fs.lstatSync(path.join(dataDir,'platform.sqlite')); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  return require('./sqlite-storage.cjs');
+}
 
 function sectionsDir(dataDir) { return path.join(dataDir, 'sections'); }
 function sectionFile(dataDir, name) { return path.join(sectionsDir(dataDir), name + '.json'); }
@@ -117,6 +124,8 @@ function writeJsonAtomic(file, data) {
 }
 
 function readRevisions(dataDir) {
+  const sqlite = sqliteBackend(dataDir);
+  if (sqlite) return sqlite.readRevisions(dataDir);
   recoverTransaction(dataDir);
   const revs = readJson(revisionsFile(dataDir));
   if (!revs || ['vehicles', 'records'].some(n => !Number.isSafeInteger(revs[n]) || revs[n] < 0) ||
@@ -131,6 +140,8 @@ function readRevisions(dataDir) {
 }
 
 function readRows(dataDir, name) {
+  const sqlite = sqliteBackend(dataDir);
+  if (sqlite) return sqlite.readRows(dataDir,name);
   const rows = readJson(sectionFile(dataDir, name));
   validateRows(name, rows);
   return rows;
@@ -203,6 +214,7 @@ function prepareWriteoffSections(previous, sections, options = {}) {
 // Revisions are the commit point. Before that point a failed or interrupted
 // multi-file save rolls back; after it recovery finishes the committed save.
 function recoverTransaction(dataDir) {
+  if (sqliteBackend(dataDir)) return;
   const journal = path.join(sectionsDir(dataDir), '.transaction.json');
   if (!fs.existsSync(journal)) return;
   const tx = readJson(journal);
@@ -230,6 +242,9 @@ function recoverTransaction(dataDir) {
 }
 
 function commitSections(dataDir, sections, revisions) {
+  if (!Object.keys(sections).length) return;
+  const sqlite = sqliteBackend(dataDir);
+  if (sqlite) return sqlite.commitSections(dataDir,sections,revisions);
   const changed = Object.keys(sections);
   if (!changed.length) return;
   const journal = path.join(sectionsDir(dataDir), '.transaction.json');
@@ -281,15 +296,22 @@ function checkClosedPeriods(previous, next) {
   const historicalCardRows = [...(previous.records||[]),...(previous.fuelPurchases||[]),...(previous.monthlyFuel||[])].filter(historical);
   for (const [name, keys] of Object.entries(fields)) {
     if (!(name in next)) continue;
-    const old = previous[name] || [], after = new Map(next[name].map(row => [String(row.id), row]));
-    for (const row of old) {
-      const updated = after.get(String(row.id));
-      if (!updated || JSON.stringify(project(row, keys)) !== JSON.stringify(project(updated, keys))) throw new Error('Месяц закрыт: ' + lastClosed + '. Исходные данные ГСМ (' + name + ') изменят закрытые расчёты. Сначала откройте период.');
-      after.delete(String(row.id));
+    const old = previous[name] || [], after = new Map();
+    const identity = (row,index) => require('../assets/core/platform-integrity.js').rowIdentity(name,row,index);
+    next[name].forEach((row,index) => {
+      const key=identity(row,index);
+      if (!after.has(key)) after.set(key,[]);
+      after.get(key).push(row);
+    });
+    for (const [index,row] of old.entries()) {
+      const candidates=after.get(identity(row,index)) || [], before=JSON.stringify(project(row,keys));
+      const match=candidates.findIndex(updated => before === JSON.stringify(project(updated,keys)));
+      if (match < 0) throw new Error('Месяц закрыт: ' + lastClosed + '. Исходные данные ГСМ (' + name + ') изменят закрытые расчёты. Сначала откройте период.');
+      candidates.splice(match,1);
     }
     // A new asset with no opening stock and only future events does not
     // change historical fuel. A new card may resolve an old unmatched card.
-    for (const row of after.values()) {
+    for (const row of [...after.values()].flat()) {
       const historicalReference = name === 'fuelCards'
         ? !!cardKey(row.number) && historicalCardRows.some(entry => cardKey(entry.fuelCardNum || entry.cardNo || entry.cardNumber) === cardKey(row.number))
         : name === 'vehicles'
@@ -302,6 +324,7 @@ function checkClosedPeriods(previous, next) {
 }
 
 function isSplit(dataDir) {
+  if (sqliteBackend(dataDir)) return true;
   return fs.existsSync(revisionsFile(dataDir));
 }
 
@@ -311,6 +334,7 @@ function isSplit(dataDir) {
  * удаляем и не трогаем — он остаётся резервной копией на случай отката.
  */
 function migrate(dataDir) {
+  if (sqliteBackend(dataDir)) return { migrated:false, reason:'SQLite: явный перенос уже выполнен' };
   recoverTransaction(dataDir);
   if (isSplit(dataDir)) return { migrated: false, reason: 'уже разделено' };
   const legacy = legacyFile(dataDir);
@@ -342,6 +366,8 @@ function migrate(dataDir) {
 
 /** Собрать все разделы в один объект — в том же виде, что раньше отдавал data.json */
 function readAll(dataDir) {
+  const sqlite = sqliteBackend(dataDir);
+  if (sqlite) return sqlite.readAll(dataDir);
   recoverTransaction(dataDir);
   if (!isSplit(dataDir)) migrate(dataDir);
   readRevisions(dataDir);
@@ -411,8 +437,8 @@ function writeAll(dataDir, data, options = {}) {
     const next = name in data ? data[name] : previous[name];
     const file = sectionFile(dataDir, name);
     const nextRaw = JSON.stringify(next);
-    let prevRaw = null;
-    try { prevRaw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null; } catch {}
+    let prevRaw = sqliteBackend(dataDir) ? JSON.stringify(previous[name]) : null;
+    if (!sqliteBackend(dataDir)) try { prevRaw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null; } catch {}
     if (prevRaw === nextRaw) return;         // раздел не менялся — не трогаем
     sections[name] = next;
     revisions[name] = (revisions[name] || 0) + 1;
@@ -473,8 +499,8 @@ function writeSections(dataDir, payload, options = {}) {
     const next = Array.isArray(sections[name]) ? sections[name] : [];
     const file = sectionFile(dataDir, name);
     const nextRaw = JSON.stringify(next);
-    let prevRaw = null;
-    try { prevRaw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null; } catch {}
+    let prevRaw = sqliteBackend(dataDir) ? JSON.stringify(previous[name]) : null;
+    if (!sqliteBackend(dataDir)) try { prevRaw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null; } catch {}
     if (prevRaw === nextRaw) return;
     pending[name] = next;
     revisions[name] = (revisions[name] || 0) + 1;
@@ -507,5 +533,9 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
 module.exports = {
   SECTIONS, sectionsDir, sectionFile, revisionsFile,
   databaseToken, withDatabaseLock, validateRows, prepareWriteoffSections,
-  ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, () => operation(dataDir, ...args))])),
+  ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, () => {
+    const sqlite = sqliteBackend(dataDir), action = () => operation(dataDir,...args);
+    if (!sqlite || ['isSplit','migrate'].includes(name)) return action();
+    return sqlite.transaction(dataDir,action,{ readOnly:!['writeAll','writeSections'].includes(name) });
+  })])),
 };

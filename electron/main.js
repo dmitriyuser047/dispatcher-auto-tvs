@@ -463,6 +463,8 @@ app.whenReady().then(() => {
     try {
       const dir = getDataDir();
       const sections = path.join(dir, 'sections');
+      const hasSqlite = fs.existsSync(path.join(dir,'platform.sqlite'));
+      if (hasSqlite) storage.readRevisions(dir);
       const hasSplit = fs.existsSync(path.join(sections, 'revisions.json'));
       const hasLegacy = fs.existsSync(path.join(dir, 'data.json'));
       let backups = [];
@@ -472,8 +474,8 @@ app.whenReady().then(() => {
           .sort((a, b) => b.time - a.time);
       } catch {}
       return {
-        mode, available: hasSplit || hasLegacy,
-        storage: hasSplit ? 'Разделённая база' : hasLegacy ? 'Файл базы' : 'База не найдена',
+        mode, available: hasSqlite || hasSplit || hasLegacy,
+        storage: hasSqlite ? 'SQLite (транзакционная база)' : hasSplit ? 'Разделённая база' : hasLegacy ? 'Файл базы' : 'База не найдена',
         backupCount: backups.length,
         lastBackupAt: backups.length ? new Date(backups[0].time).toISOString() : null,
         checkedAt: new Date().toISOString(),
