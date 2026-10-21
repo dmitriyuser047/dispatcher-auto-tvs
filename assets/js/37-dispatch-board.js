@@ -120,7 +120,7 @@ function dxJobCard(row, compact = false) {
     <div class="dx-job-site">${htmlEsc(row.site || 'Объект не указан')}${row.customer ? ` <span>· ${htmlEsc(row.customer)}</span>` : ''}</div>
     <div class="dx-job-resources">
       <div class="${!asset || asset.missing ? 'is-missing' : ''}"><span class="dx-resource-mark" aria-hidden="true">ТС</span><div><small>Техника</small><strong>${htmlEsc(asset?.label || 'Выбрать технику')}</strong></div></div>
-      <div class="${!driver || driver.missing ? 'is-missing' : ''}"><span class="dx-resource-mark" aria-hidden="true">С</span><div><small>Сотрудник</small><strong>${htmlEsc(driver?.name || 'Назначить сотрудника')}</strong></div></div>
+      <div class="${!driver || driver.missing ? 'is-missing' : ''}"><span class="dx-resource-mark" aria-hidden="true">С</span><div><small>${htmlEsc(wfPersonnelFieldLabel(row.assetRef))}</small><strong>${htmlEsc(driver?.name || 'Назначить сотрудника')}</strong></div></div>
     </div>
     ${row.points ? `<p class="dx-job-route" title="${htmlEsc(row.points)}">${htmlEsc(row.points)}</p>` : ''}
     ${factKm || factHours ? `<div class="dx-job-facts">${factKm ? `<span><small>км · план / факт</small><b>${dxJobFact(row.plannedKm)} / ${dxJobFact(row.actualKm)}</b></span>` : ''}${factHours ? `<span><small>ч · план / факт</small><b>${dxJobFact(row.plannedHours)} / ${dxJobFact(row.actualHours)}</b></span>` : ''}</div>` : ''}
@@ -129,6 +129,7 @@ function dxJobCard(row, compact = false) {
     <footer class="dx-job-footer">
       ${writable && next ? `<button type="button" class="btn btn-primary btn-sm" onclick="dxJobAdvance(${htmlJs(row.id)},${htmlJs(next[0])})">${next[1]}<span aria-hidden="true"> →</span></button>` : ''}
       ${writable ? `<button type="button" class="btn btn-ghost btn-sm" onclick="wfEdit('dispatchJobs',${htmlJs(row.id)})">Открыть</button>` : `<button type="button" class="btn btn-ghost btn-sm" onclick="dxJobDetails(${htmlJs(row.id)})">Подробнее</button>`}
+      ${driver&&!driver.missing&&!driver.restricted?`<button type="button" class="btn btn-ghost btn-sm" data-personnel-job="${htmlEsc(row.id)}">Сотрудник</button>`:''}
       ${writable ? `<button type="button" class="btn btn-ghost btn-sm dx-job-files" onclick="wfAttachments('dispatchJobs',${htmlJs(row.id)})" title="Документы и файлы заявки">Файлы${(row.attachments || []).length ? ' · ' + (row.attachments || []).length : ''}</button>` :
         (row.attachments || []).length ? `<span class="dx-job-files" title="Прикреплённые файлы">${(row.attachments || []).length} файл.</span>` : ''}
       ${row.archived && dxJobCanWrite() ? `<button type="button" class="btn btn-ghost btn-sm" onclick="wfArchive('dispatchJobs',${htmlJs(row.id)})">Восстановить</button>` : ''}
@@ -143,7 +144,7 @@ function dxJobDetails(id) {
   const details = [
     ['Состояние', WF_STATUS[row.status] || row.status], ['Плановое время', dxJobRange(row, true)],
     ['Объект', row.site], ['Организация', row.org], ['Заказчик', row.customer],
-    ['Техника', dxJobAsset(row)?.label], ['Сотрудник', dxJobDriver(row)?.name],
+    ['Техника', dxJobAsset(row)?.label], [wfPersonnelFieldLabel(row.assetRef), dxJobDriver(row)?.name],
     ['Маршрут', row.points], ['Допуски', row.requirements],
     ['План / факт, км', dxJobFact(row.plannedKm) + ' / ' + dxJobFact(row.actualKm)],
     ['План / факт, ч', dxJobFact(row.plannedHours) + ' / ' + dxJobFact(row.actualHours)],
@@ -275,6 +276,7 @@ function dxRenderJobs() {
     ${dxJobsView === 'timeline' ? dxJobTimelineHtml(rows) : dxJobBoardHtml(rows)}
     ${rows.length === 0 && dxJobsView === 'board' ? `<div class="dx-board-empty-note">${wfQuery || wfSite || wfOrg || dxJobsSiteUnset ? 'По выбранным фильтрам заявок нет. Измените поиск или сбросьте фильтры.' : 'Для этого периода заявок пока нет. Начните с новой заявки или посмотрите все даты.'}</div>` : ''}
   </div>`;
+  document.querySelectorAll('#mainContent [data-personnel-job]').forEach(button=>button.addEventListener('click',()=>{const row=(data.dispatchJobs||[]).find(item=>String(item.id)===button.dataset.personnelJob);if(row&&dxJobCanRead('drivers')&&typeof personnelOpenPerson==='function')personnelOpenPerson(row.driverId);}));
   document.getElementById('dxJobDate').addEventListener('change', event => {
     if (!wfValidDate(event.target.value)) return;
     dxJobsDate = event.target.value; dxJobsAllDates = false; dxRenderJobs();

@@ -1,9 +1,9 @@
 /* Shared dispatch, acceptance and inventory rules from the existing workflows. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.PlatformPolicies = factory();
-})(typeof globalThis === 'object' ? globalThis : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'));
+  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine);
+})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel) {
   'use strict';
   const rows = (db, section) => Array.isArray(db?.[section]) ? db[section] : [];
   const present = value => value != null && String(value).trim() !== '';
@@ -63,13 +63,18 @@
         if (balance < -1e-9) add('partMovements',row,'PART_STOCK_DEFICIT',field,'Недостаточно остатка на складе ' + label,[row.partId,at],{ partId:row.partId,deficit:-balance });
       }
     }
-    return { issues,counts:{ error:issues.length,warning:0,total:issues.length } };
+    const personnel = getPersonnel();
+    if (personnel && personnel.apiVersion === 1) issues.push(...personnel.inspect(db,context).issues);
+    return { issues,counts:{ error:issues.filter(issue=>issue.severity==='error').length,warning:issues.filter(issue=>issue.severity==='warning').length,total:issues.length } };
   }
   function validateChanges(previous,next,context) {
     const old = inspect(previous,context).issues, current = inspect(next,context).issues;
     const key = issue => JSON.stringify([issue.section,issue.recordId,issue.code,issue.field,issue.relatedRecordId || '']);
     const prior = new Map(old.map(issue => [key(issue),issue]));
     const blocking = current.filter(issue => {
+      // Personnel uses field/assignment delta semantics below. Its read-only
+      // report may show legacy rows and active links that need manual review.
+      if (issue.code.startsWith('PERSONNEL_')) return false;
       const before = prior.get(key(issue));
       if (!before) return true;
       if (issue.code === 'PART_STOCK_DEFICIT') return issue.deficit > before.deficit + 1e-9;
@@ -79,6 +84,11 @@
       const error = new Error(blocking.map(issue => issue.message).slice(0,5).join('; '));
       error.name = 'PlatformPolicyError'; error.code = 'POLICY_VIOLATION'; error.issues = blocking; error.details = { issues:blocking }; throw error;
     }
+    const personnel = getPersonnel();
+    if (!personnel || personnel.apiVersion !== 1) {
+      const error = new Error('Не загружено ядро сотрудников');error.code='MODULE_UNAVAILABLE';throw error;
+    }
+    personnel.validateChanges(previous,next,context);
     return true;
   }
   return Object.freeze({ apiVersion:1,inspect,validateChanges });

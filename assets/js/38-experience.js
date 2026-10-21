@@ -21,6 +21,8 @@ function xpIcon(name,size=20){
 }
 const XP_MODULES={
   dispatch:{title:'Диспетчерская',note:'Смена, заявки и назначения',icon:'grid'},
+  drivers:{title:'Водители',note:'Карточки, категории, документы и назначения',icon:'people'},
+  operators:{title:'Операторы ДЭС',note:'Состав смен, допуски и работа на генераторах',icon:'people'},
   vehicles:{title:'Транспорт',note:'Автопарк и журналы работы',icon:'car',count:()=>data.vehicles.filter(v=>!v.archived).length+' ТС'},
   generators:{title:'Дизельные генераторы',note:'Наработка, расход и обслуживание',icon:'power',count:()=>(data.generators||[]).filter(v=>!v.archived).length+' ДЭС'},
   tanks:{title:'Топливные ёмкости',note:'Остатки и движения',icon:'tank',count:()=>(data.tanks||[]).filter(v=>!v.archived).length},
@@ -46,10 +48,12 @@ function xpRememberSection(section){
 }
 function renderLaunchpad(){
   const today=new Date();let recent=[];
-  try{recent=JSON.parse(localStorage.getItem('tvs-recent-sections')||'[]').filter(s=>XP_MODULES[s]);}catch{}
+  const visible=id=>!['drivers','operators'].includes(id)||typeof _sync==='undefined'||!_sync.access||(_sync.access.readable||[]).includes('drivers');
+  try{recent=JSON.parse(localStorage.getItem('tvs-recent-sections')||'[]').filter(s=>XP_MODULES[s]&&visible(s));}catch{}
   for(const id of ['vehicles','fuelPurchases','reestr'])if(!recent.includes(id))recent.push(id);
   const groups=[
     ['Техника и эксплуатация',['vehicles','generators','tanks','toSchedule','repairs']],
+    ['Сотрудники',['drivers','operators']],
     ['Топливо и финансы',['fuelPurchases','fuelReport','finances','costs','contragents','reports']],
     ['Документы и процессы',['reestr','workflows','procurement','printForms','pdf']],
   ];
@@ -58,7 +62,7 @@ function renderLaunchpad(){
     <div class="xp-home-top"><div><div class="xp-eyebrow">Технрайз Велл Сервис / Автопарк</div><h2>Рабочее пространство</h2></div><span class="xp-home-date">${today.toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'})}</span></div>
     <div class="xp-home-lead"><button type="button" class="xp-dispatch-entry" onclick="wfOpenTab('overview')"><div><div class="xp-eyebrow">Пульт диспетчера</div><h3>Вся смена.<br>В одном рабочем пространстве.</h3></div><span class="xp-entry-link">Открыть диспетчерскую ${xpIcon('arrow',18)}</span></button>
     <section class="xp-shortcuts"><h3>Быстрый доступ</h3>${recent.slice(0,3).map(id=>`<button type="button" class="xp-shortcut" onclick="${xpModuleAction(id)}"><span class="xp-icon">${xpIcon(XP_MODULES[id].icon,18)}</span>${XP_MODULES[id].title}<span style="margin-left:auto">↗</span></button>`).join('')}</section></div>
-    <div class="xp-catalog">${groups.map(([title,ids])=>`<section class="xp-catalog-group"><h3>${title}</h3><div class="xp-catalog-list">${ids.map(module).join('')}</div></section>`).join('')}</div>
+    <div class="xp-catalog">${groups.filter(([,ids])=>ids.some(visible)).map(([title,ids])=>`<section class="xp-catalog-group"><h3>${title}</h3><div class="xp-catalog-list">${ids.filter(visible).map(module).join('')}</div></section>`).join('')}</div>
     <div class="xp-home-footer"><span>ТВС · Техника, люди и документы</span><span><kbd>Ctrl K</kbd> — найти раздел, машину или документ</span></div>
   </div>`;
 }

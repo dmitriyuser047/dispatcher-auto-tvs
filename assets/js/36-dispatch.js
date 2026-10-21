@@ -1,7 +1,7 @@
 // Диспетчерская — самостоятельный раздел с собственной навигацией и фильтрами.
 const WF_DISPATCH_TABS = {
   overview:'Обзор', dispatchJobs:'Заявки', assetAssignments:'Назначения',
-  drivers:'Сотрудники', shiftReports:'Сменные формы',
+  drivers:'Водители', operators:'Операторы ДЭС', shiftReports:'Сменные формы',
 };
 const wfWorkspaceState = {
   dispatch:{tab:'overview',query:'',site:'',org:'',archive:false},
@@ -22,11 +22,12 @@ function wfSwitchWorkspace(previous,next,options={}){
   wfOrg=options.org??state.org;wfShowArchive=options.archive??state.archive;
 }
 function wfOpenTab(tab,view={}){
+  if(tab==='drivers'||tab==='operators'){switchSection(tab);return;}
   if(tab==='dispatchJobs' && typeof dxJobsSiteUnset!=='undefined')dxJobsSiteUnset=!!view.siteUnset;
   switchSection(wfSectionForTab(tab),{...view,workflowTab:tab});
 }
 function wfTabsHtml(tabs=wfVisibleTabs()){
-  return `<nav class="wf-tabs" aria-label="${activeSection==='dispatch'?'Разделы диспетчерской':'Рабочие процессы'}">${Object.entries(tabs).map(([key,label])=>`<button type="button" class="btn ${wfTab===key?'btn-primary':'btn-ghost'} btn-sm" aria-current="${wfTab===key?'page':'false'}" onclick="wfOpenTab(${htmlJs(key)})">${htmlEsc(label)}${key==='overview'?'':` <small>${(data[key]||[]).length}</small>`}</button>`).join('')}</nav>`;
+  return `<nav class="wf-tabs" aria-label="${activeSection==='dispatch'?'Разделы диспетчерской':'Рабочие процессы'}">${Object.entries(tabs).filter(([key])=>!['drivers','operators'].includes(key)||dxOverviewCanRead('drivers')).map(([key,label])=>`<button type="button" class="btn ${wfTab===key?'btn-primary':'btn-ghost'} btn-sm" aria-current="${wfTab===key?'page':'false'}" onclick="wfOpenTab(${htmlJs(key)})">${htmlEsc(label)}${key==='overview'?'':` <small>${['drivers','operators'].includes(key)&&typeof personnelRows==='function'?personnelRows(key==='drivers'?'driver':'operator').filter(row=>!row.archived).length:(data[key]||[]).length}</small>`}</button>`).join('')}</nav>`;
 }
 let dxOverviewDate = '';
 let dxOverviewSite = '';

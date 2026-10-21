@@ -8,7 +8,7 @@ const clone=value=>JSON.parse(JSON.stringify(value));
 const violation=expected=>error=>error.name==='PlatformIntegrityError'&&Array.isArray(error.issues)&&(!expected||error.issues.some(issue=>issue.code===expected));
 function validGraph(){
   const db=Object.fromEntries(schema.sections.map(section=>[section,[]]));
-  db.vehicles=[{id:'v',fuelBalance:100}];db.generators=[{id:'g',tankId:'t'}];db.tanks=[{id:'t',capacity:1000}];db.parts=[{id:'p',minStock:1}];db.drivers=[{id:'d'}];db.contragents=[{id:'c'}];
+  db.vehicles=[{id:'v',fuelBalance:100}];db.generators=[{id:'g',tankId:'t'}];db.tanks=[{id:'t',capacity:1000}];db.parts=[{id:'p',minStock:1}];db.drivers=[{id:'d',name:'Тестовый сотрудник',personnelRoles:['driver','operator']}];db.contragents=[{id:'c'}];
   db.records=[{id:'r',vehicleId:'v',date:'2026-09-01',km:100,fuelActual:10,fuelMovementId:'fm',glonassProvenance:{importId:'gi',rawIds:['gt']}}];
   db.genRecords=[{id:'gr',generatorId:'g',tankId:'t',date:'2026-09-01',hours:10}];db.vehicleTo=[{id:'vt',vehicleId:'v',date:'2026-09-01'}];db.toRecords=[{id:'tr',generatorId:'g',date:'2026-09-01'}];db.repairs=[{id:'rp',vehicleId:'v',invoiceDate:'2026-09-01',cost:10}];
   db.fuelImports=[{id:'fi',at:'2026-10-01T10:00:00.000Z'}];db.fuelPurchases=[{id:'fp',vehicleId:'v',recordId:'r',importId:'fi',date:'2026-09-01',grade:'АИ-95',qty:20,cardNo:'123'}];db.fuelCards=[{id:'fc',number:'123',assignments:[{vehicleId:'v',from:'2026-09-01',to:''}]}];db.fuelPeriods=[{month:'2026-09'}];db.monthlyFuel=[{vehicleId:'v',month:'2026-09',liters:20}];
@@ -30,7 +30,7 @@ test('one immutable platform registry covers every current section and ten appli
 });
 
 test('CommonJS and browser modules inspect a graph without DOM, storage or global application data',()=>{
-  const context=vm.createContext({});for(const name of ['platform-schema.js','platform-policies.js','platform-integrity.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name),'utf8'),context);
+  const context=vm.createContext({});for(const name of ['platform-schema.js','personnel-engine.js','platform-policies.js','platform-integrity.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name),'utf8'),context);
   const db=validGraph(),before=JSON.stringify(db);assert.equal(context.PlatformIntegrity.inspect(db).counts.error,0);assert.equal(JSON.stringify(db),before);
   assert.equal(integrity.inspect([]).issues[0].code,'invalid-database');
 });

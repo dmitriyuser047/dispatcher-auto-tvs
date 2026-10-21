@@ -32,12 +32,17 @@ function wfAssets() { return [...(data.vehicles||[]).map(v=>({ref:'v:'+v.id,labe
 function wfAsset(ref) { return wfAssets().find(x=>x.ref===ref); }
 function wfContext(ref,date=wfToday()) { const a=wfAsset(ref); const changes=(data.assetAssignments||[]).filter(x=>!x.archived && x.assetRef===ref && x.from<=date && (!x.to||x.to>=date)).sort((a,b)=>String(b.from).localeCompare(a.from)); return Object.assign({},a?.row||{},changes[0]||{}); }
 function wfOverlap(a,b) { return a.start<b.end && b.start<a.end; }
-function wfDispatchProblems(job) {
+function wfPersonnelKind(assetRef){return typeof TvsPersonnelEngine!=='undefined'?TvsPersonnelEngine.kindForAsset(assetRef):String(assetRef||'').startsWith('g:')?'operator':String(assetRef||'').startsWith('v:')?'driver':null;}
+function wfPersonnelFieldLabel(assetRef){const kind=wfPersonnelKind(assetRef);return kind==='operator'?'Оператор ДЭС':kind==='driver'?'Водитель':'Сотрудник';}
+function wfPersonnelReferenceUnchanged(row,old){return !!old&&old.driverId===row.driverId&&(old.assetRef||'')===(row.assetRef||'');}
+function wfPersonnelMatches(row,kind){if(!kind)return true;if(typeof TvsPersonnelEngine!=='undefined')return TvsPersonnelEngine.matchesRole(row,kind);return (Array.isArray(row.personnelRoles)?row.personnelRoles:['driver']).includes(kind);}
+function wfPersonnelAvailable(row){return typeof TvsPersonnelEngine!=='undefined'?TvsPersonnelEngine.availability(row).available:!row.archived&&!row.deleted&&(!row.employmentStatus||row.employmentStatus==='active');}
+function wfDispatchProblems(job,old) {
   const issues=[]; const asset=wfAsset(job.assetRef),driver=(data.drivers||[]).find(x=>x.id===job.driverId);
   if(!(job.start<job.end))issues.push('Конец задания должен быть позже начала');
   if(['assigned','started','done','confirmed'].includes(job.status)) {
     if(!asset || asset.row.archived)issues.push('Выберите действующую технику');
-    if(!driver||driver.archived)issues.push('Выберите действующего сотрудника');
+    if(!driver||(!wfPersonnelReferenceUnchanged(job,old)&&(!wfPersonnelAvailable(driver)||!wfPersonnelMatches(driver,wfPersonnelKind(job.assetRef)))))issues.push('Выберите действующего сотрудника: '+wfPersonnelFieldLabel(job.assetRef).toLowerCase());
     if(asset && /ремонт|списан|дтп|продан/i.test(wfContext(job.assetRef,job.start?.slice(0,10)).status||''))issues.push('Статус техники не позволяет назначение');
     for(const r of data.dispatchJobs||[]) if(!r.archived && r.id!==job.id && !['cancelled','done','confirmed'].includes(r.status) && wfOverlap(job,r)) {
       if(job.assetRef&&job.assetRef===r.assetRef)issues.push('Техника занята: '+r.title);
@@ -84,12 +89,16 @@ function wfValidate(section,row,old) {
       const ref=type==='asset'?wfAsset(value)?.row:type==='driver'?(data.drivers||[]).find(r=>r.id===value):type==='tank'?(data.tanks||[]).find(r=>r.id===value):(data.parts||[]).find(r=>r.id===value);
       if(!ref)throw Error('Не найден объект поля «'+label+'»');
       if(ref.archived&&(!old||old[key]!==value))throw Error('Нельзя выбрать объект из архива: '+label);
+      if(type==='driver'&&['assetAssignments','dispatchJobs','shiftReports'].includes(section)&&!wfPersonnelReferenceUnchanged(row,old)){
+        if(!wfPersonnelAvailable(ref))throw Error('Сотрудник недоступен для нового назначения');
+        if(!wfPersonnelMatches(ref,wfPersonnelKind(row.assetRef)))throw Error('Для выбранной техники требуется '+wfPersonnelFieldLabel(row.assetRef).toLowerCase());
+      }
     }
-    if(!['number','checkbox'].includes(type)&&typeof value!=='string')throw Error('Поле «'+label+'» должно быть текстом');
+    if(!['number','checkbox','driver'].includes(type)&&typeof value!=='string')throw Error('Поле «'+label+'» должно быть текстом');
   }
   const transitions=WF_TRANSITIONS[section];
   if(transitions&&old&&old.status!==row.status&&transitions[old.status]&&!transitions[old.status].includes(row.status))throw Error('Недопустимый переход: '+(WF_STATUS[old.status]||old.status)+' → '+(WF_STATUS[row.status]||row.status));
-  if(section==='dispatchJobs') {const p=wfDispatchProblems(row);if(p.length)throw Error(p.join('\n'));}
+  if(section==='dispatchJobs') {const p=wfDispatchProblems(row,old);if(p.length)throw Error(p.join('\n'));}
   if(section==='assetAssignments') {
     if(row.to&&row.from>row.to)throw Error('Дата окончания раньше начала');
     if((data.assetAssignments||[]).some(r=>!r.archived&&r.id!==row.id&&r.assetRef===row.assetRef&&r.from<=(row.to||'9999')&&(r.to||'9999')>=row.from))throw Error('Период назначения пересекается с существующим. Сначала завершите прежнее назначение.');
@@ -148,7 +157,7 @@ async function wfSave(section,row) {
     records.push(linked);
   }
   if(old)Object.assign(old,row);else data[section].push(row);
-  if(await saveData(data)){closeModal('wfModal');renderWorkflows();showToast('Сохранено');return true;}return false;
+  if(await saveData(data)){closeModal('wfModal');if((activeSection==='drivers'||activeSection==='operators')&&typeof renderPersonnelSection==='function')renderPersonnelSection();else renderWorkflows();showToast('Сохранено');return true;}return false;
 }
 function wfReversalCheck(id) {
   const original=(data.fuelMovements||[]).find(r=>r.id===id);

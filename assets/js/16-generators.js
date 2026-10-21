@@ -178,6 +178,7 @@ function renderGenDetail(g) {
     </div>
 
     ${renderToSection(g.id, totalHours + (g.hoursInit || 0))}`;
+  if(typeof personnelMountAssetPeople==='function')personnelMountAssetPeople(document.querySelector('#mainContent .vehicle-detail-header'),'g:'+g.id);
 }
 
 // ─── ГРАФИК ТО ───────────────────────────────────────────

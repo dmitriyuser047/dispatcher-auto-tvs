@@ -22,6 +22,7 @@ function platformOpenSource(section, id) {
   const readable = platformSessionContext().readable;
   if (readable && !readable.includes(section)) { showToast('Раздел недоступен для вашей роли.'); return; }
   const row = (data[section] || []).find(row => String(row.id ?? row.month ?? '') === String(id));
+  if (section === 'drivers') { if (row) personnelOpenPerson(row.id); else switchSection('drivers'); return; }
   if (section === 'vehicles') { switchSection('vehicles'); if (row) renderDetail(row); return; }
   if (section === 'records') { switchSection('vehicles'); const vehicle = row && data.vehicles.find(vehicle => vehicle.id === row.vehicleId); if (vehicle) renderDetail(vehicle); return; }
   if (section === 'generators' || section === 'genRecords') { switchSection('generators'); return; }

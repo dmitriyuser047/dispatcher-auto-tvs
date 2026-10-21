@@ -287,6 +287,7 @@ function syncRefreshView(names) {
     else if (activeSection === 'costs') renderCostsSection();
     else if (activeSection === 'procurement') renderProcurementSection();
     else if (activeSection === 'system') renderPlatformSystem();
+    else if (activeSection === 'drivers' || activeSection === 'operators') renderPersonnelSection();
     else if (activeSection === 'generators' && typeof renderGeneratorCards === 'function' && !selectedGeneratorId) renderGeneratorCards();
   } catch (e) { console.warn('[sync] перерисовка: ' + e.message); }
 }

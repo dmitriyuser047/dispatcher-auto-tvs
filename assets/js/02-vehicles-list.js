@@ -469,6 +469,7 @@ function renderDetail(v) {
     document.getElementById('mainContent').innerHTML = vehicleHeaderHtml + statsHtml +
       renderRepairSection(v.id);
   }
+  if(typeof personnelMountAssetPeople==='function')personnelMountAssetPeople(document.querySelector('#mainContent .vehicle-detail-header'),'v:'+v.id);
 }
 
 function selectMonth(year, month) {

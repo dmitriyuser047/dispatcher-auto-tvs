@@ -3,6 +3,7 @@ const CC_SECTIONS = [
   ['Диспетчерская · Обзор · Заявки · Назначения', 'dispatch'],
   ['Рабочие процессы · Задачи · Ремонт · Документы', 'workflows'],
   ['Транспорт', 'vehicles'], ['ДЭС', 'generators'], ['Ёмкости', 'tanks'],
+  ['Водители · Сотрудники · Категории', 'drivers'], ['Операторы ДЭС · Сотрудники · Допуски', 'operators'],
   ['ГСМ · Заправки', 'fuelPurchases'], ['ГСМ · Отчёт по топливу', 'fuelReport'],
   ['Реестр', 'reestr'], ['График ТО', 'toSchedule'],
   ['Финансы', 'finances'], ['Контрагенты', 'contragents'], ['Отчёты', 'reports'],
@@ -17,7 +18,7 @@ function ccNorm(value) {
 
 function ccBuildItems(query) {
   const q = ccNorm(query), items = [];
-  CC_SECTIONS.forEach(([label, section]) => items.push({ label, detail: 'Раздел', section, score: q && ccNorm(label).includes(q) ? 0 : 3 }));
+  CC_SECTIONS.forEach(([label, section]) => {if(['drivers','operators'].includes(section)&&typeof _sync!=='undefined'&&_sync.access&&!(_sync.access.readable||[]).includes('drivers'))return;items.push({ label, detail: 'Раздел', section, score: q && ccNorm(label).includes(q) ? 0 : 3 });});
   items.push({ label: 'Журнал ремонта', detail: 'Раздел', action: () => openRepairsJournal(), score: q && ccNorm('Журнал ремонта').includes(q) ? 0 : 3 });
   items.push({ label: 'Редактор PDF', detail: 'Документы', action: () => openPdfEditor(), score: q && ccNorm('Редактор PDF').includes(q) ? 0 : 3 });
   items.push({ label: 'Уведомления Windows', detail: 'Настройки напоминаний', action: () => openNotificationSettings(), score: q && ccNorm('Уведомления Windows напоминания').includes(q) ? 0 : 3 });
@@ -25,7 +26,7 @@ function ccBuildItems(query) {
     const label = fields.map(k => row[k]).filter(Boolean).join(' · ');
     const haystack = ccNorm([label, row.note, row.driver, row.object, row.location, row.serial, row.org].join(' '));
     if (!label || (q && !haystack.includes(q))) return;
-    items.push({ label, detail: kind, section, open: () => open(row), score: q && ccNorm(label).startsWith(q) ? 1 : 2 });
+    items.push({ label, detail: typeof kind==='function'?kind(row):kind, section, open: () => open(row), score: q && ccNorm(label).startsWith(q) ? 1 : 2 });
   });
   addRows(data.vehicles, 'Транспортное средство', 'vehicles', ['plate', 'make'], row => {
     switchSection('vehicles'); selectVehicle(row.id);
@@ -42,7 +43,10 @@ function ccBuildItems(query) {
   addRows(data.fuelCards, 'Топливная карта', 'fuelPurchases', ['number', 'provider', 'org'], row => {
     fpView = 'fcards'; fcSearch = row.number || row.provider || ''; switchSection('fuelPurchases');
   });
-  ['dispatchJobs','opsTasks','drivers','workOrders','assetDocuments','shiftReports'].forEach(section=>{
+  if(typeof _sync==='undefined'||!_sync.access||(_sync.access.readable||[]).includes('drivers')){
+    addRows(data.drivers,row=>[wfPersonnelMatches(row,'driver')?'Водитель':'',wfPersonnelMatches(row,'operator')?'Оператор ДЭС':''].filter(Boolean).join(' · ')||'Сотрудник','drivers',['name','phone','site'],row=>{if(typeof personnelOpenPerson==='function')personnelOpenPerson(row.id);else wfOpenTab('drivers');});
+  }
+  ['dispatchJobs','opsTasks','workOrders','assetDocuments','shiftReports'].forEach(section=>{
     addRows(data[section], typeof WF_TABS!=='undefined'?WF_TABS[section]:section, wfSectionForTab(section),['title','name','number'],row=>{wfOpenTab(section);wfEdit(section,row.id);});
   });
   addRows(data.payments,'Платёж','finances',['contragent','purpose','description'],()=>switchSection('finances'));

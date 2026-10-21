@@ -10,7 +10,7 @@ function switchSection(section, options = {}) {
   const isHome = section === 'home';
   const hasSidebar = section === 'tanks';
   const sectionTitles = {
-    vehicles: 'Транспорт', generators: 'ДЭС', tanks: 'Ёмкости', workflows:'Рабочие процессы', dispatch:'Диспетчерская',
+    vehicles: 'Транспорт', generators: 'ДЭС', tanks: 'Ёмкости', drivers:'Водители', operators:'Операторы ДЭС', workflows:'Рабочие процессы', dispatch:'Диспетчерская',
     reestr: 'Реестр', toSchedule: 'График ТО', repairs: 'Журнал ремонта',
     finances: 'Финансы', contragents: 'Контрагенты', reports: 'Отчёты',
     costs: 'Стоимость работы', procurement: 'Планирование закупок', system:'Состояние программы',
@@ -69,6 +69,8 @@ function switchSection(section, options = {}) {
     renderMainMenu();
   } else if (section === 'system') {
     renderPlatformSystem();
+  } else if (section === 'drivers' || section === 'operators') {
+    renderPersonnelSection();
   } else if (section === 'workflows' || section === 'dispatch') {
     renderWorkflows();
   } else if (section === 'toSchedule') {

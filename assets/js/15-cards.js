@@ -4,6 +4,22 @@
 // ─── VEHICLE CARDS ──────────────────────────────────────
 let vcSearchQuery = '';
 let vcShowArchive=false,genShowArchive=false;
+function personnelMountAssetPeople(host,ref){
+  if(!host)return;
+  if(host.nextElementSibling?.hasAttribute('data-personnel-for-asset'))host.nextElementSibling.remove();
+  if(typeof personnelRows!=='function'||typeof personnelCanRead!=='function'||!personnelCanRead('drivers')||!personnelCanRead('assetAssignments'))return;
+  const today=wfToday(),people=personnelRows(),seen=new Set(),current=[];
+  for(const assignment of data.assetAssignments||[]){
+    if(assignment.archived||assignment.deleted||assignment.assetRef!==ref||!assignment.from||assignment.from>today||assignment.to&&assignment.to<today)continue;
+    const person=people.find(row=>row.id===assignment.driverId);if(!person)continue;
+    const key=typeof person.id+':'+person.id;if(seen.has(key))continue;seen.add(key);current.push(person);
+  }
+  if(!current.length)return;
+  const panel=document.createElement('div');panel.className='personnel-asset-people wf-actions';panel.dataset.personnelForAsset=ref;
+  const label=document.createElement('small');label.textContent=wfPersonnelFieldLabel(ref)+' · закрепление на '+fmtDate(today)+':';panel.appendChild(label);
+  for(const person of current){const button=document.createElement('button');button.type='button';button.className='btn btn-ghost btn-sm';button.textContent=person.name;button.setAttribute('aria-label','Открыть карточку: '+person.name);button.addEventListener('click',event=>{event.stopPropagation();personnelOpenPerson(person.id);});panel.appendChild(button);}
+  host.insertAdjacentElement('afterend',panel);
+}
 function renderVehicleCards() {
   const q = vcSearchQuery.toLowerCase().trim();
   const fuelLabels = { diesel: 'Дизельное', gasoline: 'Бензин', gas: 'Газ' };
