@@ -60,6 +60,9 @@ function execute(dataDir,input,options={}){
       const planned=commands.plan(snapshot.data,command,{id:envelope.operation.id,now,today:now.slice(0,10),actor});
       if(!planned||!planned.sections||Object.keys(planned.sections).some(name=>!footprint.includes(name)))fail('COMMAND_DEFINITION','Команда попыталась изменить посторонний раздел',500);
       contracts.validateSections(planned.sections,schema.sections);
+      // New precision rules apply to changed persisted facts only, after a
+      // committed receipt has already had the chance to replay unchanged.
+      require('../assets/core/precision-policy.js').validateChanges(snapshot.data,{...snapshot.data,...planned.sections},{readable:dependencies});
       const result=storage.writeSections(dataDir,{databaseToken:token,base:envelope.base,sections:planned.sections,operation:envelope.operation},
         {principal,now,commandIntent:envelope,beforeCommit:options.beforeCommit});
       return filteredResult({...result,command:true},principal);

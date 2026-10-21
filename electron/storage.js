@@ -203,7 +203,7 @@ function prepareWriteoffSections(previous, sections, options = {}) {
     const old = oldById.get(row.id);
     if (!old) {
       const withoutOwnDocument = { ...next, fuelWriteoffs:rows.filter(other => other.id !== row.id) };
-      return engine.post(withoutOwnDocument, { ...row.scope, date:row.date, basisNote:row.basisNote },
+      return engine.forVersion(2).post(withoutOwnDocument, { ...row.scope, date:row.date, basisNote:row.basisNote },
         { id:row.id, number:row.number, postedAt:at, postedBy:actor, expectedFingerprint:row.sourceFingerprint });
     }
     if (old.status === 'posted' && row.status === 'void')

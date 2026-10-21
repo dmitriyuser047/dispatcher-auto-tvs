@@ -42,19 +42,13 @@ async function saveGenerator() {
   if (!name)     { showFieldError('Укажите наименование ДЭС', 'gm_name'); return; }
   if (!location) { showFieldError('Укажите местонахождение', 'gm_location'); return; }
   if (!data.generators) data.generators = [];
+  const numeric=precisionRead({power:['gm_power',3],norm:['gm_norm',6],norm100:['gm_norm100',6],norm50:['gm_norm50',6],normIdle:['gm_norm_idle',6],hoursInit:['gm_hours_init',3,'zero'],fuelBalance:['gm_fuel_balance',3,'zero'],cost:['gm_cost',2]},editingGeneratorId==null?null:data.generators.find(x=>x.id===editingGeneratorId));
+  if(!numeric)return;
   const obj = {
-    name, location,
+    name, location, ...numeric,
     serial:      document.getElementById('gm_serial').value.trim(),
     responsible: document.getElementById('gm_responsible').value.trim(),
-    power:       parseFloat(document.getElementById('gm_power').value)        || null,
     fuel:        document.getElementById('gm_fuel').value,
-    norm:        parseFloat(document.getElementById('gm_norm').value)         || null,
-    norm100:     parseFloat(document.getElementById('gm_norm100').value)      || null,
-    norm50:      parseFloat(document.getElementById('gm_norm50').value)       || null,
-    normIdle:    parseFloat(document.getElementById('gm_norm_idle').value)    || null,
-    hoursInit:   parseFloat(document.getElementById('gm_hours_init').value)   || 0,
-    fuelBalance: parseFloat(document.getElementById('gm_fuel_balance').value) || 0,
-    cost:        parseFloat(document.getElementById('gm_cost').value)         || null,
     status:      document.getElementById('gm_status').value.trim(),
     note:        document.getElementById('gm_note').value.trim(),
     tankId:      document.getElementById('gm_tank').value || null,
@@ -158,26 +152,21 @@ async function saveGenRecord() {
   if (!generator || generator.archived) { showToast('Для новой записи восстановите ДЭС из архива'); return; }
   const dateRaw = document.getElementById('gen_rec_date').value.trim();
   const date    = parseDate(dateRaw);
-  const hours   = parseFloat(document.getElementById('gen_rec_hours').value);
+  const old=editingGenRecordId==null?null:(data.genRecords||[]).find(r=>r.id===editingGenRecordId);
+  const numeric=precisionRead({hours:['gen_rec_hours',3,'error'],meterStart:['gen_rec_meter_start',3],meterEnd:['gen_rec_meter_end',3],fuelIssued:['gen_rec_fuel_issued',3],fuelUsed:['gen_rec_fuel_used',3],fuelActual:['gen_rec_fuel_actual',3],load:['gen_rec_load',3]},old);
+  if(!numeric)return;
+  const {hours,meterStart,meterEnd}=numeric;
   if (!date)              { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'gen_rec_date'); return; }
   if (!Number.isFinite(hours) || hours < 0) { showFieldError('Укажите неотрицательную наработку', 'gen_rec_hours'); return; }
-  if (!validNonnegativeFields(['gen_rec_meter_start','gen_rec_meter_end','gen_rec_fuel_issued','gen_rec_fuel_used','gen_rec_fuel_actual','gen_rec_load'])) return;
   if (+document.getElementById('gen_rec_fuel_issued').value > 0 && (data.tanks || []).find(t => t.id === generator.tankId)?.archived) {
     showFieldError('Выберите действующую ёмкость в карточке ДЭС или восстановите прежнюю', 'gen_rec_fuel_issued'); return;
   }
-  const meterStart = optionalNumber('gen_rec_meter_start'), meterEnd = optionalNumber('gen_rec_meter_end');
-  if (meterStart != null && meterEnd != null && (meterEnd < meterStart || Math.abs((meterEnd - meterStart) - hours) > 0.11)) {
+  if (meterStart != null && meterEnd != null && (meterEnd < meterStart || Math.abs((meterEnd - meterStart) - hours) > 0.11) && (!old||old.meterStart!==meterStart||old.meterEnd!==meterEnd||old.hours!==hours)) {
     showFieldError('Разность показаний счётчика должна совпадать с наработкой', 'gen_rec_meter_end'); return;
   }
   if (!data.genRecords) data.genRecords = [];
   const obj = {
-    generatorId: selectedGeneratorId, date, hours,
-    meterStart:  optionalNumber('gen_rec_meter_start'),
-    meterEnd:    optionalNumber('gen_rec_meter_end'),
-    fuelIssued:  optionalNumber('gen_rec_fuel_issued'),
-    fuelUsed:    optionalNumber('gen_rec_fuel_used'),
-    fuelActual:  optionalNumber('gen_rec_fuel_actual'),
-    load:        optionalNumber('gen_rec_load'),
+    generatorId: selectedGeneratorId, date, ...numeric,
     note:        document.getElementById('gen_rec_note').value.trim(),
   };
   const actualSource = document.getElementById('gen_rec_fuel_actual').dataset.source;
@@ -215,7 +204,7 @@ async function deleteGenRecord(id) {
 
 // ─── GENERATOR RECORD AUTO-CALC ──────────────────────────
 function calcGenFuelAuto() {
-  const hours = parseFloat(document.getElementById('gen_rec_hours').value);
+  let hours;try{hours=precisionInput('gen_rec_hours',{scale:3,blank:'null'});}catch{return;}
   const g   = (data.generators || []).find(x => x.id === selectedGeneratorId);
   const inp = document.getElementById('gen_rec_fuel_used');
   if (!inp) return;
@@ -224,40 +213,40 @@ function calcGenFuelAuto() {
   // норма при номинальной мощности × моточасы.
   if (!g || isNaN(hours) || hours <= 0) { inp.value = ''; return; }
   const v = genNormSpent(g, { hours });
-  inp.value = v ? Math.round(v * 10) / 10 : '';
+  inp.value = v==null?'':precisionRound(v,3);
 }
 
 // Фактический расход = норма@100% × (факт. нагрузка / номинальная мощность) × моточасы
 function calcGenActualAuto() {
   const g     = (data.generators || []).find(x => x.id === selectedGeneratorId);
-  const hours = parseFloat(document.getElementById('gen_rec_hours').value);
-  const load  = parseFloat(document.getElementById('gen_rec_load').value);
+  let hours;try{hours=precisionInput('gen_rec_hours',{scale:3,blank:'null'});}catch{return;}
+  let load;try{load=precisionInput('gen_rec_load',{scale:3,blank:'null'});}catch{return;}
   const inp   = document.getElementById('gen_rec_fuel_actual');
   if (!inp || !g) return;
   if (inp.dataset.source === 'manual' && inp.value !== '') return;
-  if (!g.norm100 || !g.power || isNaN(hours) || isNaN(load) || hours < 0 || load < 0) {
+  if (!g.norm100 || !g.power || hours==null || load==null || hours < 0 || load < 0) {
     if (inp.dataset.source === 'estimate') { inp.value = ''; inp.dataset.source = ''; inp.classList.remove('auto-filled'); }
     return;
   }
-  const rate = genFuelRate(g, load);
-  if (rate == null) return;
-  inp.value = Math.round(Math.max(0, rate) * hours * 10) / 10;
+  const spent=genActualSpent(g,{hours,load});
+  if(spent==null)return;
+  inp.value=spent;
   inp.dataset.source = 'estimate';
   inp.classList.add('auto-filled');
 }
 
 function calcGenHoursEnd() {
-  const start = parseFloat(document.getElementById('gen_rec_meter_start').value);
-  const hours = parseFloat(document.getElementById('gen_rec_hours').value);
-  if (!isNaN(start) && !isNaN(hours))
-    document.getElementById('gen_rec_meter_end').value = Math.round((start + hours) * 10) / 10;
+  let start;try{start=precisionInput('gen_rec_meter_start',{scale:3,blank:'null'});}catch{return;}
+  let hours;try{hours=precisionInput('gen_rec_hours',{scale:3,blank:'null'});}catch{return;}
+  if (start!=null && hours!=null)
+    document.getElementById('gen_rec_meter_end').value = DecimalCore.toNumberExact(DecimalCore.add(start,hours));
 }
 
 function calcGenHoursFromMeter() {
-  const start = parseFloat(document.getElementById('gen_rec_meter_start').value);
-  const end   = parseFloat(document.getElementById('gen_rec_meter_end').value);
-  if (!isNaN(start) && !isNaN(end) && end > start) {
-    document.getElementById('gen_rec_hours').value = Math.round((end - start) * 10) / 10;
+  let start;try{start=precisionInput('gen_rec_meter_start',{scale:3,blank:'null'});}catch{return;}
+  let end;try{end=precisionInput('gen_rec_meter_end',{scale:3,blank:'null'});}catch{return;}
+  if (start!=null && end!=null && end >= start) {
+    document.getElementById('gen_rec_hours').value = DecimalCore.toNumberExact(DecimalCore.sub(end,start));
     calcGenFuelAuto();
   }
 }

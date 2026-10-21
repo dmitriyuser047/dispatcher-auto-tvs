@@ -44,8 +44,9 @@ function fixture(options = {}) {
     async loadContracts() { return [{ name: 'Тестовый договор' }]; },
   };
   const context = vm.createContext({ console, window: { reestrAPI: api, electronAPI: { async openReestrWindow(value) { opened.push(value); } } }, document: { getElementById: get, createElement: element, addEventListener() {}, documentElement: { removeAttribute() {} } }, localStorage: { getItem() { return null; } }, setTimeout, clearTimeout, testDb: db });
+  vm.runInContext(fs.readFileSync(path.join(root, 'assets/core/decimal-core.js'),'utf8'),context);
   vm.runInContext(fs.readFileSync(path.join(root, 'assets/core/fuel-engine.js'), 'utf8'), context, { filename: 'assets/core/fuel-engine.js' });
-  for (const file of ['01-core.js', '19-reestr.js', '20-to-schedule.js']) vm.runInContext(fs.readFileSync(path.join(root, 'assets', 'js', file), 'utf8'), context, { filename: file });
+  for (const file of ['55-precision-input.js', '01-core.js', '19-reestr.js', '20-to-schedule.js']) vm.runInContext(fs.readFileSync(path.join(root, 'assets', 'js', file), 'utf8'), context, { filename: file });
   context.saveData = async value => { saved.push(plain(value)); return options.saveResult !== false; };
   vm.runInContext('data = testDb;', context);
   const files = [

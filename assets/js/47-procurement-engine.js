@@ -1,12 +1,18 @@
 /* Procurement forecasts are estimates. Orders never mutate inventory or fuel journals. */
-(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('../core/accounting-boundary.js'));else root.ProcurementEngine=factory(root.AccountingBoundary);})(typeof globalThis!=='undefined'?globalThis:this,function(accounting){
+(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('../core/accounting-boundary.js'),require('../core/decimal-core.js'));else root.ProcurementEngine=factory(root.AccountingBoundary,root.DecimalCore);})(typeof globalThis!=='undefined'?globalThis:this,function(accounting,decimal){
  'use strict';
  const DAY=86400000,STATUSES=['draft','ordered','partial','received','cancelled'];
  const rows=(db,name)=>Array.isArray(db?.[name])?db[name]:[];
  const live=r=>r&&typeof r==='object'&&!r.archived&&!r.deleted&&!r.cancelled;
  function number(value){return value!==null&&value!==''&&typeof value!=='boolean'&&Number.isFinite(Number(value))?Number(value):null;}
  const nonnegative=value=>{const n=number(value);return n!==null&&n>=0?n:0;};
- const round=n=>Math.round((n+Number.EPSILON)*100)/100;
+ function exact(){if(!decimal)throw Error('Не загружено ядро десятичных расчётов');return decimal;}
+ const result=value=>exact().toNumberExact(value);
+ const round=(n,scale=3)=>result(exact().quantize(n,{scale,rounding:'half-away-from-zero'}));
+ const add=(a,b)=>result(exact().add(a,b)),sub=(a,b)=>result(exact().sub(a,b));
+ const multiply=(a,b)=>result(exact().mul(a,b));
+ const divide=(a,b)=>result(exact().div(a,b,{scale:12,rounding:'half-away-from-zero'}));
+ function ceilQuantity(value,whole){const scale=whole?0:3,rounded=round(value,scale);return exact().compare(rounded,value)<0?add(rounded,whole?1:0.001):rounded;}
  function validDate(value){if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value)||Number(value.slice(0,4))<1900||Number(value.slice(0,4))>9990)return false;const d=new Date(value+'T12:00:00Z');return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===value;}
  function shift(date,days){const d=new Date(date+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
  function today(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
@@ -19,36 +25,36 @@
   const boundary=kind==='tank'?tankAccounting(item(db,kind,id)):{mode:'legacy'};
   if(boundary.mode==='explicit'&&date<boundary.from)return null;
   const at=r=>live(r)&&validDate(r.date)&&r.date<=date&&(boundary.mode!=='explicit'||r.date>=boundary.from);
-  if(kind==='part')rows(db,'partMovements').filter(r=>at(r)&&r.partId===id).forEach(r=>{value+=(['receipt','return'].includes(r.kind)?1:-1)*nonnegative(r.qty);});
+  if(kind==='part')rows(db,'partMovements').filter(r=>at(r)&&r.partId===id).forEach(r=>{value=add(value,(['receipt','return'].includes(r.kind)?1:-1)*nonnegative(r.qty));});
   else{
    value=boundary.mode==='explicit'?boundary.opening:number(item(db,kind,id)?.balanceInit)||0;
    // Legacy tank transfers are two linked income rows with signed amounts.
    // Clamp invalid values, but preserve the negative outgoing half.
-   rows(db,'tankIncomes').filter(r=>at(r)&&r.tankId===id).forEach(r=>{value+=number(r.liters??r.litres??r.amount??r.qty)||0;});
-   rows(db,'genRecords').filter(r=>at(r)&&recordTank(db,r)===id).forEach(r=>{value-=nonnegative(r.fuelIssued);});
-   rows(db,'fuelMovements').filter(at).forEach(r=>{const qty=nonnegative(r.qty);if(r.toTankId===id)value+=qty;if(r.fromTankId===id)value-=qty;});
+   rows(db,'tankIncomes').filter(r=>at(r)&&r.tankId===id).forEach(r=>{value=add(value,number(r.liters??r.litres??r.amount??r.qty)||0);});
+   rows(db,'genRecords').filter(r=>at(r)&&recordTank(db,r)===id).forEach(r=>{value=sub(value,nonnegative(r.fuelIssued));});
+   rows(db,'fuelMovements').filter(at).forEach(r=>{const qty=nonnegative(r.qty);if(r.toTankId===id)value=add(value,qty);if(r.fromTankId===id)value=sub(value,qty);});
   }
-  return boundary.mode==='explicit'?value:round(value);
+  return value;
  }
  function usage(db,kind,id,date){
   const boundary=kind==='tank'?tankAccounting(item(db,kind,id)):{mode:'legacy'};
   if(boundary.mode==='explicit'&&date<boundary.from)return {total:null,daily:null,count:0,from:null,to:date,observedDays:0,status:'outside-accounting'};
   const from=boundary.mode==='explicit'&&boundary.from>shift(date,-29)?boundary.from:shift(date,-29),within=r=>live(r)&&validDate(r.date)&&r.date>=from&&r.date<=date;
   let total=0,count=0;
-  const add=qty=>{const n=nonnegative(qty);if(n>0){total+=n;count++;}};
-  if(kind==='part')rows(db,'partMovements').filter(r=>within(r)&&r.partId===id&&['issue','writeoff'].includes(r.kind)).forEach(r=>add(r.qty));
+  const include=qty=>{const n=nonnegative(qty);if(n>0){total=add(total,n);count++;}};
+  if(kind==='part')rows(db,'partMovements').filter(r=>within(r)&&r.partId===id&&['issue','writeoff'].includes(r.kind)).forEach(r=>include(r.qty));
   else{
-   rows(db,'genRecords').filter(r=>within(r)&&recordTank(db,r)===id).forEach(r=>add(r.fuelIssued));
-   rows(db,'fuelMovements').filter(r=>within(r)&&r.fromTankId===id&&r.kind==='issue'&&!r.reversedBy).forEach(r=>add(r.qty));
+   rows(db,'genRecords').filter(r=>within(r)&&recordTank(db,r)===id).forEach(r=>include(r.fuelIssued));
+   rows(db,'fuelMovements').filter(r=>within(r)&&r.fromTankId===id&&r.kind==='issue'&&!r.reversedBy).forEach(r=>include(r.qty));
   }
   const days=boundary.mode==='explicit'?Math.min(30,Math.floor((new Date(date+'T12:00:00Z')-new Date(from+'T12:00:00Z'))/DAY)+1):30;
-  return {total:round(total),daily:total/days,count,from,to:date,...(boundary.mode==='explicit'?{observedDays:days}:{})};
+  return {total,daily:divide(total,days),count,from,to:date,...(boundary.mode==='explicit'?{observedDays:days}:{})};
  }
  function orderState(order){
   if(!order||order.status==='cancelled'||order.archived||order.deleted)return {undelivered:0,pendingPosting:0,coverage:0,draft:0};
   const qty=nonnegative(order.quantity),received=Math.min(qty,nonnegative(order.receivedQty)),posted=Math.min(received,nonnegative(order.stockPostedQty));
-  const undelivered=Math.max(0,qty-received),pendingPosting=Math.max(0,received-posted);
-  return {undelivered:round(undelivered),pendingPosting:round(pendingPosting),coverage:round(undelivered+pendingPosting),draft:order.status==='draft'?round(undelivered):0};
+  const undelivered=Math.max(0,sub(qty,received)),pendingPosting=Math.max(0,sub(received,posted));
+  return {undelivered,pendingPosting,coverage:add(undelivered,pendingPosting),draft:order.status==='draft'?undelivered:0};
  }
  function scheduled(db,kind,id,date,horizon){
   const demand=new Map();let knownJobs=0,unknownJobs=0;
@@ -63,18 +69,18 @@
     // Only generators with an explicit tank and a flat l/h norm can be quantified.
     if(!generator||generator.tankId!==id)continue;
     const hours=number(job.plannedHours),rate=number(generator.norm);
-    if(hours!==null&&hours>=0&&rate!==null&&rate>0)qty=hours*rate;
+    if(hours!==null&&hours>=0&&rate!==null&&rate>0)qty=multiply(hours,rate);
     else unknownJobs++;
    }else{
     const requirements=Array.isArray(job.partRequirements)?job.partRequirements.filter(r=>r.partId===id):[];
     if(!requirements.length)continue;
-    if(requirements.every(r=>number(r.qty)!==null&&number(r.qty)>=0))qty=requirements.reduce((sum,r)=>sum+Number(r.qty),0);else unknownJobs++;
+    if(requirements.every(r=>number(r.qty)!==null&&number(r.qty)>=0))qty=requirements.reduce((sum,r)=>add(sum,Number(r.qty)),0);else unknownJobs++;
    }
    if(qty===null||!Number.isFinite(qty))continue;knownJobs++;
    // Spread a multi-day assignment over its whole interval, not only its remaining days.
-   const span=Math.max(1,Math.round((new Date(end+'T12:00Z')-new Date(start+'T12:00Z'))/DAY)+1),perDay=qty/span;
+   const span=Math.max(1,Math.round((new Date(end+'T12:00Z')-new Date(start+'T12:00Z'))/DAY)+1),perDay=divide(qty,span);
    const first=start<date?date:start,last=end>shift(date,horizon)?shift(date,horizon):end;
-   for(let d=first;d<=last;d=shift(d,1))demand.set(d,(demand.get(d)||0)+perDay);
+   for(let d=first;d<=last;d=shift(d,1))demand.set(d,add(demand.get(d)||0,perDay));
   }
   return {demand,knownJobs,unknownJobs};
  }
@@ -91,24 +97,24 @@
    const daily=manual?nonnegative(rule.expectedDaily):recent.daily;
    const stock=balance(db,kind,obj.id,date),orders=rows(db,'procurementOrders').filter(r=>r.kind===kind&&r.itemId===obj.id);
    const open=orders.map(order=>({order,...orderState(order)})).filter(r=>r.coverage>0);
-   const undelivered=round(open.reduce((s,r)=>s+r.undelivered,0)),pendingPosting=round(open.reduce((s,r)=>s+r.pendingPosting,0));
-   const drafts=round(open.reduce((s,r)=>s+r.draft,0)),coverage=round(undelivered+pendingPosting);
+   const undelivered=open.reduce((s,r)=>add(s,r.undelivered),0),pendingPosting=open.reduce((s,r)=>add(s,r.pendingPosting),0);
+   const drafts=open.reduce((s,r)=>add(s,r.draft),0),coverage=add(undelivered,pendingPosting);
    const horizon=leadDays+coverDays,scheduledJobs=scheduled(db,kind,obj.id,date,Math.max(365,horizon));
    // Planned demand replaces the routine estimate on its day if larger. Adding both
    // would count the same normal assignment twice.
    const demandAt=d=>Math.max(daily,scheduledJobs.demand.get(d)||0);
-   let demand=0;for(let i=0;i<horizon;i++)demand+=demandAt(shift(date,i));
-   const rawNeed=Math.max(0,demand+reserve-stock-coverage),wholeUnits=kind==='part'&&/^(шт\.?|компл\.?|ед\.?)$/i.test(String(obj.unit||'').trim());
-   const need=Math.max(0,wholeUnits?Math.ceil(rawNeed-1e-10):Math.ceil((rawNeed-1e-10)*100)/100);
+   let demand=0;for(let i=0;i<horizon;i++)demand=add(demand,demandAt(shift(date,i)));
+   const rawNeed=Math.max(0,sub(sub(add(demand,reserve),stock),coverage)),wholeUnits=kind==='part'&&/^(шт\.?|компл\.?|ед\.?)$/i.test(String(obj.unit||'').trim());
+   const need=Math.max(0,ceilQuantity(rawNeed,wholeUnits));
    const deliveryDates=open.filter(r=>r.order.status!=='draft'&&r.undelivered>0&&validDate(r.order.deliveryDate)&&r.order.deliveryDate>=date).map(r=>r.order.deliveryDate).sort(),nextDelivery=deliveryDates[0]||null;
    let physical=stock,crossing=null,stockoutDate=null,gapDelivery=null,shortageBeforeDelivery=false;
    for(let i=0;i<Math.max(366,horizon+1);i++){
     const day=shift(date,i);
     // Received-but-unposted quantities and draft purchases never become actual stock.
-    const arrivals=open.filter(r=>r.order.status!=='draft'&&r.undelivered>0&&validDate(r.order.deliveryDate)&&r.order.deliveryDate===day).reduce((s,r)=>s+r.undelivered,0);
-    physical+=arrivals;
+    const arrivals=open.filter(r=>r.order.status!=='draft'&&r.undelivered>0&&validDate(r.order.deliveryDate)&&r.order.deliveryDate===day).reduce((s,r)=>add(s,r.undelivered),0);
+    physical=add(physical,arrivals);
     if(physical<=reserve&&crossing===null)crossing=day;
-    physical-=demandAt(day);
+    physical=sub(physical,demandAt(day));
     if(physical<reserve&&crossing===null)crossing=day;
     if(physical<0&&stockoutDate===null)stockoutDate=day;
     if(physical<0&&gapDelivery===null)gapDelivery=deliveryDates.find(d=>d>day)||null;

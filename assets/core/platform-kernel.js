@@ -2,9 +2,9 @@
 (function (root, factory) {
   'use strict';
   if (typeof module === 'object' && module.exports)
-    module.exports = factory(require('./platform-schema.js'), require('./platform-integrity.js'), require('./platform-contracts.js'));
-  else root.PlatformKernel = factory(root.PlatformSchema, root.PlatformIntegrity, root.PlatformContracts);
-})(typeof globalThis === 'object' ? globalThis : this, function (schema, integrity, contracts) {
+    module.exports = factory(require('./platform-schema.js'), require('./platform-integrity.js'), require('./platform-contracts.js'),require('./precision-policy.js'));
+  else root.PlatformKernel = factory(root.PlatformSchema, root.PlatformIntegrity, root.PlatformContracts,root.PrecisionPolicy);
+})(typeof globalThis === 'object' ? globalThis : this, function (schema, integrity, contracts,precision) {
   'use strict';
   const tag = value => Object.prototype.toString.call(value);
   const plain = value => value != null && tag(value) === '[object Object]';
@@ -150,7 +150,11 @@
     contracts.validateOperation({ id:ctx.id });
     contracts.validateSections(sections,names);
     contracts.validateRevisions(base,names);
-    try { integrity.validateChanges(prior, target, ctx); }
+    try {
+      if(!precision||precision.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила точности чисел');
+      precision.validateChanges(prior,target,ctx);
+      integrity.validateChanges(prior, target, ctx);
+    }
     catch (error) {
       if (error?.name === 'PlatformKernelError') throw error;
       fail(error?.code || 'INTEGRITY_VIOLATION', error?.message || 'Изменения нарушают связи данных', { issues:clone(error?.issues || error?.details?.issues || []) });

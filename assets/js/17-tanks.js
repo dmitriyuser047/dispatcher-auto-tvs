@@ -33,21 +33,21 @@ function computeTankBalance(tankId) {
     const today=dispatcherLocalDate(),active=row=>row.date<=today&&fuelAccountingIncludes('tanks',t,row.date);
     const init=fuelAccountingOpening('tanks',t,today);
     const flows=DomainSources.projectTankFlows(data,[tankId],{accounting:true,to:today});
-    const income=flows.filter(row=>row.sourceSection==='tankIncomes').reduce((sum,row)=>sum+row.amount,0);
-    const movements=flows.filter(row=>row.sourceSection!=='tankIncomes').reduce((sum,row)=>sum+row.amount,0);
-    const issued=(data.genRecords||[]).filter(row=>genRecordTankId(row)===tankId&&active(row)).reduce((sum,row)=>sum+(fqValue(row.fuelIssued)||0),0);
-    const balance=init===null?null:init+income+movements-issued,capacity=t.capacity||0;
+    const income=DecimalCore.toNumberExact(DecimalCore.sum(flows.filter(row=>row.sourceSection==='tankIncomes').map(row=>row.amount)));
+    const movements=DecimalCore.toNumberExact(DecimalCore.sum(flows.filter(row=>row.sourceSection!=='tankIncomes').map(row=>row.amount)));
+    const issued=DecimalCore.toNumberExact(DecimalCore.sum((data.genRecords||[]).filter(row=>genRecordTankId(row)===tankId&&active(row)).map(row=>row.fuelIssued??0)));
+    const balance=init===null?null:DecimalCore.toNumberExact(DecimalCore.sub(DecimalCore.sum([init,income,movements]),issued)),capacity=t.capacity||0;
     return {init,income,movements,issued,balance,capacity,fillPct:capacity>0&&balance!==null?Math.max(0,Math.min(100,Math.round(balance/capacity*100))):0,accountingFrom:accounting.from};
   }
-  const income = (data.tankIncomes || []).filter(r => r.tankId === tankId).reduce((s,r) => s + (r.amount || 0), 0);
-  const issued = (data.genRecords || []).filter(r => genRecordTankId(r) === tankId).reduce((s,r) => s + (r.fuelIssued || 0), 0);
-  const init = t.balanceInit || 0;
-  const movements = (data.fuelMovements || []).filter(r => !r.deleted && !r.cancelled).reduce((sum,r) => {
+  const income = DecimalCore.toNumberExact(DecimalCore.sum((data.tankIncomes || []).filter(r => r.tankId === tankId).map(r=>r.amount??0)));
+  const issued = DecimalCore.toNumberExact(DecimalCore.sum((data.genRecords || []).filter(r => genRecordTankId(r) === tankId).map(r=>r.fuelIssued??0)));
+  const init = t.balanceInit ?? 0;
+  const movements = DecimalCore.toNumberExact((data.fuelMovements || []).filter(r => !r.deleted && !r.cancelled && (r.toTankId===tankId||r.fromTankId===tankId)).reduce((sum,r) => {
     const qty = Number(r.qty);
-    if (!Number.isFinite(qty) || qty < 0) return sum;
-    return sum + (r.toTankId === tankId ? qty : 0) - (r.fromTankId === tankId ? qty : 0);
-  }, 0);
-  const balance = +(init + income - issued + movements).toFixed(2);
+    if (!Number.isFinite(qty) || qty < 0) throw Error('Некорректные литры в движении топлива '+r.id);
+    return DecimalCore.sub(DecimalCore.add(sum,r.toTankId===tankId?qty:0),r.fromTankId===tankId?qty:0);
+  }, '0'));
+  const balance = DecimalCore.toNumberExact(DecimalCore.sub(DecimalCore.sum([init,income,movements]),issued));
   const capacity = t.capacity || 0;
   const fillPct = capacity > 0 ? Math.max(0, Math.min(100, Math.round(balance / capacity * 100))) : 0;
   return { init, income, issued, movements, balance, capacity, fillPct };
@@ -129,9 +129,9 @@ function renderTankDetail(t) {
   const balColor = reserveState.color;
   const incomes = (data.tankIncomes || []).filter(r => r.tankId === t.id).sort((a, b2) => cmpDateDesc(a.date, b2.date));
   const boundGens = (data.generators || []).filter(g => g.tankId === t.id);
-  const fmtL = x => x===null?'—':(x||0).toLocaleString('ru',{maximumFractionDigits:3});
+  const fmtL = x => precisionFormat(x);
 
-  const fmtR = x => (x||0).toLocaleString('ru',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmtR = x => precisionFormat(x,{minimumScale:2});
   const tankName = id => { const q = tanksAll().find(x => x.id === id); return q ? (q.object || q.name) : '—'; };
   let incRows = incomes.length ? incomes.map(r => {
     const isMove = r.kind === 'in' || r.kind === 'out';
@@ -262,15 +262,12 @@ function openEditTank(id) {
 async function saveTank() {
   const name = document.getElementById('tk_name').value.trim();
   if (!name) { showFieldError('Укажите наименование ёмкости', 'tk_name'); return; }
-  if (!validNonnegativeFields(['tk_capacity', 'tk_balance', 'tk_reserve'])) return;
+  const numeric=precisionRead({capacity:['tk_capacity',3],balanceInit:['tk_balance',3,'zero'],reserveLevel:['tk_reserve',3]},editingTankId==null?null:tanksAll().find(t=>t.id===editingTankId));if(!numeric)return;
   if (!data.tanks) data.tanks = [];
   const obj = {
-    name,
+    name, ...numeric,
     serial:      document.getElementById('tk_serial').value.trim(),
     fuel:        document.getElementById('tk_fuel').value,
-    capacity:    parseFloat(document.getElementById('tk_capacity').value) || null,
-    balanceInit: parseFloat(document.getElementById('tk_balance').value)  || 0,
-    reserveLevel: document.getElementById('tk_reserve').value.trim() === '' ? null : Math.max(0, parseFloat(document.getElementById('tk_reserve').value) || 0),
     location:    document.getElementById('tk_location').value.trim(),
     object:      document.getElementById('tk_object').value.trim(),
     owner:       document.getElementById('tk_owner').value.trim(),
@@ -349,7 +346,8 @@ function openEditTankIncome(id) {
 async function saveTankIncome() {
   if (tanksAll().find(t => t.id === selectedTankId)?.archived) { showToast('Восстановите ёмкость для изменения операций'); return; }
   const date = parseDate(document.getElementById('ti_date').value.trim());
-  const amount = parseFloat(document.getElementById('ti_amount').value);
+  const numeric=precisionRead({amount:['ti_amount',3,'error'],sum:['ti_sum',2,'zero']},editingTankIncomeId==null?null:(data.tankIncomes||[]).find(r=>r.id===editingTankIncomeId));if(!numeric)return;
+  const {amount,sum}=numeric;
   if (!date) { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'ti_date'); return; }
   if (!amount || amount <= 0) { showFieldError('Укажите количество (л)', 'ti_amount'); return; }
   if (!data.tankIncomes) data.tankIncomes = [];
@@ -357,7 +355,7 @@ async function saveTankIncome() {
     tankId: selectedTankId, date, amount,
     source: document.getElementById('ti_source').value.trim(),
     note:   document.getElementById('ti_note').value.trim(),
-    sum:    parseFloat(document.getElementById('ti_sum').value) || 0,
+    sum,
   };
   if (editingTankIncomeId) {
     Object.assign(data.tankIncomes.find(x => x.id === editingTankIncomeId), obj);
@@ -427,8 +425,8 @@ function renderTransferHint() {
 
 async function saveTankTransfer() {
   const date = parseDate(document.getElementById('tt_date').value.trim());
-  const amount = parseFloat(document.getElementById('tt_amount').value);
-  const sum = parseFloat(document.getElementById('tt_sum').value) || 0;
+  const numeric=precisionRead({amount:['tt_amount',3,'error'],sum:['tt_sum',2,'zero']});if(!numeric)return;
+  const {amount,sum}=numeric;
   const note = document.getElementById('tt_note').value.trim();
   const dir = document.getElementById('tt_dir').value;
   const otherId = document.getElementById('tt_counter').value;
@@ -441,7 +439,6 @@ async function saveTankTransfer() {
   const toT = tanksAll().find(t => t.id === toId);
   if (!fromT || !toT || fromT.archived || toT.archived) { showToast('Для перемещения нужны две действующие ёмкости'); return; }
   if ((fromT.fuel || 'diesel') !== (toT.fuel || 'diesel')) { showToast('Перемещение между ёмкостями разных видов топлива запрещено'); return; }
-  if (!validNonnegativeFields(['tt_sum'])) return;
   const bal = typeof wfTankBalanceAt === 'function' ? wfTankBalanceAt(fromId, date) : computeTankBalance(fromId).balance;
   if (amount > bal && !confirm(`На «${fromT.object || fromT.name}» остаток ${bal.toLocaleString('ru')} л, а перемещается ${amount.toLocaleString('ru')} л. Остаток уйдёт в минус. Продолжить?`)) return;
   addTankTransfer({ fromId, toId, date, amount, sum, note });

@@ -41,7 +41,7 @@ function gsmManualPlan(db, draft) {
     const fail = text => { throw Error('Строка ' + (index + 1) + ': ' + text); };
     if (!gsmValidDate(row.date) || !row.date.startsWith(draft.month + '-')) fail('укажите дату выбранного месяца');
     if ((db.fuelPeriods || []).some(p => p.closed && p.month === draft.month)) fail('месяц закрыт');
-    const qty = Number(row.qty), sum = row.sum === '' ? null : Number(row.sum);
+    let qty,sum;try{qty=precisionParse(row.qty,{scale:3,blank:'error'});sum=precisionParse(row.sum,{scale:2,blank:'null'});}catch(error){fail(error.code==='PRECISION'?'литры — до трёх знаков, сумма — до копеек':'введите полные неотрицательные числа');}
     if (!Number.isFinite(qty) || qty <= 0 || Math.abs(qty - fpQtyRound(qty)) > 0.000001) fail('укажите положительные литры, до трёх знаков после запятой');
     if (sum != null && (!Number.isFinite(sum) || sum < 0 || Math.abs(sum - fpRound(sum)) > 0.000001)) fail('укажите неотрицательную сумму, до копеек');
     if (!FP_GRADES.includes(row.grade)) fail('выберите марку топлива');
@@ -49,7 +49,7 @@ function gsmManualPlan(db, draft) {
     if (problem) fail(problem);
     const owner = gsmCardAt(db, row.cardNo, row.date);
     if (row.cardNo && (!owner.org || gsmOrgKey(owner.org) !== gsmOrgKey(draft.org))) fail('карта не принадлежит выбранной организации на эту дату');
-    const key = duplicateKey(row), existing = live.filter(p => duplicateKey(p) === key);
+    const key = duplicateKey({...row,qty}), existing = live.filter(p => duplicateKey(p) === key);
     const entry = { ...row, qty: fpQtyRound(qty), sum, org: draft.org.trim(), provider: owner.provider, cardVehicleId: owner.vehicleId,
       duplicate: existing.length > 0 || keys.has(key) };
     keys.add(key); entries.push(entry);
@@ -96,7 +96,7 @@ function gsmManualApply(db, plan, confirmedDuplicates) {
       const id = 'fp_manual_' + entry.id;
       if (next.fuelPurchases.some(p => p.id === id)) throw Error('Эта заправка уже сохранена');
       next.fuelPurchases.push({ id, date: entry.date, time: '', vehicleId: entry.vehicleId, recordId: rec.id, grade: entry.grade, product: entry.grade,
-        qty: entry.qty, sum: entry.sum, price: entry.sum != null ? fpRound(entry.sum / entry.qty) : null, cardNo: entry.cardNo || '',
+        qty: entry.qty, sum: entry.sum, price: entry.sum != null ? precisionRound(DecimalCore.div(entry.sum,entry.qty,{scale:12,rounding:'half-away-from-zero'}),6) : null, cardNo: entry.cardNo || '',
         sourceOrg: entry.org, sourceProvider: entry.provider || '', cardVehicleId: entry.cardVehicleId || '', comment: entry.comment || '', manual: true, manualStatement: true });
       if (!linkOnly) {
         rec.fuelIssued = fpQtyRound((+rec.fuelIssued || 0) + entry.qty);
@@ -167,7 +167,7 @@ function gsmManualUpdate(id, field, value) {
 }
 function gsmManualTotals() {
   const total = document.getElementById('gsmManualTotal');
-  if (total && gsmManual) total.textContent = gsmManual.rows.filter(r => Number(r.qty) > 0).length + ' заправок · ' + fpNum(gsmManual.rows.reduce((s, r) => s + (Number(r.qty) || 0), 0)) + ' л';
+  if(total&&gsmManual){const quantities=[];let invalid=false;for(const row of gsmManual.rows){try{const qty=precisionParse(row.qty,{scale:3,blank:'null'});if(qty!=null&&qty>0)quantities.push(qty);}catch{invalid=true;}}total.textContent=quantities.length+' заправок · '+fpNum(DecimalCore.toNumberExact(DecimalCore.sum(quantities)))+' л'+(invalid?' · проверьте ввод литров':'');}
   document.querySelectorAll('.gsm-manual-context select,.gsm-manual-context input').forEach(el => { el.disabled = gsmManualDirty() || gsmManualSaving; });
 }
 function gsmManualAdd() {
@@ -230,11 +230,12 @@ function gsmStatementLinked(db, p) {
 function gsmStatementPlan(db, id, changes) {
   const original = (db.fuelPurchases || []).find(p => p.id === id && !p.deleted);
   if (!original) throw Error('Строка выписки больше не существует');
-  const date = changes.date, qty = Number(changes.qty), grade = changes.grade, vehicleId = changes.vehicleId;
-  const sum = changes.sum === '' || changes.sum == null ? null : Number(changes.sum);
+  const date = changes.date, grade = changes.grade, vehicleId = changes.vehicleId;
+  const qty=changes.qty===original.qty?original.qty:precisionParse(changes.qty,{scale:3,blank:'error'});
+  const sum=changes.sum===original.sum?original.sum:precisionParse(changes.sum,{scale:2,blank:'null'});
   if (!gsmValidDate(date)) throw Error('Укажите правильную дату');
   if ((db.fuelPeriods || []).some(p => p.closed && [String(original.date || '').slice(0, 7), date.slice(0, 7)].includes(p.month))) throw Error('Месяц закрыт для изменения');
-  if (!Number.isFinite(qty) || qty <= 0 || Math.abs(qty - fpQtyRound(qty)) > 0.000001) throw Error('Укажите положительные литры, до трёх знаков после запятой');
+  if (!Number.isFinite(qty) || qty <= 0) throw Error('Укажите положительные литры, до трёх знаков после запятой');
   if (sum != null && (!Number.isFinite(sum) || sum < 0)) throw Error('Сумма должна быть неотрицательной');
   if (!FP_GRADES.includes(grade)) throw Error('Выберите вид топлива');
   const cardNo = changes.cardNo ?? original.cardNo;
@@ -273,9 +274,9 @@ function gsmStatementPlan(db, id, changes) {
       else if (Math.abs(manualQty) < 0.000001) choices.push({ value: 'add:' + r.id, label: 'Добавить ' + fpNum(qty) + ' л в журнал этой даты' });
     });
   }
-  Object.assign(p, { date, qty: fpQtyRound(qty), sum: sum == null ? null : fpRound(sum), grade, vehicleId, cardNo, ...sourceChanges,
+  Object.assign(p, { date, qty, sum, grade, vehicleId, cardNo, ...sourceChanges,
     sourceProvider: sameDate && original.sourceProvider || owner.provider || '', cardVehicleId: holderId || '',
-    price: sum == null ? null : fpRound(sum / qty), statementReviewed: true });
+    price: Object.hasOwn(changes,'price')?(changes.price===original.price?original.price:precisionParse(changes.price,{scale:6,blank:'null'})):qty===original.qty&&sum===original.sum?original.price:sum==null?null:precisionRound(DecimalCore.div(sum,qty,{scale:12,rounding:'half-away-from-zero'}),6), statementReviewed: true });
   return { id, original: { ...original }, next, choices, mode: choices.length === 2 ? choices[1].value : choices[0].value, fingerprint: gsmManualFingerprint(db) };
 }
 function gsmStatementApply(db, plan) {

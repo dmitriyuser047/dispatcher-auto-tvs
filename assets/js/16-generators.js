@@ -320,10 +320,12 @@ async function saveToRecord() {
   const type    = document.getElementById('to_type').value.trim();
   if (!dateIso) { showFieldError('Укажите дату проведения ТО', 'to_date'); return; }
   if (!type)    { showFieldError('Укажите вид ТО', 'to_type'); return; }
-  const nextHours   = parseFloat(document.getElementById('to_next_hours').value) || null;
-  const hours       = parseFloat(document.getElementById('to_hours').value) ?? null;
+  const previous=editingToId?(data.toRecords || []).find(row=>row.id===editingToId):undefined;
+  const numbers=precisionRead({hours:['to_hours',3,'null'],nextHours:['to_next_hours',3,'null'],cost:['to_cost',2,'null']},previous);
+  if(!numbers)return;
+  const {nextHours,hours}=numbers;
   const nextDate    = parseDate(document.getElementById('to_next_date').value.trim()) || null;
-  const nextHoursAbs = hours != null && nextHours != null ? +(hours + nextHours).toFixed(1) : null;
+  const nextHoursAbs = hours != null && nextHours != null ? DecimalCore.toNumberExact(DecimalCore.add(hours,nextHours)) : null;
   const obj = {
     generatorId:  document.getElementById('toModal').dataset.gid,
     date:         dateIso,
@@ -332,7 +334,7 @@ async function saveToRecord() {
     nextHours,
     nextHoursAbs,
     nextDate,
-    cost:         parseFloat(document.getElementById('to_cost').value) || null,
+    cost:         numbers.cost,
     performer:    document.getElementById('to_performer').value.trim(),
     note:         document.getElementById('to_note').value.trim(),
   };
@@ -364,13 +366,12 @@ function computeGenFuelBalances(gid) {
   const gen  = (data.generators || []).find(g => g.id === gid);
   const recs = genRecsFor(gid).slice().sort((a,b) => cmpDateAsc(a.date, b.date));
   let balance = fuelAccountingOpening('generators',gen);
-  const explicit=fuelAccountingFor('generators',gen).mode==='explicit';
   const balMap = {};
   recs.forEach(r => {
     if(!fuelAccountingIncludes('generators',gen,r.date))return;
     const spent = genActualSpent(gen, r);
-    balance += (fqValue(r.fuelIssued)||0) - spent;
-    balMap[r.id] = explicit?balance:+balance.toFixed(2);
+    balance = DecimalCore.toNumberExact(DecimalCore.sub(DecimalCore.add(balance,fqValue(r.fuelIssued)||0),spent));
+    balMap[r.id] = balance;
   });
   _genBalCache[cacheKey] = balMap;
   return balMap;
@@ -432,18 +433,17 @@ function computeTankBalanceAt(tankId, boundary, inclusive) {
   const initial=fuelAccountingOpening('tanks',t,boundary);
   if(initial===null)return null;
   const okDate = d => fuelAccountingIncludes('tanks',t,d)&&(!boundary || (inclusive ? d <= boundary : d < boundary));
-  const flows = DomainSources.projectTankFlows(data,[tankId],{accounting:true}).filter(row=>okDate(row.date)).reduce((sum,row)=>sum+row.amount,0);
-  const issued = (data.genRecords || []).filter(r => genRecordTankId(r) === tankId && okDate(r.date)).reduce((s, r) => s + (Number(r.fuelIssued) || 0), 0);
-  const balance=initial+flows-issued;
-  return fuelAccountingFor('tanks',t).mode==='explicit'?balance:+balance.toFixed(2);
+  const flows = DecimalCore.sum(DomainSources.projectTankFlows(data,[tankId],{accounting:true}).filter(row=>okDate(row.date)).map(row=>row.amount));
+  const issued = DecimalCore.sum((data.genRecords || []).filter(r => genRecordTankId(r) === tankId && okDate(r.date)).map(r=>fqValue(r.fuelIssued)||0));
+  return DecimalCore.toNumberExact(DecimalCore.sub(DecimalCore.add(initial,flows),issued));
 }
 
 function genRecordTankId(r) {
-  return Object.prototype.hasOwnProperty.call(r, 'tankId') ? r.tankId : ((data.generators || []).find(g => g.id === r.generatorId) || {}).tankId || null;
+  return Object.prototype.hasOwnProperty.call(r, 'tankId') ? r.tankId : ((data.generators || []).find(g => g.id === r.generatorId) || {}).tankId ?? null;
 }
 function genPreserveTankHistory(g) {
   (data.genRecords || []).filter(r => r.generatorId === g.id && !Object.prototype.hasOwnProperty.call(r, 'tankId'))
-    .forEach(r => { r.tankId = g.tankId || null; });
+    .forEach(r => { r.tankId = g.tankId ?? null; });
 }
 
 // Баланс генератора без привязанной ёмкости на дату (аналог computeTankBalanceAt)
@@ -475,32 +475,13 @@ function genNormKnown(g,r){return !!g&&!!r&&(fqValue(r.fuelUsed)!=null||fqValue(
 // По факту  — норма, пересчитанная под реальную нагрузку, × моточасы. Если в
 //             записи проставлен фактический расход вручную, берётся он.
 function genNormSpent(g, r) {
-  if (!g || !r) return 0;
-  if(fqValue(r.fuelUsed)!=null)return Number(r.fuelUsed);
-  const hours = +r.hours || 0;
-  if (!hours) return 0;
-  // Норма для фактического режима: расход при указанной нагрузке × моточасы.
-  // Кривая опирается на три точки — холостой ход, 50 % и 100 %. Без normIdle
-  // участок ниже 50 % считался экстраполяцией по прямой и при нагрузке 10-12 %
-  // давал почти нулевую «норму», отчего в акте выходил ложный перерасход.
-  if (r.load != null && r.load !== '' && g.power && g.norm100 != null) {
-    const rate = genFuelRate(g, +r.load);
-    if (rate != null) return +(Math.max(0, rate) * hours).toFixed(2);
-  }
-  // Нагрузка не указана — берём паспортную норму при номинальной мощности
-  const flat = (g.norm != null && g.norm !== '') ? +g.norm : (g.norm100 != null ? +g.norm100 : null);
-  if (flat == null) return 0;
-  return +(flat * hours).toFixed(2);
+  if(typeof FuelMovementPolicy==='undefined')throw Error('Не загружены общие правила расчёта ДЭС');
+  return FuelMovementPolicy.generatorNormSpent(g,r);
 }
 
 function genActualSpent(g, r) {
-  if (!r) return 0;
-  if (r.fuelActual != null && r.fuelActual !== '') return +r.fuelActual || 0;
-  if (r.fuelUsed  != null && r.fuelUsed  !== '') return +r.fuelUsed || 0;
-  const hours = +r.hours || 0;
-  if (!g || !hours || r.load == null) return 0;
-  const rate = genFuelRate(g, +r.load);
-  return rate == null ? 0 : +(Math.max(0, rate) * hours).toFixed(2);
+  if(typeof FuelMovementPolicy==='undefined')throw Error('Не загружены общие правила расчёта ДЭС');
+  return FuelMovementPolicy.generatorSpent(g,r);
 }
 
 function computeGenBalanceAt(gid, boundary, inclusive) {
@@ -512,8 +493,8 @@ function computeGenBalanceAt(gid, boundary, inclusive) {
   const recs = (data.genRecords || []).filter(r => r.generatorId === gid && okDate(r.date))
     .slice().sort((a,b) => cmpDateAsc(a.date, b.date));
   let bal = initial;
-  recs.forEach(r => { bal += (fqValue(r.fuelIssued)||0) - genActualSpent(g, r); });
-  return fuelAccountingFor('generators',g).mode==='explicit'?bal:+bal.toFixed(2);
+  recs.forEach(r => { bal = DecimalCore.toNumberExact(DecimalCore.sub(DecimalCore.add(bal,fqValue(r.fuelIssued)||0),genActualSpent(g,r))); });
+  return bal;
 }
 
 function exportGenWriteOffAct(dateFrom, dateTo, opts) {
@@ -531,13 +512,11 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
   const allLocs = genActLocations();
   const locsToRender = (opts.loc && opts.loc !== '__ALL__') ? [opts.loc] : allLocs;
   if (!locsToRender.length) { alert('Нет ДЭС для акта.'); return; }
-  let preciseFuel=false;
   try{
     const selected=(data.generators||[]).filter(g=>locsToRender.includes((g.location||'').trim()||'— Без местонахождения —'));
-    preciseFuel=selected.some(generator=>fuelAccountingFor('generators',generator).mode==='explicit');
     for(const generator of selected)fuelAccountingRequireActRange('generators',generator,dateFrom,dateTo);
     const selectedTankIds=new Set(selected.map(g=>g.tankId).filter(id=>id!=null&&id!==''));
-    for(const tank of tanksAll().filter(tank=>selectedTankIds.has(tank.id))){fuelAccountingRequireActRange('tanks',tank,dateFrom,dateTo);if(fuelAccountingFor('tanks',tank).mode==='explicit')preciseFuel=true;}
+    for(const tank of tanksAll().filter(tank=>selectedTankIds.has(tank.id)))fuelAccountingRequireActRange('tanks',tank,dateFrom,dateTo);
   }catch(error){alert(error.message);return false;}
 
   const P = { navy:'1B3A6B', navyMid:'2D5A8E', navyLight:'D6E4F7', white:'FFFFFF',
@@ -564,7 +543,9 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
   const merge = (r1,c1,r2,c2) => ws['!merges'].push({ s:{r:r1,c:c1}, e:{r:r2,c:c2} });
   const fillRow = (r, style) => { for (let c=0;c<=NC;c++) if (!ws[XLSX.utils.encode_cell({r,c})]) put(r,c,'',style); };
   const rowH = (r, h) => ws['!rows'][r] = { hpt:h };
-  const num = (x, d) => +(Number(x)||0).toFixed(d==null?(preciseFuel?3:2):d);
+  const num = (x, d) => DecimalCore.toNumberExact(d==null?DecimalCore.parse(x??0):DecimalCore.quantize(x??0,{scale:d,rounding:'half-away-from-zero'}));
+  const sum = values => DecimalCore.toNumberExact(DecimalCore.sum(values));
+  const add = (a,b) => DecimalCore.toNumberExact(DecimalCore.add(a,b));
 
   let rendered = false;
 
@@ -573,7 +554,7 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
       .sort((a,b) => (a.name||'').toLowerCase() < (b.name||'').toLowerCase() ? -1 : 1);
     if (!gens.length) return;
     rendered = true;
-    const linkedTanks = [...new Set(gens.map(g => g.tankId).filter(Boolean))];
+    const linkedTanks = [...new Set(gens.map(g => g.tankId).filter(id=>id!=null&&id!==''))];
     const ownerFromTank = (linkedTanks.map(id => (tanksAll().find(t=>t.id===id)||{}).owner).find(Boolean)) || '';
     const owner = opts.owner || ownerFromTank || '';
 
@@ -604,10 +585,10 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
     vh(12,'Остаток на конец мес., л');
     rowH(h1,16); rowH(h2,26); n += 2;
 
-    let tHours=0, tNorm=0, tAct=0, tOstNoTank=0, tBak=0, i=0;
+    let tHours=0, tNorm=0, tAct=0, tBak=0, i=0;
     gens.forEach(g => {
       const recs = genRecsFor(g.id).filter(inPeriod).filter(row=>fuelAccountingIncludes('generators',g,row.date)).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
-      const hours = recs.reduce((s,r)=>s+(r.hours||0),0);
+      const hours = sum(recs.map(r=>r.hours||0));
       const explicit=fuelAccountingFor('generators',g).mode==='explicit';
       const meterStart = recs.length ? (recs[0].meterStart!=null?recs[0].meterStart:explicit?'':(g.hoursInit!=null?g.hoursInit:'')) : (explicit?'':g.hoursInit!=null?g.hoursInit:'');
       const meterEnd = recs.length ? (recs[recs.length-1].meterEnd!=null?recs[recs.length-1].meterEnd:'') : '';
@@ -617,23 +598,22 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
       // Раньше здесь норма пересчитывалась под фактическую нагрузку: у ДЭС,
       // работающих на 10% мощности, «норма» падала ниже реального расхода,
       // и в акте везде получался перерасход, хотя на деле экономия.
-      const normSpent = recs.reduce((s,r)=> s + genNormSpent(g,r), 0);
-      const actSpent  = recs.reduce((s,r)=> s + genActualSpent(g,r), 0);
+      const normSpent = sum(recs.map(r=>genNormSpent(g,r)));
+      const actSpent  = sum(recs.map(r=>genActualSpent(g,r)));
       // Остаток в баке самого ДЭС: начальный + выдано − израсходовано.
       const bakKon = computeGenBalanceAt(g.id, dateTo, true);
-      tBak += bakKon;
+      tBak = add(tBak,bakKon);
       // Остаток по строке: то, что в ёмкости, плюс то, что уже залито в бак этой машины.
       // У ДЭС без привязанной ёмкости весь остаток и так лежит в баке.
-      const ostTank = g.tankId ? computeTankBalanceAt(g.tankId, dateTo, true) : 0;
-      const ostKon = ostTank + bakKon;
-      if (!g.tankId) tOstNoTank += bakKon; // ёмкости суммируются один раз ниже, по linkedTanks
+      const ostTank = g.tankId!=null&&g.tankId!=='' ? computeTankBalanceAt(g.tankId, dateTo, true) : 0;
+      const ostKon = add(ostTank,bakKon);
       const bg = i%2===0?P.white:P.gray1; i++;
-      tHours+=hours; tNorm+=normSpent; tAct+=actSpent;
+      tHours=add(tHours,hours); tNorm=add(tNorm,normSpent); tAct=add(tAct,actSpent);
       const nameCell = g.name + (g.serial ? ', ' + g.serial : '')+(explicit?' · учёт ГСМ с '+fuelAccountingFor('generators',g).from:'');
       put(n,0,nameCell,ST.tdL(bg));
       put(n,1,fuelLabels[g.fuel||'diesel'],ST.tdC(bg));
       put(n,2,'л',ST.tdC(bg));
-      put(n,3,num(hours,1),ST.tdC(bg));
+      put(n,3,num(hours),ST.tdC(bg));
       put(n,4,meterStart===''?'—':+meterStart,ST.tdR(bg));
       put(n,5,meterEnd===''?'—':+meterEnd,ST.tdR(bg));
       put(n,6,loadAvg!=null?num(loadAvg,1):'—',ST.tdC(bg));
@@ -647,11 +627,11 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
     });
     // ИТОГО
     put(n,0,'ИТОГО',ST.totL); merge(n,0,n,2); fillRow(n,ST.totL);
-    put(n,3,num(tHours,1),ST.tot); put(n,4,'',ST.tot); put(n,5,'',ST.tot); put(n,6,'',ST.tot); put(n,7,'',ST.tot); put(n,8,'',ST.tot);
+    put(n,3,num(tHours),ST.tot); put(n,4,'',ST.tot); put(n,5,'',ST.tot); put(n,6,'',ST.tot); put(n,7,'',ST.tot); put(n,8,'',ST.tot);
     put(n,9,num(tNorm),ST.tot); put(n,10,num(tAct),ST.tot);
     put(n,11, num(tBak), ST.tot);
     // Итог: ёмкости считаем по разу, баки — по всем машинам
-    put(n,12, num(linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id,dateTo,true),0) + tBak), ST.tot);
+    put(n,12, add(sum(linkedTanks.map(id=>computeTankBalanceAt(id,dateTo,true))),tBak), ST.tot);
     rowH(n,20); n++;
     put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,6); n++;
 
@@ -667,10 +647,8 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
     // Остаток = топливо в ёмкостях плюс топливо в баках самих ДЭС.
     // Баки берём по всем машинам, а не только по тем, что без ёмкости.
     const allGenIds = gens.map(g => g.id);
-    const ostNach = linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id, dateFrom, false), 0)
-      + allGenIds.reduce((s,id)=>s+computeGenBalanceAt(id, dateFrom, false), 0);
-    const ostKonAll = linkedTanks.reduce((s,id)=>s+computeTankBalanceAt(id, dateTo, true), 0)
-      + allGenIds.reduce((s,id)=>s+computeGenBalanceAt(id, dateTo, true), 0);
+    const ostNach = sum([...linkedTanks.map(id=>computeTankBalanceAt(id,dateFrom,false)),...allGenIds.map(id=>computeGenBalanceAt(id,dateFrom,false))]);
+    const ostKonAll = sum([...linkedTanks.map(id=>computeTankBalanceAt(id,dateTo,true)),...allGenIds.map(id=>computeGenBalanceAt(id,dateTo,true))]);
     put(n,0,'Остаток ДТ, л:',ST.totL); merge(n,0,n,1); put(n,2,'на начало',ST.head); put(n,3,'на конец',ST.head); rowH(n,16); n++;
     put(n,0,'',ST.tdC(P.white)); merge(n,0,n,1); put(n,2,num(ostNach),ST.tdR(P.white)); put(n,3,num(ostKonAll),ST.tdR(P.white)); rowH(n,16); n++;
     put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,8); n++;

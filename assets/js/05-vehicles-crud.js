@@ -32,15 +32,15 @@ function openEditVehicle(id) {
   document.getElementById('vm_object').value = v.object || '';
   document.getElementById('vm_fuel_grade').value = vehicleFuelGrade(v);
   document.getElementById('vm_supplier').value = v.supplier || '';
-  document.getElementById('vm_norm').value = v.norm || '';
+  document.getElementById('vm_norm').value = v.norm ?? '';
   document.getElementById('vm_norm_city').value = v.normCity ?? '';
   document.getElementById('vm_norm_highway').value = v.normHighway ?? '';
-  document.getElementById('vm_norm_idle').value = v.normIdle || '';
-  document.getElementById('vm_odometer').value = v.odometer || '';
+  document.getElementById('vm_norm_idle').value = v.normIdle ?? '';
+  document.getElementById('vm_odometer').value = v.odometer ?? '';
   document.getElementById('vm_fuel_balance').value = v.fuelBalance ?? '';
-  document.getElementById('vm_tank_volume').value = v.tankVolume || '';
-  document.getElementById('vm_to_km').value = v.toIntervalKm || '';
-  document.getElementById('vm_to_months').value = v.toIntervalMonths || '';
+  document.getElementById('vm_tank_volume').value = v.tankVolume ?? '';
+  document.getElementById('vm_to_km').value = v.toIntervalKm ?? '';
+  document.getElementById('vm_to_months').value = v.toIntervalMonths ?? '';
   document.getElementById('vm_responsible').value = v.responsible || '';
   document.getElementById('vm_fuelcard').value = v.fuelcard || '';
   document.getElementById('vm_status').value = v.status || '';
@@ -58,6 +58,8 @@ async function saveVehicle() {
       !make ? 'vm_make' : !plate ? 'vm_plate' : 'vm_driver');
     return;
   }
+  const numeric = precisionRead({norm:['vm_norm',6],normCity:['vm_norm_city',6],normHighway:['vm_norm_highway',6],normIdle:['vm_norm_idle',6],odometer:['vm_odometer',3],fuelBalance:['vm_fuel_balance',3,'zero'],tankVolume:['vm_tank_volume',3],toIntervalKm:['vm_to_km',3],toIntervalMonths:['vm_to_months',0]}, editingVehicleId == null ? null : data.vehicles.find(x=>x.id===editingVehicleId));
+  if(!numeric)return;
   const obj = {
     make, plate, driver,
     org: document.getElementById('vm_org').value.trim(),
@@ -65,15 +67,7 @@ async function saveVehicle() {
     fuelGrade: document.getElementById('vm_fuel_grade').value === 'Бензин' ? '' : document.getElementById('vm_fuel_grade').value,
     fuel: fuelTypeFromGrade(document.getElementById('vm_fuel_grade').value),
     supplier: document.getElementById('vm_supplier').value,
-    norm: parseFloat(document.getElementById('vm_norm').value) || null,
-    normCity: parseFloat(document.getElementById('vm_norm_city').value) || null,
-    normHighway: parseFloat(document.getElementById('vm_norm_highway').value) || null,
-    normIdle: parseFloat(document.getElementById('vm_norm_idle').value) || null,
-    odometer: parseFloat(document.getElementById('vm_odometer').value) || null,
-    fuelBalance: parseFloat(document.getElementById('vm_fuel_balance').value) || 0,
-    tankVolume: parseFloat(document.getElementById('vm_tank_volume').value) || null,
-    toIntervalKm: parseFloat(document.getElementById('vm_to_km').value) || null,
-    toIntervalMonths: parseFloat(document.getElementById('vm_to_months').value) || null,
+    ...numeric,
     responsible: document.getElementById('vm_responsible').value.trim(),
     fuelcard: document.getElementById('vm_fuelcard').value.trim(),
     status: document.getElementById('vm_status').value.trim(),

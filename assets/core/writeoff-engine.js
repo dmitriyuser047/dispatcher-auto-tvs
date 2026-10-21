@@ -1,11 +1,14 @@
 /* Posted fuel acts are immutable calculations, never adjustments to source records. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./fuel-engine.js'),()=>require('./accounting-boundary.js'));
-  else root.TvsWriteoffEngine = factory(root.TvsFuelEngine,()=>root.AccountingBoundary);
-})(typeof globalThis === 'object' ? globalThis : this, function (fuel,getAccounting) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./fuel-engine.js'),()=>require('./accounting-boundary.js'),()=>require('./decimal-core.js'));
+  else root.TvsWriteoffEngine = factory(root.TvsFuelEngine,()=>root.AccountingBoundary,()=>root.DecimalCore);
+})(typeof globalThis === 'object' ? globalThis : this, function (fuelRoot,getAccounting,getDecimal) {
   'use strict';
+  function makeEngine(calculationVersion){
+  const fuel=fuelRoot.forVersion(calculationVersion),modern=calculationVersion===2;
   if (!fuel || fuel.apiVersion !== 1) throw Error('Не загружено ядро расчёта ГСМ');
+  const sumValues=values=>modern?getDecimal().toNumberExact(getDecimal().sum(values)):values.reduce((sum,value)=>sum+value,0);
   const sourceSections = Object.freeze(['vehicles', 'records', 'fuelPurchases', 'fuelCards', 'monthlyFuel']);
   const requiredSections = Object.freeze([...sourceSections, 'fuelWriteoffs']);
   const grades = ['ДТ', 'Бензин', 'АИ-92', 'АИ-95', 'АИ-98', 'АИ-100'];
@@ -184,7 +187,7 @@
     return { vehicles:dependencyVehicles.map(vehicleProjection).map(row=>({...row,...(row.orgHistory?{orgHistory:historicalHistory(row.orgHistory)}:{})})), records, fuelPurchases:purchases, fuelCards:cards,
       monthlyFuel:db.monthlyFuel.filter(row => ids.has(row.vehicleId) && (typeof row.month !== 'string' || row.month <= scope.month) && currentSource(vehicles.get(row.vehicleId),typeof row.month==='string'&&/^\d{4}-(?:0[1-9]|1[0-2])$/.test(row.month)?fuel.gsmMonthRange(row.month).to:'')) };
   }
-  function projectionFingerprint(source, scope) { return 'sha256:' + sha256(stableSerialize({ schemaVersion:1, scope:{month:scope.month,org:orgKey(scope.org),grade:scope.grade}, source })); }
+  function projectionFingerprint(source, scope) { return 'sha256:' + sha256(stableSerialize({ schemaVersion:1,...(modern?{calculationVersion:2}:{}), scope:{month:scope.month,org:orgKey(scope.org),grade:scope.grade}, source })); }
   function fingerprint(input, request) {
     const { scope } = normalize(request), db = database(input), ledger = fuel.buildLedger(db, scope);
     return projectionFingerprint(sourceProjection(db, scope, selection(db, scope, ledger)), scope);
@@ -329,12 +332,30 @@
     duplicatePurchases.forEach(rows => { if (rows.length > 1) add({code:'possible-duplicate-purchases',purchaseId:rows[0].id,vehicleId:rows[0].vehicleId,date:rows[0].date,message:'Совпали признаки покупок; необходима сверка с исходной выпиской',sourceIds:rows.map(row=>row.id)}); });
     const movementVisible = movement => selected.ids.has(movement.vehicleId) && fuel.gsmFamily(movement.grade) !== 'gas' && visible(movement,scope);
     const movements = ledger.movements.filter(movementVisible);
-    const consumption = movements.filter(row => row.kind === 'consumption').map(row => {
+    const consumed = movements.filter(row => row.kind === 'consumption');
+    const consumption = consumed.map(row => {
       const record = referencedRecords.get(row.recordId) || {}, vehicle = vehicles.get(row.vehicleId), basis = fuel.fqRecord(record,vehicle);
       const measurement = row.source === 'measurement' ? appliedMeasurement(record) : null;
-      return { ...row, qty:rounded(row.qty), idle:rounded(row.idle), norm:row.norm == null ? null : rounded(row.norm), enteredActual:basis.actual,
+      return { ...row, ...(modern?{km:rounded(row.km),totalNorm:row.totalNorm==null?null:rounded(row.totalNorm)}:{}),qty:rounded(row.qty), idle:rounded(row.idle), norm:row.norm == null ? null : rounded(row.norm), enteredActual:basis.actual,
         enteredIdle:fuel.fqValue(record.fuelIdle), normSource:basis.normSource, measurement:measurement ? fuel.fqValue(measurement.tankMeasured) : null,measurementRecordId:measurement ? measurement.id : '' };
     });
+    if(modern){
+      // Allocate display quanta only. Preserve every original journal fact in
+      // enteredActual/snapshot, and expose adjustments instead of losing them.
+      const d=getDecimal(),groups=new Map(),key=row=>stableSerialize([row.vehicleId,orgKey(row.org),row.grade]);
+      consumption.forEach((item,index)=>{const id=key(item);if(!groups.has(id))groups.set(id,[]);groups.get(id).push({item,raw:consumed[index],index});});
+      function align(parts,field,target,row){
+        if(target==null||parts.some(part=>part.item[field]==null))return;
+        const difference=d.mul(d.sub(target,d.sum(parts.map(part=>part.item[field]))),1000),units=d.toNumberExact(difference);
+        if(!Number.isSafeInteger(units)||Math.abs(units)>parts.length)fail('ROUNDING_RANGE','Не удалось согласовать точность строк акта');
+        if(!units)return;
+        const sign=units<0?-1:1,ordered=parts.map(part=>({...part,error:d.sub(part.raw[field],part.item[field]),stable:stableSerialize([part.item.recordId,part.index])}));
+        ordered.sort((a,b)=>sign*d.compare(b.error,a.error)||a.stable.localeCompare(b.stable));
+        for(const part of ordered.slice(0,Math.abs(units))){const delta=sign*.001;part.item[field]=d.toNumberExact(d.add(part.item[field],delta));(part.item.roundingAdjustment||(part.item.roundingAdjustment={}))[field]=delta;}
+        add({code:'rounding-allocation',severity:'warning',vehicleId:row.vehicleId,org:row.org,grade:row.grade,field,qty:d.toNumberExact(d.div(units,1000,{scale:3,rounding:'half-away-from-zero'})),message:'Округление подробных строк согласовано с итогом до 0,001; исходные значения сохранены в снимке'});
+      }
+      for(const row of selected.rows){const parts=groups.get(key(row));if(!parts?.length)continue;align(parts,'qty',row.spent,row);align(parts,'idle',row.idle,row);align(parts,'norm',row.norm,row);align(parts,'km',row.km,row);}
+    }
     for (const item of consumption) {
       if (!['actual','norm','measurement'].includes(item.source) && (item.qty > 0 || item.km > 0)) add({...item,code:'consumption-source-unknown',message:'Нет подтверждённого основания расхода'});
       if (item.norm == null && (item.qty > 0 || item.km > 0)) add({...item,severity:'warning',code:'norm-unknown',message:'Норма неизвестна; нормативный расход и экономия не определяются'});
@@ -342,7 +363,7 @@
     const rows = selected.rows.map(row => {
       const parts = consumption.filter(item => item.vehicleId === row.vehicleId && orgKey(item.org) === orgKey(row.org) && item.grade === row.grade);
       const norm = parts.some(item => item.norm == null && (item.qty || item.km)) ? null : rounded(parts.reduce((sum,item)=>sum+(item.norm || 0),0));
-      const value = { ...row, vehicle:vehicleProjection(row.vehicle),cards:[...(row.cards || [])], norm, balanceDelta:rounded(row.start+row.issued+row.correction-row.spent-row.end) };
+      const value = { ...row, vehicle:vehicleProjection(row.vehicle),cards:[...(row.cards || [])], norm, balanceDelta:rounded(sumValues([row.start,row.issued,row.correction,-row.spent,-row.end])) };
       if (!grades.includes(row.grade)) add({code:'row-grade-invalid',vehicleId:row.vehicleId,org:row.org,grade:row.grade,message:'В строке текущего акта не определена допустимая марка топлива'});
       if ((!row.org || orgKey(row.org)===orgKey('Организация не определена')) && ['start','issued','spent','end','correction'].some(field=>Math.abs(row[field])>0.0005)) add({code:'row-org-unknown',vehicleId:row.vehicleId,org:row.org,grade:row.grade,message:'Для текущего остатка или движения не определена организация топлива'});
       if (value.start < -0.0005 || value.end < -0.0005) add({code:'negative-balance',vehicleId:row.vehicleId,org:row.org,grade:row.grade,message:'Отрицательный входящий или конечный остаток'});
@@ -351,9 +372,9 @@
       return value;
     });
     const totals = { start:0,issued:0,spent:0,idle:0,correction:0,end:0,km:0,glonass:0,norm:rows.some(row=>row.norm==null)?null:0,basis:{actual:0,norm:0,measurement:0,missing:0} };
-    for (const row of rows) for (const field of ['start','issued','spent','idle','correction','end','km','glonass']) totals[field] = rounded(totals[field]+row[field]);
+    for (const row of rows) for (const field of ['start','issued','spent','idle','correction','end','km','glonass']) totals[field] = rounded(sumValues([totals[field],row[field]]));
     if (totals.norm !== null) totals.norm = rounded(rows.reduce((sum,row)=>sum+(row.norm || 0),0));
-    consumption.forEach(row => { const source = Object.prototype.hasOwnProperty.call(totals.basis,row.source)?row.source:'missing'; totals.basis[source] = rounded(totals.basis[source]+row.qty); });
+    consumption.forEach(row => { const source = Object.prototype.hasOwnProperty.call(totals.basis,row.source)?row.source:'missing'; totals.basis[source] = rounded(sumValues([totals.basis[source],row.qty])); });
     const requiresBasisNote = consumption.some(row=>row.source==='norm'&&row.qty>0);
     if (requiresBasisNote) add({code:'norm-basis',severity:'warning',message:'Часть расхода рассчитана по норме; при проведении требуется явное основание'});
     if (!rows.length) add({code:'empty-scope',message:'В выбранной области нет транспорта для акта'});
@@ -368,13 +389,13 @@
       const key = stableSerialize([orgKey(row.org),row.grade]);
       if (!barrelMap.has(key)) barrelMap.set(key,{org:row.org,grade:row.grade,start:0,issued:0,spent:0,end:0,correction:0});
       const barrel=barrelMap.get(key);
-      for (const field of ['start','issued','spent','end','correction']) barrel[field]=rounded(barrel[field]+row[field]);
+      for (const field of ['start','issued','spent','end','correction']) barrel[field]=rounded(sumValues([barrel[field],row[field]]));
     });
     const snapshotLedger = { from:scope.from,to:scope.to,rows,barrels:[...barrelMap.values()].sort((a,b)=>a.org.localeCompare(b.org,'ru')||a.grade.localeCompare(b.grade,'ru')),movements,
       receipts:ledger.receipts.filter(movementVisible),journal:ledger.journal.filter(row=>selected.ids.has(row.vehicleId)),issues,
       errors:issues.filter(row=>row.severity==='error'),organizations:[...new Set(rows.map(row=>row.org))].sort((a,b)=>a.localeCompare(b,'ru')) };
     const snapshot = { ledger:snapshotLedger,vehicles:db.vehicles.filter(row=>selected.ids.has(row.id)).map(vehicleProjection),records:db.records.filter(row=>selected.ids.has(row.vehicleId)&&fuel.gsmInPeriod(row.date,scope.from,scope.to)) };
-    return freeze(clone({ schemaVersion:1,...parameters,sourceFingerprint:projectionFingerprint(projection,scope),sourceRefs:refs,rows,totals,consumption,
+    return freeze(clone({ schemaVersion:1,...(modern?{calculationVersion:2}:{}),...parameters,sourceFingerprint:projectionFingerprint(projection,scope),sourceRefs:refs,rows,totals,consumption,
       issues,canPost:!issues.some(row=>row.severity==='error'),requiresBasisNote,snapshot }));
   }
   function actor(value) {
@@ -420,17 +441,22 @@
         const expected = voidDocument(document,{voidedAt:changed.voidedAt,voidedBy:changed.voidedBy,reason:changed.voidReason});
         if (stableSerialize(expected) !== stableSerialize(changed)) fail('DOCUMENT_IMMUTABLE','При аннулировании нельзя изменять снимок акта');
       } else if (stableSerialize(document) !== stableSerialize(changed)) fail('DOCUMENT_IMMUTABLE','Сохранённый акт неизменяем; сначала аннулируйте его');
-      if (changed.status === 'posted' && fingerprint(next,{...changed.scope,date:changed.date}) !== changed.sourceFingerprint) fail('POSTED_SOURCE_LOCKED','Источники проведённого акта изменены; сначала аннулируйте акт');
+      if (changed.status === 'posted' && forVersion(documentVersion(document)).fingerprint(next,{...changed.scope,date:changed.date}) !== changed.sourceFingerprint) fail('POSTED_SOURCE_LOCKED','Источники проведённого акта изменены; сначала аннулируйте акт');
     }
     for (const document of after) if (!old.has(document.id)) {
       if (document.status !== 'posted') fail('INVALID_TRANSITION','Нельзя создать сразу аннулированный акт');
       const withoutOwn = {...next,fuelWriteoffs:after.filter(row=>row.id!==document.id)};
-      const expected = post(withoutOwn,{...document.scope,date:document.date,basisNote:document.basisNote},
+      const expected = forVersion(2).post(withoutOwn,{...document.scope,date:document.date,basisNote:document.basisNote},
         {id:document.id,number:document.number,postedAt:document.postedAt,postedBy:document.postedBy,expectedFingerprint:document.sourceFingerprint});
       if (stableSerialize(expected) !== stableSerialize(document)) fail('DOCUMENT_RECALCULATION_FAILED','Снимок акта не совпадает с серверным пересчётом');
     }
     return true;
   }
-  return Object.freeze({apiVersion:1,schemaVersion:1,sourceSections,requiredSections,prepare,preview:prepare,fingerprint,post,voidDocument,
+  return Object.freeze({apiVersion:1,schemaVersion:1,calculationVersion,sourceSections,requiredSections,prepare,preview:prepare,fingerprint,post,voidDocument,
     validateWriteoffChanges,validateDocuments:validateWriteoffChanges,stableSerialize,sha256});
+  }
+  function documentVersion(document){const version=Object.prototype.hasOwnProperty.call(document,'calculationVersion')?document.calculationVersion:Object.prototype.hasOwnProperty.call(document,'algorithmVersion')?document.algorithmVersion:1;if(version!==1&&version!==2)throw Object.assign(Error('Неизвестная версия расчёта проведённого акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version;}
+  const legacy=makeEngine(1),current=makeEngine(2);
+  function forVersion(version){if(version!==1&&version!==2)throw Object.assign(Error('Неизвестная версия расчёта акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version===1?legacy:current;}
+  return Object.freeze({...current,forVersion});
 });

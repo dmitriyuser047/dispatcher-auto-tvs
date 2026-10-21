@@ -54,6 +54,7 @@ test('standalone browser build executes calculations without document, window, s
     Object.defineProperty(sandbox, key, { get() { throw new Error('Unexpected global access: ' + key); } });
   }
   const context = vm.createContext(sandbox), source = fs.readFileSync(path.join(__dirname, '../assets/core/fuel-engine.js'), 'utf8');
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core/decimal-core.js'),'utf8'),context);
   vm.runInContext(source, context, { filename: 'assets/core/fuel-engine.js' });
   const browser = context.TvsFuelEngine, db = freeze(database());
   assert.equal(browser.apiVersion, 1);
@@ -92,10 +93,11 @@ test('negative source consumption remains diagnosable without silently creating 
   assert.equal(ledger.rows.reduce((sum, row) => sum + row.spent, 0), 0);
 });
 
-test('source ledger retains millilitres while the existing journal display keeps two decimals', () => {
+test('v2 source ledger and journal retain millilitres while explicit v1 keeps the old journal precision', () => {
   const db = database(); Object.assign(db.records[0], { fuelIssued: 20.555, fuelActual: 10.223 });
   const { ledger, balances } = calculate(db);
-  assert.equal(balances.record, 110.33);
+  assert.equal(balances.record, 110.332);
+  assert.equal(engine.forVersion(1).recordBalances(db,'vehicle').record,110.33);
   assert.equal(ending(ledger), 110.332);
   assert.equal(ledger.rows[0].issued, 20.555);
   assert.equal(ledger.rows[0].spent, 10.223);

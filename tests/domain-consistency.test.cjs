@@ -9,7 +9,7 @@ function financeFixture(overrides={}){
 }
 function finances(db,options={}){
   const calls={save:0,confirm:[],toast:[]};
-  const context=vm.createContext({console,data:clone(db),DomainSources:sources,
+  const context=vm.createContext({console,data:clone(db),DomainSources:sources,DecimalCore:require('../assets/core/decimal-core.js'),
     confirmAction:async text=>{calls.confirm.push(text);return options.confirm!==false;},
     saveData:async()=>{calls.save++;return true;},showToast:text=>calls.toast.push(text)});
   vm.runInContext(read('assets/js/21-finances.js'),context);
@@ -22,7 +22,7 @@ function repairAndOrder(){
 }
 function generators(db){
   let workbook;
-  const context=vm.createContext({console,data:clone(db),DomainSources:sources,TvsFuelEngine:require('../assets/core/fuel-engine.js'),AccountingBoundary:require('../assets/core/accounting-boundary.js'),
+  const context=vm.createContext({console,data:clone(db),DomainSources:sources,TvsFuelEngine:require('../assets/core/fuel-engine.js'),AccountingBoundary:require('../assets/core/accounting-boundary.js'),DecimalCore:require('../assets/core/decimal-core.js'),FuelMovementPolicy:require('../assets/core/fuel-movement-policy.js'),
     fmtDate:value=>value,cmpDateAsc:(a,b)=>String(a).localeCompare(String(b)),fqValue:value=>value==null?null:Number(value),
     alert:message=>{throw Error(message);},
     XLSX:{utils:{encode_cell:position=>position.r+','+position.c,encode_range:range=>JSON.stringify(range),

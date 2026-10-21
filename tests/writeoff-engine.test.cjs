@@ -33,7 +33,7 @@ test('writeoff module is versioned, portable, and uses standard SHA-256 UTF-8',(
   assert.equal(engine.apiVersion,1);assert.ok(Object.isFrozen(engine));
   for(const text of ['', 'abc','Сентябрь 👋','\ud800','x'.repeat(1000)]) assert.equal(engine.sha256(text),crypto.createHash('sha256').update(text).digest('hex'));
   const sandbox = vm.createContext({});
-  for(const file of ['fuel-engine.js','writeoff-engine.js']) vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',file),'utf8'),sandbox);
+  for(const file of ['decimal-core.js','fuel-engine.js','writeoff-engine.js']) vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',file),'utf8'),sandbox);
   assert.equal(sandbox.TvsWriteoffEngine.prepare(database(),request).totals.end,68);
 });
 

@@ -1,9 +1,8 @@
 /* Pure document-based operating cost calculation, shared by UI and storage validation. */
 (function (root, factory) {
-  const api = factory();
-  if (typeof module === 'object' && module.exports) module.exports = api;
-  else root.TvsCostEngine = api;
-})(typeof globalThis === 'object' ? globalThis : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(()=>require('../core/decimal-core.js'));
+  else root.TvsCostEngine = factory(()=>root.DecimalCore);
+})(typeof globalThis === 'object' ? globalThis : this, function (getDecimal) {
   'use strict';
   const SOURCES = ['vehicles', 'generators', 'records', 'genRecords', 'repairs', 'vehicleTo', 'toRecords', 'workOrders', 'payments', 'fuelPurchases', 'partMovements', 'costEntries', 'costProfiles'];
   const LABELS = { records:'Журнал ТС', genRecords:'Журнал ДЭС', repairs:'Ремонт', vehicleTo:'ТО транспорта', toRecords:'ТО ДЭС', workOrders:'Ремонтный заказ', payments:'Финансы', fuelPurchases:'Покупка ГСМ', costEntries:'Ручная операция', partMovements:'Движение запчастей' };
@@ -22,7 +21,11 @@
     return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
   }
   function dateOf(value) { const valueDate = typeof value === 'string' ? value.slice(0, 10) : ''; return validDate(valueDate) ? valueDate : ''; }
-  function amountSum(rows) { return rows.length ? rows.reduce((sum, row) => sum + row.amount, 0) : null; }
+  function decimal(){const api=getDecimal();if(!api||api.apiVersion!==1)throw Object.assign(Error('Не загружено десятичное ядро денежных расчётов'),{code:'MODULE_UNAVAILABLE'});return api;}
+  function exactSum(values){return decimal().toNumberExact(decimal().sum(values));}
+  function amountSum(rows) { return rows.length ? exactSum(rows.map(row=>row.amount)) : null; }
+  function differenceExceeds(a,b,tolerance){const difference=decimal().sub(a,b);return decimal().compare(difference,tolerance)>0||decimal().compare(difference,decimal().sub(0,tolerance))<0;}
+  function roundedMoney(value){return decimal().toNumberExact(decimal().quantize(value,{scale:2,rounding:'half-away-from-zero'}));}
   function norm(value) { return String(value || '').trim().replace(/\s+/g, '').toLocaleLowerCase('ru'); }
   function invoiceKey(entry) {
     return entry.assetRef && entry.invoiceNo && entry.date ? [entry.assetRef, entry.date, norm(entry.invoiceNo), norm(entry.party), entry.party ? '' : String(entry.amount)].join('|') : '';
@@ -76,14 +79,18 @@
     if (!profile) return null;
     const salaryRate = number(profile.salaryRate), depreciationRate = number(profile.depreciationRate);
     const fuelRate = number(profile.fuelRate), fuelPrice = number(profile.fuelPrice);
+    const rawFuelRate=fuelRate!=null&&fuelPrice!=null?decimal().mul(fuelRate,fuelPrice):null;
+    const fuelDivisor=unit==='км'?100:1;
     const pieces = [
       { key:'salary', label:'Оплата труда', rate:salaryRate },
       { key:'depreciation', label:'Амортизация', rate:depreciationRate },
-      { key:'fuel', label:'Топливо по норме', rate:fuelRate != null && fuelPrice != null ? fuelRate * fuelPrice / (unit === 'км' ? 100 : 1) : null },
-    ].map(piece => ({ ...piece, amount:piece.rate != null && quantity != null ? piece.rate * quantity : null }));
+      { key:'fuel', label:'Топливо по норме', rate:rawFuelRate!=null?decimal().toNumberExact(decimal().div(rawFuelRate,fuelDivisor,{scale:6,rounding:'half-away-from-zero'})):null },
+    ].map(piece => ({ ...piece, amount:piece.rate!=null&&quantity!=null?piece.key==='fuel'
+      ?decimal().toNumberExact(decimal().div(decimal().mul(rawFuelRate,quantity),fuelDivisor,{scale:2,rounding:'half-away-from-zero'}))
+      :roundedMoney(decimal().mul(piece.rate,quantity)):null }));
     const known = pieces.filter(piece => piece.rate != null);
-    return { pieces, rate:known.length ? known.reduce((sum, piece) => sum + piece.rate, 0) : null,
-      amount:known.length && quantity != null ? known.reduce((sum, piece) => sum + piece.rate * quantity, 0) : null,
+    return { pieces, rate:known.length ? exactSum(known.map(piece=>piece.rate)) : null,
+      amount:known.length && quantity != null ? exactSum(known.map(piece=>piece.amount)) : null,
       complete:known.length === pieces.length, fuelRate, fuelPrice, note:profile.note || '' };
   }
   function buildReport(database, options) {
@@ -138,11 +145,13 @@
         return;
       }
       if (entry.amount == null) { issue(entry.assetRef, 'amount', entry.sourceLabel + ': сумма не задана; не считается нулевой', entry.sourceKey); return; }
+      try{decimal().parse(entry.amount,{scale:2,max:'1000000000000'});}
+      catch(error){if(error.code==='MODULE_UNAVAILABLE')throw error;entry.precisionLegacy=true;issue(entry.assetRef,'precision','Историческая сумма показана с исходной точностью; источник не округлён и не изменён',entry.sourceKey);}
       if (entry.estimated) { const target = rowMap.get(entry.assetRef); if (target) target.estimates.push(entry); return; }
       const key = invoiceKey(entry);
       if (key && invoiceMap.has(key)) {
         const previous = invoiceMap.get(key);
-        exclude(entry, 'Спорное совпадение реквизитов счёта ' + entry.invoiceNo + ' на одну дату для той же техники; временно учтён ' + previous.sourceLabel + (Math.abs(previous.amount - entry.amount) > .005 ? '. Суммы различаются — нужна сверка' : '. Проверьте, не самостоятельные ли это операции'), true); return;
+        exclude(entry, 'Спорное совпадение реквизитов счёта ' + entry.invoiceNo + ' на одну дату для той же техники; временно учтён ' + previous.sourceLabel + (differenceExceeds(previous.amount,entry.amount,'0.005') ? '. Суммы различаются — нужна сверка' : '. Проверьте, не самостоятельные ли это операции'), true); return;
       }
       if (key) invoiceMap.set(key, entry);
       const target = rowMap.get(entry.assetRef);
@@ -164,7 +173,7 @@
         if (quantity == null) { target.unknownQuantityRows++; continue; }
         target.quantityRows.push({ sourceKey:section + ':' + row.id, date, quantity });
       }
-      target.quantity = target.quantityRows.length ? target.quantityRows.reduce((sum, row) => sum + row.quantity, 0) : null;
+      target.quantity = target.quantityRows.length ? exactSum(target.quantityRows.map(row=>row.quantity)) : null;
       target.quantityComplete = target.quantityRows.length > 0 && target.unknownQuantityRows === 0 && (!allowed || allowed.has(section));
       if (target.unknownQuantityRows) issue(target.assetRef, 'quantity', 'В ' + target.unknownQuantityRows + ' строках журнала не указаны ' + target.unit + '; расчёт на единицу недоступен');
     }
@@ -215,7 +224,7 @@
         entries.forEach(entry => aggregateCoveredEntries.add(entry));
         if (inPeriod(dateOf(record.date))) issue(refOf(record), 'fuel-restored', note, 'records:' + recordId);
       }
-      if (inPeriod(dateOf(record.date)) && journal != null && exact.length === entries.length && Math.abs(journal - exact.reduce((sum, entry) => sum + entry.amount, 0)) > .01)
+      if (inPeriod(dateOf(record.date)) && journal != null && exact.length === entries.length && differenceExceeds(journal,exactSum(exact.map(entry=>entry.amount)),'0.01'))
         issue(refOf(record), 'fuel-sum', 'Сумма журнала ГСМ отличается от покупок; учтены покупки, разность автоматически не добавлена', 'records:' + recordId);
     }
     for (const entry of purchaseEntries) {
@@ -241,7 +250,7 @@
         exclude(entry, source ? 'Связанный платёж: расход учитывается по первичному документу' : 'Источник связанного платежа отсутствует или недоступен; требуется сверка', !source); continue;
       }
       const invoice = entry.invoiceNo && documents.find(item => invoiceKey(item) === invoiceKey(entry));
-      if (invoice) { exclude(entry, 'Спорное совпадение даты, счёта и техники с первичным документом; исключено до сверки' + (Math.abs(invoice.amount - entry.amount) > .005 ? '; суммы различаются' : ''), true); continue; }
+      if (invoice) { exclude(entry, 'Спорное совпадение даты, счёта и техники с первичным документом; исключено до сверки' + (differenceExceeds(invoice.amount,entry.amount,'0.005') ? '; суммы различаются' : ''), true); continue; }
       if (/ремонт|топлив|гсм|запчаст|^то$/i.test(row.category || '')) { exclude(entry, 'Платёж ремонт/ТО/ГСМ без связи с первичным документом. Исключён до сверки, чтобы не повторить расход', true); continue; }
       add(entry);
     }
@@ -257,8 +266,8 @@
     for (const target of rows) {
       target.expenses = amountSum(target.entries.filter(entry => entry.kind === 'expense'));
       target.income = amountSum(target.entries.filter(entry => entry.kind === 'income'));
-      target.rate = target.expenses != null && target.quantityComplete && target.quantity > 0 ? target.expenses / target.quantity : null;
-      target.result = target.expenses != null && target.income > 0 ? target.income - target.expenses : null;
+      target.rate = target.expenses != null && target.quantityComplete && target.quantity > 0 ? decimal().toNumberExact(decimal().div(target.expenses,target.quantity,{scale:6,rounding:'half-away-from-zero'})) : null;
+      target.result = target.expenses != null && target.income > 0 ? decimal().toNumberExact(decimal().sub(target.income,target.expenses)) : null;
       target.margin = target.result != null ? target.result / target.income * 100 : null;
       const profiles = db.costProfiles.filter(profile => profile.assetRef === target.assetRef);
       target.scenario = profiles.length === 1 ? scenario(profiles[0], target.quantityComplete ? target.quantity : null, target.unit) : null;
@@ -267,7 +276,7 @@
     }
     const exactExpenses = rows.flatMap(row => row.entries.filter(entry => entry.kind === 'expense'));
     const exactIncome = rows.flatMap(row => row.entries.filter(entry => entry.kind === 'income'));
-    return { from, to, rows, unassigned, exclusions, issues,
+    return { calculationVersion:2,from, to, rows, unassigned, exclusions, issues,
       totals:{ expenses:amountSum(exactExpenses), income:amountSum(exactIncome), review:rows.reduce((sum, row) => sum + row.exclusions.filter(entry => entry.review).length, 0) + exclusions.filter(entry => entry.review).length + unassigned.filter(entry => entry.review).length },
       unavailable:allowed ? SOURCES.filter(section => !allowed.has(section)) : [],
       method:'Учтённые расходы по датам первичных документов. Покупки ГСМ признаются в дату покупки и не означают стоимость израсходованного топлива. Журналы пробега и наработки — единственный источник км/ч. Полная себестоимость и прибыль могут отличаться: неучтённые расходы не заменяются нулями.' };

@@ -468,12 +468,14 @@ document.addEventListener('mousedown', function(e) {
 });
 
 function calcFuelAuto() {
-  const km  = parseFloat(document.getElementById('rec_km').value);
   const v   = data.vehicles.find(x => x.id === selectedVehicleId);
   const inp = document.getElementById('rec_fuel_used');
   if (!inp) return;
-  if (!v || !v.norm || isNaN(km) || km <= 0) { inp.value = ''; return; }
-  inp.value = Math.round(v.norm * km / 100 * 10) / 10;
+  let km;
+  try{km=precisionInput('rec_km',{scale:3,blank:'null'});}catch{inp.value='';return;}
+  if (!v || km==null) { inp.value = ''; return; }
+  const norm=TvsFuelEngine.fqRecord({km},v).norm;
+  inp.value=norm==null?'':String(norm);
 }
 
 function toggleHistoryFullscreen() {

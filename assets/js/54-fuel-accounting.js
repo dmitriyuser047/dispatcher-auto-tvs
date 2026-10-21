@@ -9,18 +9,17 @@ function fuelAccountingAsset(section,id){
 }
 function fuelAccountingLabel(section,row){return section==='vehicles'?[row.plate,row.make].filter(Boolean).join(' · '):section==='generators'?'ДЭС · '+(row.name||row.code||row.id):'Ёмкость · '+(row.name||row.id);}
 function fuelAccountingNumber(text,label){
-  const value=String(text).trim();if(!/^\d+(?:[.,]\d+)?$/.test(value))throw Error('Поле «'+label+'»: укажите неотрицательное число');
-  const number=Number(value.replace(',','.'));if(!Number.isFinite(number))throw Error('Поле «'+label+'»: число слишком велико');return number;
+  try{return precisionParse(text,{scale:3,blank:'error'});}catch(error){throw Error('Поле «'+label+'»: укажите полное неотрицательное число, до трёх знаков после запятой');}
 }
 function fuelAccountingGrade(asset){const grade=typeof vehicleFuelGrade==='function'?vehicleFuelGrade(asset):asset.fuelGrade;return FUEL_ACCOUNTING_GRADES.includes(grade)?grade:asset.fuel==='gas'?'Газ':asset.fuel==='gasoline'?'Бензин':'ДТ';}
 function fuelAccountingSourceRow(source,grade){
   const row=document.createElement('div');row.className='gsm-opening-row';row.dataset.fuelAccountingSource='';
   row.innerHTML='<input aria-label="Организация входящего остатка" data-fa-source="org" maxlength="500" placeholder="Организация" value="'+htmlEsc(source.org??'')+'"><select aria-label="Марка входящего топлива" data-fa-source="grade">'+FUEL_ACCOUNTING_GRADES.map(value=>'<option'+(value===(source.grade||grade)?' selected':'')+'>'+htmlEsc(value)+'</option>').join('')+'</select><input aria-label="Литры источника" data-fa-source="qty" inputmode="decimal" value="'+htmlEsc(source.qty??'')+'"><button type="button" class="btn btn-ghost" aria-label="Удалить источник">×</button>';
-  row.querySelector('button').onclick=()=>{row.remove();row._fuelAccountingChanged?.();};return row;
+  row.querySelector('button').onclick=()=>{row.remove();row._fuelAccountingChanged?.();};row._precisionSource=typeof source.qty==='number'?{qty:source.qty}:null;precisionRemember(row);return row;
 }
 function fuelAccountingRead(state){
-  const form=state.form,metadata={version:1,from:form.elements.from.value,opening:fuelAccountingNumber(form.elements.opening.value,'Входящий остаток'),basis:form.elements.basis.value.trim()};
-  if(form.elements.allocate.checked)metadata.sources=[...form.querySelectorAll('[data-fuel-accounting-source]')].map(row=>({org:row.querySelector('[data-fa-source="org"]').value.trim(),grade:row.querySelector('[data-fa-source="grade"]').value,qty:fuelAccountingNumber(row.querySelector('[data-fa-source="qty"]').value,'Литры источника')}));
+  const form=state.form,metadata={version:1,from:form.elements.from.value,opening:precisionInput(form.elements.opening,{scale:3,blank:'error',...(state.original.fuelAccounting?{previous:state.original.fuelAccounting.opening}:{})}),basis:form.elements.basis.value.trim()};
+  if(form.elements.allocate.checked)metadata.sources=[...form.querySelectorAll('[data-fuel-accounting-source]')].map(row=>({org:row.querySelector('[data-fa-source="org"]').value.trim(),grade:row.querySelector('[data-fa-source="grade"]').value,qty:precisionInput(row.querySelector('[data-fa-source="qty"]'),{scale:3,blank:'error',...(row._precisionSource?{previous:row._precisionSource.qty}:{})})}));
   const resolved=AccountingBoundary.resolve(state.section,{...state.original,fuelAccounting:metadata}),{mode,...value}=resolved;return JSON.parse(JSON.stringify(value));
 }
 function fuelAccountingCurrent(state){

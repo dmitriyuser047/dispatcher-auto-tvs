@@ -23,14 +23,14 @@ function tssEnsureLifecycleFields() {
   const fields = document.createElement('div');
   fields.innerHTML = `<div class="form-row">
     <div class="form-group"><label>Состояние записи</label><select id="tss_record_status"><option value="done">Выполнено</option><option value="planned">План</option></select></div>
-    <div class="form-group"><label id="tss_next_meter_label">Следующее ТО через, км</label><input type="number" id="tss_next_meter" min="0" step="0.1" placeholder="Не задано"></div>
+    <div class="form-group"><label id="tss_next_meter_label">Следующее ТО через, км</label><input type="number" id="tss_next_meter" min="0" step="any" placeholder="Не задано"></div>
     </div><div class="form-row"><div class="form-group"><label>Дата следующего ТО</label><input type="text" id="tss_next_date" placeholder="ДД.ММ.ГГГГ" maxlength="10" oninput="autoDateSep(this)"></div>
-    <div class="form-group"><label id="tss_next_abs_label">Следующий одометр, км</label><input type="number" id="tss_next_abs" min="0" step="0.1" placeholder="Либо интервал выше"></div></div>
+    <div class="form-group"><label id="tss_next_abs_label">Следующий одометр, км</label><input type="number" id="tss_next_abs" min="0" step="any" placeholder="Либо интервал выше"></div></div>
     <div id="tss_plan_context" style="font-size:12px;color:var(--text3);margin-bottom:12px"></div>`;
   body.appendChild(fields);
   document.getElementById('tss_next_meter').oninput = () => {
-    const meter = optionalNumber('tss_odometer'), interval = optionalNumber('tss_next_meter');
-    if (meter != null && interval != null) document.getElementById('tss_next_abs').value = +(meter + interval).toFixed(1);
+    let meter,interval;try{meter=precisionInput('tss_odometer',{scale:3,blank:'null'});interval=precisionInput('tss_next_meter',{scale:3,blank:'null'});}catch{return;}
+    if (meter != null && interval != null) document.getElementById('tss_next_abs').value = DecimalCore.toNumberExact(DecimalCore.add(meter,interval));
   };
 }
 
@@ -66,13 +66,13 @@ function tssCompletePlan(id, source) {
   const rule = (asset?.maintenanceRules || []).find(x => x.id === r.maintenanceRuleId);
   const interval = rule ? +(vehicle ? rule.km : rule.hours) || 0 : vehicle ? (+r.nextKm || (asset ? toIntervalKm(asset) : 0)) : (+r.nextHours || 0);
   document.getElementById('tss_next_meter').value = interval || '';
-  document.getElementById('tss_next_abs').value = interval && meter != null ? +(meter + interval).toFixed(1) : '';
+  document.getElementById('tss_next_abs').value = interval && meter != null ? DecimalCore.toNumberExact(DecimalCore.add(meter,interval)) : '';
   const months = rule ? +rule.months || 0 : +r.maintenanceIntervalMonths || (vehicle && asset ? toIntervalMonths(asset) : 0);
   document.getElementById('tss_next_date').value = months > 0 ? fmtDate(toAddMonths(dateIso, months)) : '';
   document.getElementById('tss_plan_context').textContent = 'План: ' + fmtDate(r.date) + '. Укажите фактические дату, счётчик, работы и стоимость. Исходный план сохранится в истории записи.';
   document.getElementById('tss_odometer').oninput = () => {
-    const reading = optionalNumber('tss_odometer'), gap = optionalNumber('tss_next_meter');
-    if (reading != null && gap != null) document.getElementById('tss_next_abs').value = +(reading + gap).toFixed(1);
+    let reading,gap;try{reading=precisionInput('tss_odometer',{scale:3,blank:'null'});gap=precisionInput('tss_next_meter',{scale:3,blank:'null'});}catch{return;}
+    if (reading != null && gap != null) document.getElementById('tss_next_abs').value = DecimalCore.toNumberExact(DecimalCore.add(reading,gap));
   };
 }
 
@@ -321,18 +321,16 @@ async function tssSaveRecord() {
   const objType = document.getElementById('tss_obj_type').value;
   const objId = document.getElementById('tss_obj_id').value;
   if (!objId) { showFieldError('Выберите объект', 'tss_obj_id'); return; }
-  const meter = parseFloat(document.getElementById('tss_odometer').value);
-  const cost = optionalNumber('tss_cost');
+  const previous = tssEditingId ? tssFindRecord(tssEditingId, tssEditingSource) : null;
+  const oldNumeric=previous?{meter:objType==='vehicle'?previous.odometer:previous.hours,cost:previous.cost,nextInterval:objType==='vehicle'?previous.nextKm:previous.nextHours,explicitAbs:objType==='vehicle'?previous.nextOdometerAbs:previous.nextHoursAbs}:null;
+  const numeric=precisionRead({meter:['tss_odometer',3],cost:['tss_cost',2],nextInterval:['tss_next_meter',3],explicitAbs:['tss_next_abs',3]},oldNumeric);if(!numeric)return;
+  const {meter,cost,nextInterval,explicitAbs}=numeric;
   const performer = document.getElementById('tss_performer').value.trim();
   const note = document.getElementById('tss_note').value.trim();
-  if (!validNonnegativeFields(['tss_odometer', 'tss_cost', 'tss_next_meter', 'tss_next_abs'])) return;
   const rawNextDate = document.getElementById('tss_next_date').value.trim();
   const nextDate = rawNextDate ? parseDate(rawNextDate) : null;
   if (rawNextDate && !nextDate) { showFieldError('Проверьте дату следующего ТО', 'tss_next_date'); return; }
-  const nextInterval = optionalNumber('tss_next_meter');
-  const explicitAbs = optionalNumber('tss_next_abs');
-  const nextAbs = explicitAbs != null ? explicitAbs : nextInterval != null && Number.isFinite(meter) ? +(meter + nextInterval).toFixed(1) : null;
-  const previous = tssEditingId ? tssFindRecord(tssEditingId, tssEditingSource) : null;
+  const nextAbs = oldNumeric&&meter===oldNumeric.meter&&nextInterval===oldNumeric.nextInterval&&explicitAbs===oldNumeric.explicitAbs ? oldNumeric.explicitAbs : explicitAbs != null ? explicitAbs : nextInterval != null && Number.isFinite(meter) ? DecimalCore.toNumberExact(DecimalCore.add(meter,nextInterval)) : null;
   if (tssEditingId && !previous) { showToast('Запись уже удалена. Обновите график.'); return; }
   const planned = !tssCompletionMode && document.getElementById('tss_record_status').value === 'planned';
   if (previous?.planned && !planned && !tssCompletionMode) {
@@ -349,7 +347,7 @@ async function tssSaveRecord() {
   if (objType === 'vehicle') {
     const obj = {
       vehicleId: objId, date: dateIso, type,
-      odometer: !isNaN(meter) ? meter : null,
+      odometer: meter ?? null,
       nextKm: nextInterval, nextOdometerAbs: nextAbs, nextDate,
       cost, performer, note, ...lifecycle,
     };
@@ -363,7 +361,7 @@ async function tssSaveRecord() {
   } else {
     const obj = {
       generatorId: objId, date: dateIso, type,
-      hours: !isNaN(meter) ? +meter : null,
+      hours: meter ?? null,
       nextHours: nextInterval, nextHoursAbs: nextAbs, nextDate,
       cost, performer, note, ...lifecycle,
     };
@@ -771,12 +769,12 @@ function reestrRenderLog(entries) {
   const okCount = entries.filter(l => l.type === 'ok').length;
   const warnCount = entries.filter(l => l.type === 'warn').length;
   document.getElementById('reestrSummaryCount').textContent = okCount + (warnCount ? ' из ' + (okCount + warnCount) : '') + ' счетов распознано';
-  const totalSum = reestrRows.reduce((s, r) => s + r.sum, 0);
+  const totalSum = DecimalCore.toNumberExact(DecimalCore.sum(reestrRows.map(r=>r.sum??0)));
   document.getElementById('reestrSummaryAmount').textContent = 'на сумму ' + totalSum.toLocaleString('ru-RU') + ' руб.';
 }
 
 function reestrUpdateTotal() {
-  const total = reestrRows.reduce((s, r) => s + (r.sum || 0), 0);
+  const total = DecimalCore.toNumberExact(DecimalCore.sum(reestrRows.map(r=>r.sum??0)));
   const el = document.getElementById('reestrReviewTotal');
   if (el) el.textContent = total.toLocaleString('ru-RU', { minimumFractionDigits: 2 }) + ' руб.';
 }
@@ -836,7 +834,7 @@ function reestrRenderTable() {
     const tdS = document.createElement('td'); tdS.style.cssText = 'padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)';
     const sumInp = document.createElement('input'); sumInp.type = 'text'; sumInp.value = (row.sum || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2 });
     sumInp.style.cssText = 'width:90px;text-align:right;padding:3px 5px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);font-family:inherit;font-weight:700';
-    sumInp.addEventListener('change', () => { const v = parseFloat(sumInp.value.replace(/\s/g,'').replace(',','.')); reestrRows[i].sum = isNaN(v) ? 0 : v; sumInp.value = reestrRows[i].sum.toLocaleString('ru-RU',{minimumFractionDigits:2}); reestrUpdateTotal(); });
+    sumInp.addEventListener('change', () => { try { const v=precisionParse(sumInp.value,{scale:2,blank:'zero'}); reestrRows[i].sum=v; sumInp.value=precisionFormat(v,{minimumScale:2}); reestrUpdateTotal(); } catch(error) { showFieldError(error.message); } });
     tdS.appendChild(sumInp); tr.appendChild(tdS);
 
     const tdD = document.createElement('td'); tdD.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
@@ -999,7 +997,7 @@ async function reestrSaveCurrent() {
   if (!reestrRows.length) return;
   const saved = data.savedReestrs || [];
   const nextNum = saved.length > 0 ? Math.max(...saved.map(r => r.number)) + 1 : 1;
-  const totalSum = reestrRows.reduce((s, r) => s + (r.sum || 0), 0);
+  const totalSum = DecimalCore.toNumberExact(DecimalCore.sum(reestrRows.map(r=>r.sum??0)));
   saved.push({
     number: nextNum,
     date: new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }),

@@ -22,7 +22,10 @@ function showFieldError(msg, fieldId) {
     if (el) {
       el.classList.add('field-error');
       setTimeout(() => el.classList.remove('field-error'), 2500);
-      setTimeout(() => el.focus(), 50);
+      const active=document.activeElement;
+      setTimeout(() => {
+        if(document.getElementById(fieldId)===el&&document.activeElement===active)el.focus();
+      }, 50);
     }
   }
 }
@@ -31,39 +34,29 @@ let recordEditingState = null;
 function recordFormFields() {
   const map = { date:'rec_date', km:'rec_km', kmGlonass:'rec_km_glonass', odoStart:'rec_odo_start', odoEnd:'rec_odo_end', driver:'rec_driver', fuelGrade:'rec_fuel_grade',
     fuelIssued:'rec_fuel_issued', fuelSum:'rec_fuel_sum', fuelUsed:'rec_fuel_used', fuelActual:'rec_fuel_actual', fuelIdle:'rec_fuel_idle', tankMeasured:'rec_tank_measured', fuelCardNum:'rec_fuel_card', note:'rec_note' };
-  const text = new Set(['date','driver','fuelGrade','fuelCardNum','note']);
-  const fields = Object.fromEntries(Object.entries(map).map(([key, id]) => [key, text.has(key) ? document.getElementById(id).value.trim() : optionalNumber(id)]));
+  const fields = Object.fromEntries(Object.entries(map).map(([key,id])=>[key,document.getElementById(id).value.trim()]));
   fields.route = routeGet(); return fields;
 }
 
 async function saveRecord() {
   const dateRaw = document.getElementById('rec_date').value.trim();
   const date = parseDate(dateRaw);
-  const km = parseFloat(document.getElementById('rec_km').value);
   const _old = editingRecordId && data.records.find(x => x.id === editingRecordId);
   if(_old?.fuelMovementId){showToast('Связанная выдача изменяется отдельной корректировкой движения топлива');return;}
   if (!date) { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'rec_date'); return; }
+  const numeric=precisionRead({km:['rec_km',3,'error'],kmGlonass:['rec_km_glonass',3],odoStart:['rec_odo_start',3],odoEnd:['rec_odo_end',3],fuelIssued:['rec_fuel_issued',3],fuelSum:['rec_fuel_sum',2],fuelUsed:['rec_fuel_used',3],fuelActual:['rec_fuel_actual',3],fuelIdle:['rec_fuel_idle',3],tankMeasured:['rec_tank_measured',3]},_old);
+  if(!numeric)return;
+  const {km,odoStart:start,odoEnd:end}=numeric;
   if (!Number.isFinite(km) || km < 0) { showFieldError('Укажите неотрицательный пробег за день', 'rec_km'); return; }
-  if (!validNonnegativeFields(['rec_km_glonass','rec_odo_start','rec_odo_end','rec_fuel_issued','rec_fuel_sum','rec_fuel_used','rec_fuel_actual','rec_fuel_idle','rec_tank_measured'])) return;
-  const start = optionalNumber('rec_odo_start'), end = optionalNumber('rec_odo_end');
   if (start != null && end != null && (end < start || Math.abs(end - start - km) > 0.11) &&
       (!_old || _old.km !== km || _old.odoStart !== start || _old.odoEnd !== end)) { showFieldError('Пробег не совпадает с разницей одометра', 'rec_odo_end'); return; }
   if (typeof fuelEditAllowed === 'function' && !fuelEditAllowed(date, _old && _old.date)) return;
   let obj = {
     vehicleId: selectedVehicleId,
     date,
-    km,
-    kmGlonass: parseFloat(document.getElementById('rec_km_glonass').value) || null,
-    odoStart: start,
-    odoEnd: end,
+    ...numeric,
     driver: document.getElementById('rec_driver').value.trim() || null,
     fuelGrade: document.getElementById('rec_fuel_grade').value === 'Бензин' ? '' : document.getElementById('rec_fuel_grade').value,
-    fuelIssued: parseFloat(document.getElementById('rec_fuel_issued').value) || null,
-    fuelSum:    parseFloat(document.getElementById('rec_fuel_sum').value)    || null,
-    fuelUsed:   optionalNumber('rec_fuel_used'),
-    fuelActual: document.getElementById('rec_fuel_actual').value.trim() === '' ? null : parseFloat(document.getElementById('rec_fuel_actual').value),
-    fuelIdle:   parseFloat(document.getElementById('rec_fuel_idle').value)   || null,
-    tankMeasured: document.getElementById('rec_tank_measured').value.trim() === '' ? null : parseFloat(document.getElementById('rec_tank_measured').value),
     fuelCardNum: document.getElementById('rec_fuel_card').value || null,
     route: routeGet(),
     note: document.getElementById('rec_note').value.trim(),
@@ -142,7 +135,7 @@ async function recDeleteSelected() {
 }
 
 // ─── MODALS ──────────────────────────────────────────────
-function openModal(id) { document.getElementById(id).classList.add('open'); }
+function openModal(id) { const modal=document.getElementById(id); precisionRemember(modal); modal.classList.add('open'); }
 function closeModal(id) {
   document.getElementById(id).classList.remove('open');
   if (id === 'confirmModal' && _confirmResolve) { const resolve = _confirmResolve; _confirmResolve = null; resolve(false); }

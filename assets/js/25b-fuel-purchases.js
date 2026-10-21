@@ -26,11 +26,11 @@ function fpEsc(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 function fpJs(value) { return htmlEsc(JSON.stringify(value)); }
-function fpRound(v) { return Math.round((+v || 0) * 100) / 100; }
+function fpRound(v) { return precisionRound(v ?? 0,2); }
 // Литры хранятся до миллилитра; денежные суммы по-прежнему округляются до копеек.
-function fpQtyRound(v) { return Math.round((+v || 0) * 1000) / 1000; }
+function fpQtyRound(v) { return precisionRound(v ?? 0,3); }
 function fpNum(v, dec) {
-  return (+v || 0).toLocaleString('ru', { minimumFractionDigits: dec ?? 2, maximumFractionDigits: dec ?? 2 });
+  return precisionFormat(v,{...(dec==null?{}:{scale:dec,minimumScale:dec})});
 }
 function fpList() { return data.fuelPurchases || (data.fuelPurchases = []); }
 function fpLive() { return fpList().filter(p => !p.deleted); }
@@ -89,8 +89,8 @@ function fpApply(p, sign) {
       rec = fpRecordFor(p.vehicleId, p.date, p.grade, true);
     }
     const before = +rec.fuelIssued || 0;
-    rec.fuelIssued = fpQtyRound(before + (+p.qty || 0)) || null;
-    if (+p.sum) rec.fuelSum = fpRound((+rec.fuelSum || 0) + (+p.sum)) || null;
+    rec.fuelIssued = DecimalCore.toNumberExact(DecimalCore.add(before,p.qty??0));
+    if (fqValue(p.sum)!=null)rec.fuelSum=DecimalCore.toNumberExact(DecimalCore.add(rec.fuelSum??0,p.sum));
     if (!rec.fuelGrade) rec.fuelGrade = p.grade;
     if (p.importKey && typeof fuelImportAppendNote === 'function') {
       fuelImportAppendNote(rec, 'заправка: ' + (p.product || p.grade) + ' ' + fpQtyRound(p.qty) + 'л; импорт заправок: ' + p.importKey);
@@ -102,10 +102,10 @@ function fpApply(p, sign) {
   p.recordId = null;
   if (!rec) return null;
   const before = +rec.fuelIssued || 0;
-  const left = fpQtyRound(before - (+p.qty || 0));
+  const left = DecimalCore.toNumberExact(DecimalCore.sub(before,p.qty??0));
   rec.fuelIssued = left > 0 ? left : null;
   if (+p.sum && rec.fuelSum) {
-    const s = fpRound(rec.fuelSum - p.sum);
+    const s = DecimalCore.toNumberExact(DecimalCore.sub(rec.fuelSum,p.sum));
     rec.fuelSum = s > 0 ? s : null;
   }
   if (fpRecordIsEmpty(rec)) data.records = data.records.filter(r => r !== rec);
@@ -117,7 +117,7 @@ function fpUpdate(p, changes) {
   if (typeof gsmStampPurchase === 'function') gsmStampPurchase(p, data);
   fpApply(p, -1);
   Object.assign(p, changes, { editedAt: new Date().toISOString() });
-  if (p.qty && p.sum) p.price = fpRound(p.sum / p.qty);
+  if (!Object.hasOwn(changes,'price')&&p.qty&&p.sum)p.price=precisionRound(DecimalCore.div(p.sum,p.qty,{scale:12,rounding:'half-away-from-zero'}),6);
   return fpApply(p, +1);
 }
 
@@ -132,9 +132,9 @@ function fpCreate(tx, opts) {
     recordId: opts.recordId || null,
     grade: opts.grade || parseFuelGrade(tx.fuel) || '',
     product: tx.fuel || '',
-    qty: fpQtyRound(tx.qty),
-    price: fqValue(tx.price) != null ? fpRound(tx.price) : (fqValue(tx.sum) != null && tx.qty ? fpRound(tx.sum / tx.qty) : null),
-    sum: fqValue(tx.sum) != null ? fpRound(tx.sum) : null,
+    qty: tx.qty,
+    price: fqValue(tx.price) != null ? tx.price : (fqValue(tx.sum) != null && tx.qty ? precisionRound(DecimalCore.div(tx.sum,tx.qty,{scale:12,rounding:'half-away-from-zero'}),6) : null),
+    sum: fqValue(tx.sum) != null ? tx.sum : null,
     cardNo: tx.cardNo || '',
     vehicleText: tx.vehicleText || '',
     azs: tx.azs || '',
@@ -156,13 +156,13 @@ function fpRefreshFromTx(p, tx) {
   if (tx.region && !p.region) p.region = tx.region;
   if (tx.fuel && !p.product) p.product = tx.fuel;
   if (tx.sum && (p.restored || fqValue(p.sum) == null) && Math.abs((+p.sum || 0) - tx.sum) >= 0.01) {
-    const delta = fpRound(tx.sum - (+p.sum || 0));
-    p.sum = fpRound(tx.sum);
-    p.price = tx.price ? fpRound(tx.price) : fpRound(tx.sum / (p.qty || tx.qty || 1));
+    const delta = DecimalCore.toNumberExact(DecimalCore.sub(tx.sum,p.sum??0));
+    p.sum = tx.sum;
+    p.price = fqValue(tx.price)!=null ? tx.price : precisionRound(DecimalCore.div(tx.sum,p.qty||tx.qty||1,{scale:12,rounding:'half-away-from-zero'}),6);
     const rec = p.recordId && !p.deleted && (data.records || []).find(r => r.id === p.recordId);
-    if (rec) rec.fuelSum = fpRound((+rec.fuelSum || 0) + delta) || null;
+    if (rec) rec.fuelSum=DecimalCore.toNumberExact(DecimalCore.add(rec.fuelSum??0,delta));
   }
-  if (tx.price && fqValue(p.price) == null) p.price = fpRound(tx.price);
+  if (fqValue(tx.price)!=null&&fqValue(p.price)==null)p.price=tx.price;
   p.restored = false;
 }
 
@@ -248,7 +248,7 @@ function fpRestoreFromJournal() {
     const v = (data.vehicles || []).find(x => x.id === rec.vehicleId);
     const totalQty = totals.get(rec);
     keys.forEach(k => {
-      const sum = +rec.fuelSum && totalQty ? fpRound(rec.fuelSum * k.qty / totalQty) : null;
+      const sum = +rec.fuelSum && totalQty ? precisionRound(DecimalCore.div(DecimalCore.mul(rec.fuelSum,k.qty),totalQty,{scale:12,rounding:'half-away-from-zero'}),2) : null;
       const p = fpCreate({ importKey: k.key, date: k.date, qty: k.qty, sum, cardNo: k.card, comment: k.comment, fuel: k.product },
         { vehicleId: rec.vehicleId, recordId: rec.id, grade: parseFuelGrade(k.product) || recordFuelGrade(rec, v), date: k.date });
       p.restored = true;
@@ -446,8 +446,8 @@ function fpRenderVehicle() {
       <td><span class="fuel-tag ${fuelTypeFromGrade(p.grade)}" style="font-size:10px;padding:1px 6px">${fpEsc(p.grade || '—')}</span></td>
       <td style="max-width:150px;white-space:normal">${fpEsc(p.product || '—')}</td>
       <td style="text-align:right;font-weight:700">${fpNum(p.qty)}</td>
-      <td style="text-align:right">${p.price ? fpNum(p.price) : '—'}</td>
-      <td style="text-align:right">${p.sum ? fpNum(p.sum) : '—'}${p.restored ? '<div style="font-size:10px;color:var(--text3)" title="Восстановлено из журнала, точная сумма подтянется при повторной загрузке выписки">≈ по журналу</div>' : ''}</td>
+      <td style="text-align:right">${p.price != null ? fpNum(p.price) : '—'}</td>
+      <td style="text-align:right">${p.sum != null ? fpNum(p.sum) : '—'}${p.restored ? '<div style="font-size:10px;color:var(--text3)" title="Восстановлено из журнала, точная сумма подтянется при повторной загрузке выписки">≈ по журналу</div>' : ''}</td>
       <td>${fpEsc(p.cardNo || '—')}</td>
       <td style="max-width:280px;white-space:normal;font-size:12px">${fpEsc(fpPlace(p) || '—')}</td>
       <td style="font-size:12px">${stateHtml(p)}</td>
@@ -527,7 +527,7 @@ function fpUnmatchedHtml(list) {
         <td>${fmtDate(p.date)} ${fpEsc(p.time || '')}</td>
         <td>${fpEsc(p.product || p.grade || '—')}</td>
         <td style="text-align:right;font-weight:700">${fpNum(p.qty)}</td>
-        <td style="text-align:right">${p.sum ? fpNum(p.sum) : '—'}</td>
+        <td style="text-align:right">${p.sum != null ? fpNum(p.sum) : '—'}</td>
         <td>${fpEsc(p.cardNo || '—')}</td>
         <td>${fpEsc(p.vehicleText || '—')}</td>
         <td style="max-width:260px;white-space:normal;font-size:12px">${fpEsc(fpPlace(p) || '—')}</td>
@@ -614,7 +614,7 @@ function fpEdit(id) {
     </div>
     <div class="form-row">
       <div class="form-group"><label>Литры</label><input type="number" id="fpe_qty" min="0.001" step="0.001" value="${p.qty ?? ''}" oninput="fpEditRecalc('qty')"></div>
-      <div class="form-group"><label>Цена, ₽/л</label><input type="number" id="fpe_price" step="0.01" value="${p.price ?? ''}" oninput="fpEditRecalc('price')"></div>
+      <div class="form-group"><label>Цена, ₽/л</label><input type="number" id="fpe_price" step="any" value="${p.price ?? ''}" oninput="fpEditRecalc('price')"></div>
       <div class="form-group"><label>Сумма, ₽</label><input type="number" id="fpe_sum" step="0.01" value="${p.sum ?? ''}"></div>
     </div>
     <div class="form-group"><label>Комментарий</label><input type="text" id="fpe_comment" value="${fpEsc(p.comment || '')}"></div>
@@ -634,9 +634,10 @@ function fpEdit(id) {
 
 // Литры или цена изменились — пересчитать сумму
 function fpEditRecalc() {
-  const q = parseFloat(document.getElementById('fpe_qty').value);
-  const pr = parseFloat(document.getElementById('fpe_price').value);
-  if (q && pr) document.getElementById('fpe_sum').value = fpRound(q * pr);
+  try {
+    const q=precisionInput('fpe_qty',{scale:3,blank:'null'}),pr=precisionInput('fpe_price',{scale:6,blank:'null'});
+    if(q!=null&&pr!=null)document.getElementById('fpe_sum').value=precisionRound(DecimalCore.mul(q,pr),2);
+  } catch { /* Keep the draft while a number is incomplete. */ }
 }
 
 async function fpEditSave(id) {
@@ -648,9 +649,10 @@ async function fpEditSave(id) {
   }
   const date = parseDate(document.getElementById('fpe_date').value.trim());
   if (!fuelEditAllowed(p.date, date)) return;
-  const qty = Number(document.getElementById('fpe_qty').value);
+  const numeric=precisionRead({qty:['fpe_qty',3,'error'],sum:['fpe_sum',2],price:['fpe_price',6]},p);if(!numeric)return;
+  const {qty,sum,price}=numeric;
   if (!date) { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'fpe_date'); return; }
-  if (!Number.isFinite(qty) || !(qty > 0) || Math.abs(qty - fpQtyRound(qty)) > 0.000001) { showFieldError('Укажите положительные литры, до трёх знаков после запятой', 'fpe_qty'); return; }
+  if (!Number.isFinite(qty) || !(qty > 0)) { showFieldError('Укажите положительные литры, до трёх знаков после запятой', 'fpe_qty'); return; }
   if (!gsmValidDate(date)) { showFieldError('Некорректная дата', 'fpe_date'); return; }
   const cardNo = document.getElementById('fpe_card').value.trim();
   const owner = gsmCardAt(data, cardNo, date);
@@ -665,12 +667,10 @@ async function fpEditSave(id) {
     const problem = gsmManualRecipientError(data, vehicleId, cardNo, date, grade);
     if (problem) { showFieldError(problem, 'fpe_vehicle'); return; }
   }
-  const sum = optionalNumber('fpe_sum'), price = optionalNumber('fpe_price');
   if ([sum, price].some(n => n != null && (!Number.isFinite(n) || n < 0))) { showFieldError('Сумма и цена должны быть неотрицательными', 'fpe_sum'); return; }
   const before = JSON.stringify(data);
   const changes = {
-    date, qty: fpQtyRound(qty), sum: sum != null ? fpRound(sum) : null,
-    price: price != null ? fpRound(price) : null,
+    date, qty, sum, price,
     time: document.getElementById('fpe_time').value.trim(),
     grade,
     vehicleId,
@@ -807,12 +807,12 @@ async function fpSyncRecord(recordId) {
   const rec = (data.records || []).find(r => r.id === recordId);
   if (!rec || !fuelEditAllowed(rec.date)) return;
   const list = fpLive().filter(p => fpLinkedRecord(p)?.id === recordId);
-  const qty = fpQtyRound(list.reduce((s, p) => s + (+p.qty || 0), 0));
-  const sum = fpRound(list.reduce((s, p) => s + (+p.sum || 0), 0));
+  const qty=DecimalCore.toNumberExact(DecimalCore.sum(list.map(p=>p.qty??0)));
+  const sum=DecimalCore.toNumberExact(DecimalCore.sum(list.map(p=>p.sum??0)));
   if (!confirm(`Поставить в журнал за ${fmtDate(rec.date)}: ${fpNum(qty)} л вместо ${fpNum(rec.fuelIssued)} л?`)) return;
   list.forEach(p => { p.recordId = recordId; });
   rec.fuelIssued = qty || null;
-  if (sum) rec.fuelSum = sum;
+  if (list.some(p=>p.sum!=null)) rec.fuelSum=sum;
   fpSaveAndRender();
 }
 
@@ -842,8 +842,8 @@ function fpDoubles() {
     const v = (data.vehicles || []).find(x => x.id === list[0].vehicleId);
     if (!v || fpIsOffice(v)) return;
     list.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-    const litres = fpQtyRound(list.reduce((s, p) => s + (+p.qty || 0), 0));
-    const sum = fpRound(list.reduce((s, p) => s + (+p.sum || 0), 0));
+    const litres=DecimalCore.toNumberExact(DecimalCore.sum(list.map(p=>p.qty??0)));
+    const sum=DecimalCore.toNumberExact(DecimalCore.sum(list.map(p=>p.sum??0)));
     const journal = fpQtyRound(recsFor(v.id).filter(r => r.date === list[0].date).reduce((s, r) => s + (+r.fuelIssued || 0), 0));
     const own = fpFuelFamily(vehicleFuelGrade(v));
     const grades = [...new Set(list.map(p => p.grade).filter(Boolean))];
@@ -903,7 +903,7 @@ function fpDoublesHtml(all) {
       <td style="cursor:pointer" onclick="fpOpenVehicle(${fpJs(d.v.id)})"><b>${fpEsc(d.v.plate)}</b><div style="font-size:12px;color:var(--text3)">${fpEsc(d.v.make || '')} · ${fpEsc(vehicleFuelGrade(d.v))}</div></td>
       <td style="font-size:12px;color:var(--text3);max-width:180px;white-space:normal">${fpEsc(d.v.object || '')}</td>
       <td style="text-align:center">${d.list.length}</td>
-      <td style="font-size:12px">${d.list.map(p => `<div>${fpEsc(p.time || '—:—')} · <span class="fuel-tag ${fuelTypeFromGrade(p.grade)}" style="font-size:10px;padding:0 5px">${fpEsc(p.grade || '—')}</span> ${fpNum(p.qty)} л${p.sum ? ' · ' + fpNum(p.sum) + ' ₽' + (p.restored ? '≈' : '') : ''}
+      <td style="font-size:12px">${d.list.map(p => `<div>${fpEsc(p.time || '—:—')} · <span class="fuel-tag ${fuelTypeFromGrade(p.grade)}" style="font-size:10px;padding:0 5px">${fpEsc(p.grade || '—')}</span> ${fpNum(p.qty)} л${p.sum != null ? ' · ' + fpNum(p.sum) + ' ₽' + (p.restored ? '≈' : '') : ''}
         <a href="#" style="margin-left:6px;font-size:11px" onclick="event.preventDefault();fpEdit(${fpJs(p.id)})">изменить</a>
         <a href="#" style="margin-left:4px;font-size:11px;color:var(--red)" title="Удалить заправку и снять её с журнала" onclick="event.preventDefault();fpDelete(${fpJs(p.id)})">✕</a></div>`).join('')}</td>
       <td style="text-align:right;font-weight:700;${d.litres > FP_DAY_LIMIT ? 'color:var(--red)' : ''}">${fpNum(d.litres)}</td>
@@ -974,7 +974,7 @@ function fpExportDoubles() {
     put(r, 2, d.v.make || '', s);
     put(r, 3, d.v.object || '', s);
     put(r, 4, d.list.length, sn);
-    put(r, 5, d.list.map(p => (p.time || '—') + ' ' + (p.grade || '') + ' ' + fpNum(p.qty) + ' л' + (p.sum ? ' · ' + fpNum(p.sum) + ' ₽' : '')).join('\n'), s);
+    put(r, 5, d.list.map(p => (p.time || '—') + ' ' + (p.grade || '') + ' ' + fpNum(p.qty) + ' л' + (p.sum != null ? ' · ' + fpNum(p.sum) + ' ₽' : '')).join('\n'), s);
     put(r, 6, d.litres, sn, '#,##0.00');
     put(r, 7, d.sum || '', sn, '#,##0.00');
     put(r, 8, d.flags.join('; ') + (d.checked ? (d.flags.length ? '; ' : '') + 'проверено' + (d.checkNote ? ': ' + d.checkNote : '') : ''), st(Object.assign({ font: { sz: 10, color: { rgb: P.amber } } }, fill ? { fill } : {})));
@@ -1364,7 +1364,7 @@ async function mfSaveRow(el) {
   if (!fuelEditAllowed(month)) return;
   const mfId = el.dataset.mfid;
   const isSum = el.dataset.field === 'sum';
-  const val = parseFloat(el.value) || null;
+  let val;try { val=precisionInput(el,{scale:isSum?2:3,blank:'null',...((data.monthlyFuel||[]).some(row=>row.id===mfId)?{previous:(data.monthlyFuel||[]).find(row=>row.id===mfId)[isSum?'sum':'liters']}:{})}); } catch(error) {showFieldError(error.message,el.id);return;}
   if (!mfId && val == null) return;
   const rec = mfFindOrCreate(vid, month, mfId);
   if (!mfId) el.dataset.mfid = rec.id;

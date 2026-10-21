@@ -151,15 +151,15 @@ async function saveVehicleTo() {
   const type    = document.getElementById('vto_type').value.trim();
   if (!dateIso) { showFieldError('Укажите дату проведения ТО', 'vto_date'); return; }
   if (!type)    { showFieldError('Укажите вид ТО', 'vto_type'); return; }
-  const nextKm      = parseFloat(document.getElementById('vto_next_km').value);
-  const odometer    = parseFloat(document.getElementById('vto_odometer').value);
+  const previous=editingVehicleToId==null?null:(data.vehicleTo||[]).find(r=>r.id===editingVehicleToId);
+  const numeric=precisionRead({nextKm:['vto_next_km',3],odometer:['vto_odometer',3],cost:['vto_cost',2]},previous);if(!numeric)return;
+  const {nextKm,odometer}=numeric;
   const nextDate    = parseDate(document.getElementById('vto_next_date').value.trim()) || null;
-  const hasNextKm   = !isNaN(nextKm);
-  const hasOdometer = !isNaN(odometer);
-  if (!validNonnegativeFields(['vto_odometer', 'vto_next_km', 'vto_cost'])) return;
+  const hasNextKm   = nextKm != null;
+  const hasOdometer = odometer != null;
   const rawNextDate = document.getElementById('vto_next_date').value.trim();
   if (rawNextDate && !nextDate) { showFieldError('Проверьте дату следующего ТО', 'vto_next_date'); return; }
-  const nextOdometerAbs = hasOdometer && hasNextKm ? Math.round(odometer + nextKm) : null;
+  const nextOdometerAbs = previous && previous.odometer===odometer && previous.nextKm===nextKm ? previous.nextOdometerAbs : hasOdometer && hasNextKm ? DecimalCore.toNumberExact(DecimalCore.add(odometer,nextKm)) : null;
   const obj = {
     vehicleId:  document.getElementById('vehicleToModal').dataset.vid,
     date:       dateIso,
@@ -168,7 +168,7 @@ async function saveVehicleTo() {
     nextKm:     hasNextKm ? nextKm : null,
     nextOdometerAbs,
     nextDate,
-    cost:       optionalNumber('vto_cost'),
+    cost:       numeric.cost,
     performer:  document.getElementById('vto_performer').value.trim(),
     note:       document.getElementById('vto_note').value.trim(),
   };

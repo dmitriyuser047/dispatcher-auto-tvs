@@ -172,7 +172,7 @@ function frcData(month) {
   fpLive().filter(p => (p.date || '').startsWith(month)).forEach(p => {
     const k = frcProvider(p);
     const x = by.get(k) || { litres: 0, sum: 0, n: 0, noSum: 0 };
-    x.litres += fqValue(p.qty) || 0; x.sum += fqValue(p.sum) || 0; x.n++; if (fqValue(p.sum) == null) x.noSum++;
+    x.litres=DecimalCore.toNumberExact(DecimalCore.add(x.litres,fqValue(p.qty)||0));x.sum=DecimalCore.toNumberExact(DecimalCore.add(x.sum,fqValue(p.sum)||0)); x.n++; if (fqValue(p.sum) == null) x.noSum++;
     by.set(k, x);
   });
   return by;
@@ -184,9 +184,9 @@ function frcCompleteness(month) {
   const result={providers:providers.length,litresKnown:0,moneyKnown:0,statementMoneyKnown:0,litres:0,money:0,statementLitres:0,statementMoney:0};
   providers.forEach(provider => {
     const values=recon[provider] || {}, statement=by.get(provider) || {litres:0,sum:0,n:0,noSum:0};
-    result.statementLitres+=statement.litres; result.statementMoney+=statement.sum;
-    if (frcHas(values.litres)) { result.litresKnown++; result.litres+=Number(values.litres); }
-    if (frcHas(values.sum)) { result.moneyKnown++; result.money+=Number(values.sum); }
+    result.statementLitres=DecimalCore.toNumberExact(DecimalCore.add(result.statementLitres,statement.litres)); result.statementMoney=DecimalCore.toNumberExact(DecimalCore.add(result.statementMoney,statement.sum));
+    if (frcHas(values.litres)) { result.litresKnown++; result.litres=DecimalCore.toNumberExact(DecimalCore.add(result.litres,Number(values.litres))); }
+    if (frcHas(values.sum)) { result.moneyKnown++; result.money=DecimalCore.toNumberExact(DecimalCore.add(result.money,Number(values.sum))); }
     if (!statement.noSum) result.statementMoneyKnown++;
   });
   result.litresComplete=providers.length > 0 && result.litresKnown === providers.length;
@@ -200,25 +200,25 @@ function frcHtml() {
   if (!frcMonth || !months.includes(frcMonth)) frcMonth=months[0] || '';
   if (!frcMonth) return '<div class="welcome"><p>Нет данных</p></div>';
   const recon=(fuelPeriod(frcMonth) || {}).recon || {}, closed=fuelMonthClosed(frcMonth), by=frcData(frcMonth), providers=[...new Set([...by.keys(),...Object.keys(recon),...drafts.filter(entry=>entry.month===frcMonth).map(entry=>entry.provider)])].sort((a,b) => a.localeCompare(b,'ru'));
-  const total=frcCompleteness(frcMonth), journal=(data.records || []).filter(r => String(r.date || '').startsWith(frcMonth)).reduce((sum,r) => sum+(fqValue(r.fuelIssued) || 0),0);
+  const total=frcCompleteness(frcMonth), journal=DecimalCore.toNumberExact(DecimalCore.sum((data.records||[]).filter(r=>String(r.date||'').startsWith(frcMonth)).map(r=>fqValue(r.fuelIssued)||0)));
   const difference=(a,b,money) => {
-    if (!frcHas(a) || !frcHas(b)) return '—'; const delta=Number(a)-Number(b), tolerance=money ? 1 : 0.5;
-    return '<span style="font-weight:700;color:'+(Math.abs(delta) <= tolerance ? 'var(--green)' : 'var(--red)')+'">'+(delta > 0 ? '+' : '')+fpNum(delta,money ? 2 : 1)+'</span>';
+    if (!frcHas(a) || !frcHas(b)) return '—'; const delta=DecimalCore.toNumberExact(DecimalCore.sub(a,b)), tolerance=money ? 1 : 0.5;
+    return '<span style="font-weight:700;color:'+(Math.abs(delta) <= tolerance ? 'var(--green)' : 'var(--red)')+'">'+(delta > 0 ? '+' : '')+precisionFormat(delta,{minimumScale:money?2:0})+'</span>';
   };
   const input=(provider,field,value,type) => frcInput(frcMonth,provider,field,value,closed,type);
   const rows=providers.map(provider => {
     const s=by.get(provider) || {litres:0,sum:0,n:0,noSum:0}, r=recon[provider] || {};
-    return '<tr><td><b>'+fpEsc(provider)+'</b><div>'+s.n+' операций'+(s.noSum ? ' · без суммы: '+s.noSum : '')+'</div></td><td>'+fpNum(s.litres,1)+'</td><td>'+fpNum(s.sum,2)+(s.noSum ? ' (частично)' : '')+'</td><td>'+input(provider,'litres',r.litres)+'</td><td>'+input(provider,'sum',r.sum)+'</td><td data-frc-difference="'+fpEsc(JSON.stringify([provider,'litres']))+'">'+difference(s.litres,r.litres,false)+'</td><td data-frc-difference="'+fpEsc(JSON.stringify([provider,'sum']))+'">'+(s.noSum ? 'нужны суммы выписки' : difference(s.sum,r.sum,true))+'</td><td>'+input(provider,'note',r.note,'text')+'</td></tr>';
+    return '<tr><td><b>'+fpEsc(provider)+'</b><div>'+s.n+' операций'+(s.noSum ? ' · без суммы: '+s.noSum : '')+'</div></td><td>'+fpNum(s.litres)+'</td><td>'+precisionFormat(s.sum,{minimumScale:2})+(s.noSum ? ' (частично)' : '')+'</td><td>'+input(provider,'litres',r.litres)+'</td><td>'+input(provider,'sum',r.sum)+'</td><td data-frc-difference="'+fpEsc(JSON.stringify([provider,'litres']))+'">'+difference(s.litres,r.litres,false)+'</td><td data-frc-difference="'+fpEsc(JSON.stringify([provider,'sum']))+'">'+(s.noSum ? 'нужны суммы выписки' : difference(s.sum,r.sum,true))+'</td><td>'+input(provider,'note',r.note,'text')+'</td></tr>';
   }).join('');
-  const partial=(value,known) => known ? fpNum(value,2)+(known < total.providers ? ' (частично: '+known+'/'+total.providers+')' : '') : 'не внесено';
+  const partial=(value,known) => known ? precisionFormat(value)+(known < total.providers ? ' (частично: '+known+'/'+total.providers+')' : '') : 'не внесено';
   return '<div style="display:flex;gap:12px;align-items:center;margin-bottom:12px"><select class="fsel" onchange="frcMonth=this.value;renderFuelPurchases()">'+months.map(month => '<option value="'+month+'"'+(month === frcMonth ? ' selected' : '')+'>'+fpMonthLabel(month)+(fuelMonthClosed(month) ? ' — закрыт' : '')+'</option>').join('')+'</select>'+(closed ? 'Месяц закрыт' : '')+'</div>'+
     '<div id="frcSaveStatus" role="status" aria-live="polite" style="font-size:12px;margin-bottom:12px">'+frcSaveStatusHtml(session)+'</div>'+
-    '<div id="frcTotals" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'+fkCard('Выписки',fpNum(total.statementLitres,1)+' л',fpNum(total.statementMoney,2)+' ₽'+(total.statementMoneyComplete ? '' : ' · стоимость неполная'),'#2563eb')+
+    '<div id="frcTotals" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'+fkCard('Выписки',fpNum(total.statementLitres)+' л',precisionFormat(total.statementMoney,{minimumScale:2})+' ₽'+(total.statementMoneyComplete ? '' : ' · стоимость неполная'),'#2563eb')+
     fkCard('Литры 1С',partial(total.litres,total.litresKnown),'Заполнено поставщиков: '+total.litresKnown+' из '+total.providers,total.litresComplete ? '#16a34a' : '#d97706')+
     fkCard('Стоимость 1С',partial(total.money,total.moneyKnown),'Заполнено поставщиков: '+total.moneyKnown+' из '+total.providers,total.moneyComplete ? '#16a34a' : '#d97706')+
-    fkCard('Журнал без выписок',fpNum(journal-total.statementLitres,1)+' л','Выдано по журналу: '+fpNum(journal,1)+' л','#64748b')+'</div>'+
+    fkCard('Журнал без выписок',fpNum(DecimalCore.sub(journal,total.statementLitres))+' л','Выдано по журналу: '+fpNum(journal)+' л','#64748b')+'</div>'+
     '<div class="table-scroll"><table class="data-table"><thead><tr><th>Поставщик</th><th>Выписка, л</th><th>Выписка, ₽</th><th>1С, л</th><th>1С, ₽</th><th>Разница, л</th><th>Разница, ₽</th><th>Примечание</th></tr></thead><tbody>'+rows+
-    '<tr id="frcTotalsRow" style="font-weight:700"><td>Итого</td><td>'+fpNum(total.statementLitres,1)+'</td><td>'+fpNum(total.statementMoney,2)+(total.statementMoneyComplete ? '' : ' (частично)')+'</td><td>'+partial(total.litres,total.litresKnown)+'</td><td>'+partial(total.money,total.moneyKnown)+'</td><td>'+(total.litresComplete ? difference(total.statementLitres,total.litres,false) : 'неполные данные')+'</td><td>'+(total.moneyComplete && total.statementMoneyComplete ? difference(total.statementMoney,total.money,true) : 'неполные данные')+'</td><td></td></tr></tbody></table></div>'+
+    '<tr id="frcTotalsRow" style="font-weight:700"><td>Итого</td><td>'+fpNum(total.statementLitres)+'</td><td>'+precisionFormat(total.statementMoney,{minimumScale:2})+(total.statementMoneyComplete ? '' : ' (частично)')+'</td><td>'+partial(total.litres,total.litresKnown)+'</td><td>'+partial(total.money,total.moneyKnown)+'</td><td>'+(total.litresComplete ? difference(total.statementLitres,total.litres,false) : 'неполные данные')+'</td><td>'+(total.moneyComplete && total.statementMoneyComplete ? difference(total.statementMoney,total.money,true) : 'неполные данные')+'</td><td></td></tr></tbody></table></div>'+
     '<div style="font-size:12px;color:var(--text3);margin-top:12px">Литры и стоимость проверяются независимо. Пустое поле означает отсутствие данных; введённый ноль учитывается. Общая разница появляется только после заполнения всех поставщиков по соответствующему показателю; для стоимости также нужны суммы всех операций выписки. Допуск: 0,5 л и 1 ₽. Данные 1С пока вносятся вручную.</div>';
 }
 async function frcPersist(session,entry) {
@@ -262,9 +262,9 @@ async function frcSet(month,provider,field,value,expectedStamp) {
   if(expectedStamp!==undefined && expectedStamp!==frcContextStamp()){showToast('База или пользователь изменились. Откройте сверку заново.');return false;}
   if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month)||typeof provider!=='string'||!provider.trim()||['__proto__','prototype','constructor'].includes(provider)||!['litres','sum','note'].includes(field))return false;
   const text=String(value??''),empty=text.trim()==='';
-  if(field!=='note' && !empty && !Number.isFinite(Number(text))){showToast('Укажите число или оставьте поле пустым');return false;}
+  let numeric;try{if(field!=='note')numeric=empty?'':precisionParse(text,{scale:field==='sum'?2:3,blank:'null'});}catch(error){showToast(error.code==='PRECISION'?'Допустимо знаков после запятой: '+(field==='sum'?2:3):'Укажите полное неотрицательное число или оставьте поле пустым');return false;}
   const session=frcSession(),key=frcDraftKey(month,provider,field),previous=session.drafts.get(key),predecessor=previous && ['queued','saving'].includes(previous.state) ? previous : null;
-  const entry={key,month,provider,field,text,value:field==='note' ? text.trim() : empty ? '' : Number(text),base:predecessor ? predecessor.base : frcReadValue(month,provider,field),predecessor,state:'queued',saved:false,error:''};
+  const entry={key,month,provider,field,text,value:field==='note' ? text.trim() : numeric,base:predecessor ? predecessor.base : frcReadValue(month,provider,field),predecessor,state:'queued',saved:false,error:''};
   return frcQueue(session,entry);
 }
 async function frcRetry(expectedStamp) {
@@ -275,7 +275,7 @@ async function frcRetry(expectedStamp) {
 }
 function frcHasPendingEdits() {
   const session=frcSession(),input=document.activeElement;
-  const invalid=[...document.querySelectorAll('[data-frc-field]')].some(field=>field.dataset.frcStamp===session.stamp && field.validity?.badInput);
+  const invalid=[...document.querySelectorAll('[data-frc-field]')].some(field=>field.dataset.frcStamp===session.stamp&&(field.validity?.badInput||field.value!==field.dataset.frcRendered));
   return session.pending>0 || session.drafts.size>0 || invalid || !!(input?.matches?.('[data-frc-field]') && input.dataset.frcStamp===session.stamp && input.value!==input.dataset.frcRendered);
 }
 async function frcFlush() {
@@ -290,7 +290,7 @@ async function frcFlush() {
     if(frcSameSession(session) && (!captured || captured.text!==text) && await frcSet(month,provider,field,text,session.stamp)!==true)return false;
   }
   await session.chain;
-  return frcSameSession(session) && session.pending===0 && session.drafts.size===0;
+  return frcSameSession(session)&&session.pending===0&&session.drafts.size===0&&!frcHasPendingEdits();
 }
 async function frcDiscard(expectedStamp) {
   if(expectedStamp!==undefined && expectedStamp!==frcContextStamp())return false;

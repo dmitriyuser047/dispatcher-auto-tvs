@@ -125,7 +125,7 @@ test('absence of metadata preserves the complete legacy calculation and audit re
 });
 
 test('browser pure modules require no application state and use the same explicit boundaries as CommonJS',()=>{
-  const browser=vm.createContext({});for(const name of ['accounting-boundary','fuel-engine','writeoff-engine','fuel-audit']){
+  const browser=vm.createContext({});for(const name of ['decimal-core','accounting-boundary','fuel-engine','writeoff-engine','fuel-audit']){
     const file=path.join(__dirname,'../assets/core',name+'.js');vm.runInContext(fs.readFileSync(file,'utf8'),browser,{filename:file});
   }
   assert.deepEqual(copy(browser.AccountingBoundary.window(browser.AccountingBoundary.resolve('vehicles',database().vehicles[0]),september)),boundary.window(boundary.resolve('vehicles',database().vehicles[0]),september));
@@ -135,7 +135,7 @@ test('browser pure modules require no application state and use the same explici
 });
 
 test('explicit metadata cannot be ignored if an older browser loader omitted the accounting module',()=>{
-  const browser=vm.createContext({});vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core/fuel-engine.js'),'utf8'),browser);
+  const browser=vm.createContext({});vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core/decimal-core.js'),'utf8'),browser);vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core/fuel-engine.js'),'utf8'),browser);
   assert.throws(()=>browser.TvsFuelEngine.buildLedger(database(),september),{code:'MODULE_UNAVAILABLE'});
   const legacy=database();delete legacy.vehicles[0].fuelAccounting;assert.deepEqual(copy(browser.TvsFuelEngine.buildLedger(legacy,september)),copy(fuel.buildLedger(legacy,september)));
 });

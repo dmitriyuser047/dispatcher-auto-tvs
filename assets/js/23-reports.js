@@ -2,6 +2,7 @@
 let reportPeriod='all',reportGroupBy='category',reportKind='fuel';
 let reportOrg='',reportObject='',reportCategory='',reportSettlement='',reportExpandedKey=null;
 const REPORT_GROUPS={category:'По статьям',vehicle:'По ТС',contragent:'По контрагентам',org:'По организациям',object:'По объектам',month:'По месяцам'};
+function reportsAdd(a,b){return DecimalCore.toNumberExact(DecimalCore.add(a,b));}
 function reportsFilteredPayments() {
   return (data.payments||[]).filter(p=>{
     if(reportPeriod!=='all'&&String(p.date||'').slice(0,7)!==reportPeriod)return false;
@@ -31,7 +32,7 @@ function reportsPaymentGroups(payments) {
   payments.forEach(p=>{
     const group=reportsPaymentGroup(p);
     if(!groups.has(group.key))groups.set(group.key,{...group,count:0,sum:0,paid:0,debt:0,overdue:0});
-    const out=groups.get(group.key);out.count++;out.sum+=finNumber(p.sum);out.paid+=finPaidAmount(p);out.debt+=finDebt(p);if(finOverdue(p))out.overdue+=finDebt(p);
+    const out=groups.get(group.key);out.count++;out.sum=reportsAdd(out.sum,finNumber(p.sum));out.paid=reportsAdd(out.paid,finPaidAmount(p));out.debt=reportsAdd(out.debt,finDebt(p));if(finOverdue(p))out.overdue=reportsAdd(out.overdue,finDebt(p));
   });
   return [...groups.values()].sort((a,b)=>b.sum-a.sum||a.name.localeCompare(b.name,'ru'));
 }
@@ -44,8 +45,8 @@ function reportsToggleDetail(key) {reportExpandedKey=reportExpandedKey===key?nul
 function reportsOpenPayment(id) {switchSection('finances');openEditPayment(id);}
 function renderReportsSection() {
   if(reportKind==='fuel'){renderFuelReport();return;}
-  const filtered=reportsFilteredPayments(),groups=reportsPaymentGroups(filtered),money=n=>n.toLocaleString('ru',{maximumFractionDigits:2});
-  const totals=filtered.reduce((out,p)=>{out.sum+=finNumber(p.sum);out.paid+=finPaidAmount(p);out.debt+=finDebt(p);if(finOverdue(p))out.overdue+=finDebt(p);out.overpaid+=Math.max(0,finPaidAmount(p)-finNumber(p.sum));return out;},{sum:0,paid:0,debt:0,overdue:0,overpaid:0});
+  const filtered=reportsFilteredPayments(),groups=reportsPaymentGroups(filtered),money=n=>precisionFormat(n,{minimumScale:2});
+  const totals=filtered.reduce((out,p)=>{out.sum=reportsAdd(out.sum,finNumber(p.sum));out.paid=reportsAdd(out.paid,finPaidAmount(p));out.debt=reportsAdd(out.debt,finDebt(p));if(finOverdue(p))out.overdue=reportsAdd(out.overdue,finDebt(p));out.overpaid=reportsAdd(out.overpaid,Math.max(0,DecimalCore.toNumberExact(DecimalCore.sub(finPaidAmount(p),finNumber(p.sum)))));return out;},{sum:0,paid:0,debt:0,overdue:0,overpaid:0});
   const periods=[...new Set((data.payments||[]).map(p=>String(p.date||'').slice(0,7)).filter(m=>/^\d{4}-\d{2}$/.test(m)))].sort().reverse();
   const periodTabs='<button class="mtab '+(reportPeriod==='all'?'active':'')+'" onclick="reportPeriod=\'all\';reportExpandedKey=null;renderReportsSection()">Все</button>'+periods.map(m=>`<button class="mtab ${reportPeriod===m?'active':''}" onclick="reportPeriod='${m}';reportExpandedKey=null;renderReportsSection()">${new Date(Number(m.slice(0,4)),Number(m.slice(5,7))-1,1).toLocaleDateString('ru',{month:'long',year:'numeric'})}</button>`).join('');
   const groupButtons=Object.entries(REPORT_GROUPS).map(([key,label])=>`<button class="mtab ${reportGroupBy===key?'active':''}" onclick="reportGroupBy='${key}';reportExpandedKey=null;renderReportsSection()">${label}</button>`).join('');

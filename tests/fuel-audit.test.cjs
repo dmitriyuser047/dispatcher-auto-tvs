@@ -60,7 +60,7 @@ test('large actual measurement 923.537 is preserved and a possible duplicate rem
 
 test('browser UMD and legacy UI shim require only the pure fuel core and return the unchanged model',()=>{
   const sandbox=vm.createContext({}),directory=path.resolve(__dirname,'../assets/core');
-  for(const file of ['fuel-engine.js','fuel-audit.js'])vm.runInContext(fs.readFileSync(path.join(directory,file),'utf8'),sandbox,{filename:file});
+  for(const file of ['decimal-core.js','fuel-engine.js','fuel-audit.js'])vm.runInContext(fs.readFileSync(path.join(directory,file),'utf8'),sandbox,{filename:file});
   vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../assets/js/25m-gsm-diagnostics.js'),'utf8'),sandbox,{filename:'25m-gsm-diagnostics.js'});
   const result=sandbox.gsmAuditModel(fixtures().negative,range);assert.equal(hash(result),legacy.negative.hash);assert.equal(sandbox.TvsFuelAudit.apiVersion,1);
   assert.equal(Object.isFrozen(sandbox.TvsFuelAudit),true);assert.equal(Object.isFrozen(sandbox.TvsFuelAudit.rules),true);assert.equal(Object.isFrozen(sandbox.TvsFuelAudit.rules['negative-input']),true);

@@ -20,7 +20,7 @@ function fixture(){return {vehicles:[{id:'v',plate:'Synthetic vehicle',fuel:'die
 function harness(database=fixture(),date='2026-09-30'){
   const elements=new Map(),calls={alerts:[],books:[]};
   const element=()=>({innerHTML:'',style:{},dataset:{},children:[],querySelector:()=>null,appendChild(node){this.children.push(node);},addEventListener(){},remove(){}});
-  const context=vm.createContext({console,data:copy(database),TvsFuelEngine:fuel,AccountingBoundary:accounting,DomainSources:sources,
+  const context=vm.createContext({console,data:copy(database),TvsFuelEngine:fuel,AccountingBoundary:accounting,DomainSources:sources,DecimalCore:require('../assets/core/decimal-core.js'),FuelMovementPolicy:require('../assets/core/fuel-movement-policy.js'),
     _genBalCache:{},window:{},__today:date,summaryOpen:true,filterStatus:'',filterFuel:'',filterOrg:'',genSearchQuery:'',
     cmpDateAsc:(a,b)=>String(a).localeCompare(String(b)),cmpDateDesc:(a,b)=>String(b).localeCompare(String(a)),fmtDate:value=>value,
     dispatcherLocalDate:()=>context.__today,htmlEsc:value=>String(value??''),htmlJs:value=>JSON.stringify(value),
@@ -97,6 +97,24 @@ test('generator balance cache preserves numeric and string identities with indep
   const db=fixture();db.generators=[{id:7,name:'Numeric ID',fuelBalance:500,fuelAccounting:anchor('2026-09-01',10)},{id:'7',name:'String ID',fuelBalance:600,fuelAccounting:anchor('2026-09-01',100)}];
   db.genRecords=[{id:'number-row',generatorId:7,date:'2026-09-01',hours:1,fuelIssued:0,fuelActual:1},{id:'string-row',generatorId:'7',date:'2026-09-01',hours:1,fuelIssued:0,fuelActual:2}];
   const app=harness(db);assert.equal(app.context.computeGenFuelBalances(7)['number-row'],9);assert.equal(app.context.computeGenFuelBalances('7')['string-row'],98);
+});
+test('new DES worksheet keeps millilitres and thousandths of hours even without optional accounting metadata',()=>{
+  const db=fixture();db.generators=[{id:9,name:'Synthetic millilitre DES',location:'Synthetic site',fuel:'diesel',fuelBalance:923.537}];
+  db.genRecords=[{id:'small',generatorId:9,date:'2026-09-01',hours:0.001,fuelActual:0.001,fuelUsed:0.001,fuelIssued:0.002,tankId:null}];
+  db.tanks=[];db.tankIncomes=[];db.fuelMovements=[];
+  const app=harness(db),before=JSON.stringify(app.context.data);app.export();
+  assert.equal(app.calls.alerts.length,0);const sheet=app.calls.books[0].sheet;
+  const marker=Object.entries(sheet).find(([,cell])=>cell?.v==='Synthetic millilitre DES');assert.ok(marker);
+  const row=Number(marker[0].split(',')[0]);assert.equal(sheet[row+',3'].v,0.001);assert.equal(sheet[row+',9'].v,0.001);assert.equal(sheet[row+',10'].v,0.001);assert.equal(sheet[row+',11'].v,923.538);
+  const total=Object.entries(sheet).find(([,cell])=>cell?.v==='ИТОГО');const totalRow=Number(total[0].split(',')[0]);
+  assert.equal(sheet[totalRow+',10'].v,sheet[row+',10'].v);assert.equal(JSON.stringify(app.context.data),before);
+});
+test('DES worksheet and legacy record source preserve a valid numeric zero tank identity',()=>{
+  const db=fixture();db.generators=[{id:9,name:'Numeric zero tank DES',location:'Synthetic site',fuel:'diesel',tankId:0,fuelBalance:20}];
+  db.tanks=[{id:0,name:'Numeric zero tank',balanceInit:923.537}];db.genRecords=[];db.tankIncomes=[];db.fuelMovements=[];
+  const app=harness(db);assert.equal(app.context.genRecordTankId({generatorId:9}),0);app.export();
+  const sheet=app.calls.books[0].sheet,marker=Object.entries(sheet).find(([,cell])=>cell?.v==='Остаток ДТ, л:');assert.ok(marker);
+  const row=Number(marker[0].split(',')[0])+1;assert.equal(sheet[row+',2'].v,943.537);assert.equal(sheet[row+',3'].v,943.537);
 });
 
 test('vehicle sidebar keeps all kilometres but does not present not-started accounting as a measured zero balance',()=>{

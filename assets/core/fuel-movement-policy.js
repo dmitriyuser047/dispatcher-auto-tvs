@@ -1,5 +1,5 @@
 /* Fuel conservation and journal linkage rules shared by native, API and UI saves. */
-(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(()=>require('./fuel-engine.js'),()=>require('./accounting-boundary.js'));else root.FuelMovementPolicy=factory(()=>root.TvsFuelEngine,()=>root.AccountingBoundary);})(typeof globalThis==='object'?globalThis:this,function(getFuel,getAccounting){
+(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(()=>require('./fuel-engine.js'),()=>require('./accounting-boundary.js'),()=>require('./decimal-core.js'));else root.FuelMovementPolicy=factory(()=>root.TvsFuelEngine,()=>root.AccountingBoundary,()=>root.DecimalCore);})(typeof globalThis==='object'?globalThis:this,function(getFuel,getAccounting,getDecimal){
   'use strict';
   const EPS=1e-7;
   const own=(row,key)=>Object.prototype.hasOwnProperty.call(row,key);
@@ -112,12 +112,31 @@
     return issues;
   }
   function inspect(db,context={}){const issues=analyze(db,context);return {issues,counts:{error:issues.filter(issue=>issue.severity==='error').length,warning:issues.filter(issue=>issue.severity==='warning').length,total:issues.length}};}
+  function decimal(){const api=getDecimal();if(api?.apiVersion!==1)throw Object.assign(Error('Не загружена десятичная арифметика'),{code:'MODULE_UNAVAILABLE'});return api;}
+  function generatorRate(generator,row){
+    const d=decimal(),power=number(generator?.power),n100=number(generator?.norm100),load=number(row.load),n50=number(generator?.norm50),idle=number(generator?.normIdle);
+    if(!(power>0)||!Number.isFinite(n100)||!Number.isFinite(load))return null;
+    const share=d.div(load,power,{scale:12,rounding:'half-away-from-zero'}),twice=d.mul(share,2);
+    const rate=Number.isFinite(n50)?d.compare(share,'0.5')<=0&&Number.isFinite(idle)
+      ?d.add(idle,d.mul(d.sub(n50,idle),twice))
+      :d.add(n50,d.mul(d.sub(n100,n50),d.sub(twice,1)))
+      :d.mul(n100,share);
+    return d.compare(rate,0)<0?'0':rate;
+  }
+  function generatorRounded(value){const d=decimal();return d.toNumberExact(d.quantize(value,{scale:3,rounding:'half-away-from-zero'}));}
   function generatorSpent(generator,row){
+    if(!row)return 0;
     if(present(row.fuelActual))return quantity(row.fuelActual);if(present(row.fuelUsed))return quantity(row.fuelUsed);
-    const hours=quantity(row.hours),power=number(generator?.power),n100=number(generator?.norm100),load=number(row.load),n50=number(generator?.norm50),idle=number(generator?.normIdle);
-    if(!hours||!(power>0)||!Number.isFinite(n100)||!Number.isFinite(load))return 0;
-    const percent=load/power*100,rate=Number.isFinite(n50)?percent<=50&&Number.isFinite(idle)?idle+(n50-idle)*percent/50:n50+(n100-n50)*(percent-50)/50:n100*percent/100;
-    return Math.round(Math.max(0,rate)*hours*100)/100;
+    const hours=quantity(row.hours);if(!generator||!hours)return 0;const rate=generatorRate(generator,row);
+    return rate===null?0:generatorRounded(decimal().mul(rate,hours));
+  }
+  function generatorNormSpent(generator,row){
+    if(!generator||!row)return 0;if(present(row.fuelUsed))return quantity(row.fuelUsed);
+    const hours=quantity(row.hours);if(!hours)return 0;
+    const rate=present(row.load)?generatorRate(generator,row):null;
+    if(rate!==null)return generatorRounded(decimal().mul(rate,hours));
+    const flat=present(generator.norm)?number(generator.norm):number(generator.norm100);
+    return Number.isFinite(flat)?generatorRounded(decimal().mul(flat,hours)):0;
   }
   function assetBalances(db,ref){
     const target=asset(db,ref),vehicle=String(ref).startsWith('v:'),section=vehicle?'records':'genRecords',assetField=vehicle?'vehicleId':'generatorId';
@@ -200,5 +219,5 @@
     if(issues.length){const error=new Error(issues.slice(0,5).map(issue=>issue.message).join('; '));error.name='FuelMovementPolicyError';error.code='POLICY_VIOLATION';error.issues=issues;error.details={issues};throw error;}
     return true;
   }
-  return Object.freeze({apiVersion:1,inspect,validateChanges});
+  return Object.freeze({apiVersion:1,inspect,validateChanges,generatorSpent,generatorNormSpent});
 });

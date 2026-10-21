@@ -20,8 +20,9 @@ function context(db = fixture()) {
   const fields = new Map();
   const ctx = vm.createContext({ console, window: {}, document: { addEventListener() {}, documentElement: { removeAttribute() {} },
     getElementById(id) { return fields.get(id); } }, localStorage: { getItem() {} } });
+  vm.runInContext(fs.readFileSync(path.join(root, 'assets/core/decimal-core.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(root, 'assets/core/fuel-engine.js'), 'utf8'), ctx, { filename: 'assets/core/fuel-engine.js' });
-  for (const file of ['01-core.js', '29-fuel-quality.js', '25b-fuel-purchases.js', '25c-fuel-control.js', '25i-gsm-ledger.js', '25l-manual-fuel.js'])
+  for (const file of ['55-precision-input.js', '01-core.js', '29-fuel-quality.js', '25b-fuel-purchases.js', '25c-fuel-control.js', '25i-gsm-ledger.js', '25l-manual-fuel.js'])
     vm.runInContext(fs.readFileSync(path.join(root, 'assets/js', file), 'utf8'), ctx, { filename: file });
   ctx.input = db; vm.runInContext('data=input', ctx);
   Object.assign(ctx, {
@@ -40,19 +41,20 @@ function context(db = fixture()) {
   for (const [id, value] of Object.entries({ fpd_mode: 'remove', fpd_reason: '', fpd_preview: '', fpd_error: '', fpd_commit: '' }))
     fields.set(id, { value, textContent: '', disabled: false });
   fields.set('fpd_confirm', { checked: false });
-  ctx.fpEdit('p');
+  ctx.fpEdit('p'); for(const input of fields.values())input._precisionInitial=input.value;
   return { ctx, fields, current: () => vm.runInContext('data', ctx) };
 }
 function statement(ctx, db, changes = {}) {
   return ctx.gsmStatementApply(db, ctx.gsmStatementPlan(db, 'p', { ...db.fuelPurchases[0], ...changes }));
 }
 
-test('import and journal posting preserve millilitres while money remains rounded to kopecks', () => {
+test('source quantities, explicit money and price retain their decimals in purchase and journal without rewriting the source', () => {
   const db = fixture(), { ctx } = context(db);
-  const p = ctx.fpCreate({ date: '2026-09-02', qty: 45.562, sum: 3100.125, price: 68.045, fuel: 'АИ-95' }, { vehicleId: 'v' });
-  assert.equal(p.qty, 45.562); assert.equal(p.sum, 3100.13); assert.equal(p.price, 68.05);
+  const tx=Object.freeze({ date: '2026-09-02', qty: 45.562, sum: 3100.125, price: 68.045, fuel: 'АИ-95' }),before=JSON.stringify(tx);
+  const p = ctx.fpCreate(tx, { vehicleId: 'v' });
+  assert.equal(JSON.stringify(tx),before);assert.equal(p.qty, 45.562); assert.equal(p.sum, 3100.125); assert.equal(p.price, 68.045);
   const r = ctx.fpApply(p, 1).record;
-  assert.equal(r.fuelIssued, 45.562); assert.equal(r.fuelSum, 3100.13);
+  assert.equal(r.fuelIssued, 45.562); assert.equal(r.fuelSum, 3100.125);
   ctx.fpApply(p, -1); assert.equal(r.fuelIssued, null);
   assert.equal(db.records[0].km, 123); assert.equal(db.records[0].tankMeasured, 138.307);
 });
@@ -80,7 +82,7 @@ test('manual and statement entries accept three quantity decimals and reject fou
   assert.throws(() => ctx.gsmManualPlan(db, draft('45.5621')), /трёх/);
   const badMoney = draft('45.562'); badMoney.rows[0].sum = '3100.125'; assert.throws(() => ctx.gsmManualPlan(db, badMoney), /копеек/);
   assert.equal(statement(ctx, db, { qty: 45.564 }).records[0].fuelIssued, 55.565);
-  assert.throws(() => statement(ctx, db, { qty: 45.5621 }), /трёх/);
+  assert.throws(() => statement(ctx, db, { qty: 45.5621 }), error=>error.code==='PRECISION');
 });
 
 test('millilitre differences do not become duplicate keys or false exact journal matches', () => {

@@ -67,6 +67,16 @@ test('public DTO types reject incompatible amounts, source names and identifiers
     import type {IssueFuelInput,PlatformCommand,CommandEnvelope} from './src/core/platform-contracts';
     import type {CommandContext,CommandPlan} from './src/core/platform-commands';
     import {createAccountingBoundary,type FuelAccounting,type AccountingWindow} from './src/core/accounting-boundary';
+    import {createDecimalCore,type DecimalInputOptions} from './src/core/decimal-core';
+    const decimal=createDecimalCore();
+    const exact:string=decimal.add('0.1','0.2');
+    const inputOptions:DecimalInputOptions={scale:3,blank:'null'};
+    const optionalInput:number|null=decimal.parseInput('923,537',inputOptions);
+    // @ts-expect-error exact values cross JSON boundaries as decimal strings, never BigInt
+    const escapedBigInt:bigint=decimal.mul('1','2');
+    // @ts-expect-error rounding must be explicitly supported
+    decimal.quantize(exact,{scale:2,rounding:'implicit'});
+    void optionalInput;void escapedBigInt;
     const api=createDomainSources();
     const projection:FinancialProjection=api.projectFinancialSources({});
     const amount:number|undefined=projection.sources[0]?.sum;

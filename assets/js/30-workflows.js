@@ -61,11 +61,11 @@ function wfDispatchProblems(job,old) {
 function wfTankBalanceAt(id,date=wfToday()) {
   const tank=(data.tanks||[]).find(t=>t.id===id); if(!tank)return 0;
   if(fuelAccountingFor('tanks',tank).mode==='explicit')return computeTankBalanceAt(id,date,true);
-  let bal=Number(tank.balanceInit??0)||0;
-  (data.tankIncomes||[]).filter(r=>r.tankId===id&&r.date<=date).forEach(r=>{bal+=Number(r.liters??r.litres??r.amount??r.qty??0)||0;});
-  (data.genRecords||[]).filter(r=>genRecordTankId(r)===id&&r.date<=date).forEach(r=>{bal-=Number(r.fuelIssued)||0;});
-  (data.fuelMovements||[]).filter(r=>!r.deleted&&!r.cancelled&&r.date<=date).forEach(r=>{const qty=Number(r.qty);if(!Number.isFinite(qty)||qty<0)return;if(r.toTankId===id)bal+=qty;if(r.fromTankId===id)bal-=qty;});
-  return Math.round(bal*100)/100;
+  let bal=DecimalCore.parse(tank.balanceInit??0);
+  (data.tankIncomes||[]).filter(r=>r.tankId===id&&r.date<=date).forEach(r=>{bal=DecimalCore.add(bal,r.liters??r.litres??r.amount??r.qty??0);});
+  (data.genRecords||[]).filter(r=>genRecordTankId(r)===id&&r.date<=date).forEach(r=>{bal=DecimalCore.sub(bal,r.fuelIssued??0);});
+  (data.fuelMovements||[]).filter(r=>!r.deleted&&!r.cancelled&&r.date<=date&&(r.toTankId===id||r.fromTankId===id)).forEach(r=>{const qty=Number(r.qty);if(!Number.isFinite(qty)||qty<0)throw Error('Некорректные литры в движении топлива '+r.id);if(r.toTankId===id)bal=DecimalCore.add(bal,qty);if(r.fromTankId===id)bal=DecimalCore.sub(bal,qty);});
+  return DecimalCore.toNumberExact(bal);
 }
 function wfPartStock(id,date=wfToday()) { return (data.partMovements||[]).filter(r=>r.partId===id&&!r.cancelled&&!r.deleted&&r.date<=date).reduce((s,r)=>s+(r.kind==='receipt'||r.kind==='return'?1:-1)*(Number(r.qty)||0),0); }
 function wfValidDate(value,withTime=false) {
@@ -295,7 +295,7 @@ function wfTimeline(ref) {
   const id=ref.slice(2),isV=ref.startsWith('v:');add(isV?data.records:data.genRecords,'Журнал',r=>isV?r.vehicleId===id:r.generatorId===id);add(isV?data.vehicleTo:data.toRecords,'ТО',r=>isV?r.vehicleId===id:r.generatorId===id);add(data.repairs,'Ремонт · журнал',r=>r.vehicleId===id&&isV);
   wfShowDialog('История · '+(a?.label||ref),`<div class="wf-timeline">${rows.sort((a,b)=>b.at.localeCompare(a.at)).map(r=>`<article><strong>${htmlEsc(r.at)} · ${r.label}</strong><p>${htmlEsc(r.text||r.id)}</p></article>`).join('')||'Нет событий'}</div>`);
 }
-function wfShowDialog(title,body,footer='') {document.getElementById('wfModal')?.remove();const el=document.createElement('div');el.id='wfModal';el.className='modal-overlay open';el.innerHTML=`<div class="modal wf-modal" role="dialog" aria-modal="true" aria-label="${htmlEsc(title)}"><div class="modal-header"><div class="modal-title">${htmlEsc(title)}</div><button class="icon-btn" onclick="closeModal('wfModal')" aria-label="Закрыть">×</button></div><div class="modal-body">${body}</div>${footer?`<div class="modal-footer">${footer}</div>`:''}</div>`;document.body.append(el);el.querySelector('input,select,textarea,button')?.focus();}
+function wfShowDialog(title,body,footer='') {document.getElementById('wfModal')?.remove();const el=document.createElement('div');el.id='wfModal';el.className='modal-overlay open';el.innerHTML=`<div class="modal wf-modal" role="dialog" aria-modal="true" aria-label="${htmlEsc(title)}"><div class="modal-header"><div class="modal-title">${htmlEsc(title)}</div><button class="icon-btn" onclick="closeModal('wfModal')" aria-label="Закрыть">×</button></div><div class="modal-body">${body}</div>${footer?`<div class="modal-footer">${footer}</div>`:''}</div>`;document.body.append(el);precisionRemember(el);el.querySelector('input,select,textarea,button')?.focus();}
 async function wfArchive(section,id) {const r=data[section].find(x=>x.id===id);if(!r)return;if(['fuelMovements','partMovements','auditLog'].includes(section))return; if(section==='dispatchJobs'&&['started','done','confirmed'].includes(r.status)){showToast('Завершённое или начатое задание сохраняется в истории');return;}r.archived=!r.archived;if(await saveData(data))renderWorkflows();}
 async function wfTaskFromIssue(index) {const issue=_opsIssues[index];if(!issue)return;const fingerprint=wfHash(issue.title+'|'+issue.body);const existing=(data.opsTasks||[]).find(t=>!t.archived&&t.sourceId===issue.id&&t.sourceFingerprint===fingerprint&&t.status!=='closed');wfOpenTab('opsTasks',{query:'',site:'',org:'',archive:false});if(existing){wfEdit('opsTasks',existing.id);return;}const task={id:wfId('task'),title:issue.title,description:issue.body,sourceId:issue.id,sourceFingerprint:fingerprint,status:'open',due:wfToday(),owner:'',result:''};wfEdit('opsTasks',null,task);}
 async function wfSnoozeIssue(index) {const issue=_opsIssues[index];if(!issue)return;const fingerprint=wfHash(issue.title+'|'+issue.body);let state=data.appMeta.find(r=>r.id==='attention:'+issue.id);if(!state){state={id:'attention:'+issue.id};data.appMeta.push(state);}state.fingerprint=fingerprint;state.until=new Date(Date.now()+86400000).toISOString();if(await saveData(data)){if(activeSection==='dispatch')renderWorkflows();else if(activeSection==='home')renderMainMenu();}}

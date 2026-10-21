@@ -65,6 +65,13 @@ test('dynamic generic forms also survive text selection beyond their bounds', as
   await page.mouse.move(f.x + 10, f.y + 10); await page.mouse.down(); await page.mouse.move(m.x - 10, f.y + 10, { steps: 10 }); await page.mouse.up();
   assert.equal(await page.locator('#genericModal').evaluate(el => el.classList.contains('open')), true);
 });
+test('a delayed field error cannot steal focus from a newer input or another form',async()=>{
+  const result=await page.evaluate(async()=>{
+    openEditRecord('r1');showFieldError('Synthetic validation','rec_km');document.getElementById('rec_note').focus();
+    await new Promise(resolve=>setTimeout(resolve,80));return document.activeElement.id;
+  });
+  assert.equal(result,'rec_note');
+});
 
 test('vehicle act button opens the original period dialog and exports its selected dates and organization', async () => {
   await page.getByRole('button', { name: 'Акт ГСМ', exact: true }).click();
@@ -263,7 +270,7 @@ test('reimport keeps the allocated statement vehicle, date, litres and an explic
     journalMoney: data.records.reduce((sum, record) => sum + (+record.fuelSum || 0), 0)
   }));
   assert.equal(result.purchases, 1);
-  assert.deepEqual(result.purchase, { id: original.id, vehicleId: 'recipient', date: '2026-09-03', qty: 35, sum: 0, price: 0, source: original.source, key: original.key });
+  assert.deepEqual(result.purchase, { id: original.id, vehicleId: 'recipient', date: '2026-09-03', qty: 35, sum: 0, price: 100, source: original.source, key: original.key });
   assert.equal(result.issued, 35);
   assert.equal(result.journalMoney, 0);
 });
@@ -275,6 +282,65 @@ test('manual statement links existing issued litres without changing mileage or 
   await page.locator('#gsmManualCommit').click(); await page.waitForFunction(() => data.fuelPurchases.length === 1);
   assert.equal(await page.evaluate(() => JSON.stringify(data.records)), before);
   assert.equal(await page.evaluate(() => data.fuelPurchases[0].recordId), 'r1');
+});
+
+async function importSyntheticStatement(quantities){
+  return page.evaluate(async quantities=>{
+    window.__importReport=null;window.__precisionImportAlerts=[];window.alert=message=>window.__precisionImportAlerts.push(String(message));showFuelImportReport=report=>{window.__importReport=report;};
+    const workbook=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([
+      ['Дата транзакции','Тип транзакции','Количество','Товар','Комментарий','Номер карты','Сумма к оплате','Цена клиента','ID транзакции'],
+      ...quantities.map(value=>{const item=typeof value==='object'?value:{qty:value};return ['01.09.2026 14:00','Покупка',item.qty,'АИ-95','Х123АА716','111111',10,100,item.id||''];})
+    ]),'Sheet1');
+    importFuelFromXls({files:[new File([XLSX.write(workbook,{type:'array',bookType:'xlsx'})],'synthetic-precision.xlsx')],value:''});
+    for(let i=0;i<150&&!window.__importReport;i++){
+      document.getElementById('importPlanCommit')?.click();await new Promise(resolve=>setTimeout(resolve,20));
+    }
+    if(!window.__importReport)throw Error('Synthetic precision import did not finish: '+JSON.stringify({alerts:window.__precisionImportAlerts,platform:platformRuntimeStatus()}));
+    return {purchases:data.fuelPurchases,journals:data.records,batch:data.fuelImports.at(-1)};
+  },quantities);
+}
+test('actual XLSX import and reimport preserve distinct source millilitres and exact journal totals',async()=>{
+  await page.evaluate(()=>{data.records=[];data.fuelPurchases=[];data.fuelImports=[];data.fuelCards=[{number:'111111',org:'A'}];rebuildIndex();});
+  const first=await importSyntheticStatement([2.001,2.004]);
+  assert.equal(first.purchases.length,2);assert.equal(first.journals[0].fuelIssued,4.005);
+  assert.equal(first.purchases[0].importKeyV2,first.purchases[1].importKeyV2);
+  assert.notEqual(first.purchases[0].importKeyV3,first.purchases[1].importKeyV3);
+  const repeat=await importSyntheticStatement([2.001,2.004]);
+  assert.equal(repeat.purchases.length,2);assert.equal(repeat.journals[0].fuelIssued,4.005);
+  const extra=await importSyntheticStatement([2.001,2.004,2.002]);
+  assert.equal(extra.purchases.length,3);assert.equal(extra.journals[0].fuelIssued,6.007);
+  assert.equal(extra.batch.keyVersion,3);
+});
+test('actual XLSX legacy rounded-key ambiguity is previewed for reconciliation without modifying journal litres',async()=>{
+  const before=await page.evaluate(()=>{
+    data.records=[{id:'legacy',vehicleId:'v',date:'2026-09-01',fuelIssued:2,km:100}];
+    const tx={date:'2026-09-01',time:'14:00',qty:2.001,fuel:'АИ-95',comment:'Х123АА716',cardNo:'111111',plate:'Х123АА716'};
+    data.fuelPurchases=[{id:'old',vehicleId:'v',recordId:'legacy',date:tx.date,qty:2,grade:'АИ-95',sum:10,importKeyV2:fuelImportKeyV2(tx)}];
+    data.fuelImports=[];rebuildIndex();return JSON.stringify(data.records);
+  });
+  const result=await importSyntheticStatement([2.001]);
+  assert.equal(JSON.stringify(result.journals),before);assert.equal(result.purchases.length,1);
+  assert.equal(result.batch.quarantined[0].status,'legacy-key-ambiguous');
+  assert.match(result.batch.decisions[0].decision,/точное количество источника не подтверждено/);
+});
+test('actual XLSX repeated supplier ID cannot add another receipt or silently choose conflicting litres',async()=>{
+  await page.evaluate(()=>{data.records=[];data.fuelPurchases=[];data.fuelImports=[];rebuildIndex();});
+  const first=await importSyntheticStatement([{id:'TX-1',qty:2.001}]);assert.equal(first.purchases.length,1);assert.equal(first.journals[0].fuelIssued,2.001);
+  const repeated=await importSyntheticStatement([{id:'TX-1',qty:2.001},{id:'TX-1',qty:2.001}]);
+  assert.equal(repeated.purchases.length,1);assert.equal(repeated.journals[0].fuelIssued,2.001);assert.equal(repeated.batch.quarantined.length,1);
+  const conflict=await importSyntheticStatement([{id:'TX-2',qty:2.001},{id:'TX-2',qty:2.004}]);
+  assert.equal(conflict.purchases.length,1);assert.equal(conflict.journals[0].fuelIssued,2.001);assert.equal(conflict.batch.quarantined.length,2);
+  assert.ok(conflict.batch.decisions.every(row=>/разные исходные данные/.test(row.decision)));
+});
+test('actual vehicle norm autofill shares core millilitre precision and preserves an explicit zero norm',async()=>{
+  const result=await page.evaluate(()=>{
+    openEditRecord('r1');document.getElementById('rec_km').value='1.234';calcFuelAuto();const precise=document.getElementById('rec_fuel_used').value;
+    const expected=TvsFuelEngine.fqRecord({km:1.234},data.vehicles[0]).norm;
+    data.vehicles[0].norm=0;calcFuelAuto();const zero=document.getElementById('rec_fuel_used').value;
+    document.getElementById('rec_km').value='';calcFuelAuto();return{precise,expected,zero,blank:document.getElementById('rec_fuel_used').value};
+  });
+  assert.deepEqual(result,{precise:'0.123',expected:0.123,zero:'0',blank:''});
 });
 
 test('manual statement adds separate rows, keeps chosen grades and saves the batch once', async () => {

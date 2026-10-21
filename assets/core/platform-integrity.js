@@ -1,5 +1,5 @@
 /* Read-only data health and delta validation for every business section. */
-(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(require('./platform-schema.js'),()=>require('./platform-policies.js'));else root.PlatformIntegrity=factory(root.PlatformSchema,()=>root.PlatformPolicies);})(typeof globalThis==='object'?globalThis:this,function(schema,getPolicies){
+(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(require('./platform-schema.js'),()=>require('./platform-policies.js'),()=>require('./precision-policy.js'));else root.PlatformIntegrity=factory(root.PlatformSchema,()=>root.PlatformPolicies,()=>root.PrecisionPolicy);})(typeof globalThis==='object'?globalThis:this,function(schema,getPolicies,getPrecision){
   'use strict';
   if(!schema||schema.apiVersion!==1)throw Error('Не загружен реестр разделов платформы');
   const own=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
@@ -157,6 +157,11 @@
         const {proof,...publicIssue}=issue;result.issues.push(publicIssue);
       }
     }else result.issues.push({code:'policy-module-unavailable',severity:'warning',section:'',recordId:'',rowIndex:-1,field:'',message:'Общие правила рабочих процессов недоступны для проверки'});
+    let precision;try{precision=getPrecision();}catch{}
+    if(precision?.apiVersion===1){
+      try{for(const issue of precision.inspect(db,options).issues)if(canRead(issue.section))result.issues.push(issue);}
+      catch(error){result.issues.push({code:'precision-module-unavailable',severity:'warning',section:'',recordId:'',rowIndex:-1,field:'',message:'Правила точности чисел недоступны для проверки'});}
+    }else result.issues.push({code:'precision-module-unavailable',severity:'warning',section:'',recordId:'',rowIndex:-1,field:'',message:'Правила точности чисел недоступны для проверки'});
     const sections=schema.sections.map(section=>({section,label:schema.descriptors[section].label,module:schema.descriptors[section].module,readable:!readable||readable.has(section),rows:readable&&!readable.has(section)?null:rowsOf(db,section).length}));
     return {apiVersion:1,issues:result.issues,counts:{error:result.issues.filter(issue=>issue.severity==='error').length,warning:result.issues.filter(issue=>issue.severity==='warning').length,total:result.issues.length},sections};
   }
