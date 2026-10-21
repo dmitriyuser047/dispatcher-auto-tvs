@@ -7,6 +7,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getRevisions:   ()        => ipcRenderer.invoke('get-revisions'),
   readSection:    (name)    => ipcRenderer.invoke('read-section', name),
   writeSections:  (json)    => ipcRenderer.invoke('write-sections', json),
+  getPendingOperations:()=>ipcRenderer.invoke('get-pending-operations'),
+  reconcileOperation:id=>ipcRenderer.invoke('reconcile-operation',id),
+  retryOperation:id=>ipcRenderer.invoke('retry-operation',id),
+  discardOperation:id=>ipcRenderer.invoke('discard-operation',id),
+  finishClose:payload=>ipcRenderer.invoke('finish-close',payload),
+  onPrepareClose:callback=>{
+    const listener=(_event,nonce)=>callback(nonce);ipcRenderer.on('prepare-close',listener);
+    return ()=>ipcRenderer.removeListener('prepare-close',listener);
+  },
   getDataPath:    ()        => ipcRenderer.invoke('get-data-path'),
   getDataIdentity:()        => ipcRenderer.invoke('get-data-identity'),
   getDataHealth:  ()        => ipcRenderer.invoke('get-data-health'),

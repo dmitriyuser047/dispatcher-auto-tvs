@@ -44,7 +44,11 @@ function canonicalDirectory(dataDir) {
   return runtimeProcess.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 function databaseToken(dataDir) {
-  return crypto.createHash('sha256').update('tvs-database:' + canonicalDirectory(dataDir)).digest('hex');
+  return withDatabaseLock(dataDir,()=>{
+    const sqlite=sqliteBackend(dataDir);
+    const identity=sqlite ? sqlite.readIdentity(dataDir) : require('./database-identity.cjs').readOrCreate(dataDir);
+    return crypto.createHash('sha256').update(JSON.stringify(['tvs-database',canonicalDirectory(dataDir),identity.uuid,identity.generation])).digest('hex');
+  });
 }
 function lockError(file, detail) {
   const error = new Error('База занята другим процессом. Повторите операцию после окончания сохранения. ' + detail + ' Если все экземпляры программы закрыты, сохраните копию папки базы и удалите оставшийся файл блокировки: ' + file);
@@ -460,7 +464,11 @@ function readSection(dataDir, name) {
 
 function readSnapshot(dataDir) {
   const data = readAll(dataDir);
-  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1 } };
+  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1 } };
+}
+function readOperation(dataDir,query,principal){
+  const token=databaseToken(dataDir),audit=readSection(dataDir,'auditLog');
+  return {ok:true,databaseToken:token,operationReceipt:require('./platform-service.cjs').findReceipt(audit.rows,query,principal,token)};
 }
 
 /**
@@ -533,7 +541,7 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
 module.exports = {
   SECTIONS, sectionsDir, sectionFile, revisionsFile,
   databaseToken, withDatabaseLock, validateRows, prepareWriteoffSections,
-  ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, () => {
+  ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot,readOperation }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, () => {
     const sqlite = sqliteBackend(dataDir), action = () => operation(dataDir,...args);
     if (!sqlite || ['isSplit','migrate'].includes(name)) return action();
     return sqlite.transaction(dataDir,action,{ readOnly:!['writeAll','writeSections'].includes(name) });

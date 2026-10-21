@@ -122,6 +122,10 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls}) {
     }
     if (req.method !== 'GET') { respond(res,404,{ok:false,error:'Неизвестный запрос'}); return; }
     try {
+      if(req.url.startsWith('/api/operation?')){
+        const query=new URL(req.url,'http://localhost').searchParams;
+        respond(res,200,storage.readOperation(_dataDir,{id:query.get('id'),digest:query.get('digest')},principal));return;
+      }
       if (req.url === '/api/revisions') { respond(res,200,{...filteredRevisions(storage.readRevisions(_dataDir),principal),databaseToken:storage.databaseToken(_dataDir)}); return; }
       const sectionMatch = /^\/api\/section\/([A-Za-z]+)$/.exec(req.url);
       if (sectionMatch) {
@@ -212,7 +216,9 @@ function parseResponse(response,allowConflict) {
   let value;
   try { value = JSON.parse(response.text); } catch { throw new Error('Сервер вернул неверный ответ'); }
   if (response.status >= 200 && response.status < 300 || allowConflict && response.status === 409) return value;
-  throw new Error('HTTP ' + response.status + (value?.error ? ': ' + value.error : ''));
+  const error=new Error('HTTP ' + response.status + (value?.error ? ': ' + value.error : ''));
+  error.status=response.status;error.code=value?.code||'HTTP_RESPONSE';error.definitive=response.status>=400&&response.status<500&&response.status!==408;
+  throw error;
 }
 async function fetchData(host,port) { const response = await request(host,port,'/api/data',null,10000); parseResponse(response); return response.text; }
 async function postData(host,port,jsonStr) { return parseResponse(await request(host,port,'/api/data',jsonStr),true); }

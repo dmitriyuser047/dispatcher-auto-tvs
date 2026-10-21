@@ -1,5 +1,15 @@
 // Application-wide diagnostics. Reading this workspace never repairs or saves data.
 let platformIssueFilter = '', platformIssueSeverity = '', platformIssueLimit = 40;
+async function platformNotifyPendingOperations(){
+  if(!window.electronAPI?.getPendingOperations)return;
+  const stamp=syncSessionStamp();
+  try{
+    const result=await window.electronAPI.getPendingOperations();
+    if(stamp!==syncSessionStamp()||!result?.ok)return;
+    const count=(result.operations||[]).filter(row=>row.status!=='committed').length;
+    if(count)showToast('Есть неподтверждённые операции: '+count+'. Откройте «Состояние программы», чтобы проверить результат.');
+  }catch{}
+}
 
 function platformHealthSnapshot() {
   const context = platformSessionContext();
@@ -63,6 +73,39 @@ function renderPlatformSystem() {
   document.getElementById('platformSection').onchange = event => { platformIssueFilter=event.target.value; platformIssueLimit=40; refreshIssues(); };
   document.getElementById('platformSeverity').onchange = event => { platformIssueSeverity=event.target.value; platformIssueLimit=40; refreshIssues(); };
   platformBindSourceLinks(report);
+  platformRenderRecoveryPanel();
+}
+async function platformRenderRecoveryPanel(){
+  if(!window.electronAPI?.getPendingOperations)return;
+  const workspace=document.querySelector('.platform-workspace');if(!workspace)return;
+  document.getElementById('platformRecovery')?.remove();
+  const panel=document.createElement('section');panel.id='platformRecovery';
+  panel.innerHTML='<h3>Восстановление операций</h3><p role="status">Проверяю локальную очередь…</p>';workspace.append(panel);
+  const stamp=syncSessionStamp();
+  let result;try{result=await window.electronAPI.getPendingOperations();}catch{result={ok:false,error:'Не удалось прочитать очередь'};}
+  if(stamp!==syncSessionStamp()||!panel.isConnected)return;
+  if(!result?.ok){panel.innerHTML='<h3>Восстановление операций</h3><p role="status">'+htmlEsc(result?.error||'Очередь недоступна')+'</p>';return;}
+  if(result.supported===false){panel.innerHTML='<h3>Восстановление операций</h3><p role="status">В этом подключении восстановление операций недоступно. Серверу нужна поддержка сохранённой очереди.</p>';return;}
+  const rows=(result.operations||[]).filter(row=>row.status!=='committed');
+  panel.innerHTML='<h3>Восстановление операций</h3><p class="platform-note">Здесь хранятся изменения, результат которых нужно проверить. Проверка не выполняет их повторно. Повторная отправка использует исходную операцию.</p>'+
+    (rows.length?'<div class="platform-operation-list">'+rows.map(row=>'<article><div><strong>'+htmlEsc(({pending:'Ожидает проверки',unknown:'Результат не подтверждён',conflict:'Нужна сверка версий',rejected:'Сохранение отклонено'})[row.status]||'Требует проверки')+'</strong><span>'+htmlEsc((row.sections||[]).map(platformSectionLabel).join(', '))+'</span><small>'+htmlEsc(row.createdAt)+'</small></div><div class="platform-actions">'+
+      '<button class="btn btn-ghost btn-sm" data-operation-check="'+htmlEsc(row.id)+'">Проверить результат</button><button class="btn btn-ghost btn-sm" data-operation-retry="'+htmlEsc(row.id)+'">Повторить отправку</button><button class="btn btn-ghost btn-sm" data-operation-discard="'+htmlEsc(row.id)+'">Убрать из очереди</button></div></article>').join('')+'</div>':'<p role="status">Ожидающих операций нет.</p>');
+  for(const [attribute,action]of [['check','reconcileOperation'],['retry','retryOperation'],['discard','discardOperation']])for(const button of panel.querySelectorAll('[data-operation-'+attribute+']'))button.onclick=async()=>{
+    if(stamp!==syncSessionStamp())return;
+    if(action==='discardOperation'&&!await confirmAction('Убрать операцию из локальной очереди? Это не отменяет запись, которую сервер уже выполнил.'))return;
+    if(stamp!==syncSessionStamp())return;
+    button.disabled=true;
+    try{
+      const response=await window.electronAPI[action](button.getAttribute('data-operation-'+attribute));
+      if(stamp!==syncSessionStamp())return;
+      if(!response?.ok)showToast(response?.error||'Не удалось проверить операцию');
+      else if(response.committed||response.operationReceipt){
+        data=await loadData();rebuildIndex();if(activeSection==='system')renderPlatformSystem();
+        showToast('Операция сохранена. Данные обновлены.');return;
+      }else showToast(action==='discardOperation'?'Операция убрана из очереди':response.conflicts?'Нужна сверка изменений: исходные данные в базе не перезаписаны':'Сервер пока не подтвердил выполнение операции');
+    }catch(error){if(stamp===syncSessionStamp())showToast(error.message||'Проверка не завершена');}
+    if(stamp===syncSessionStamp())platformRenderRecoveryPanel();
+  };
 }
 function platformBindSourceLinks(report) {
   document.querySelectorAll('[data-platform-source]').forEach(button => { button.onclick = () => platformOpenSource(button.dataset.platformSource,button.dataset.platformId); });

@@ -89,7 +89,7 @@ test('SQLite remains opt-in and ordinary synthetic JSON directories are not conv
 
 test('shared storage reads exact SQLite sections, revisions, typed IDs and 923.537 litre values without JSON shadows',t=>{
   const {dir,initial,revisions}=fixture(t),file=adapter().filename(dir),before=hash(file),guard=assertGuardOnly(dir),snapshot=storage.readSnapshot(dir);
-  assert.deepEqual(snapshot.data,initial);assert.deepEqual(snapshot.revisions,revisions);assert.deepEqual(snapshot.platform,{apiVersion:1,operations:1});
+  assert.deepEqual(snapshot.data,initial);assert.deepEqual(snapshot.revisions,revisions);assert.deepEqual(snapshot.platform,{apiVersion:1,operations:1,outbox:1,receiptQuery:1});
   assert.equal(snapshot.data.vehicles[0].fuelBalance,923.537);assert.equal(typeof snapshot.data.vehicles[0].id,'number');assert.equal(typeof snapshot.data.vehicles[1].id,'string');
   assert.equal(storage.readSection(dir,'records').rows[0].vehicleId,7);assert.equal(storage.readSection(dir,'records').rows[1].vehicleId,'7');
   assert.equal(hash(file),before);assertGuardOnly(dir,guard);

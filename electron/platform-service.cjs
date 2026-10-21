@@ -20,6 +20,13 @@ function visibleAudit(rows, principal) {
   return (rows || []).filter(row => row && typeof row.section === 'string' && access.authorize(principal, 'read', row.section) &&
     (row.type !== 'transaction' || Array.isArray(row.changedSections) && row.changedSections.every(name => access.authorize(principal, 'read', name))));
 }
+function findReceipt(rows,query,principal,token){
+  const operation=contracts().validateOperation(query),actor=principalOf(principal);
+  const receipt=(rows||[]).find(row=>row?.source==='platform'&&row.type==='transaction'&&row.operationId===operation.id&&
+    row.actorId===actor.id&&row.actorRole===actor.role&&row.databaseToken===token&&row.requestDigest===operation.digest&&
+    Array.isArray(row.changedSections)&&row.changedSections.every(name=>access.authorize(actor,'read',name)));
+  return receipt ? {id:operation.id,digest:receipt.requestDigest,status:'committed',at:receipt.at} : null;
+}
 function operationInfo(previous, sections, options = {}) {
   if (!options.operation) return null;
   const operation = contracts().validateOperation(options.operation);
@@ -90,4 +97,4 @@ function prepareTransaction(previous, supplied, options = {}) {
   return { sections:result, plan, operationReceipt:{ id, digest, status:'committed', at } };
 }
 
-module.exports = { prepareTransaction, operationInfo, replayResult, visibleAudit };
+module.exports = { prepareTransaction, operationInfo, replayResult, visibleAudit,findReceipt };

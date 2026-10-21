@@ -65,3 +65,17 @@ async function platformExecuteSave(database, options, persist) {
     return false;
   }
 }
+async function platformFlushForClose(){
+  let ready=typeof frcFlush==='function'?await frcFlush():true;
+  if(ready)document.activeElement?.blur();
+  while(typeof _pendingSaveOperations!=='undefined'&&_pendingSaveOperations.size){
+    const results=await Promise.allSettled([..._pendingSaveOperations]);
+    if(results.some(result=>result.status!=='fulfilled'||result.value!==true))ready=false;
+  }
+  if(typeof frcHasPendingEdits==='function'&&frcHasPendingEdits())ready=false;
+  return ready;
+}
+if(window.electronAPI?.onPrepareClose)window.electronAPI.onPrepareClose(async nonce=>{
+  let ready=false;try{ready=await platformFlushForClose();}catch{}
+  try{await window.electronAPI.finishClose({nonce,ready});}catch{}
+});

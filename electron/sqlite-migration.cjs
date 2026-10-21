@@ -81,7 +81,7 @@ function sourceManifest(source) {
     const {filename} = ordinaryFile(source,relative);
     manifest.push({ path:relative,type:'file',...hashFile(filename) });
   };
-  for (const name of ['data.json','data.json.before-split']) if (stat(path.join(source,name))) addFile(name);
+  for (const name of ['data.json','data.json.before-split','database-identity.json']) if (stat(path.join(source,name))) addFile(name);
   for (const directory of ['sections',...managed]) {
     const info = stat(path.join(source,directory));
     if (!info) continue;

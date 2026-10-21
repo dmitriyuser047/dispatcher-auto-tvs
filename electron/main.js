@@ -68,19 +68,80 @@ function configureNetwork(s){
 try{configureNetwork(settings);}catch(e){networkConfigError=e.message;server.configureTransport({protocol:'https:'});console.error('[network] '+e.message);}
 
 const dataBindings = new Map();
+const saveBarriers=new Map(),approvedCloseWindows=new Set();
+function finishSaveBarrier(senderId,ready){
+  const pending=saveBarriers.get(senderId);if(!pending)return;
+  clearTimeout(pending.timer);saveBarriers.delete(senderId);pending.resolve(ready===true);
+}
+function requestSaveBarrier(win){
+  if(!win||win.isDestroyed())return Promise.resolve(false);
+  const senderId=win.webContents.id;
+  if(!dataBindings.has(senderId))return Promise.resolve(true);
+  if(saveBarriers.has(senderId))return saveBarriers.get(senderId).promise;
+  const nonce=require('node:crypto').randomUUID();let resolve;
+  const promise=new Promise(done=>{resolve=done;});
+  const timer=setTimeout(()=>finishSaveBarrier(senderId,false),10000);
+  saveBarriers.set(senderId,{nonce,promise,resolve,timer});
+  try{win.webContents.send('prepare-close',nonce);}catch{finishSaveBarrier(senderId,false);}return promise;
+}
 let notificationService = null;
 const settingsIdentity = () => databaseIdentity(settings);
-function bindData(event, token, access = null, revisions = null) {
+function bindData(event, token, access = null, revisions = null, platform = null) {
   const previous=dataBindings.get(event.sender.id);
   if(previous&&(previous.identity!==settingsIdentity()||previous.databaseToken!==(token||null)||JSON.stringify(previous.notificationAccess)!==JSON.stringify(access)))notificationService?.invalidate();
   dataBindings.set(event.sender.id, { identity:settingsIdentity(), databaseToken:token || null, notificationAccess:access,
-    revisions:revisions && { ...revisions } });
+    revisions:revisions && { ...revisions },platform:platform && { ...platform } });
 }
 function assertDataBinding(event, token) {
   const binding = dataBindings.get(event.sender.id);
   if (!binding || binding.identity !== settingsIdentity() || token && token !== binding.databaseToken) throw new Error('База переключена. Загрузите выбранную базу заново перед сохранением.');
   if (settings.networkMode !== 'client' && binding.databaseToken !== storage.databaseToken(getDataDir())) throw new Error('База изменилась. Загрузите её заново.');
   return binding;
+}
+let recoveryService=null;
+function capturedOperationContext(event,binding=assertDataBinding(event)){
+  const client=settings.networkMode==='client',principal=client?binding.notificationAccess?.user:{id:'local-profile',name:getActiveUser().name||'Локальный пользователь',role:'admin'};
+  const identity=settingsIdentity(),scope=require('node:crypto').createHash('sha256').update(JSON.stringify([
+    identity,binding.databaseToken,client?null:settings.activeUser,principal?.id,principal?.role,binding.notificationAccess||'local-admin'
+  ])).digest('hex');
+  return {scope,identity,senderId:event.sender.id,databaseToken:binding.databaseToken,principal,client,
+    directory:getDataDir(),host:settings.remoteHost,port:settings.remotePort||3377,
+    supportsOperations:binding.platform?.apiVersion===1&&binding.platform?.operations===1&&binding.platform?.outbox===1&&!!principal};
+}
+function assertOperationContext(context){
+  const binding=dataBindings.get(context.senderId);
+  if(!binding||settingsIdentity()!==context.identity||capturedOperationContext({sender:{id:context.senderId}},binding).scope!==context.scope)
+    throw Object.assign(Error('База или учётная запись изменились. Очередь не применялась.'),{code:'SESSION_CHANGED',definitive:true});
+}
+async function verifiedOperationContext(event){
+  const context=capturedOperationContext(event);
+  if(context.client){
+    if(networkConfigError)throw Error(networkConfigError);
+    const ping=await server.getJson(context.host,context.port,'/api/ping',5000);
+    assertOperationContext(context);
+    if(!ping?.ok||ping.databaseToken!==context.databaseToken||JSON.stringify(ping.access)!==JSON.stringify(dataBindings.get(context.senderId)?.notificationAccess))
+      throw Object.assign(Error('База или права изменились. Загрузите данные заново.'),{code:'SESSION_CHANGED'});
+  }else if(storage.databaseToken(context.directory)!==context.databaseToken)throw Error('База изменилась. Загрузите её заново.');
+  return context;
+}
+function operationRecovery(){
+  if(!recoveryService){
+    const outbox=require('./command-outbox.cjs').createCommandOutbox({rootDir:path.join(app.getPath('userData'),'pending-operations'),maxEntries:128,maxPayloadBytes:64*1024*1024,maxTotalBytes:256*1024*1024});
+    recoveryService=require('./operation-recovery.cjs').createOperationRecovery({outbox,
+      send:async(context,json)=>{
+        assertOperationContext(context);
+        if(context.client){if(networkConfigError)throw Error(networkConfigError);return server.postSections(context.host,context.port,json);}
+        ensureDirs();createDailyBackup();
+        return storage.writeSections(context.directory,JSON.parse(json),{principal:context.principal});
+      },
+      lookup:async(context,id,digest)=>{
+        assertOperationContext(context);
+        if(context.client)return server.getJson(context.host,context.port,'/api/operation?id='+encodeURIComponent(id)+'&digest='+encodeURIComponent(digest),5000);
+        return storage.readOperation(context.directory,{id,digest},context.principal);
+      },onWarning:code=>console.warn('[outbox] '+code)
+    });
+  }
+  return recoveryService;
 }
 
 let settingsChain = Promise.resolve(), restartConfiguredServer = null;
@@ -163,6 +224,23 @@ function createWindow() {
     },
   });
   win.setMenuBarVisibility(false);
+  const closeSenderId=win.webContents.id,closeWindowId=win.id;
+  let closing=false;
+  win.on('close',event=>{
+    if(approvedCloseWindows.has(win.id))return;
+    event.preventDefault();if(closing)return;closing=true;
+    void(async()=>{
+      let ready=await requestSaveBarrier(win);if(win.isDestroyed())return;
+      if(!ready&&!hiddenTest){
+        const choice=await dialog.showMessageBox(win,{type:'warning',buttons:['Продолжить работу','Закрыть программу'],defaultId:0,cancelId:0,
+          title:'Изменения не подтверждены',message:'Не удалось подтвердить последние изменения.',detail:'Продолжите работу, чтобы проверить их и повторить сохранение. Операции, уже записанные в локальную очередь, останутся доступны при следующем запуске.'});
+        ready=choice.response===1;
+      }
+      if(win.isDestroyed())return;
+      if(ready){approvedCloseWindows.add(win.id);win.close();}else closing=false;
+    })().catch(()=>{closing=false;});
+  });
+  win.on('closed',()=>{approvedCloseWindows.delete(closeWindowId);finishSaveBarrier(closeSenderId,false);});
   win.webContents.on('will-navigate', (event, url) => {
     const origin = 'http://127.0.0.1:' + app._localServerPort;
     if (!url.startsWith(origin + '/')) event.preventDefault();
@@ -221,6 +299,11 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  ipcMain.handle('finish-close',(event,payload)=>{
+    const pending=saveBarriers.get(event.sender.id);
+    if(!pending||payload?.nonce!==pending.nonce||typeof payload.ready!=='boolean')return false;
+    finishSaveBarrier(event.sender.id,payload.ready);return true;
+  });
   require('./artifacts').register({ipcMain,getDataDir,isClientMode,getSettings:()=>settings,knowledgeDir:()=>path.join(getDataDir(),'reestr-knowledge')});
   if (settings.networkMode !== 'client') ensureDirs();
 
@@ -267,7 +350,7 @@ app.whenReady().then(() => {
       }
     }
   });
-  app.once('before-quit',()=>notificationService.dispose());
+  app.once('will-quit',()=>notificationService.dispose());
   ipcMain.handle('get-notification-settings',async event=>{try{
     const context=await notificationContext(event);
     return {...notificationService.status(context),databaseToken:context.databaseToken,user:context.user};
@@ -296,7 +379,7 @@ app.whenReady().then(() => {
         try { snapshot = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/snapshot', 15000); }
         catch { snapshot = { data:JSON.parse(await server.fetchData(settings.remoteHost, settings.remotePort || 3377)) }; }
         if (identity !== settingsIdentity()) throw new Error('База переключена во время чтения');
-        bindData(event, snapshot.databaseToken, snapshot.access, snapshot.revisions);
+        bindData(event, snapshot.databaseToken, snapshot.access, snapshot.revisions, snapshot.platform);
         return JSON.stringify(snapshot.data);
       } catch (e) {
         return null;
@@ -304,7 +387,7 @@ app.whenReady().then(() => {
     }
     try {
       const snapshot = storage.readSnapshot(getDataDir());
-      bindData(event, snapshot.databaseToken, null, snapshot.revisions);
+      bindData(event, snapshot.databaseToken, null, snapshot.revisions, snapshot.platform);
       return JSON.stringify(snapshot.data);
     } catch (e) {
       console.error('[read-data] ' + e.message);
@@ -360,7 +443,7 @@ app.whenReady().then(() => {
       try {
         const snapshot = await server.getJson(host, port, '/api/snapshot', 15000);
         if (identity !== settingsIdentity()) return null;
-        bindData(event, snapshot.databaseToken, snapshot.access, snapshot.revisions);
+        bindData(event, snapshot.databaseToken, snapshot.access, snapshot.revisions, snapshot.platform);
         return JSON.stringify(snapshot);
       }
       catch (e) {
@@ -376,7 +459,7 @@ app.whenReady().then(() => {
     try {
       const dir = getDataDir();
       const snapshot = storage.readSnapshot(dir);
-      bindData(event, snapshot.databaseToken, null, snapshot.revisions);
+      bindData(event, snapshot.databaseToken, null, snapshot.revisions, snapshot.platform);
       return JSON.stringify(snapshot);
     } catch (e) {
       console.error('[read-snapshot] ' + e.message);
@@ -409,34 +492,34 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('write-sections', async (_event, jsonStr) => {
-    let payload;
+    let payload,binding;
     try {
       payload = JSON.parse(jsonStr);
-      const binding = assertDataBinding(_event, payload.databaseToken);
+      binding = assertDataBinding(_event, payload.databaseToken);
       if (binding.databaseToken) payload.databaseToken = binding.databaseToken;
     } catch (e) { return { ok:false, error:e.message }; }
     const identity = settingsIdentity();
-    if (isClientMode()) {
-      if(networkConfigError)return {ok:false,error:networkConfigError};
-      try {
-        const result = await server.postSections(settings.remoteHost, settings.remotePort || 3377, JSON.stringify(payload));
-        if (identity !== settingsIdentity()) return { ok:false, error:'База переключена во время сохранения. Загрузите выбранную базу заново.' };
-        return result;
-      }
-      catch (e) { return { ok: false, error: e.message }; }
-    }
-    ensureDirs();
-    createDailyBackup();
     try {
-      const res = storage.writeSections(getDataDir(), payload, {
-        principal:{ id:'local-profile', name:getActiveUser().name || 'Локальный пользователь', role:'admin' } });
-      if (res.ok && res.changed.length) console.log('[write-sections] ' + res.changed.join(', '));
+      const res=await operationRecovery().execute(capturedOperationContext(_event,binding),payload);
+      if (identity !== settingsIdentity()) return {ok:false,error:'База переключена во время сохранения. Загрузите выбранную базу заново.'};
+      if (res?.ok && res.changed?.length) console.log('[write-sections] ' + res.changed.join(', '));
       return res;
     } catch (e) {
       console.error('[write-sections] ' + e.message);
       return { ok: false, error: e.message };
     }
   });
+  ipcMain.handle('get-pending-operations',async event=>{try{
+    const context=await verifiedOperationContext(event);
+    return {ok:true,supported:context.supportsOperations,operations:context.supportsOperations?operationRecovery().list(context):[]};
+  }catch(error){return {ok:false,error:error.message};}});
+  for(const [channel,action]of [['reconcile-operation','reconcile'],['retry-operation','retry'],['discard-operation','discard']])ipcMain.handle(channel,async(event,id)=>{try{
+    require('../assets/core/platform-contracts.js').validateOperation({id});
+    const context=await verifiedOperationContext(event);
+    if(!context.supportsOperations)throw Error('Сервер не поддерживает восстановление операций. Загрузите данные заново.');
+    const result=await operationRecovery()[action](context,id);assertOperationContext(context);
+    return action==='discard'?{ok:true}:result;
+  }catch(error){return {ok:false,error:error.message,code:error.code};}});
 
   ipcMain.handle('get-data-path', () => getDataDir());
   ipcMain.handle('get-data-identity', async () => {
@@ -718,12 +801,16 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('install-update', async () => {
+  ipcMain.handle('install-update', async event => {
     try {
       if(!downloadedPath || !fs.existsSync(downloadedPath))throw new Error('Установщик не загружен');
+      const win=BrowserWindow.fromWebContents(event.sender);
+      if(BrowserWindow.getAllWindows().some(other=>other!==win))throw Error('Закройте окна документов перед установкой обновления');
+      if(!await requestSaveBarrier(win))throw Error('Последние изменения не подтверждены. Проверьте сохранение перед установкой.');
+      approvedCloseWindows.add(win.id);
       await updater.launchInstaller(downloadedPath);
       return {ok:true};
-    } catch(e) {return {ok:false,error:e.message};}
+    } catch(e) {const win=BrowserWindow.fromWebContents(event.sender);if(win)approvedCloseWindows.delete(win.id);return {ok:false,error:e.message};}
   });
 
   // ─── РЕЕСТР-БИЛДЕР ──────────────────────────────────────

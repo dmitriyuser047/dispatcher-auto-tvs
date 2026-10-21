@@ -4,6 +4,7 @@
 // create a database during a read. The public storage service remains responsible
 // for permissions, CAS, domain rules, canonical audit and operation receipts.
 const fs=require('node:fs');
+const crypto=require('node:crypto');
 const path=require('node:path');
 const {DatabaseSync}=require('node:sqlite');
 const schema=require('../assets/core/platform-schema.js');
@@ -111,6 +112,10 @@ function readAll(dataDir){return transaction(dataDir,()=>{
 function readRevisions(dataDir){return transaction(dataDir,()=>{
   const revisions=Object.fromEntries(connection(dataDir).prepare('SELECT name,revision FROM sections').all().map(row=>[row.name,row.revision]));
   if(schema.sections.some(name=>!own(revisions,name)))fail('SQLITE_REVISIONS','В базе SQLite отсутствуют версии разделов');return revisionsOf(revisions);
+},{readOnly:true});}
+function readIdentity(dataDir){return transaction(dataDir,()=>{
+  const metadata=Object.fromEntries(connection(dataDir).prepare("SELECT key,value FROM metadata WHERE key IN('database_uuid','generation')").all().map(row=>[row.key,row.value]));
+  return require('./database-identity.cjs').validate({format:'tvs-database-identity',version:1,uuid:metadata.database_uuid,generation:Number(metadata.generation)});
 },{readOnly:true});}
 function rowEntries(data){
   const entries=[],bySection={};
@@ -228,7 +233,7 @@ function create(dataDir,input,options={}){
     const claim=fs.openSync(target.file,'wx');fs.closeSync(claim);claimed=true;
     assertDatabaseFile(target);
     db=new DatabaseSync(target.file,{enableForeignKeyConstraints:true,allowExtension:false,enableDoubleQuotedStringLiterals:false,timeout:5000,defensive:true});configure(db,false);db.exec('BEGIN IMMEDIATE;');began=true;db.exec(ddl);
-    const meta=db.prepare('INSERT INTO metadata VALUES(?,?)');for(const [name,value]of Object.entries({format:FORMAT,format_version:String(VERSION),schema_version:String(VERSION),created_at:new Date().toISOString()}))meta.run(name,value);
+    const meta=db.prepare('INSERT INTO metadata VALUES(?,?)');for(const [name,value]of Object.entries({format:FORMAT,format_version:String(VERSION),schema_version:String(VERSION),database_uuid:crypto.randomUUID(),generation:'1',created_at:new Date().toISOString()}))meta.run(name,value);
     const section=db.prepare('INSERT INTO sections(name,revision) VALUES(?,?)');for(const name of schema.sections)section.run(name,revisions[name]);
     build(db,data,revisions,schema.sections);if(options.beforeCommit)resultSync(()=>options.beforeCommit());db.exec('COMMIT;');began=false;
     db.exec('PRAGMA wal_checkpoint(TRUNCATE);');db.close();db=null;writeGuard(target.directory);
@@ -246,4 +251,4 @@ function inspect(dataDir){return transaction(dataDir,()=>{
     sections,rowCount:sections.reduce((total,row)=>total+row.count,0),linkCount:db.prepare('SELECT count(*) AS count FROM row_links').get().count,
     legacyIssues:db.prepare('SELECT issue_json FROM reference_issues ORDER BY id').all().map(row=>JSON.parse(row.issue_json)),integrity:integrityCheck,foreignKeyErrors};
 },{readOnly:true});}
-module.exports={exists,filename,readAll,readRows,readRevisions,commitSections,create,inspect,transaction};
+module.exports={exists,filename,readAll,readRows,readRevisions,readIdentity,commitSections,create,inspect,transaction};

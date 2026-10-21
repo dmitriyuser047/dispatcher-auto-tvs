@@ -212,9 +212,11 @@ function scheduleLocalBackup(json) {
   }, 0);
 }
 
+const _pendingSaveOperations=new Set();
 async function saveData(d = data, options) {
-  if (typeof platformExecuteSave === 'function') return platformExecuteSave(d, options, nextOptions => persistData(d,nextOptions));
-  return persistData(d, options);
+  const operation=typeof platformExecuteSave === 'function' ? platformExecuteSave(d,options,nextOptions=>persistData(d,nextOptions)) : persistData(d,options);
+  _pendingSaveOperations.add(operation);
+  try{return await operation;}finally{_pendingSaveOperations.delete(operation);}
 }
 function restoreSaveBaseline(d) {
   if (d !== data || !_lastPersisted) return;

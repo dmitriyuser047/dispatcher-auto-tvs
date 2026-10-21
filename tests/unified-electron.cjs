@@ -57,10 +57,11 @@ test('hidden Electron application persists synthetic journals, isolates registry
     const snap = JSON.parse(await window.electronAPI.readSnapshot());
     data.records.push({ id:'native-journal',vehicleId:'A',date:'2026-10-01',km:100,odoStart:1000,odoEnd:1100,fuelIssued:0,fuelActual:10,fuelGrade:'ДТ',driver:'Synthetic driver' });
     const saved = await saveData(data);
-    return { saved, token:snap.databaseToken, identity:await window.electronAPI.getDataIdentity(), operationReceipt:_sync.lastResult?.operationReceipt, platform:snap.platform };
+    return { saved, token:snap.databaseToken, identity:await window.electronAPI.getDataIdentity(), operationReceipt:_sync.lastResult?.operationReceipt, platform:snap.platform,
+      ...(saved?{}:{failure:platformRuntimeStatus().lastError,syncResult:_sync.lastResult}) };
   });
-  assert.equal(first.saved, true);
-  assert.deepEqual(first.platform, {apiVersion:1,operations:1});
+  assert.equal(first.saved, true,JSON.stringify(first));
+  assert.deepEqual(first.platform, {apiVersion:1,operations:1,outbox:1,receiptQuery:1});
   assert.equal(first.operationReceipt?.status, 'committed'); assert.ok(first.operationReceipt.id);
   assert.equal(storage.readAll(dataA).records[0].id, 'native-journal');
   assert.match(first.token, /^[a-f0-9]{64}$/);
@@ -135,6 +136,42 @@ test('hidden Electron application persists synthetic journals, isolates registry
   const replayData=storage.readAll(dataA);
   assert.equal(replayData.opsTasks.filter(row=>row.id==='native-idempotent-task').length,1);
   assert.equal(replayData.auditLog.filter(row=>row.type==='transaction'&&row.operationId===replayedNative.id).length,1);
+  // The private journal stores committed receipts without retaining submitted
+  // financial/journal bodies. All inspected files belong to this temp profile.
+  const outboxDirectory=path.join(profile,'pending-operations');
+  assert.equal(path.dirname(outboxDirectory),profile);
+  const outboxRecords=()=>fs.readdirSync(outboxDirectory).filter(name=>/^[a-f0-9]{64}\.json$/.test(name))
+    .map(name=>JSON.parse(fs.readFileSync(path.join(outboxDirectory,name),'utf8')));
+  const nativeQueue=await page.evaluate(()=>window.electronAPI.getPendingOperations());
+  assert.equal(nativeQueue.ok,true);
+  for(const id of [first.operationReceipt.id,features.operationReceipt.id,replayedNative.id]){
+    const metadata=nativeQueue.operations.find(row=>row.id===id),record=outboxRecords().find(row=>row.id===id);
+    assert.ok(metadata,id);assert.equal(metadata.status,'committed');assert.ok(record,id);
+    assert.equal(record.status,'committed');assert.equal(record.payloadJson,null);assert.equal(record.receipt.id,id);
+    assert.match(record.scope,/^[a-f0-9]{64}$/);assert.match(record.checksum,/^[a-f0-9]{64}$/);
+    assert.equal(Object.hasOwn(metadata,'payloadJson'),false);assert.equal(Object.hasOwn(metadata,'payload'),false);
+  }
+  const nativeScope=outboxRecords().find(row=>row.id===first.operationReceipt.id).scope;
+  const durableOutbox=require('../electron/command-outbox.cjs').createCommandOutbox({rootDir:outboxDirectory});
+  const recoveredId='native-durable-recovery',recoveryBase=storage.readSnapshot(dataA);
+  durableOutbox.stage(nativeScope,{databaseToken:recoveryBase.databaseToken,base:{opsTasks:recoveryBase.revisions.opsTasks},
+    sections:{opsTasks:[...recoveryBase.data.opsTasks,{id:'native-recovered-task',status:'open',title:'Synthetic durable original request'}]},
+    operation:{id:recoveredId}},{supportsOperations:true});
+  const beforeRecovery=await page.evaluate(()=>window.electronAPI.getPendingOperations());
+  assert.equal(beforeRecovery.operations.find(row=>row.id===recoveredId).status,'pending');
+  const recovered=await page.evaluate(async id=>{
+    const result=await window.electronAPI.retryOperation(id);
+    data=await loadData();rebuildIndex();return result;
+  },recoveredId);
+  assert.equal(recovered.ok,true);assert.equal(recovered.operationReceipt.id,recoveredId);
+  assert.equal(storage.readAll(dataA).opsTasks.filter(row=>row.id==='native-recovered-task').length,1);
+  assert.equal(storage.readAll(dataA).auditLog.filter(row=>row.type==='transaction'&&row.operationId===recoveredId).length,1);
+  const recoveredRecord=outboxRecords().find(row=>row.id===recoveredId);
+  assert.equal(recoveredRecord.status,'committed');assert.equal(recoveredRecord.payloadJson,null);
+  assert.equal(JSON.stringify(recoveredRecord).includes('Synthetic durable original request'),false);
+  const reconciled=await page.evaluate(id=>window.electronAPI.reconcileOperation(id),recoveredId);
+  assert.equal(reconciled.ok,true);assert.equal(reconciled.committed,true);
+  assert.equal(storage.readAll(dataA).auditLog.filter(row=>row.type==='transaction'&&row.operationId===recoveredId).length,1);
   for (const request of ['/electron/main.js','/package.json','/bundled-data/data-2.0.57.json']) assert.equal(await page.evaluate(url => fetch(url).then(res => res.status), request), 403);
 
   // The actual native section protocol must acknowledge the backend's document,
@@ -226,6 +263,11 @@ test('hidden Electron application persists synthetic journals, isolates registry
   await page.evaluate(() => window.electronAPI.setTheme('dark'));
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
   await registers[0].waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+  const isolatedId='native-profile-A-pending',isolatedBase=storage.readSnapshot(dataA);
+  durableOutbox.stage(nativeScope,{databaseToken:isolatedBase.databaseToken,base:{opsTasks:isolatedBase.revisions.opsTasks},
+    sections:{opsTasks:[...isolatedBase.data.opsTasks,{id:'must-stay-in-profile-A',status:'open',title:'Synthetic profile A pending request'}]},
+    operation:{id:isolatedId}},{supportsOperations:true});
+  assert.equal((await page.evaluate(()=>window.electronAPI.getPendingOperations())).operations.find(row=>row.id===isolatedId).status,'pending');
   const afterSwitch = await page.evaluate(async token => {
     await window.electronAPI.switchUser(1);
     const stale = await window.electronAPI.writeSections(JSON.stringify({ databaseToken:token,base:{vehicles:2},sections:{vehicles:[{id:'WRONG'}]} }));
@@ -234,6 +276,11 @@ test('hidden Electron application persists synthetic journals, isolates registry
   }, first.token);
   assert.equal(afterSwitch.stale.ok, false);
   assert.equal(afterSwitch.vehicle, 'B');
+  const newProfileQueue=await page.evaluate(async id=>({queue:await window.electronAPI.getPendingOperations(),retry:await window.electronAPI.retryOperation(id)}),isolatedId);
+  assert.equal(newProfileQueue.queue.ok,true);assert.deepEqual(newProfileQueue.queue.operations,[]);assert.equal(newProfileQueue.retry.ok,false);
+  assert.equal(outboxRecords().find(row=>row.id===isolatedId).status,'pending');
+  assert.equal(storage.readAll(dataB).opsTasks.some(row=>row.id==='must-stay-in-profile-A'),false);
+  assert.equal(storage.readAll(dataA).opsTasks.some(row=>row.id==='must-stay-in-profile-A'),false);
   assert.equal((await registers[0].evaluate(() => window.reestrWindow.saveRows([]))).ok, false);
   assert.equal(storage.readAll(dataB).vehicles[0].id, 'B');
   assert.equal(storage.readAll(dataB).reestrRows[0].id, 'original-B');
@@ -276,5 +323,26 @@ test('hidden Electron application persists synthetic journals, isolates registry
   assert.deepEqual(fs.readFileSync(pdfs[1]),beforeB);
   assert.equal((await PDFDocument.load(fs.readFileSync(pdfs[0]))).getPageCount(),1);
   assert.equal(await app.evaluate(({ BrowserWindow })=>BrowserWindow.getAllWindows().some(win=>win.isVisible())),false);
+
+  // Closing waits for the renderer's save barrier. A false result in hidden
+  // mode keeps the window alive and never opens a native confirmation dialog.
+  const beforeClose=storage.readSnapshot(dataB);
+  await page.evaluate(()=>{
+    window.__originalCloseFlush=platformFlushForClose;window.__closeFlushCalls=0;
+    platformFlushForClose=async()=>{window.__closeFlushCalls++;return new Promise(resolve=>{window.__releaseCloseFlush=resolve;});};
+  });
+  const closeWindowId=await app.evaluate(({BrowserWindow,dialog})=>{
+    globalThis.__syntheticCloseDialogs=0;dialog.showMessageBox=async()=>{globalThis.__syntheticCloseDialogs++;return{response:0};};
+    const win=BrowserWindow.getAllWindows().find(win=>win.webContents.getURL().includes('/index.html'));
+    const id=win.id;win.close();return id;
+  });
+  await page.waitForFunction(()=>!!window.__releaseCloseFlush);
+  assert.equal(await app.evaluate(({BrowserWindow},id)=>!!BrowserWindow.fromId(id)&&!BrowserWindow.fromId(id).isDestroyed(),closeWindowId),true);
+  assert.equal(await page.evaluate(()=>window.electronAPI.finishClose({nonce:'synthetic-invalid-close-nonce',ready:true})),false);
+  assert.equal(await page.evaluate(()=>window.__closeFlushCalls),1);
+  await page.evaluate(async()=>{window.__releaseCloseFlush(false);await new Promise(resolve=>setTimeout(resolve,50));platformFlushForClose=window.__originalCloseFlush;});
+  assert.equal(await app.evaluate(({BrowserWindow},id)=>!!BrowserWindow.fromId(id)&&!BrowserWindow.fromId(id).isDestroyed(),closeWindowId),true);
+  assert.equal(await app.evaluate(()=>globalThis.__syntheticCloseDialogs),0);
+  assert.deepEqual(storage.readSnapshot(dataB),beforeClose);
   assert.deepEqual(errors, []);
 });
