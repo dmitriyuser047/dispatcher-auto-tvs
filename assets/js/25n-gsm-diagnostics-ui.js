@@ -83,7 +83,9 @@ function gsmSetDiagnosticsCategory(value) { gsmDiagnosticsCategory = value === '
 function gsmDiagnosticsShowMore() { gsmDiagnosticsLimit += 30; gsmRefreshDiagnostics(); }
 function gsmDiagnosticsHtml(ledger) {
   if (typeof gsmAuditModel !== 'function') return '<p class="gsm-status">Модуль расчёта проверки данных не подключён.</p>';
-  gsmDiagnosticsModel = gsmAuditModel(data, { ...gsmMonthRange(fpMonth), ledger });
+  const background=typeof gsmBackgroundRequired==='function'&&gsmBackgroundRequired(),prepared=background?gsmPreparedWorkspace()?.audit:null;
+  if(background&&!prepared){gsmDiagnosticsModel=null;return '<p class="gsm-status" role="status">Проверка ГСМ не готова или источники изменились. Обновите расчёт.</p>';}
+  gsmDiagnosticsModel = background ? prepared : gsmAuditModel(data, { ...gsmMonthRange(fpMonth), ledger });
   const items = gsmDiagnosticsBaseItems(), count = category => items.filter(item => item.category === category).length;
   return '<section class="gsm-diagnostics" id="gsmDiagnostics" aria-label="Проверка данных ГСМ"><div class="gsm-audit-intro"><h3>Проверка данных ГСМ</h3><p>' +
     fpEsc([fpMonthLabel(fpMonth), gsmOrg || 'Все организации', gsmFuel || 'Все марки топлива'].join(' · ')) + '</p><p>Откройте первоисточник и внесите подтверждённую правку вручную. Проверка пересчитывается после сохранения. Открытие проверки ничего не меняет.</p></div>' +

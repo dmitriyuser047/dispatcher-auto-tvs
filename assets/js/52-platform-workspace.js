@@ -11,9 +11,9 @@ async function platformNotifyPendingOperations(){
   }catch{}
 }
 
-function platformHealthSnapshot() {
+function platformHealthSnapshot(calculatedIntegrity) {
   const context = platformSessionContext();
-  const inspected=PlatformIntegrity.inspect(data, { readable:context.readable, today:dispatcherLocalDate() });
+  const inspected=calculatedIntegrity||PlatformIntegrity.inspect(data, { readable:context.readable, today:dispatcherLocalDate() });
   const issueFields=['code','severity','section','recordId','rowIndex','field','message','targetSection','targetId','relatedRecordId'];
   const integrity={ counts:{...inspected.counts}, sections:inspected.sections,
     issues:inspected.issues.map(issue => Object.fromEntries(issueFields.filter(field => issue[field] != null && ['string','number'].includes(typeof issue[field])).map(field => [field,issue[field]]))) };
@@ -31,7 +31,7 @@ function platformSectionLabel(section) { return PlatformSchema.descriptors[secti
 function platformOpenSource(section, id) {
   const readable = platformSessionContext().readable;
   if (readable && !readable.includes(section)) { showToast('Раздел недоступен для вашей роли.'); return; }
-  const row = (data[section] || []).find(row => String(row.id ?? row.month ?? '') === String(id));
+  const row = (data[section] || []).find(row => (row.id ?? row.month ?? '') === id);
   if (section === 'drivers') { if (row) personnelOpenPerson(row.id); else switchSection('drivers'); return; }
   if (section === 'vehicles') { switchSection('vehicles'); if (row) renderDetail(row); return; }
   if (section === 'records') { switchSection('vehicles'); const vehicle = row && data.vehicles.find(vehicle => vehicle.id === row.vehicleId); if (vehicle) renderDetail(vehicle); return; }
@@ -50,11 +50,13 @@ function renderPlatformIssues(report) {
   const issues = platformSystemIssues(report), shown = issues.slice(0,platformIssueLimit);
   return '<p class="platform-note" role="status">Показано ' + shown.length + ' из ' + issues.length + '. Проверка ничего не изменяет в базе.</p>' +
     (shown.length ? '<div class="platform-issues">' + shown.map(issue => '<article class="platform-issue ' + (issue.severity === 'error' ? 'is-error' : '') + '"><div><strong>' + htmlEsc(platformSectionLabel(issue.section)) + '</strong><span>' + (issue.severity === 'error' ? 'Нужна проверка' : 'Замечание') + '</span></div><p>' + htmlEsc(issue.message) + '</p><small>' + htmlEsc([issue.recordId ? 'Запись: '+issue.recordId : '',issue.field ? 'Поле: '+issue.field : ''].filter(Boolean).join(' · ')) + '</small>' +
-      (issue.section ? '<button type="button" class="btn btn-ghost btn-sm" data-platform-source="' + htmlEsc(issue.section) + '" data-platform-id="' + htmlEsc(issue.recordId || '') + '">Открыть раздел</button>' : '') + '</article>').join('') + '</div>' : '<div class="platform-empty">Замечаний по выбранному фильтру нет.</div>') +
+      (issue.section ? '<button type="button" class="btn btn-ghost btn-sm" data-platform-source="' + htmlEsc(issue.section) + '" data-platform-id="' + htmlEsc(JSON.stringify(issue.recordId ?? '')) + '">Открыть раздел</button>' : '') + '</article>').join('') + '</div>' : '<div class="platform-empty">Замечаний по выбранному фильтру нет.</div>') +
     (issues.length > shown.length ? '<button type="button" class="btn btn-ghost" id="platformMoreIssues">Показать ещё</button>' : '');
 }
-function renderPlatformSystem() {
-  const report = platformHealthSnapshot(), counts = report.integrity.counts || {}, allowed = new Set(report.storage.readable);
+function renderPlatformSystem(calculatedIntegrity) {
+  const supplied=calculatedIntegrity&&Array.isArray(calculatedIntegrity.issues)&&calculatedIntegrity.counts?calculatedIntegrity:null;
+  if(!supplied&&dispatcherBackgroundNeeded()){dispatcherRenderBackground('system','health',{},renderPlatformSystem);return;}
+  const report = platformHealthSnapshot(supplied), counts = report.integrity.counts || {}, allowed = new Set(report.storage.readable);
   const modules = Array.isArray(PlatformSchema.modules) ? PlatformSchema.modules : Object.values(PlatformSchema.modules);
   const history = report.runtime.recent || report.runtime.operations || [];
   document.getElementById('mainContent').innerHTML = '<div class="platform-workspace"><div class="platform-heading"><div><h2>Состояние программы</h2><p>Общие проверки данных и операций всех модулей.</p></div><div class="platform-actions"><button type="button" class="btn btn-ghost" id="platformExport">Выгрузить диагностику</button><button type="button" class="btn btn-primary" id="platformRefresh">Проверить заново</button></div></div>' +
@@ -74,6 +76,51 @@ function renderPlatformSystem() {
   document.getElementById('platformSeverity').onchange = event => { platformIssueSeverity=event.target.value; platformIssueLimit=40; refreshIssues(); };
   platformBindSourceLinks(report);
   platformRenderRecoveryPanel();
+  platformRenderDataBrowser();
+}
+function platformRenderDataBrowser(){
+  if(!window.electronAPI?.queryRows)return;
+  const workspace=document.querySelector('.platform-workspace');if(!workspace)return;
+  const readable=platformSessionContext().readable||PlatformSchema.sections;
+  const sections=PlatformSchema.sections.filter(section=>section!=='auditLog'&&readable.includes(section));
+  if(!sections.length)return;
+  const panel=document.createElement('section');panel.id='platformDataBrowser';
+  panel.innerHTML='<h3>Просмотр записей</h3><p class="platform-note">Загрузка по 25 записей. Для исправления откройте исходный раздел.</p><form class="platform-filters"><label>Раздел<select name="section">'+sections.map(section=>'<option value="'+htmlEsc(section)+'">'+htmlEsc(platformSectionLabel(section))+'</option>').join('')+'</select></label><label>Поиск<input name="search" type="search" maxlength="200" placeholder="Номер, название, примечание"></label><label>С даты<input type="date" name="from"></label><label>По дату<input type="date" name="to"></label><button class="btn btn-ghost" type="submit">Показать</button></form><p role="status"></p><div class="platform-page-rows"></div><div class="platform-actions"><button type="button" class="btn btn-ghost" data-page="previous">Назад</button><button type="button" class="btn btn-ghost" data-page="next">Далее</button></div>';
+  workspace.append(panel);
+  const form=panel.querySelector('form'),status=panel.querySelector('[role=status]'),rowsHost=panel.querySelector('.platform-page-rows');
+  const previous=panel.querySelector('[data-page=previous]'),next=panel.querySelector('[data-page=next]');
+  let selection=null,cursors=[null],page=0,nextCursor=null,sequence=0;
+  const stamp=syncSessionStamp();
+  async function load(){
+    const request=++sequence;previous.disabled=true;next.disabled=true;rowsHost.replaceChildren();status.textContent='Загружаю записи…';
+    let result;try{result=await window.electronAPI.queryRows({...selection,limit:25,...(cursors[page]?{cursor:cursors[page]}:{})});}
+    catch{result={ok:false,error:'Не удалось загрузить записи. Повторите выборку.'};}
+    if(request!==sequence||stamp!==syncSessionStamp()||!panel.isConnected)return;
+    if(!result?.ok){status.textContent=result?.error||'Выборка недоступна';previous.disabled=page===0;return;}
+    nextCursor=result.nextCursor;previous.disabled=page===0;next.disabled=!nextCursor;
+    status.textContent='Страница '+(page+1)+' · записей '+result.rows.length+' из '+result.total;
+    for(const row of result.rows){
+      const article=document.createElement('article'),title=document.createElement('strong'),text=document.createElement('p'),button=document.createElement('button');
+      const id=row.id??row.month??row.cardNum??'';
+      title.textContent=String(row.plate||row.name||row.title||row.number||id||'Запись');
+      text.textContent=[row.date||row.month, id!==''?'ID: '+JSON.stringify(id):'',row.status,row.assetRef].filter(value=>value!==undefined&&value!==null&&value!=='').map(String).join(' · ');
+      button.type='button';button.className='btn btn-ghost btn-sm';button.textContent='Открыть раздел';button.onclick=()=>platformOpenSource(selection.section,id);
+      article.className='platform-issue';article.append(title,text,button);rowsHost.append(article);
+    }
+  }
+  function start(){
+    selection={section:form.elements.section.value,...(form.elements.search.value.trim()?{search:form.elements.search.value.trim()}:{}),...(form.elements.from.value?{from:form.elements.from.value}:{}),...(form.elements.to.value?{to:form.elements.to.value}:{})};
+    cursors=[null];page=0;nextCursor=null;void load();
+  }
+  function dateFields(){
+    const dated=PlatformSchema.descriptors[form.elements.section.value]?.dates?.some(item=>item.field==='date'||item.field==='month');
+    for(const field of ['from','to']){form.elements[field].disabled=!dated;if(!dated)form.elements[field].value='';}
+  }
+  form.elements.section.onchange=()=>{dateFields();start();};
+  form.onsubmit=event=>{event.preventDefault();start();};
+  previous.onclick=()=>{if(page>0){page--;void load();}};
+  next.onclick=()=>{if(nextCursor){cursors[++page]=nextCursor;void load();}};
+  dateFields();start();
 }
 async function platformRenderRecoveryPanel(){
   if(!window.electronAPI?.getPendingOperations)return;
@@ -108,12 +155,14 @@ async function platformRenderRecoveryPanel(){
   };
 }
 function platformBindSourceLinks(report) {
-  document.querySelectorAll('[data-platform-source]').forEach(button => { button.onclick = () => platformOpenSource(button.dataset.platformSource,button.dataset.platformId); });
+  document.querySelectorAll('[data-platform-source]').forEach(button => { button.onclick = () => platformOpenSource(button.dataset.platformSource,JSON.parse(button.dataset.platformId)); });
   const more=document.getElementById('platformMoreIssues');
   if (more) more.onclick = () => { platformIssueLimit+=40; document.getElementById('platformIssues').innerHTML=renderPlatformIssues(report); platformBindSourceLinks(report); };
 }
-function platformExportDiagnostics() {
-  const report = platformHealthSnapshot();
+async function platformExportDiagnostics() {
+  let report;
+  try{report=platformHealthSnapshot(dispatcherBackgroundNeeded()?await dispatcherHealthAsync():null);}
+  catch(error){showToast(error.message);return;}
   const blob = new Blob([JSON.stringify(report,null,2)],{type:'application/json'}), url=URL.createObjectURL(blob), link=document.createElement('a');
   link.href=url; link.download='Диагностика_программы_'+dispatcherLocalDate()+'.json'; link.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
 }

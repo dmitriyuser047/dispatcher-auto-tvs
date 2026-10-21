@@ -169,7 +169,11 @@
     if (!Number.isSafeInteger(characterBudget) || characterBudget < 0 || characterBudget > 64000000) fail('INVALID_CONFIGURATION', 'Некорректный бюджет квитанций операций');
     const now = configuration.now || (() => new Date().toISOString());
     if (typeof now !== 'function') fail('INVALID_CONFIGURATION', 'Некорректный источник времени');
-    const entries = new Map(), listeners = new Set(), recent = [];
+    if (configuration.prepare != null && typeof configuration.prepare !== 'function') fail('INVALID_CONFIGURATION','Подготовка операции должна быть функцией');
+    const injectedPrepare=configuration.prepare;
+    const pendingLimit=configuration.maxPending == null ? 16 : configuration.maxPending;
+    if(!Number.isSafeInteger(pendingLimit)||pendingLimit<1||pendingLimit>128)fail('INVALID_CONFIGURATION','Предел ожидающих операций должен быть от 1 до 128');
+    const entries = new Map(), listeners = new Set(), recent = [], preparationJobs=new Map();
     const counts = { queued:0, running:0, committed:0, unchanged:0, failed:0, deduplicated:0 };
     let retainedCharacters = 0;
     let tail = Promise.resolve();
@@ -215,7 +219,125 @@
       }
       return clone(ack);
     }
+    function preparedPlan(value, previous, next, captured) {
+      if (!plain(value))
+        fail('INVALID_PREPARED_PLAN','Подготовленный план относится к другой операции или базе');
+      // The provider is trusted calculation code, but its response is still an
+      // unknown DTO. Do not rerun domain policies; check the complete JSON shape
+      // and its binding to the captured inputs before accepting a worker plan.
+      try { contracts.validateSections({appMeta:[value]},schema.sections); }
+      catch { fail('INVALID_PREPARED_PLAN','Подготовленный план содержит неподдерживаемые данные'); }
+      if(value.schemaVersion!==1 || value.id!==captured.id || value.identity!==captured.identity)
+        fail('INVALID_PREPARED_PLAN','Подготовленный план относится к другой операции или базе');
+      const result=clone(value), names=schema.sections;
+      const validNames=value=>Array.isArray(value)&&new Set(value).size===value.length&&value.every(name=>names.includes(name));
+      if (!validNames(result.changed) || !plain(result.sections) || !plain(result.sourceSnapshot) || !plain(result.base) ||
+          !plain(result.metadata) || result.metadata.createdAt!==captured.now || stableSerialize(result.actor)!==stableSerialize(captured.actor || null) ||
+          !Array.isArray(result.rowChanges) || typeof result.requestDigest!=='string' || !/^sha256:[a-f0-9]{64}$/.test(result.requestDigest))
+        fail('INVALID_PREPARED_PLAN','Некорректная структура подготовленной операции');
+      const sameNames=value=>JSON.stringify(Object.keys(value).sort())===JSON.stringify(result.changed.slice().sort());
+      if (!sameNames(result.sections) || !sameNames(result.sourceSnapshot) || !sameNames(result.base))
+        fail('INVALID_PREPARED_PLAN','Разделы подготовленного плана не согласованы');
+      try { contracts.validateSections(result.sections,names);contracts.validateSections(result.sourceSnapshot,names);contracts.validateRevisions(result.base,names); }
+      catch { fail('INVALID_PREPARED_PLAN','Некорректные разделы или версии подготовленного плана'); }
+      const target={...previous,...next}, changed=[];
+      for (const name of new Set([...Object.keys(previous),...Object.keys(next)]))
+        if (!names.includes(name) && JSON.stringify(previous[name])!==JSON.stringify(target[name]))
+          fail('INVALID_PREPARED_PLAN','Подготовленный план изменяет неизвестный раздел');
+      for (const name of names) {
+        const before=previous[name] || [], after=target[name] || [];
+        if (JSON.stringify(before)!==JSON.stringify(after)) changed.push(name);
+      }
+      if (JSON.stringify(changed)!==JSON.stringify(result.changed)) fail('INVALID_PREPARED_PLAN','Подготовленный план не соответствует изменениям');
+      for (const name of result.changed) {
+        if (result.base[name] !== (captured.revisions?.[name] ?? 0) || JSON.stringify(result.sections[name])!==JSON.stringify(target[name] || []) ||
+            JSON.stringify(result.sourceSnapshot[name])!==JSON.stringify(previous[name] || []))
+          fail('INVALID_PREPARED_PLAN','Источники или версии подготовленного плана изменились');
+      }
+      for (const row of result.rowChanges) if (!plain(row) || !result.changed.includes(row.section) || typeof row.key!=='string' ||
+          !['create','update','delete'].includes(row.action) || !Array.isArray(row.fields) || row.fields.some(field=>typeof field!=='string') ||
+          !(row.before===null||plain(row.before)) || !(row.after===null||plain(row.after)))
+        fail('INVALID_PREPARED_PLAN','Некорректные изменения записей подготовленного плана');
+      if (result.requestDigest!==requestDigest({base:result.base,sections:result.sections}))
+        fail('INVALID_PREPARED_PLAN','Отпечаток подготовленной операции не совпал');
+      return freeze(result);
+    }
+    function runPrepared(command,persist) {
+      let captured,options,nextRef,nextText,previousText,previous,next,reservation,leader;
+      try {
+        if (!plain(command) || typeof persist!=='function') fail('INVALID_ARGUMENT','Нужны команда и адаптер сохранения');
+        if(counts.queued+counts.running>=pendingLimit)fail('QUEUE_LIMIT','Дождитесь завершения ожидающих операций');
+        captured=context();
+        if(command.identity!=null&&command.identity!==captured.identity)fail('STALE_IDENTITY','Команда относится к другой базе или сеансу');
+        options=clone(command.options || {});
+        if(!plain(options)||options.requiredCanonicalSections!=null&&(!Array.isArray(options.requiredCanonicalSections)||options.requiredCanonicalSections.some(name=>!schema.sections.includes(name))))
+          fail('INVALID_ARGUMENT','Некорректные параметры подтверждения операции');
+        if(!plain(command.previous)||!plain(command.next))fail('INVALID_ARGUMENT','Источник и изменения должны быть объектами');
+        nextRef=command.next;nextText=stableSerialize(nextRef);next=freeze(JSON.parse(nextText));previousText=stableSerialize(command.previous);previous=freeze(JSON.parse(previousText));
+        captured=freeze({...captured,id:command.id || newId(),now:now()});contracts.validateOperation({id:captured.id});
+        if(typeof captured.now!=='string'||!Number.isFinite(Date.parse(captured.now)))fail('INVALID_TIMESTAMP','Некорректное время операции');
+        options=freeze(options);
+        const peers=preparationJobs.get(captured.id);leader=peers && peers.values().next().value;
+        const stamp=stableSerialize({identity:captured.identity,access:accessStamp(captured),revisions:captured.revisions || {},options});
+        // Identical concurrent callers join before the first save can install
+        // canonical audit rows into their shared live nextRef. Their immutable
+        // initial command is already bound; no second prepare or persist occurs.
+        if(leader&&leader.nextText===nextText&&leader.previousText===previousText&&leader.stamp===stamp){
+          counts.deduplicated++;return leader.promise.then(receipt=>{guard(captured);return freeze({...receipt,duplicate:true});});
+        }
+        reservation={nextText,previousText,stamp,promise:null,binding:null};
+        if(peers)peers.add(reservation);else preparationJobs.set(captured.id,new Set([reservation]));
+      } catch(error) { return Promise.reject(commandError(error)); }
+      counts.queued++;
+      // Reserve the FIFO slot before asynchronous preparation starts. A faster
+      // second worker response can never overtake the first caller's commit.
+      const task=tail.then(async()=>{
+        counts.queued--;counts.running++;
+        let plan={id:captured.id,changed:[],metadata:{createdAt:captured.now}},entry=null,binding='';
+        const unchangedSource=()=>{if(stableSerialize(nextRef)!==nextText)fail('STALE_COMMAND','Данные изменились после постановки операции в очередь');};
+        try {
+          guard(captured);unchangedSource();
+          const raw=await injectedPrepare(previous,next,captured);
+          guard(captured);unchangedSource();plan=preparedPlan(raw,previous,next,captured);
+          guard(captured);unchangedSource();
+          binding=sha256(stableSerialize({identity:captured.identity,access:accessStamp(captured),digest:plan.requestDigest,options}));
+          reservation.binding=binding;
+          // A non-identical input may still produce the same canonical plan.
+          // Retain its in-flight leader binding independently of receipt pruning.
+          if(leader?.binding){
+            if(leader.binding!==binding)fail('OPERATION_ID_REUSE','ID операции уже связан с другими изменениями');
+            counts.deduplicated++;const receipt=await leader.promise;guard(captured);return freeze({...receipt,plan,duplicate:true});
+          }
+          const existing=entries.get(plan.id);
+          if(existing&&existing.binding!==binding)fail('OPERATION_ID_REUSE','ID операции уже связан с другими изменениями');
+          if(existing&&existing.state!=='failed') {
+            counts.deduplicated++;const receipt=await existing.promise;guard(captured);return freeze({plan,...clone(receipt),duplicate:true});
+          }
+          if(existing)retainedCharacters-=existing.characters || 0;
+          entry={binding,state:'pending',promise:null,characters:0};entries.set(plan.id,entry);
+          if(!plan.changed.length) {
+            const ack={ok:true,unchanged:true},receipt=freeze({ack,result:ack});entry.state='unchanged';counts.unchanged++;
+            entry.characters=stableSerialize(receipt).length+binding.length+plan.id.length;retainedCharacters+=entry.characters;entry.promise=Promise.resolve(receipt);
+            remember(plan,true,safeNow(plan.metadata.createdAt),undefined,'unchanged');return freeze({plan,...receipt,duplicate:false});
+          }
+          const rawAck=await persist(plan);guard(captured);const ack=checkAck(rawAck,plan,options),at=safeNow(plan.metadata.createdAt),receipt=freeze({ack,result:ack});
+          entry.characters=stableSerialize(receipt).length+binding.length+plan.id.length;retainedCharacters+=entry.characters;
+          entry.state='committed';entry.promise=Promise.resolve(receipt);counts.committed++;remember(plan,true,at);
+          const event=freeze({type:'committed',id:plan.id,sections:plan.changed.slice(),at});
+          for(const listener of [...listeners]){try{listener(event);}catch{}}
+          return freeze({plan,...receipt,duplicate:false});
+        } catch(error) {
+          const failure=commandError(error);
+          if(entry){entry.state='failed';entry.promise=null;entry.characters=binding.length+plan.id.length;retainedCharacters+=entry.characters;}
+          counts.failed++;remember(plan,false,safeNow(plan.metadata.createdAt),failure.code);throw failure;
+        } finally {
+          counts.running--;const peers=preparationJobs.get(captured.id);peers?.delete(reservation);if(!peers?.size)preparationJobs.delete(captured.id);prune();
+        }
+      });
+      reservation.promise=task;tail=task.catch(()=>{});prune();return task;
+    }
     function run(command, persist) {
+      if(injectedPrepare)return runPrepared(command,persist);
       let plan, captured, options, nextRef, nextText;
       try {
         if (!plain(command) || typeof persist !== 'function') fail('INVALID_ARGUMENT', 'Нужны команда и адаптер сохранения');
@@ -271,7 +393,7 @@
       return task.then(receipt => freeze({ plan, ...clone(receipt), duplicate:false }));
     }
     return Object.freeze({ run,
-      status() { return freeze({ ...counts, retained:entries.size, maxReceipts:limit, retainedCharacters,
+      status() { return freeze({ ...counts, ...(injectedPrepare?{maxPending:pendingLimit}:{}), retained:entries.size, maxReceipts:limit, retainedCharacters,
         maxReceiptCharacters:characterBudget, recent:clone(recent) }); },
       subscribe(listener) {
         if (typeof listener !== 'function') fail('INVALID_ARGUMENT', 'Нужен обработчик завершённых операций');

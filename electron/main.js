@@ -491,6 +491,22 @@ app.whenReady().then(() => {
     } catch (e) { return null; }
   });
 
+  ipcMain.handle('query-rows', async (event, query) => {
+    try {
+      const binding=assertDataBinding(event), identity=settingsIdentity(), token=binding.databaseToken;
+      let result;
+      if(isClientMode()) {
+        if(networkConfigError)throw Error(networkConfigError);
+        result=await server.getJson(settings.remoteHost,settings.remotePort||3377,'/api/query?query='+encodeURIComponent(JSON.stringify(query)),15000);
+      } else {
+        result=require('./data-query.cjs').queryRows(getDataDir(),query,{id:'local-profile',role:'admin'});
+      }
+      if(identity!==settingsIdentity()||dataBindings.get(event.sender.id)!==binding||result.databaseToken!==token)
+        return {ok:false,code:'CURSOR_STALE',error:'База изменилась. Загрузите раздел заново.'};
+      return result;
+    } catch(error) { return {ok:false,code:error.code||'QUERY_FAILED',error:error.message}; }
+  });
+
   ipcMain.handle('write-sections', async (_event, jsonStr) => {
     let payload,binding;
     try {

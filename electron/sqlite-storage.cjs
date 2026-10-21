@@ -102,6 +102,32 @@ function readRows(dataDir,name){
   if(!schema.sections.includes(name))fail('SQLITE_SECTION','Неизвестный раздел SQLite: '+name);
   return transaction(dataDir,()=>connection(dataDir).prepare('SELECT row_json FROM section_rows WHERE section=? ORDER BY position').all(name).map(row=>JSON.parse(row.row_json)),{readOnly:true});
 }
+function queryRows(dataDir,input){
+  const spec=require('./data-query.cjs');
+  if(!plain(input)||Object.keys(input).some(key=>!['section','limit','from','to','assetRef','search','afterPosition'].includes(key)))fail('QUERY_INVALID','Неверные параметры выборки SQLite');
+  const {afterPosition=-1,...selection}=input,query=spec.normalizeQuery(selection);
+  if(!Number.isSafeInteger(afterPosition)||afterPosition< -1)fail('QUERY_INVALID','Неверная позиция страницы SQLite');
+  if(query.section==='auditLog')fail('QUERY_UNSUPPORTED','Индексированная выборка истории пока недоступна');
+  return transaction(dataDir,()=>{
+    const db=connection(dataDir),where=['section=?'],parameters=[query.section];
+    if(query.from){where.push('date_value>=?');parameters.push(query.from);}
+    if(query.to){where.push('date_value<=?');parameters.push(query.to+'\uffff');}
+    if(query.assetRef){where.push('asset_ref=?');parameters.push(query.assetRef);}
+    if(query.search){
+      // Caller controls neither field names nor JSON paths. Only bounded scalar
+      // text enters the search projection; financial amounts and nested history
+      // are never searched to derive counts for another role.
+      db.function('tvs_query_scalar',{deterministic:true},spec.searchScalar);
+      db.function('tvs_query_fold',{deterministic:true},value=>value.toLowerCase());
+      const text=spec.SEARCH_FIELDS.map(field=>`CASE WHEN json_type(row_json,'$.${field}') IN ('text','integer','real') THEN tvs_query_scalar(json_extract(row_json,'$.${field}')) ELSE '' END`).join("||char(10)||");
+      where.push('instr(tvs_query_fold('+text+'),?)>0');parameters.push(query.search);
+    }
+    const condition=where.join(' AND '),total=db.prepare('SELECT count(*) AS count FROM section_rows WHERE '+condition).get(...parameters).count;
+    const entries=db.prepare('SELECT position,row_json FROM section_rows WHERE '+condition+' AND position>? ORDER BY position LIMIT ?').all(...parameters,afterPosition,query.limit+1);
+    const page=entries.slice(0,query.limit);
+    return {rows:page.map(entry=>JSON.parse(entry.row_json)),positions:page.map(entry=>entry.position),total,hasMore:entries.length>query.limit};
+  },{readOnly:true});
+}
 function readAll(dataDir){return transaction(dataDir,()=>{
   const result=Object.fromEntries(schema.sections.map(name=>[name,[]]));
   for(const row of connection(dataDir).prepare('SELECT section,row_json FROM section_rows ORDER BY section,position').all()){
@@ -251,4 +277,4 @@ function inspect(dataDir){return transaction(dataDir,()=>{
     sections,rowCount:sections.reduce((total,row)=>total+row.count,0),linkCount:db.prepare('SELECT count(*) AS count FROM row_links').get().count,
     legacyIssues:db.prepare('SELECT issue_json FROM reference_issues ORDER BY id').all().map(row=>JSON.parse(row.issue_json)),integrity:integrityCheck,foreignKeyErrors};
 },{readOnly:true});}
-module.exports={exists,filename,readAll,readRows,readRevisions,readIdentity,commitSections,create,inspect,transaction};
+module.exports={exists,filename,readAll,readRows,queryRows,readRevisions,readIdentity,commitSections,create,inspect,transaction};

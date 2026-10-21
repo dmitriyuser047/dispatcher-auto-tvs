@@ -1,6 +1,65 @@
 // One application-wide write gateway. UI forms keep their domain editors;
 // the platform prepares, checks and records every save through the same bus.
 let _platformRuntime = null, _platformRuntimeIdentity = null, _platformLastError = null;
+let _platformPrepareActive=null,_platformPrepareSequence=0;
+const _platformPrepareQueue=[],PLATFORM_PREPARE_LIMIT=8,PLATFORM_PREPARE_CHARACTERS=1048576;
+
+function platformPrepareBackgroundStatus(){return {active:_platformPrepareActive?1:0,queued:_platformPrepareQueue.length,limit:PLATFORM_PREPARE_LIMIT};}
+function platformPrepareAccessStamp(context){
+  const list=value=>value==null?null:[...new Set(value)].sort();
+  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
+}
+function platformPrepareError(code,message){return Object.assign(Error(message),{name:'PlatformKernelError',code});}
+function platformPrepareGuard(job){
+  const current=platformSessionContext();
+  if(current.identity!==job.context.identity)throw platformPrepareError('STALE_IDENTITY','База или сеанс изменились. Откройте форму заново.');
+  if(platformPrepareAccessStamp(current)!==job.access)throw platformPrepareError('STALE_ACCESS','Права или пользователь изменились. Откройте форму заново.');
+  if(JSON.stringify(job.previous)!==job.previousText||JSON.stringify(job.next)!==job.nextText)throw platformPrepareError('STALE_COMMAND','Данные изменились во время подготовки. Повторите проверку формы.');
+}
+function platformDrainPrepareQueue(){
+  if(_platformPrepareActive||!_platformPrepareQueue.length)return;
+  const job=_platformPrepareQueue.shift();
+  try{platformPrepareGuard(job);}catch(error){job.reject(error);platformDrainPrepareQueue();return;}
+  if(typeof Worker!=='function'){job.reject(platformPrepareError('WORKER_UNAVAILABLE','Фоновая подготовка недоступна. Откройте программу заново.'));platformDrainPrepareQueue();return;}
+  let worker;try{worker=new Worker('assets/core/transaction-worker.js');}catch{job.reject(platformPrepareError('WORKER_FAILED','Не удалось запустить фоновую подготовку'));platformDrainPrepareQueue();return;}
+  _platformPrepareActive=job;job.worker=worker;
+  let finished=false;
+  const finish=(error,plan)=>{
+    if(finished)return;finished=true;clearTimeout(timer);worker.onmessage=null;worker.onerror=null;worker.onmessageerror=null;try{worker.terminate();}catch{}
+    if(_platformPrepareActive===job)_platformPrepareActive=null;
+    if(error)job.reject(error);else job.resolve(plan);platformDrainPrepareQueue();
+  };
+  const timer=setTimeout(()=>finish(platformPrepareError('PREPARE_TIMEOUT','Подготовка не завершилась. Повторите сохранение.')),45000);
+  worker.onerror=event=>{event.preventDefault?.();finish(platformPrepareError('WORKER_FAILED','Не удалось выполнить фоновую подготовку'));};
+  worker.onmessageerror=()=>finish(platformPrepareError('WORKER_FAILED','Не удалось прочитать результат подготовки'));
+  worker.onmessage=event=>{
+    const reply=event.data;if(finished||reply?.protocolVersion!==1||reply.requestId!==job.requestId)return;
+    try{
+      platformPrepareGuard(job);
+      if(reply.identity!==job.context.identity)throw platformPrepareError('STALE_IDENTITY','Результат подготовки относится к другой базе');
+      if(reply.ok!==true){const detail=reply.error||{};throw Object.assign(platformPrepareError(detail.code||'PREPARE_FAILED',detail.message||'Не удалось подготовить сохранение'),detail);}
+      if(reply.plan?.id!==job.context.id||reply.plan?.identity!==job.context.identity)throw platformPrepareError('MISMATCHED_PREPARE','План относится к другой операции');
+      finish(null,reply.plan);
+    }catch(error){finish(error);}
+  };
+  try{worker.postMessage({protocolVersion:1,type:'prepare',requestId:job.requestId,previous:job.previous,next:job.next,context:job.context});}
+  catch{finish(platformPrepareError('WORKER_FAILED','Не удалось передать снимок для подготовки'));}
+}
+function platformPrepareInBackground(previous,next,context){
+  const count=database=>Object.values(database||{}).reduce((total,value)=>total+(Array.isArray(value)?value.length:0),0);
+  let previousText,nextText;
+  try{previousText=JSON.stringify(previous);nextText=JSON.stringify(next);}
+  catch{return PlatformKernel.prepare(previous,next,context);}
+  if(Math.max(count(previous),count(next))<1000&&Math.max(previousText?.length||0,nextText?.length||0)<PLATFORM_PREPARE_CHARACTERS)return PlatformKernel.prepare(previous,next,context);
+  return new Promise((resolve,reject)=>{
+    if(_platformPrepareQueue.length+(_platformPrepareActive?1:0)>=PLATFORM_PREPARE_LIMIT){reject(platformPrepareError('PREPARE_LIMIT','Дождитесь завершения предыдущих сохранений'));return;}
+    try{
+      const captured=structuredClone(context),job={requestId:'prepare-'+(++_platformPrepareSequence),previous,next,context:captured,
+        previousText,nextText,access:platformPrepareAccessStamp(captured),resolve,reject};
+      _platformPrepareQueue.push(job);platformDrainPrepareQueue();
+    }catch(error){reject(error);}
+  });
+}
 
 function platformSessionContext() {
   const base = dispatcherContext(), access = typeof _sync === 'undefined' ? null : _sync.access;
@@ -16,7 +75,7 @@ function platformRuntime() {
   const identity=platformSessionContext().identity;
   if (!_platformRuntime || _platformRuntimeIdentity !== identity) {
     _platformRuntimeIdentity=identity; _platformLastError=null;
-    _platformRuntime = PlatformKernel.createRuntime({ getContext:platformSessionContext, maxReceipts:64 });
+    _platformRuntime = PlatformKernel.createRuntime({ getContext:platformSessionContext, maxReceipts:64, prepare:platformPrepareInBackground });
     _platformRuntime.subscribe(() => dispatcherInvalidate());
   }
   return _platformRuntime;

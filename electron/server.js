@@ -122,6 +122,15 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls}) {
     }
     if (req.method !== 'GET') { respond(res,404,{ok:false,error:'Неизвестный запрос'}); return; }
     try {
+      if(req.url.startsWith('/api/query?')) {
+        if(req.url.length>12000){respond(res,400,{ok:false,code:'QUERY_INVALID',error:'Слишком длинный запрос выборки'});return;}
+        const parameters=new URL(req.url,'http://localhost').searchParams;
+        if([...parameters.keys()].length!==1||!parameters.has('query')){respond(res,400,{ok:false,code:'QUERY_INVALID',error:'Неверные параметры выборки'});return;}
+        let query;try{query=JSON.parse(parameters.get('query'));}catch{respond(res,400,{ok:false,code:'QUERY_INVALID',error:'Неверные параметры выборки'});return;}
+        try{respond(res,200,require('./data-query.cjs').queryRows(_dataDir,query,principal));}
+        catch(error){respond(res,error.status||500,{ok:false,code:error.code||'QUERY_FAILED',error:error.message});}
+        return;
+      }
       if(req.url.startsWith('/api/operation?')){
         const query=new URL(req.url,'http://localhost').searchParams;
         respond(res,200,storage.readOperation(_dataDir,{id:query.get('id'),digest:query.get('digest')},principal));return;

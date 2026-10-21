@@ -1,5 +1,6 @@
 let gsmOrg = '', gsmFuel = '', gsmActNo = '', gsmActDate = new Date().toISOString().slice(0, 10);
 let gsmMovementSearch = '', gsmMovementType = '', gsmMovementLimit = 30, gsmMovementLedger = null;
+let gsmBackgroundRequest = null, gsmBackgroundReady = null;
 const GSM_MAIN_VIEWS = [['barrels', 'Бочки и остатки'], ['diagnostics', 'Проверка данных'], ['receipts', 'Выписка'], ['manual', 'Добавить вручную'], ['journal', 'Журнал и остатки'], ['writeoff', 'Списание']];
 const GSM_EXTRA_VIEWS = [['fcards', 'Топливные карты'], ['cards', 'По машинам'], ['doubles', 'Повторные заправки'], ['checks', 'Проверки'],
   ['measures', 'Замеры'], ['compare', 'Сравнение месяцев'], ['negative', 'Отрицательные остатки'], ['recon', 'Сверка с 1С'],
@@ -7,6 +8,43 @@ const GSM_EXTRA_VIEWS = [['fcards', 'Топливные карты'], ['cards', 
 function gsmArg(value) { return fpEsc(JSON.stringify(String(value || ''))); }
 function gsmVisible(row) { return (!gsmOrg || gsmOrgKey(row.org) === gsmOrgKey(gsmOrg)) && (!gsmFuel || row.grade === gsmFuel); }
 function gsmVehicle(id) { return (data.vehicles || []).find(v => v.id === id); }
+function gsmBackgroundRequired() { return typeof dispatcherBackgroundNeeded === 'function' && dispatcherBackgroundNeeded(); }
+function gsmBackgroundStamp() {
+  return JSON.stringify([dispatcherAnalysisStamp(),fpMonth,gsmOrgKey(gsmOrg),gsmFuel,gsmActDate,fpView,dispatcherLocalDate()]);
+}
+function gsmPreparedWorkspace() {
+  return gsmBackgroundReady && gsmBackgroundReady.databaseRef === data && gsmBackgroundReady.stamp === gsmBackgroundStamp() ? gsmBackgroundReady : null;
+}
+function gsmPreparedWriteoff() { return gsmPreparedWorkspace()?.model || null; }
+function gsmPrepareWorkspaceBackground(months) {
+  const stamp=gsmBackgroundStamp();
+  if(gsmBackgroundRequest?.stamp===stamp&&gsmBackgroundRequest.panel.isConnected)return;
+  gsmBackgroundRequest?.controller.abort();gsmBackgroundReady=null;gsmMovementLedger=null;
+  const panel=document.createElement('div');panel.className='gsm-workspace';panel.id='gsmBackgroundPreparation';
+  panel.innerHTML='<div class="gsm-heading"><h2>ГСМ</h2></div><p>'+fpEsc([fpMonthLabel(fpMonth),gsmOrg||'Все организации',gsmFuel||'Все марки топлива'].join(' · '))+'</p><label>Месяц <select aria-label="Месяц" class="fsel" onchange="fpMonth=this.value;renderFuelPurchases()">'+
+    [...new Set([fpMonth,...months,'all'])].map(month=>'<option value="'+fpEsc(month)+'"'+(month===fpMonth?' selected':'')+'>'+fpMonthLabel(month)+'</option>').join('')+'</select></label>'+
+    '<p role="status">Подготавливаю расчёт ГСМ… Можно перейти в другой раздел.</p><button type="button" class="btn btn-ghost" data-gsm-background-cancel>Отменить расчёт</button>';
+  document.getElementById('mainContent').replaceChildren(panel);
+  const controller=new AbortController(),request={stamp,panel,controller,databaseRef:data};gsmBackgroundRequest=request;
+  const ownsPanel=()=>gsmBackgroundRequest===request&&panel.isConnected&&activeSection==='fuelPurchases';
+  const current=()=>ownsPanel()&&data===request.databaseRef&&gsmBackgroundStamp()===stamp;
+  const failed=error=>{
+    if(!ownsPanel()){if(gsmBackgroundRequest===request)gsmBackgroundRequest=null;return;}
+    const message=current()?error.message||'Не удалось подготовить расчёт. Повторите попытку.':'Данные, фильтры или сеанс изменились. Повторите расчёт.';
+    gsmBackgroundRequest=null;
+    panel.querySelector('[role="status"]').textContent=message;
+    const button=panel.querySelector('button');button.removeAttribute('data-gsm-background-cancel');button.dataset.gsmBackgroundRetry='';button.textContent='Повторить расчёт';button.onclick=()=>renderFuelPurchases();
+  };
+  panel.querySelector('button').onclick=()=>controller.abort();
+  const fuel=dispatcherQueryAsync('fuel',gsmMonthRange(fpMonth),{signal:controller.signal});
+  const writeoff=fpView==='writeoff'?dispatcherQueryAsync('writeoff',{...gsmWriteoffScope(),date:gsmActDate},{signal:controller.signal}):Promise.resolve(null);
+  const audit=fpView==='diagnostics'?dispatcherQueryAsync('fuelAudit',gsmMonthRange(fpMonth),{signal:controller.signal}):Promise.resolve(null);
+  void Promise.all([fuel,writeoff,audit]).then(([ledger,model,auditModel])=>{
+    if(!current()){failed(Error('Расчёт устарел'));return;}
+    gsmBackgroundReady={stamp,databaseRef:data,ledger,model,audit:auditModel};gsmBackgroundRequest=null;
+    gsmRenderWorkspace();
+  }).catch(failed);
+}
 function gsmTable(head, rows, footer) {
   return '<div class="gsm-table-scroll"><table class="data-table gsm-table"><thead><tr>' + head.map(h => '<th>' + h + '</th>').join('') +
     '</tr></thead><tbody>' + (rows.join('') || '<tr><td colspan="' + head.length + '" class="gsm-empty">Нет данных за выбранный период</td></tr>') + '</tbody>' + (footer ? '<tfoot>' + footer + '</tfoot>' : '') + '</table></div>';
@@ -124,6 +162,7 @@ function gsmMovementListHtml(ledger) {
 }
 function gsmRefreshMovements() {
   const target = document.getElementById('gsmBarrelMovementResults');
+  if (target && gsmBackgroundRequired() && !gsmPreparedWorkspace()) { target.textContent='Источники изменились. Обновите расчёт ГСМ.';return; }
   if (target) target.innerHTML = gsmMovementListHtml(gsmMovementLedger || gsmBuildLedger(data, gsmMonthRange(fpMonth)));
 }
 function gsmSetMovementSearch(value) { gsmMovementSearch = String(value || ''); gsmMovementLimit = 30; gsmRefreshMovements(); }
@@ -200,7 +239,10 @@ function gsmRenderWorkspace() {
   if (fpView === 'vehicle' && fpVehicle) return fpRenderVehicle();
   const months = [...new Set([...(data.records || []).map(r => (r.date || '').slice(0, 7)), ...fpLive().map(p => (p.date || '').slice(0, 7))])].filter(m => /^\d{4}-\d{2}$/.test(m)).sort().reverse();
   if (!fpMonth) fpMonth = fpView === 'receipts' ? 'all' : months[0] || 'all';
-  const ledger = gsmBuildLedger(data, gsmMonthRange(fpMonth));
+  const background=gsmBackgroundRequired(),prepared=background?gsmPreparedWorkspace():null;
+  if(background&&!prepared){gsmPrepareWorkspaceBackground(months);return;}
+  if(!background){gsmBackgroundRequest?.controller.abort();gsmBackgroundRequest=null;gsmBackgroundReady=null;}
+  const ledger = background ? prepared.ledger : gsmBuildLedger(data, gsmMonthRange(fpMonth));
   const orgs = [...new Map([gsmOrg, ...ledger.organizations, ...ledger.receipts.map(p => p.org), ...(data.vehicles || []).map(v => v.org), ...(data.fuelCards || []).map(c => c.org),
     ...fpLive().map(p => p.sourceOrg), ...(data.records || []).map(r => r.fuelOrg), ...(data.vehicles || []).flatMap(v => (v.fuelBalanceSources || []).map(s => s.org))].filter(Boolean).map(org =>
     [gsmOrgKey(org), String(org).trim().replace(/\s+/g, ' ')])).values()].sort((a, b) => a.localeCompare(b, 'ru'));

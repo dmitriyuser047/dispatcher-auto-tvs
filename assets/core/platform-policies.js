@@ -14,24 +14,90 @@
     return Number.isFinite(day.getTime()) && day.toISOString().slice(0,10) === value.slice(0,10) &&
       (!time || +value.slice(11,13) < 24 && +value.slice(14,16) < 60 && (!value.slice(17,19) || +value.slice(17,19) < 60) && Number.isFinite(Date.parse(value)));
   }
-  const overlap = (a,b) => date(a.start,true) && date(a.end,true) && date(b.start,true) && date(b.end,true) && Date.parse(a.start) < Date.parse(b.end) && Date.parse(b.start) < Date.parse(a.end);
   function asset(db, ref) {
     if (typeof ref !== 'string' || !/^[vgt]:/.test(ref)) return null;
     return rows(db, { v:'vehicles',g:'generators',t:'tanks' }[ref[0]]).find(row => String(row.id) === ref.slice(2));
+  }
+  function dispatchOverlapPeers(jobs) {
+    const peers=jobs.map(()=>new Set()),groups=new Map();
+    const entries=jobs.map((job,index)=>{
+      const start=job.start,end=job.end;
+      return {job,index,start:date(start,true)?Date.parse(start):null,end:date(end,true)?Date.parse(end):null,
+        outer:!job.archived&&assigned.has(job.status),inner:!job.archived&&!['cancelled','done','confirmed'].includes(job.status)};
+    });
+    for(const entry of entries){
+      if(entry.start===null||entry.end===null||!entry.outer&&!entry.inner)continue;
+      for(const field of ['assetRef','driverId']){
+        const value=entry.job[field];
+        // Map uses SameValueZero; the old strict comparison never matches NaN.
+        if(!present(value)||value!==value)continue;
+        if(!groups.has(field))groups.set(field,new Map());const byValue=groups.get(field);
+        if(!byValue.has(value))byValue.set(value,[]);byValue.get(value).push(entry);
+      }
+    }
+    const pair=(a,b)=>{
+      if(a.job===b.job||a.job.id===b.job.id||a.start>=b.end||b.start>=a.end)return;
+      // Keep the existing asymmetric rules: done/confirmed can be outer rows;
+      // new rows can be counterparts of an assigned row.
+      if(a.outer&&b.inner)peers[a.index].add(b.index);
+      if(b.outer&&a.inner)peers[b.index].add(a.index);
+    };
+    for(const byValue of groups.values())for(const group of byValue.values()){
+      if(!group.some(entry=>entry.outer)||!group.some(entry=>entry.inner))continue;
+      const proper=group.filter(entry=>entry.start<entry.end).sort((a,b)=>a.start-b.start||a.index-b.index);
+      let activeOuter=[],activeInner=[];
+      for(const entry of proper){
+        if(entry.outer){activeInner=activeInner.filter(other=>other.end>entry.start);for(const other of activeInner)pair(other,entry);}
+        if(entry.inner){activeOuter=activeOuter.filter(other=>other.end>entry.start);for(const other of activeOuter)if(!entry.outer||!other.inner)pair(other,entry);}
+        if(entry.outer)activeOuter.push(entry);if(entry.inner)activeInner.push(entry);
+      }
+      // Legacy zero/reversed intervals also participated in the old strict
+      // pairwise formula, even while DISPATCH_INTERVAL reported their damage.
+      for(const entry of group)if(entry.start>=entry.end)for(const other of group){
+        if(other===entry||other.start>=other.end&&other.index<entry.index)continue;pair(entry,other);
+      }
+    }
+    // Inspect has always emitted outer -> original inner order -> field order.
+    return {intervals:entries,peers:peers.map(set=>[...set].sort((a,b)=>a-b).map(index=>jobs[index]))};
+  }
+  function partStockIndex(movements) {
+    const groups=new Map();
+    for(const row of movements){
+      if(row.cancelled||row.deleted||!date(row.date,false)||row.partId!==row.partId)continue;
+      if(!groups.has(row.partId))groups.set(row.partId,{entries:[],safe:true,absolute:0,cache:new Map()});
+      const group=groups.get(row.partId),amount=(['receipt','return'].includes(row.kind)?1:-1)*(Number(row.qty)||0);
+      group.entries.push({date:row.date,amount});group.absolute+=Math.abs(amount);
+      if(!Number.isSafeInteger(amount)||group.absolute>Number.MAX_SAFE_INTEGER)group.safe=false;
+    }
+    return (partId,until)=>{
+      const group=groups.get(partId);if(!group||partId!==partId)return 0;
+      if(!group.safe){
+        // Reordering IEEE-754 additions changes legacy deficits. Decimal/unsafe
+        // inputs retain the exact original left fold, memoized per part/date.
+        if(!group.cache.has(until))group.cache.set(until,group.entries.reduce((sum,entry)=>entry.date<=until?sum+entry.amount:sum,0));
+        return group.cache.get(until);
+      }
+      if(!group.prefix){
+        const ordered=group.entries.slice().sort((a,b)=>a.date.localeCompare(b.date));let total=0;
+        group.prefix=ordered.map(entry=>({date:entry.date,balance:total+=entry.amount}));
+      }
+      let low=0,high=group.prefix.length;while(low<high){const middle=(low+high)>>>1;if(group.prefix[middle].date<=until)low=middle+1;else high=middle;}
+      return low?group.prefix[low-1].balance:0;
+    };
   }
   function inspect(db, context) {
     context = context || {};
     const issues = [];
     const add = (section,row,code,field,message,proof,extra) => issues.push({ severity:'error',section,recordId:row.id ?? '',code,field,message,proof,...extra });
-    const jobs = rows(db,'dispatchJobs');
-    for (const job of jobs) {
-      if (!date(job.start,true) || !date(job.end,true) || Date.parse(job.start) >= Date.parse(job.end))
+    const jobs = rows(db,'dispatchJobs'), dispatchIndex=dispatchOverlapPeers(jobs);
+    for (const [jobIndex,job] of jobs.entries()) {
+      const interval=dispatchIndex.intervals[jobIndex];
+      if (interval.start===null || interval.end===null || interval.start>=interval.end)
         add('dispatchJobs',job,'DISPATCH_INTERVAL','start/end','Начало задания должно быть раньше окончания',[job.start,job.end]);
       if (!job.archived && assigned.has(job.status)) {
         if (!asset(db,job.assetRef)) add('dispatchJobs',job,'DISPATCH_ASSET_REQUIRED','assetRef','Для назначения нужна существующая техника',[job.status,job.assetRef]);
         if (!rows(db,'drivers').some(driver => driver.id === job.driverId)) add('dispatchJobs',job,'DISPATCH_DRIVER_REQUIRED','driverId','Для назначения нужен существующий сотрудник',[job.status,job.driverId]);
-        for (const other of jobs) {
-          if (other === job || other.id === job.id || other.archived || ['cancelled','done','confirmed'].includes(other.status) || !overlap(job,other)) continue;
+        for (const other of dispatchIndex.peers[jobIndex]) {
           for (const [field,code,message] of [['assetRef','DISPATCH_ASSET_OVERLAP','Техника уже назначена на пересекающееся время'],['driverId','DISPATCH_DRIVER_OVERLAP','Сотрудник уже назначен на пересекающееся время']]) {
             if (present(job[field]) && job[field] === other[field]) add('dispatchJobs',job,code,field,message,
               [job[field],job.start,job.end,other.start,other.end],{ relatedRecordId:other.id ?? '' });
@@ -51,8 +117,7 @@
     const localDay = Number.isFinite(clock.getTime()) ? `${clock.getFullYear()}-${String(clock.getMonth()+1).padStart(2,'0')}-${String(clock.getDate()).padStart(2,'0')}` : '';
     const today = date(context.today,false) ? context.today : localDay;
     const movements = rows(db,'partMovements');
-    const stockAt = (partId, until) => movements.filter(row => row.partId === partId && !row.cancelled && !row.deleted && date(row.date,false) && row.date <= until)
-      .reduce((total,row) => total + (['receipt','return'].includes(row.kind) ? 1 : -1) * (Number(row.qty) || 0),0);
+    const stockAt = partStockIndex(movements);
     for (const row of movements) {
       if (!(Number.isFinite(Number(row.qty)) && Number(row.qty) > 0)) add('partMovements',row,'PART_QUANTITY','qty','Количество должно быть больше нуля',[row.qty]);
       if (!['receipt','return','issue','writeoff'].includes(row.kind)) add('partMovements',row,'PART_KIND','kind','Неизвестный вид складской операции',[row.kind]);

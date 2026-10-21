@@ -67,6 +67,28 @@ test('hidden Electron application persists synthetic journals, isolates registry
   assert.match(first.token, /^[a-f0-9]{64}$/);
   assert.ok(first.identity.endsWith(':'+first.token));
 
+  const background = await page.evaluate(async () => {
+    const page=await window.electronAPI.queryRows({section:'vehicles',limit:1});
+    const fuel=await dispatcherQueryAsync('fuel',{from:'2026-10-01',to:'2026-10-31'});
+    const health=await dispatcherHealthAsync();
+    return {ok:page.ok,ids:page.rows?.map(row=>row.id),backend:page.backend,token:page.databaseToken,
+      fuelRows:fuel.rows.length,healthSections:health.sections.filter(row=>row.readable).length};
+  });
+  assert.equal(background.ok,true);assert.deepEqual(background.ids,['A']);assert.equal(background.backend,'json');
+  assert.equal(background.token,first.token);assert.ok(background.fuelRows>0);assert.equal(background.healthSections,storage.SECTIONS.length);
+  const beforeBackgroundPlan=storage.readSnapshot(dataA);
+  const backgroundPlan=await page.evaluate(async()=>{
+    const previous=structuredClone(data);
+    previous.records=Array.from({length:1000},(_,index)=>({id:'native-prepare-'+index,vehicleId:'A',date:'2026-10-01',km:0,fuelActual:0,fuelGrade:'ДТ'}));
+    const next=structuredClone(previous);next.records[0].note='Synthetic background preflight';
+    const context={...platformSessionContext(),id:'native-background-plan',now:'2026-10-21T12:00:00.000Z'};
+    const plan=await platformPrepareInBackground(previous,next,context);
+    return {id:plan.id,changed:plan.changed,note:plan.sections.records[0].note,status:platformPrepareBackgroundStatus()};
+  });
+  assert.equal(backgroundPlan.id,'native-background-plan');assert.deepEqual(backgroundPlan.changed,['records']);
+  assert.equal(backgroundPlan.note,'Synthetic background preflight');assert.equal(backgroundPlan.status.active,0);
+  assert.deepEqual(storage.readSnapshot(dataA),beforeBackgroundPlan);
+
   // Full-write IPC must use the revisions bound by readSnapshot, even when
   // the renderer sends neither base nor auditLog. An old audit prefix would
   // independently reject the save and conceal a missing CAS check.
@@ -291,6 +313,9 @@ test('hidden Electron application persists synthetic journals, isolates registry
   assert.equal(sqliteSave.saved,true);assert.equal(sqliteSave.receipt?.status,'committed');
   assert.equal(storage.readAll(dataB).records[0].km,25.125);
   assert.equal(storage.readAll(dataB).records[0].fuelActual,2.125);
+  const sqlitePage=await page.evaluate(()=>window.electronAPI.queryRows({section:'records',limit:1,assetRef:'v:B',from:'2026-10-01'}));
+  assert.equal(sqlitePage.ok,true);assert.equal(sqlitePage.backend,'sqlite');assert.equal(sqlitePage.total,1);
+  assert.equal(sqlitePage.rows[0].fuelActual,2.125);assert.equal(sqlitePage.rows[0].id,'native-sqlite-journal');
   assert.ok(fs.existsSync(sqlite.filename(dataB)));
 
   const { PDFDocument, StandardFonts } = require('pdf-lib');

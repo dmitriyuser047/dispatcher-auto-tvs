@@ -359,7 +359,9 @@ function gsmExportCurrentAct() {
   return exportFuelWriteOffAct(range.from, range.to, { org: gsmOrg, fuelGrade: gsmFuel, actNo: gsmActNo, actDate: gsmActDate });
 }
 function gsmExportReconciliation() {
-  const ledger = gsmBuildLedger(data, gsmMonthRange(fpMonth)), wb = XLSX.utils.book_new();
+  const prepared=typeof gsmBackgroundRequired==='function'&&gsmBackgroundRequired()?gsmPreparedWorkspace():null;
+  if(typeof gsmBackgroundRequired==='function'&&gsmBackgroundRequired()&&!prepared){showToast('Расчёт ГСМ не готов или источники изменились. Обновите раздел перед выгрузкой.');return null;}
+  const ledger = prepared ? prepared.ledger : gsmBuildLedger(data, gsmMonthRange(fpMonth)), wb = XLSX.utils.book_new();
   gsmAppendReconciliation(wb, ledger, gsmOrg, gsmFuel);
   XLSX.writeFile(wb, 'Сверка_ГСМ_' + fpMonth + '.xlsx');
 }

@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readSnapshot:   ()        => ipcRenderer.invoke('read-snapshot'),
   getRevisions:   ()        => ipcRenderer.invoke('get-revisions'),
   readSection:    (name)    => ipcRenderer.invoke('read-section', name),
+  queryRows:      (query)   => ipcRenderer.invoke('query-rows', query),
   writeSections:  (json)    => ipcRenderer.invoke('write-sections', json),
   getPendingOperations:()=>ipcRenderer.invoke('get-pending-operations'),
   reconcileOperation:id=>ipcRenderer.invoke('reconcile-operation',id),

@@ -1,5 +1,5 @@
 // Document commands only save fuelWriteoffs. Fuel movements remain source facts.
-let gsmWriteoffPending = null, gsmWriteoffVoidPending = null, gsmWriteoffSaving = false;
+let gsmWriteoffPending = null, gsmWriteoffVoidPending = null, gsmWriteoffSaving = false, gsmWriteoffPreparing = false;
 
 function gsmWriteoffCanRead() {
   return typeof _sync === 'undefined' || !_sync.access || !Array.isArray(_sync.access.readable) ||
@@ -13,7 +13,14 @@ function gsmWriteoffCanWrite() {
     (typeof _sync === 'undefined' || !_sync.access || Array.isArray(_sync.access.writable) && _sync.access.writable.includes('fuelWriteoffs'));
 }
 function gsmWriteoffScope() { return { month:fpMonth, org:gsmOrg || '', grade:gsmFuel || '' }; }
-function gsmWriteoffModel() { return dispatcherQuery('writeoff', { ...gsmWriteoffScope(), date:gsmActDate }); }
+function gsmWriteoffModel() {
+  if(gsmBackgroundRequired()) {
+    const prepared=gsmPreparedWriteoff();
+    if(!prepared)throw Error('Расчёт ГСМ не готов или источники изменились. Обновите раздел и дождитесь новой проверки.');
+    return prepared;
+  }
+  return dispatcherQuery('writeoff', { ...gsmWriteoffScope(), date:gsmActDate });
+}
 function gsmWriteoffIdentity() { return dispatcherContext().identity; }
 function gsmWriteoffActor() {
   const user = typeof _sync === 'undefined' ? null : _sync.access?.user;
@@ -85,7 +92,7 @@ function gsmWriteoffDetails(vehicleId, org, grade) {
     '<h4>Поступления по выпискам и журналу</h4>' + gsmTable(['Дата', 'Поставщик', 'Карта', 'Литры', 'Источник'], receipts.map(item => '<tr>' + gsmCell(fmtDate(item.date)) + gsmCell(item.provider) + gsmCell(item.cardNo) + gsmCell(item.qty,true) + '<td>' + gsmMovementLinks(item) + '</td></tr>')), 1040);
 }
 function gsmPostWriteoffDialog() {
-  if (gsmWriteoffSaving) return;
+  if (gsmWriteoffSaving || gsmWriteoffPreparing) return;
   try {
     if (!gsmWriteoffCanWrite()) throw Error('Для вашей роли проведение актов запрещено.');
     const model = gsmWriteoffModel();
@@ -140,26 +147,29 @@ async function gsmWriteoffStore(doc, original, pending) {
 async function gsmPostWriteoff(event) {
   event?.preventDefault();
   const form = document.querySelector('#genericModal.open #gsmWriteoffPostForm'), pending = gsmWriteoffPending;
-  if (!form || !pending || gsmWriteoffSaving) return;
+  if (!form || !pending || gsmWriteoffSaving || gsmWriteoffPreparing) return;
   const button = form.querySelector('[type="submit"]'), errorBox = form.querySelector('#gsmWriteoffPostError');
-  button.disabled = true; errorBox.textContent = '';
+  button.disabled = true; errorBox.textContent = '';gsmWriteoffPreparing=true;
   try {
     if (!gsmWriteoffCanWrite()) throw Error('Для вашей роли проведение актов запрещено.');
     if (JSON.stringify(gsmWriteoffScope()) !== JSON.stringify(pending.scope)) throw Error('Фильтры периода изменились. Откройте проверку заново.');
     const fresh = gsmWriteoffModel();
     if (!fresh.canPost || fresh.sourceFingerprint !== pending.model.sourceFingerprint) throw Error('Источники изменились после просмотра. Откройте проверку заново.');
     const number = form.elements.actNo.value.trim(), date = form.elements.actDate.value, basisNote = form.elements.basisNote.value.trim();
-    const doc = TvsWriteoffEngine.post(data, { ...pending.scope, date, basisNote }, { id:wfId('fuel-act'), number,
-      expectedFingerprint:pending.model.sourceFingerprint, postedAt:new Date().toISOString(), postedBy:gsmWriteoffActor() });
+    const request={...pending.scope,date,basisNote},metadata={id:wfId('fuel-act'),number,expectedFingerprint:pending.model.sourceFingerprint,postedAt:new Date().toISOString(),postedBy:gsmWriteoffActor()};
+    const stamp=gsmBackgroundRequired()?gsmBackgroundStamp():null;
+    const doc = stamp ? await dispatcherQueryAsync('writeoffPost',{request,metadata}) : TvsWriteoffEngine.post(data,request,metadata);
+    if(stamp&&(stamp!==gsmBackgroundStamp()||data!==pending.databaseRef||gsmWriteoffIdentity()!==pending.identity||activeSection!=='fuelPurchases'||!form.isConnected||!form.closest('#genericModal.open')||form.elements.actNo.value.trim()!==number||form.elements.actDate.value!==date||form.elements.basisNote.value.trim()!==basisNote))
+      throw Error('Источники, сеанс или параметры акта изменились во время расчёта. Откройте проверку заново.');
     await gsmWriteoffStore(doc, null, pending);
     gsmActNo = number; gsmActDate = date; gsmWriteoffPending = null;
     if (form.isConnected) { closeModal('genericModal'); renderFuelPurchases(); }
     showToast('Акт проведён. Состав и основания сохранены.');
   } catch (error) { if (errorBox.isConnected) errorBox.textContent = error.message; }
-  finally { if (button.isConnected) button.disabled = false; }
+  finally { gsmWriteoffPreparing=false;if (button.isConnected) button.disabled = false; }
 }
 function gsmVoidWriteoffDialog(id) {
-  if (gsmWriteoffSaving) return;
+  if (gsmWriteoffSaving || gsmWriteoffPreparing) return;
   if (!gsmWriteoffCanWrite()) { showToast('Для вашей роли аннулирование запрещено.'); return; }
   const doc = (data.fuelWriteoffs || []).find(row => row.id === id && row.status === 'posted');
   if (!doc) { showToast('Проведённый акт не найден. Обновите раздел.'); return; }
