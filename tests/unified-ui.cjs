@@ -401,13 +401,13 @@ test('GSM diagnostics shows source causes and keeps live search, scope and suppo
 test('GSM diagnostic typed repair links open existing source forms and cancellation never changes data',async()=>{
  await loadGsmDiagnosticsFixture(true);
  assert.equal(await page.getByRole('button',{name:'Небезопасная команда',exact:true}).count(),0);
- const cases=[['Открыть покупку','genericModal'],['Открыть запись','recordModal'],['Открыть карточку ТС','vehicleModal'],['Открыть начальные источники','genericModal'],['Открыть карту','genericModal'],['Открыть закрытый месяц','genericModal']];
+ const cases=[['Открыть покупку','genericModal'],['Открыть запись','recordModal'],['Открыть карточку ТС','vehicleModal'],['Открыть начальные источники','wfModal'],['Открыть карту','genericModal'],['Открыть закрытый месяц','genericModal']];
  for(const [label,modalId]of cases){
   await page.getByRole('button',{name:label,exact:true}).click();
   const modal=page.locator('#'+modalId);assert.equal(await modal.evaluate(el=>el.classList.contains('open')),true);
   if(label==='Открыть покупку')assert.equal(await page.locator('#fpe_qty').inputValue(),'10.123');
   if(label==='Открыть карту')assert.equal(await page.locator('#fc_move').isChecked(),false);
-  if(label==='Открыть начальные источники')assert.match(await modal.innerText(),/исходный остаток за всё время учёта/);
+  if(label==='Открыть начальные источники'){assert.equal(await modal.locator('#fuelAccountingForm').count(),1);assert.equal(await modal.locator('[name="from"]').inputValue(),'');assert.equal(await modal.locator('[name="opening"]').inputValue(),'');}
   await modal.locator('.modal-header .icon-btn').click();
   await page.waitForFunction(()=>!document.querySelector('.modal-overlay.open'));
   assert.equal(await page.locator('#gsmDiagnostics').isVisible(),true);

@@ -99,6 +99,9 @@ function doExportAll() {
 
 function exportAllToXlsx(dateFrom, dateTo) {
   if (!data.vehicles.length) return;
+  const explicitFuel=v=>Object.prototype.hasOwnProperty.call(v,'fuelAccounting');
+  const fuelRows=(v,recs)=>explicitFuel(v)?recs.filter(r=>fuelAccountingIncludes('vehicles',v,r.date)):recs;
+  const fuelNumber=(value,explicit)=>value==null?'—':+value.toFixed(explicit?3:2);
 
   // Фильтр записей по периоду
   function filterRecs(recs) {
@@ -201,27 +204,30 @@ function exportAllToXlsx(dateFrom, dateTo) {
     const gIss={diesel:0,gasoline:0,gas:0};
     const gUsd={diesel:0,gasoline:0,gas:0};
     const gBal={diesel:0,gasoline:0,gas:0};
+    const gExplicit={},gMissing={};
     data.vehicles.forEach(v=>{
       const ft=v.fuel||'diesel';
       const vRecs=filterRecs(recsFor(v.id));
-      vRecs.forEach(r=>{grandKm+=r.km||0;grandKmGlonass+=r.kmGlonass||0;gIss[ft]+=r.fuelIssued||0;gUsd[ft]+=r.fuelUsed||0;});
+      vRecs.forEach(r=>{grandKm+=r.km||0;grandKmGlonass+=r.kmGlonass||0;});
+      fuelRows(v,vRecs).forEach(r=>{gIss[ft]+=r.fuelIssued||0;gUsd[ft]+=r.fuelUsed||0;});
       const bm=computeFuelBalances(v.id, dateFrom, dateTo);
       const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
-      if(sorted.length) gBal[ft]+=bm[sorted[sorted.length-1].id]||0;
+      if(explicitFuel(v)){gExplicit[ft]=true;const value=fuelAccountingCurrentBalance('vehicles',v,recsFor(v.id),bm,dateTo||'');if(value==null)gMissing[ft]=true;else gBal[ft]+=value;}
+      else if(sorted.length) gBal[ft]+=bm[sorted[sorted.length-1].id]||0;
       else if(!dateFrom) gBal[ft]+=v.fuelBalance||0;
     });
     const vFuelSet=new Set(data.vehicles.map(v=>v.fuel||'diesel'));
     fuelTypes.filter(ft=>vFuelSet.has(ft)).forEach((ft,i)=>{
       const bg=i%2===0?P.white:P.gray1;
-      const bal=+gBal[ft].toFixed(2);
-      const balBg=bal<0?P.redPale:bal===0?P.gray2:P.greenPale;
+      const bal=gMissing[ft]?null:fuelNumber(gBal[ft],gExplicit[ft]);
+      const balBg=bal==null?P.gray2:bal<0?P.redPale:bal===0?P.gray2:P.greenPale;
       const sL=cs({bold:true,sz:10,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',indent:1},bAll('thin',P.gray3));
       const sN=cs({sz:10,color:{rgb:P.text}},bg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
-      const sB=cs({bold:true,sz:10,color:{rgb:bal<0?P.red:bal===0?P.gray4:P.green}},balBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
+      const sB=cs({bold:true,sz:10,color:{rgb:bal==null?P.gray4:bal<0?P.red:bal===0?P.gray4:P.green}},balBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
       put(R(),0,fuelLabels[ft],sL);merge(R(),0,R(),3);fill(R(),sL);
-      put(R(),4,+gIss[ft].toFixed(2),sN);merge(R(),4,R(),6);
-      put(R(),7,+gUsd[ft].toFixed(2),sN);merge(R(),7,R(),8);
-      put(R(),9,bal,sB);merge(R(),9,R(),13);fillRange(R(),cs(null,bg,null,{}),14,NC);
+      put(R(),4,fuelNumber(gIss[ft],gExplicit[ft]),sN);merge(R(),4,R(),6);
+      put(R(),7,fuelNumber(gUsd[ft],gExplicit[ft]),sN);merge(R(),7,R(),8);
+      put(R(),9,bal==null?'Учёт не начат':bal,sB);merge(R(),9,R(),13);fillRange(R(),cs(null,bg,null,{}),14,NC);
       rowH(R(),20);next();
     });
     spacer();
@@ -312,20 +318,22 @@ function exportAllToXlsx(dateFrom, dateTo) {
       const bg=grpRowNum%2===0?P.white:P.gray1;
       grpRowNum++;globalNum++;
       const vRecs=filterRecs(recsFor(v.id));
+      const vFuelRecs=fuelRows(v,vRecs),explicit=explicitFuel(v);
       const vKm=vRecs.reduce((s,r)=>s+(r.km||0),0);
-      const vIss=vRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
-      const vUsd=vRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
-      const vAct=vRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
+      const vIss=vFuelRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
+      const vUsd=vFuelRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
+      const vAct=vFuelRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
       // ГЛОНАСС: пробег и расход по датчику уровня (из отчётов «Рейсы» / «Пройденный путь»)
       const vGl=vRecs.reduce((s,r)=>s+(+r.kmGlonass||0),0);
-      const vSens=vRecs.reduce((s,r)=>s+(+r.glonassFuel||0),0);
+      const vSens=vFuelRecs.reduce((s,r)=>s+(+r.glonassFuel||0),0);
       const bm=computeFuelBalances(v.id, dateFrom, dateTo);
       const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
-      const vBal=sorted.length?(bm[sorted[sorted.length-1].id]||0):0;
-      const avg=vKm>0&&vAct>0?+(vAct/vKm*100).toFixed(2):null;
-      const bal=+vBal.toFixed(2);
-      const balBg=bal<0?P.redPale:bal===0?P.gray2:P.greenPale;
-      const sB=cs({bold:true,sz:10,color:{rgb:bal<0?P.red:bal===0?P.gray4:P.green}},balBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
+      const vBal=explicit?fuelAccountingCurrentBalance('vehicles',v,recsFor(v.id),bm,dateTo||''):sorted.length?(bm[sorted[sorted.length-1].id]||0):0;
+      const fuelKm=vFuelRecs.reduce((s,r)=>s+(r.km||0),0);
+      const avg=fuelKm>0&&vAct>0?+(vAct/fuelKm*100).toFixed(2):null;
+      const bal=vBal==null?null:fuelNumber(vBal,explicit);
+      const balBg=bal==null?P.gray2:bal<0?P.redPale:bal===0?P.gray2:P.greenPale;
+      const sB=cs({bold:true,sz:10,color:{rgb:bal==null?P.gray4:bal<0?P.red:bal===0?P.gray4:P.green}},balBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
 
       const st=(v.status||'').toLowerCase();
       const statusBg    = !v.status ? P.gray2
@@ -343,7 +351,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
       const vRoutes=vRecs.map(r=>{
         const rts=Array.isArray(r.route)?r.route:(r.route?[r.route]:[]);
         if(!rts.length) return null;
-        return fmtDate(r.date)+': '+rts.join('; ');
+        return fmtDate(r.date)+(explicit&&!fuelAccountingIncludes('vehicles',v,r.date)?' (до учёта ГСМ)':'')+': '+rts.join('; ');
       }).filter(Boolean).join('\n');
       const routeStyle=cs({sz:9,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',wrapText:true,indent:1},bAll('thin',P.gray3));
       const noteStyle=cs({sz:9,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',wrapText:true,indent:1},bAll('thin',P.gray3));
@@ -351,9 +359,9 @@ function exportAllToXlsx(dateFrom, dateTo) {
       put(R(),3,v.driver,ST.tdL(bg));put(R(),4,v.org||'—',ST.tdL(bg));put(R(),5,v.object||'—',ST.tdL(bg));
       put(R(),6,fuelLabels[v.fuel||'diesel'],ST.tdC(bg));
       put(R(),7,v.status||'—',sStatus);
-      put(R(),8,+vKm.toFixed(1)||0,ST.tdR(bg));put(R(),9,+vIss.toFixed(2)||0,ST.tdR(bg));
-      put(R(),10,+vUsd.toFixed(2)||0,ST.tdR(bg));put(R(),11,+vAct.toFixed(2)||0,ST.tdR(bg));
-      put(R(),12,bal,sB);put(R(),13,avg??'',ST.tdR(bg));
+      put(R(),8,+vKm.toFixed(1)||0,ST.tdR(bg));put(R(),9,fuelNumber(vIss,explicit),ST.tdR(bg));
+      put(R(),10,fuelNumber(vUsd,explicit),ST.tdR(bg));put(R(),11,fuelNumber(vAct,explicit),ST.tdR(bg));
+      put(R(),12,bal==null?'Учёт не начат':bal,sB);put(R(),13,avg??'',ST.tdR(bg));
       put(R(),14,vGl?+vGl.toFixed(1):'—',ST.tdR(bg));put(R(),15,vSens?+vSens.toFixed(2):'—',ST.tdR(bg));
       put(R(),16,vRoutes||'—',routeStyle);
       put(R(),17,v.note||'—',noteStyle);
@@ -363,16 +371,18 @@ function exportAllToXlsx(dateFrom, dateTo) {
     });
 
     const filteredAll=filterRecs(data.records);
+    const filteredFuel=filteredAll.filter(r=>{const v=data.vehicles.find(v=>v.id===r.vehicleId);return !v||!explicitFuel(v)||fuelAccountingIncludes('vehicles',v,r.date);});
+    const anyExplicit=data.vehicles.some(explicitFuel);
     const aKm=filteredAll.reduce((s,r)=>s+(r.km||0),0);
-    const aIss=filteredAll.reduce((s,r)=>s+(r.fuelIssued||0),0);
-    const aUsd=filteredAll.reduce((s,r)=>s+(r.fuelUsed||0),0);
-    const aAct=filteredAll.reduce((s,r)=>s+(r.fuelActual||0),0);
+    const aIss=filteredFuel.reduce((s,r)=>s+(r.fuelIssued||0),0);
+    const aUsd=filteredFuel.reduce((s,r)=>s+(r.fuelUsed||0),0);
+    const aAct=filteredFuel.reduce((s,r)=>s+(r.fuelActual||0),0);
     const aGl=filteredAll.reduce((s,r)=>s+(+r.kmGlonass||0),0);
-    const aSens=filteredAll.reduce((s,r)=>s+(+r.glonassFuel||0),0);
+    const aSens=filteredFuel.reduce((s,r)=>s+(+r.glonassFuel||0),0);
     for(let c=0;c<=NC;c++) put(R(),c,'',ST.tot);
     put(R(),1,'ИТОГО',ST.totL);
-    put(R(),8,+aKm.toFixed(1),ST.tot);put(R(),9,+aIss.toFixed(2),ST.tot);
-    put(R(),10,+aUsd.toFixed(2),ST.tot);put(R(),11,+aAct.toFixed(2),ST.tot);
+    put(R(),8,+aKm.toFixed(1),ST.tot);put(R(),9,fuelNumber(aIss,anyExplicit),ST.tot);
+    put(R(),10,fuelNumber(aUsd,anyExplicit),ST.tot);put(R(),11,fuelNumber(aAct,anyExplicit),ST.tot);
     put(R(),14,+aGl.toFixed(1),ST.tot);put(R(),15,+aSens.toFixed(2),ST.tot);rowH(R(),22);next();
 
     ws['!cols']=[{wch:4},{wch:13},{wch:22},{wch:22},{wch:18},{wch:16},{wch:14},{wch:18},

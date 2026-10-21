@@ -1,11 +1,18 @@
 /* Portable fuel calculations. Input databases are read-only; browser/storage state stays in adapters. */
 (function (root, factory) {
   'use strict';
-  const api = factory();
+  const api = factory(typeof module === 'object' && module.exports ? () => require('./accounting-boundary.js') : () => root.AccountingBoundary);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.TvsFuelEngine = api;
-})(typeof globalThis === 'object' ? globalThis : this, function () {
+})(typeof globalThis === 'object' ? globalThis : this, function (getAccounting) {
   'use strict';
+
+function fuelAccounting(section,asset) {
+  const api=getAccounting();
+  if(api?.apiVersion===1)return api.resolve(section,asset||{});
+  if(asset&&Object.prototype.hasOwnProperty.call(asset,'fuelAccounting'))throw Object.assign(Error('Не загружены правила начала учёта ГСМ'),{code:'MODULE_UNAVAILABLE'});
+  return {mode:'legacy'};
+}
 
 function parseFuelGrade(text) {
   const source = String(text || '').toUpperCase().replace(/Ё/g, 'Е')
@@ -132,8 +139,13 @@ function gsmBuildLedger(db, options) {
   options = options || {};
   const from = options.from || '', to = options.to || '';
   const vehicles = new Map((db.vehicles || []).map(v => [v.id, v]));
-  const records = (db.records || []).filter(r => vehicles.has(r.vehicleId));
-  const canonicalDays=new Set(records.filter(r=>r.glonassCanonical).map(r=>r.vehicleId+'|'+r.date));
+  const boundaries=new Map([...vehicles].map(([id,vehicle])=>[id,fuelAccounting('vehicles',vehicle)]));
+  const hasExplicit=[...boundaries.values()].some(boundary=>boundary.mode==='explicit');
+  const current=(id,date)=>{const boundary=boundaries.get(id);return boundary?.mode!=='explicit'||!gsmValidDate(date)||date>=boundary.from;};
+  const purchases=(db.fuelPurchases||[]).filter(row=>current(row.vehicleId,row.date));
+  const records = (db.records || []).filter(r => vehicles.has(r.vehicleId)&&current(r.vehicleId,r.date));
+  const accounting=[];
+  const canonicalDays=new Set(records.filter(r=>r.glonassCanonical).map(r=>JSON.stringify([r.vehicleId,r.date])));
   const byRecord = new Map(records.map(r => [r.id, []])), ambiguous = new Set();
   const receipts = [], issues = [], rows = new Map(), movements = [], journal = [];
   const issueKeys = new Set();
@@ -143,9 +155,11 @@ function gsmBuildLedger(db, options) {
   };
   const rowFor = (vehicleId, org, grade) => {
     const key = [vehicleId, gsmOrgKey(org), grade].join('|');
-    if (!rows.has(key)) rows.set(key, { key, vehicleId, vehicle: vehicles.get(vehicleId), org: org || GSM_UNKNOWN_ORG, grade,
+    const mapKey=JSON.stringify([vehicleId,gsmOrgKey(org),grade]);
+    if (!rows.has(mapKey)) rows.set(mapKey, { key, vehicleId, vehicle: vehicles.get(vehicleId), org: org || GSM_UNKNOWN_ORG, grade,
+      ...(boundaries.get(vehicleId)?.mode==='explicit'?{accountingFrom:boundaries.get(vehicleId).from}:{}),
       start: 0, issued: 0, spent: 0, idle: 0, norm: 0, km: 0, glonass: 0, end: 0, correction: 0, providers: {}, cards: new Set(), active: false });
-    return rows.get(key);
+    return rows.get(mapKey);
   };
   const addReceipt = receipt => {
     receipts.push(receipt);
@@ -159,7 +173,7 @@ function gsmBuildLedger(db, options) {
       message: 'Топливо ' + receipt.grade + ' отличается от топлива машины ' + gsmVehicleGrade(v) });
   };
   const duplicateGroups = new Map();
-  (db.fuelPurchases || []).filter(p => !p.deleted && gsmNumber(p.qty) > 0).forEach(p => {
+  purchases.filter(p => !p.deleted && gsmNumber(p.qty) > 0).forEach(p => {
     const key = [p.date, gsmCardKey(p.cardNo), gsmRound(p.qty), gsmGrade(p.grade || p.product)].join('|');
     if (!duplicateGroups.has(key)) duplicateGroups.set(key, []);
     duplicateGroups.get(key).push(p);
@@ -171,7 +185,7 @@ function gsmBuildLedger(db, options) {
       message: 'Возможный повтор восстановления: ' + list.length + ' операций по ' + p.qty + ' л. Сверьте с исходной выпиской' }));
   });
 
-  (db.fuelPurchases || []).filter(p => !p.deleted && gsmNumber(p.qty) > 0).forEach(p => {
+  purchases.filter(p => !p.deleted && gsmNumber(p.qty) > 0).forEach(p => {
     if (!gsmValidDate(p.date)) {
       issue('date', 'error', { purchaseId: p.id, vehicleId: p.vehicleId, message: 'Некорректная дата покупки' });
       return;
@@ -233,6 +247,12 @@ function gsmBuildLedger(db, options) {
   });
 
   (db.monthlyFuel || []).filter(m => m.liters != null && m.liters !== '').forEach(m => {
+    const boundary=boundaries.get(m.vehicleId);
+    if(boundary?.mode==='explicit'&&typeof m.month==='string'&&/^\d{4}-\d{2}$/.test(m.month)){
+      const coverage=getAccounting().window(boundary,gsmMonthRange(m.month));
+      if(coverage.status==='outside-accounting')return;
+      if(coverage.status==='partial'){issue('accounting-partial-month','warning',{vehicleId:m.vehicleId,date:m.month+'-01',message:'Месячная сверка включает дни до начала учёта ГСМ; она не сравнивается с частичным периодом'});return;}
+    }
     const list = receipts.filter(p => p.vehicleId === m.vehicleId && p.date.slice(0, 7) === m.month && (!m.cardNumber || gsmCardKey(p.cardNo) === gsmCardKey(m.cardNumber)));
     const total = gsmRound(list.reduce((s, p) => s + p.qty, 0));
     if (Math.abs(total - gsmNumber(m.liters)) > 0.011) issue('monthly-difference', 'error', { vehicleId: m.vehicleId, date: m.month + '-01',
@@ -241,9 +261,14 @@ function gsmBuildLedger(db, options) {
   });
 
   vehicles.forEach(v => {
-    const lots = [], defaultGrade = gsmVehicleGrade(v), defaultOrg = gsmVehicleOrgAt(v, '') || GSM_UNKNOWN_ORG;
-    const initial = gsmNumber(v.fuelBalance);
-    const initialSources = Array.isArray(v.fuelBalanceSources) && v.fuelBalanceSources.length ? v.fuelBalanceSources : [{ org: defaultOrg, grade: defaultGrade, qty: initial }];
+    const boundary=boundaries.get(v.id);
+    if(boundary.mode==='explicit'){
+      const coverage=getAccounting().window(boundary,{from,to});accounting.push({vehicleId:v.id,...coverage,from:boundary.from,opening:boundary.opening,basis:boundary.basis});
+      if(coverage.status==='outside-accounting'){issue('outside-accounting','warning',{vehicleId:v.id,date:to,message:'Период полностью предшествует началу учёта ГСМ '+boundary.from});return;}
+    }
+    const lots = [], defaultGrade = gsmVehicleGrade(v), defaultOrg = gsmVehicleOrgAt(v, boundary.mode==='explicit'?boundary.from:'') || GSM_UNKNOWN_ORG;
+    const initial = boundary.mode==='explicit'?boundary.opening:gsmNumber(v.fuelBalance);
+    const initialSources = boundary.mode==='explicit'?(boundary.sources||[{org:defaultOrg,grade:defaultGrade,qty:initial}]):Array.isArray(v.fuelBalanceSources) && v.fuelBalanceSources.length ? v.fuelBalanceSources : [{ org: defaultOrg, grade: defaultGrade, qty: initial }];
     if (Math.abs(initialSources.reduce((s, x) => s + gsmNumber(x.qty), 0) - initial) > 0.011) issue('opening-difference', 'error', {
       vehicleId: v.id, date: '', org: defaultOrg, message: 'Распределение начального остатка не совпадает с карточкой машины' });
     let reconciliationSequence = 0;
@@ -359,7 +384,7 @@ function gsmBuildLedger(db, options) {
           const share = spent > 0 ? part.qty / spent : 1;
           const row = rowFor(v.id, part.org, part.grade); row.active = true;
           row.spent += part.qty; row.idle += Math.min(idle, spent) * share;
-          row.norm += norm * share; row.km += gsmNumber(r.km) * share; row.glonass += (!canonicalDays.has(r.vehicleId+'|'+r.date)||r.glonassCanonical?gsmNumber(r.kmGlonass):0)*share;
+          row.norm += norm * share; row.km += gsmNumber(r.km) * share; row.glonass += (!canonicalDays.has(JSON.stringify([r.vehicleId,r.date]))||r.glonassCanonical?gsmNumber(r.kmGlonass):0)*share;
           movements.push({ kind: 'consumption', source:appliedMeasurement?'measurement':fuel.source, date: r.date, vehicleId: v.id, recordId: r.id, org: part.org, grade: part.grade, qty: part.qty,
             idle: Math.min(idle, spent) * share, norm: norm == null ? null : norm * share, totalNorm:norm == null ? null : (norm+idle)*share, km: gsmNumber(r.km) * share });
         });
@@ -377,6 +402,10 @@ function gsmBuildLedger(db, options) {
   });
 
   const resultRows = [...rows.values()].filter(r => r.active || Math.abs(r.start) > GSM_EPS || Math.abs(r.end) > GSM_EPS);
+  // Preserve published legacy keys unless their string representation collides.
+  // Numeric 7 and string '7' remain different assets and different UI/report keys.
+  const exposedKeys=new Map();for(const row of resultRows){if(!exposedKeys.has(row.key))exposedKeys.set(row.key,[]);exposedKeys.get(row.key).push(row);}
+  for(const group of exposedKeys.values())if(group.length>1)for(const row of group)row.key='typed:'+JSON.stringify([typeof row.vehicleId,row.vehicleId,gsmOrgKey(row.org),row.grade]);
   const barrels = new Map();
   resultRows.forEach(row => {
     ['start', 'issued', 'spent', 'idle', 'norm', 'km', 'glonass', 'end', 'correction'].forEach(k => { row[k] = gsmRound(row[k]); });
@@ -389,7 +418,7 @@ function gsmBuildLedger(db, options) {
   const resultBarrels = [...barrels.values()].sort((a, b) => a.org.localeCompare(b.org, 'ru') || a.grade.localeCompare(b.grade, 'ru'));
   return { from, to, rows: resultRows, barrels: resultBarrels, journal, movements,
     receipts: receipts.filter(p => gsmInPeriod(p.date, from, to)), issues: currentIssues,
-    errors: currentIssues.filter(i => i.severity === 'error'), organizations: [...new Set(resultRows.map(r => r.org))].sort((a, b) => a.localeCompare(b, 'ru')) };
+    errors: currentIssues.filter(i => i.severity === 'error'), organizations: [...new Set(resultRows.map(r => r.org))].sort((a, b) => a.localeCompare(b, 'ru')), ...(hasExplicit?{accounting}: {}) };
 }
 
 // The journal balance deliberately retains its historical two-decimal presentation.
@@ -400,16 +429,19 @@ function recordBalances(db, vehicleId, options) {
   options = options || {};
   const dateTo = options.to || '';
   const vehicle = (db.vehicles || []).find(v => v.id === vehicleId);
+  const boundary=fuelAccounting('vehicles',vehicle);
+  if(boundary.mode==='explicit'&&dateTo&&dateTo<boundary.from)return {};
   const recs = (db.records || []).filter(r => r.vehicleId === vehicleId)
     .filter(r => {
+      if(boundary.mode==='explicit'&&(!gsmValidDate(r.date)||r.date<boundary.from))return false;
       if (dateTo   && r.date > dateTo)   return false;
       return true;
     })
     .sort((a, b) => cmpDateAsc(a.date, b.date));
-  const opening = fqValue(vehicle && vehicle.fuelBalance) || 0;
+  const opening = boundary.mode==='explicit'?boundary.opening:fqValue(vehicle && vehicle.fuelBalance) || 0;
   const defaultFamily = fqFuelFamily(vehicleFuelGrade(vehicle));
   const familyBalances = new Map([[defaultFamily, opening]]);
-  const sources = vehicle && vehicle.fuelBalanceSources;
+  const sources = boundary.mode==='explicit'?boundary.sources:vehicle && vehicle.fuelBalanceSources;
   if (Array.isArray(sources) && sources.length && Math.abs(sources.reduce((sum, source) => sum + (fqValue(source.qty) || 0), 0) - opening) < 0.011) {
     familyBalances.clear();
     sources.forEach(source => {
@@ -428,7 +460,8 @@ function recordBalances(db, vehicleId, options) {
     const key = keyFor(r);
     if (lastOnDate.get(key) === r.id && measurements.has(key)) balance = Number(measurements.get(key).tankMeasured);
     familyBalances.set(family, balance);
-    balMap[r.id] = +[...familyBalances.values()].reduce((sum, qty) => sum + qty, 0).toFixed(2);
+    const total=[...familyBalances.values()].reduce((sum,qty)=>sum+qty,0);
+    balMap[r.id] = boundary.mode==='explicit'?total:+total.toFixed(2);
   });
   return balMap;
 }

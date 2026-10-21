@@ -277,9 +277,9 @@ function checkClosedPeriods(previous, next) {
     if (JSON.stringify(old.filter(historical)) !== JSON.stringify(rows.filter(historical))) throw new Error('Месяц закрыт: ' + lastClosed + '. Сначала откройте его: более ранние операции влияют на начальный остаток.');
   }
   const fields = {
-    vehicles: ['fuelBalance', 'fuelBalanceSources', 'fuelGrade', 'fuel', 'org', 'orgHistory', 'norm', 'fuelcard'],
-    generators: ['fuelBalance', 'fuelGrade', 'fuel', 'org', 'orgHistory', 'norm', 'norm100', 'norm50', 'normIdle', 'power', 'tankId'],
-    tanks: ['balanceInit', 'fuelGrade', 'fuel', 'org'],
+    vehicles: ['fuelAccounting', 'fuelBalance', 'fuelBalanceSources', 'fuelGrade', 'fuel', 'org', 'orgHistory', 'norm', 'fuelcard'],
+    generators: ['fuelAccounting', 'fuelBalance', 'fuelGrade', 'fuel', 'org', 'orgHistory', 'norm', 'norm100', 'norm50', 'normIdle', 'power', 'tankId'],
+    tanks: ['fuelAccounting', 'balanceInit', 'fuelGrade', 'fuel', 'org'],
     fuelCards: ['number', 'provider', 'org', 'orgHistory', 'assignments'],
   };
   const [closedYear,closedMonth] = lastClosed.split('-').map(Number);
@@ -292,10 +292,11 @@ function checkClosedPeriods(previous, next) {
     else if (key === 'fuelBalanceSources') {
       const fallbackGrade = row.fuelGrade || (row.fuel==='gasoline'?'Бензин':row.fuel==='gas'?'Газ':'ДТ'), fallbackOrg = String(row.org||'').trim() || 'Организация не определена';
       value = (Array.isArray(value)&&value.length ? value : [{org:fallbackOrg,grade:fallbackGrade,qty:Number(row.fuelBalance)||0}]).map(entry => ({org:String(entry.org||fallbackOrg).trim(),grade:entry.grade||fallbackGrade,qty:Number(entry.qty)||0}));
-    } else value = value == null ? '' : value;
+    } else if (key === 'fuelAccounting') value = value == null ? '' : require('../assets/core/platform-kernel.js').stableSerialize(value);
+    else value = value == null ? '' : value;
     return [key,value];
   }));
-  const nonzeroOpening = row => ['fuelBalance', 'balanceInit'].some(key => Number(row[key]) !== 0 && Number.isFinite(Number(row[key]))) || (row.fuelBalanceSources || []).some(entry => Number(entry.qty));
+  const nonzeroOpening = row => ['fuelBalance', 'balanceInit'].some(key => Number(row[key]) !== 0 && Number.isFinite(Number(row[key]))) || (row.fuelBalanceSources || []).some(entry => Number(entry.qty)) || Object.hasOwn(row,'fuelAccounting') && Number(row.fuelAccounting?.opening)!==0;
   const cardKey = value => { const text=String(value||'').trim();return text.replace(/\D/g,'')||text.toUpperCase(); };
   const historicalCardRows = [...(previous.records||[]),...(previous.fuelPurchases||[]),...(previous.monthlyFuel||[])].filter(historical);
   for (const [name, keys] of Object.entries(fields)) {

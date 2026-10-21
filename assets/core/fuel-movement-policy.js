@@ -1,5 +1,5 @@
 /* Fuel conservation and journal linkage rules shared by native, API and UI saves. */
-(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(()=>require('./fuel-engine.js'));else root.FuelMovementPolicy=factory(()=>root.TvsFuelEngine);})(typeof globalThis==='object'?globalThis:this,function(getFuel){
+(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(()=>require('./fuel-engine.js'),()=>require('./accounting-boundary.js'));else root.FuelMovementPolicy=factory(()=>root.TvsFuelEngine,()=>root.AccountingBoundary);})(typeof globalThis==='object'?globalThis:this,function(getFuel,getAccounting){
   'use strict';
   const EPS=1e-7;
   const own=(row,key)=>Object.prototype.hasOwnProperty.call(row,key);
@@ -16,6 +16,13 @@
   function stable(value){if(value===undefined)return 'undefined';if(value===null||typeof value!=='object')return JSON.stringify(value);return Array.isArray(value)?'['+value.map(stable).join(',')+']':'{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+stable(value[key])).join(',')+'}';}
   function dateValid(value){if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;const d=new Date(value+'T12:00:00Z');return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===value;}
   const find=(db,section,id)=>rows(db,section).find(row=>row.id===id);
+  function accounting(section,row){
+    if(!row||!own(row,'fuelAccounting'))return {mode:'legacy'};
+    const api=getAccounting();
+    if(!api||api.apiVersion!==1||typeof api.resolve!=='function')throw Object.assign(Error('Не загружены правила начала учёта топлива'),{code:'MODULE_UNAVAILABLE'});
+    return api.resolve(section,row);
+  }
+  function accountingState(section,row){try{return accounting(section,row);}catch(error){return {mode:'invalid',error};}}
   function asset(db,ref){const match=typeof ref==='string'&&ref.match(/^([vg]):(.+)$/);return match?rows(db,match[1]==='v'?'vehicles':'generators').find(row=>String(row.id)===match[2]):null;}
   function family(row){
     if(!row)return null;
@@ -26,8 +33,13 @@
   }
   function recordTank(db,row){return own(row,'tankId')?row.tankId:find(db,'generators',row.generatorId)?.tankId??null;}
   function tankTimeline(db){
-    const timelines=new Map(rows(db,'tanks').map(tank=>[idKey(tank.id),{tank,initial:quantity(tank.balanceInit),events:new Map()}]));
-    const add=(tankId,date,value)=>{const timeline=timelines.get(idKey(tankId));if(timeline&&dateValid(date)&&Number.isFinite(value))timeline.events.set(date,(timeline.events.get(date)||0)+value);};
+    const timelines=new Map();
+    for(const tank of rows(db,'tanks')){
+      const boundary=accountingState('tanks',tank);
+      if(boundary.mode==='invalid')continue;
+      timelines.set(idKey(tank.id),{tank,initial:boundary.mode==='explicit'?boundary.opening:quantity(tank.balanceInit),from:boundary.mode==='explicit'?boundary.from:null,events:new Map()});
+    }
+    const add=(tankId,date,value)=>{const timeline=timelines.get(idKey(tankId));if(timeline&&dateValid(date)&&(!timeline.from||date>=timeline.from)&&Number.isFinite(value))timeline.events.set(date,(timeline.events.get(date)||0)+value);};
     // Signed old transfer halves remain signed. A gen-record tankId:null is an
     // explicit detached source; falling back to its generator would debit twice.
     for(const row of rows(db,'tankIncomes'))add(row.tankId,row.date,amount(row));
@@ -37,12 +49,16 @@
   }
   function balancesAt(timeline,dates){
     const events=timeline?[...timeline.events].sort((a,b)=>a[0].localeCompare(b[0])):[],balances=new Map();let position=0,balance=timeline?.initial||0;
-    for(const day of dates){while(position<events.length&&events[position][0]<=day){balance+=events[position][1];position++;}balances.set(day,balance);}
+    for(const day of dates){while(position<events.length&&events[position][0]<=day){balance+=events[position][1];position++;}balances.set(day,timeline?.from&&day<timeline.from?null:balance);}
     return balances;
   }
   function analyze(db,context={}){
     const issues=[];
     const add=(section,row,code,field,message,proof,extra={})=>issues.push({severity:'error',section,recordId:row.id??'',code,field,message,proof,...extra});
+    for(const section of ['vehicles','generators','tanks'])if(canRead(context,section))for(const row of rows(db,section)){
+      const boundary=accountingState(section,row);
+      if(boundary.mode==='invalid')add(section,row,'FUEL_ACCOUNTING_INVALID','fuelAccounting',boundary.error.message,[row.fuelAccounting]);
+    }
     const movements=rows(db,'fuelMovements');
     if(canRead(context,'fuelMovements'))for(const row of movements){
       const qty=number(row.qty),from=present(row.fromTankId),to=present(row.toTankId);
@@ -92,7 +108,7 @@
       if(source&&target&&family(source)!==family(target))add('tankIncomes',row,'FUEL_LEGACY_TRANSFER_GRADE','counterTankId','Нельзя перемещать топливо между ёмкостями разных видов',[family(source),family(target)]);
     }
     const stockReadable=['tanks','tankIncomes','genRecords','generators','fuelMovements'].every(section=>canRead(context,section));
-    if(stockReadable)for(const timeline of tankTimeline(db).values())for(const [day,balance]of balancesAt(timeline,[...timeline.events.keys()].sort()))if(balance<-EPS)add('tanks',timeline.tank,'FUEL_STOCK_DEFICIT','balance','Недостаточно расчётного топлива в ёмкости на '+day,[timeline.tank.id,day],{date:day,deficit:-balance});
+    if(stockReadable)for(const timeline of tankTimeline(db).values())for(const [day,balance]of balancesAt(timeline,[...timeline.events.keys()].sort()))if(Number.isFinite(balance)&&balance<-EPS)add('tanks',timeline.tank,'FUEL_STOCK_DEFICIT','balance','Недостаточно расчётного топлива в ёмкости на '+day,[timeline.tank.id,day],{date:day,deficit:-balance});
     return issues;
   }
   function inspect(db,context={}){const issues=analyze(db,context);return {issues,counts:{error:issues.filter(issue=>issue.severity==='error').length,warning:issues.filter(issue=>issue.severity==='warning').length,total:issues.length}};}
@@ -105,16 +121,67 @@
   }
   function assetBalances(db,ref){
     const target=asset(db,ref),vehicle=String(ref).startsWith('v:'),section=vehicle?'records':'genRecords',assetField=vehicle?'vehicleId':'generatorId';
-    const records=rows(db,section).filter(row=>String(row[assetField])===String(ref).slice(2)&&dateValid(row.date)).slice().sort((a,b)=>a.date.localeCompare(b.date));
+    const boundary=accounting(vehicle?'vehicles':'generators',target);
+    const records=rows(db,section).filter(row=>String(row[assetField])===String(ref).slice(2)&&dateValid(row.date)&&(boundary.mode!=='explicit'||row.date>=boundary.from)).slice().sort((a,b)=>a.date.localeCompare(b.date));
     if(vehicle){const engine=getFuel();if(!engine||typeof engine.recordBalances!=='function')throw Error('Не загружено ядро расчёта ГСМ для проверки сторно');return {records,balances:engine.recordBalances(db,target?.id??String(ref).slice(2))};}
-    let balance=quantity(target?.fuelBalance);const balances={};for(const record of records){balance+=quantity(record.fuelIssued)-generatorSpent(target,record);balances[record.id]=balance;}return {records,balances};
+    let balance=boundary.mode==='explicit'?boundary.opening:quantity(target?.fuelBalance);const balances={};for(const record of records){balance+=quantity(record.fuelIssued)-generatorSpent(target,record);balances[record.id]=balance;}return {records,balances};
+  }
+  // Compare only facts used by fuel calculations. Legacy malformed settings
+  // remain repairable during descriptive edits; they cannot authorize a new
+  // fuel calculation by silently falling back to the old opening balance.
+  function changedFuelRows(previous,next,section,fields){
+    const project=row=>stable(Object.fromEntries(['id',...fields].map(field=>[field,row[field]])));
+    const unmatched=new Map();
+    for(const row of rows(previous,section)){const key=project(row);if(!unmatched.has(key))unmatched.set(key,[]);unmatched.get(key).push(row);}
+    const changed=[];
+    for(const row of rows(next,section)){const peers=unmatched.get(project(row));if(peers?.length)peers.pop();else changed.push({row,current:true});}
+    for(const peers of unmatched.values())for(const row of peers)changed.push({row,current:false});
+    return changed;
+  }
+  function accountingContextIssues(previous,next){
+    if(!['vehicles','generators','tanks'].some(section=>rows(previous,section).some(row=>own(row,'fuelAccounting'))||rows(next,section).some(row=>own(row,'fuelAccounting'))))return [];
+    const issues=[],seen=new Set(),states=new Map();
+    const state=(section,id)=>{const key=section+':'+idKey(id);if(!states.has(key)){const row=find(next,section,id);states.set(key,{row,boundary:accountingState(section,row)});}return states.get(key);};
+    const invalid=(section,id,origin)=>{
+      const entry=state(section,id);if(entry.boundary.mode!=='invalid')return;
+      const key=section+':'+idKey(id);if(seen.has(key))return;seen.add(key);
+      issues.push({severity:'error',section,recordId:id??'',code:'FUEL_ACCOUNTING_CONTEXT_INVALID',field:'fuelAccounting',message:'Сначала исправьте начало учёта топлива: '+entry.boundary.error.message,relatedRecordId:origin.id??''});
+    };
+    const referenced=(row,section,field)=>{if(present(row[field]))invalid(section,row[field],row);};
+    const movementAssets=row=>{
+      const entries=[['tanks',row.fromTankId],['tanks',row.toTankId]];
+      const target=asset(next,row.assetRef);if(target)entries.push([String(row.assetRef).startsWith('v:')?'vehicles':'generators',target.id]);
+      return entries.filter(([,id])=>present(id));
+    };
+    const specs={
+      records:['vehicleId','date','km','fuelIssued','fuelActual','fuelUsed','fuelIdle','tankMeasured','fuelGrade','fuelOrg','fuelMovementId'],
+      genRecords:['generatorId','tankId','date','hours','load','fuelIssued','fuelActual','fuelUsed','fuelMovementId'],
+      tankIncomes:['tankId','date','amount','liters','litres','qty','kind','deleted','cancelled'],
+      fuelMovements:['fromTankId','toTankId','assetRef','recordId','date','qty','kind','deleted','cancelled','originalMovementId','reversedBy'],
+    };
+    for(const [section,fields]of Object.entries(specs))for(const change of changedFuelRows(previous,next,section,fields)){
+      const row=change.row;
+      if(section==='records')referenced(row,'vehicles','vehicleId');
+      else if(section==='genRecords'){referenced(row,'generators','generatorId');invalid('tanks',recordTank(change.current?next:previous,row),row);}
+      else if(section==='tankIncomes')referenced(row,'tanks','tankId');
+      else for(const [target,id]of movementAssets(row)){
+        invalid(target,id,row);
+        const boundary=state(target,id).boundary;
+        if(change.current&&live(row)&&dateValid(row.date)&&boundary.mode==='explicit'&&row.date<boundary.from)
+          issues.push({severity:'error',section:'fuelMovements',recordId:row.id??'',code:'FUEL_BEFORE_ACCOUNTING',field:'date',date:row.date,message:'Дата нового движения топлива раньше начала учёта источника или получателя',proof:[target,id,boundary.from,row.date]});
+      }
+    }
+    for(const [section,fields]of Object.entries({vehicles:['fuelAccounting','fuelBalance','fuelBalanceSources','fuel','fuelGrade','norm','normCity','normHighway','normIdle','org','orgHistory'],generators:['fuelAccounting','fuelBalance','fuel','fuelGrade','power','norm','norm100','norm50','normIdle','tankId'],tanks:['fuelAccounting','balanceInit','fuel','fuelGrade']}))
+      for(const {row}of changedFuelRows(previous,next,section,fields))invalid(section,row.id,row);
+    return issues;
   }
   function validateChanges(previous,next){
     const issues=[],oldIssues=analyze(previous),current=analyze(next),signature=issue=>stable([issue.section,issue.recordId,issue.code,issue.field,issue.proof]);
     const existing=new Set(oldIssues.map(signature));
     issues.push(...current.filter(issue=>issue.code!=='FUEL_STOCK_DEFICIT'&&!existing.has(signature(issue))));
+    issues.push(...accountingContextIssues(previous,next));
     const beforeTimelines=tankTimeline(previous),afterTimelines=tankTimeline(next);
-    for(const [key,timeline]of afterTimelines){const before=beforeTimelines.get(key),dates=[...new Set([...(before?.events.keys()||[]),...timeline.events.keys()])].sort(),oldBalances=balancesAt(before,dates),newBalances=balancesAt(timeline,dates);for(const day of dates){const value=newBalances.get(day),old=oldBalances.get(day);if(value<-EPS&&value<old-EPS)issues.push({severity:'error',section:'tanks',recordId:timeline.tank.id??'',code:'FUEL_STOCK_DEFICIT',field:'balance',date:day,deficit:-value,message:'Операция создаёт или увеличивает нехватку топлива в ёмкости на '+day});}}
+    for(const [key,timeline]of afterTimelines){const before=beforeTimelines.get(key),dates=[...new Set([...(before?.events.keys()||[]),...timeline.events.keys()])].sort(),oldBalances=balancesAt(before,dates),newBalances=balancesAt(timeline,dates);for(const day of dates){const value=newBalances.get(day),old=oldBalances.get(day);if(Number.isFinite(value)&&value<-EPS&&(old===null||value<old-EPS))issues.push({severity:'error',section:'tanks',recordId:timeline.tank.id??'',code:'FUEL_STOCK_DEFICIT',field:'balance',date:day,deficit:-value,message:'Операция создаёт или увеличивает нехватку топлива в ёмкости на '+day});}}
     const protectedFields=['fuelIssued','fuelMovementId','date','vehicleId','generatorId','tankId','fuelGrade','fuelOrg','fuelProvider','fuelSourceSnapshot','originalFuelIssued','reversalId','reversedAt'];
     for(const section of ['records','genRecords'])for(const before of rows(previous,section))if(present(before.fuelMovementId)){
       const after=find(next,section,before.id),movement=find(next,'fuelMovements',before.fuelMovementId),oldMovement=find(previous,'fuelMovements',before.fuelMovementId);

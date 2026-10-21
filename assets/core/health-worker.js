@@ -4,7 +4,7 @@
   if(typeof module==='object'&&module.exports)module.exports=factory(require('./platform-schema.js'),require('./platform-integrity.js'));
   else{
     if((!root.PlatformIntegrity||!root.PlatformPolicies)&&typeof importScripts==='function')importScripts(
-      './dispatcher-core.js','./fuel-engine.js','./writeoff-engine.js','./platform-schema.js','./platform-contracts.js',
+      './dispatcher-core.js','./accounting-boundary.js','./fuel-engine.js','./writeoff-engine.js','./platform-schema.js','./platform-contracts.js',
       './personnel-engine.js','./financial-recognition.js','./fuel-movement-policy.js','./document-lifecycle.js',
       './workflow-policy.js','./platform-policies.js','./platform-integrity.js');
     const api=factory(root.PlatformSchema,root.PlatformIntegrity);root.PlatformHealthWorker=api;

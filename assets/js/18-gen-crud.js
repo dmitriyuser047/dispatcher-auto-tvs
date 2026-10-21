@@ -275,21 +275,24 @@ function renderGenSidebarSummary() {
   // ─── Агрегированная сводка (по подобию транспорта) ───
   let totalHours = 0;
   let issued = 0, used = 0, byNorm = 0, balance = 0;
+  let trackedFuel=0,unstartedFuel=0;
   const countedTanks = new Set();
   gens.forEach(g => {
     const gRecs = genRecsFor(g.id).slice().sort((a, b) => cmpDateAsc(a.date, b.date));
     gRecs.forEach(r => {
       totalHours += r.hours || 0;
+      if(!fuelAccountingCurrentIncludes('generators',g,r.date))return;
       issued     += r.fuelIssued || 0;
       used       += genActualSpent(g, r);
       byNorm     += genNormSpent(g, r);
     });
+    if(fuelAccountingFor('generators',g).mode==='explicit'&&fuelAccountingOpening('generators',g,dispatcherLocalDate())===null){unstartedFuel++;return;}
     if (g.tankId) {
-      if (!countedTanks.has(g.tankId)) { countedTanks.add(g.tankId); balance += computeTankBalance(g.tankId).balance; }
+      if (!countedTanks.has(g.tankId)) { countedTanks.add(g.tankId); const value=computeTankBalance(g.tankId).balance;if(value===null)unstartedFuel++;else{balance+=value;trackedFuel++;} }
     } else {
       const balMap  = computeGenFuelBalances(g.id);
       const lastRec = gRecs[gRecs.length - 1];
-      balance += lastRec ? (balMap[lastRec.id] ?? (g.fuelBalance || 0)) : (g.fuelBalance || 0);
+      const value=fuelAccountingCurrentBalance('generators',g,gRecs,balMap);if(value===null)unstartedFuel++;else{balance+=value;trackedFuel++;}
     }
   });
   const balColor = balance < 0 ? 'var(--red)' : balance === 0 ? 'var(--text3)' : 'var(--green)';
@@ -339,7 +342,8 @@ function renderGenSidebarSummary() {
       <div class="ss-row"><span class="ss-label">Расход по факту</span><span class="ss-value">${used.toLocaleString('ru',{maximumFractionDigits:1})} л</span></div>
       <div class="ss-row"><span class="ss-label">Отклонение</span><span class="ss-value" style="color:${devColor}" title="Факт минус норма. Плюс — перерасход, минус — экономия.">${byNorm ? (dev > 0 ? '+' : '') + dev.toLocaleString('ru',{maximumFractionDigits:1}) + ' л' + (devPct !== null ? ' · ' + (dev > 0 ? '+' : '') + devPct + '%' : '') : '—'}</span></div>
       <div class="ss-divider"></div>
-      <div class="ss-row"><span class="ss-label">Остаток</span><span class="ss-value" style="color:${balColor}">${balance.toLocaleString('ru',{maximumFractionDigits:1})} л</span></div>
+      <div class="ss-row"><span class="ss-label">Остаток</span><span class="ss-value" style="color:${balColor}">${trackedFuel?balance.toLocaleString('ru',{maximumFractionDigits:3})+' л':'Учёт ещё не начат'}</span></div>
+      ${unstartedFuel?'<small>Учёт ещё не начат: '+unstartedFuel+'</small>':''}
     </div>
   </div>`;
   list?.appendChild(div);

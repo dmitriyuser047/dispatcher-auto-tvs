@@ -1,9 +1,9 @@
 /* Posted fuel acts are immutable calculations, never adjustments to source records. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./fuel-engine.js'));
-  else root.TvsWriteoffEngine = factory(root.TvsFuelEngine);
-})(typeof globalThis === 'object' ? globalThis : this, function (fuel) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./fuel-engine.js'),()=>require('./accounting-boundary.js'));
+  else root.TvsWriteoffEngine = factory(root.TvsFuelEngine,()=>root.AccountingBoundary);
+})(typeof globalThis === 'object' ? globalThis : this, function (fuel,getAccounting) {
   'use strict';
   if (!fuel || fuel.apiVersion !== 1) throw Error('Не загружено ядро расчёта ГСМ');
   const sourceSections = Object.freeze(['vehicles', 'records', 'fuelPurchases', 'fuelCards', 'monthlyFuel']);
@@ -51,8 +51,19 @@
   function vehicleProjection(vehicle) {
     const result = {};
     vehicleFields.forEach(field=>{ if (Object.prototype.hasOwnProperty.call(vehicle,field)) result[field]=vehicle[field]; });
+    if(Object.prototype.hasOwnProperty.call(vehicle,'fuelAccounting'))result.fuelAccounting=vehicle.fuelAccounting;
     return result;
   }
+  // All callers use database()'s privately cloned rows, never mutable UI cards.
+  // Cache only these owned objects; a later source read creates a fresh clone.
+  const accountingCache=new WeakMap();
+  function accounting(vehicle){
+    if(!vehicle||!Object.prototype.hasOwnProperty.call(vehicle,'fuelAccounting'))return {mode:'legacy'};
+    if(accountingCache.has(vehicle))return accountingCache.get(vehicle);
+    const api=getAccounting();if(api?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила начала учёта ГСМ');
+    const value=api.resolve('vehicles',vehicle);accountingCache.set(vehicle,value);return value;
+  }
+  function currentSource(vehicle,date){const boundary=accounting(vehicle);return boundary.mode!=='explicit'||!fuel.gsmValidDate(date)||date>=boundary.from;}
   // Synchronous SHA-256 over UTF-8 keeps browser and storage fingerprints identical.
   function sha256(text) {
     const bytes = [];
@@ -130,7 +141,9 @@
     const selected = ledger.rows.filter(row => eligibleVehicle(row.vehicle) && fuel.gsmFamily(row.grade) !== 'gas' && visible(row, scope));
     const represented = new Set(ledger.rows.map(row => row.vehicleId));
     db.vehicles.filter(vehicle => eligibleVehicle(vehicle) && !represented.has(vehicle.id)).forEach(vehicle => {
+      const boundary=accounting(vehicle);if(boundary.mode==='explicit'&&scope.to<boundary.from)return;
       const row = { vehicleId:vehicle.id, vehicle, org:fuel.gsmVehicleOrgAt(vehicle, scope.to) || 'Организация не определена', grade:fuel.gsmVehicleGrade(vehicle),
+        ...(boundary.mode==='explicit'?{accountingFrom:boundary.from}:{}),
         key:[vehicle.id, orgKey(fuel.gsmVehicleOrgAt(vehicle, scope.to)), fuel.gsmVehicleGrade(vehicle)].join('|'),
         start:0, issued:0, spent:0, idle:0, norm:0, km:0, glonass:0, end:0, correction:0, providers:{}, cards:new Set(), active:false };
       if (visible(row, scope)) selected.push(row);
@@ -154,9 +167,9 @@
       const explicit = purchase ? row.sourceOrg : row.fuelOrg;
       return (!scope.org || !explicit || orgKey(explicit) === orgKey(scope.org)) && (!scope.grade || grade === 'Не указано' || grade === scope.grade);
     };
-    const purchases = db.fuelPurchases.filter(row => until(row.date) && (ids.has(row.vehicleId) || potentialPurchase(row) || orphanRelevant(row, true)));
+    const purchases = db.fuelPurchases.filter(row => until(row.date) && currentSource(vehicles.get(row.vehicleId),row.date) && (ids.has(row.vehicleId) || potentialPurchase(row) || orphanRelevant(row, true)));
     const dependencyIds = new Set([...ids,...purchases.map(row=>row.vehicleId)]);
-    const records = db.records.filter(row => until(row.date) && (dependencyIds.has(row.vehicleId) || orphanRelevant(row, false)));
+    const records = db.records.filter(row => until(row.date) && currentSource(vehicles.get(row.vehicleId),row.date) && (dependencyIds.has(row.vehicleId) || orphanRelevant(row, false)));
     const cardKeys = new Set([...records.map(row => row.fuelCardNum), ...purchases.map(row => row.cardNo), ...db.vehicles.filter(row => ids.has(row.id)).map(row => row.fuelcard)].filter(Boolean).map(fuel.gsmCardKey));
     const historicalHistory = entries => entries.filter(item=>!fuel.gsmValidDate(item.from)||item.from<=scope.to).map(item=>{
       const value = {...item};
@@ -169,7 +182,7 @@
       ...(row.assignments?{assignments:historicalHistory(row.assignments)}:{}),...(row.orgHistory?{orgHistory:historicalHistory(row.orgHistory)}:{})}));
     const dependencyVehicles = db.vehicles.filter(row => dependencyIds.has(row.id) || row.fuelcard && cardKeys.has(fuel.gsmCardKey(row.fuelcard)));
     return { vehicles:dependencyVehicles.map(vehicleProjection).map(row=>({...row,...(row.orgHistory?{orgHistory:historicalHistory(row.orgHistory)}:{})})), records, fuelPurchases:purchases, fuelCards:cards,
-      monthlyFuel:db.monthlyFuel.filter(row => ids.has(row.vehicleId) && (typeof row.month !== 'string' || row.month <= scope.month)) };
+      monthlyFuel:db.monthlyFuel.filter(row => ids.has(row.vehicleId) && (typeof row.month !== 'string' || row.month <= scope.month) && currentSource(vehicles.get(row.vehicleId),typeof row.month==='string'&&/^\d{4}-(?:0[1-9]|1[0-2])$/.test(row.month)?fuel.gsmMonthRange(row.month).to:'')) };
   }
   function projectionFingerprint(source, scope) { return 'sha256:' + sha256(stableSerialize({ schemaVersion:1, scope:{month:scope.month,org:orgKey(scope.org),grade:scope.grade}, source })); }
   function fingerprint(input, request) {
@@ -187,6 +200,14 @@
       if (!issueKeys.has(key)) { issueKeys.add(key); issues.push(value); }
     };
     if (request.readable != null && (!Array.isArray(request.readable) || requiredSections.some(section => !request.readable.includes(section)))) add({code:'access-incomplete',message:'Для проведения акта необходим доступ ко всем источникам ГСМ и журналу актов'});
+    for(const vehicle of db.vehicles.filter(eligibleVehicle)){
+      const boundary=accounting(vehicle);if(boundary.mode!=='explicit')continue;
+      const org=fuel.gsmVehicleOrgAt(vehicle,boundary.from),grade=fuel.gsmVehicleGrade(vehicle);
+      if(!issueVisible({vehicleId:vehicle.id,org,grade},scope,new Set([vehicle.id])))continue;
+      const coverage=getAccounting().window(boundary,{from:scope.from,to:scope.to});
+      if(coverage.status==='outside-accounting')add({code:'outside-accounting',vehicleId:vehicle.id,date:scope.to,message:'Период акта полностью предшествует началу учёта ГСМ '+boundary.from});
+      else if(coverage.status==='partial')add({code:'accounting-period-partial',vehicleId:vehicle.id,date:boundary.from,message:'Учёт ГСМ начинается '+boundary.from+' внутри месяца. Полный месячный акт до этой даты сформировать нельзя'});
+    }
     // Earlier operations establish opening stock. Their audit must not be replayed
     // as this month's errors after a confirmed tank measurement has anchored it.
     for (const item of ledger.issues) {
@@ -197,7 +218,7 @@
     const vehicles = new Map(db.vehicles.map(row => [row.id,row]));
     const measurementPlans = new Map();
     function appliedMeasurement(record) {
-      if (!measurementPlans.has(record.vehicleId)) measurementPlans.set(record.vehicleId,fuel.fqMeasurementPlan(db.records.filter(item=>item.vehicleId===record.vehicleId&&fuel.gsmValidDate(item.date)).slice().sort((a,b)=>a.date.localeCompare(b.date)),vehicles.get(record.vehicleId)));
+      if (!measurementPlans.has(record.vehicleId)) measurementPlans.set(record.vehicleId,fuel.fqMeasurementPlan(db.records.filter(item=>item.vehicleId===record.vehicleId&&fuel.gsmValidDate(item.date)&&currentSource(vehicles.get(item.vehicleId),item.date)).slice().sort((a,b)=>a.date.localeCompare(b.date)),vehicles.get(record.vehicleId)));
       const plan=measurementPlans.get(record.vehicleId),key=plan.keyFor(record);
       return plan.lastOnDate.get(key)===record.id ? plan.measurements.get(key) : null;
     }
@@ -236,15 +257,16 @@
       const ids = new Set();
       for (const row of projection[section]) {
         const severity = fuel.gsmValidDate(row.date) && row.date < scope.from ? 'warning' : 'error';
-        if (!['monthlyFuel','fuelCards'].includes(section) && (typeof row.id !== 'string' || !row.id.trim())) add({code:'source-id-missing',severity,section,sourceId:row.id || '',message:'У источника отсутствует устойчивый ID'});
+        if (!['monthlyFuel','fuelCards'].includes(section) && !(typeof row.id==='string'&&row.id.trim()||typeof row.id==='number'&&Number.isFinite(row.id))) add({code:'source-id-missing',severity,section,sourceId:row.id ?? '',message:'У источника отсутствует устойчивый ID'});
         if (row.id && ids.has(row.id)) add({code:'source-id-duplicate',severity,section,sourceId:row.id,message:'Повторяется ID источника: ' + row.id});
         ids.add(row.id);
       }
     }
     for (const row of projection.vehicles) {
-      checkNumeric(row,'vehicles',['fuelBalance','norm','normCity','normHighway','normIdle','tankVolume']);
-      if (row.fuelBalanceSources != null && !Array.isArray(row.fuelBalanceSources)) fail('INVALID_OPENING','Распределение начального остатка должно быть массивом');
-      for (const source of row.fuelBalanceSources || []) {
+      const boundary=accounting(row);
+      checkNumeric(row,'vehicles',[...(boundary.mode==='legacy'?['fuelBalance']:[]),'norm','normCity','normHighway','normIdle','tankVolume']);
+      if (boundary.mode==='legacy'&&row.fuelBalanceSources != null && !Array.isArray(row.fuelBalanceSources)) fail('INVALID_OPENING','Распределение начального остатка должно быть массивом');
+      for (const source of boundary.mode==='explicit'?boundary.sources||[]:row.fuelBalanceSources || []) {
         if (!plain(source)) fail('INVALID_OPENING','Повреждён источник начального остатка');
         checkNumeric({...source,vehicleId:row.id},'opening',['qty']);
         if (!present(source.qty) || !present(source.org) || !grades.includes(fuel.gsmGrade(source.grade))) add({code:'opening-source-invalid',vehicleId:row.id,message:'Уточните организацию, марку и литры начального остатка'});

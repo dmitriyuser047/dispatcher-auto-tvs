@@ -3,7 +3,7 @@
   'use strict';
   if(typeof module==='object'&&module.exports)module.exports=factory(require('./application-engine.js'),require('./dispatcher-core.js'));
   else{
-    if(!root.DispatcherEngine&&typeof importScripts==='function')importScripts('./dispatcher-core.js','./fuel-engine.js','./fuel-audit.js','./writeoff-engine.js','../js/45-cost-engine.js','../js/47-procurement-engine.js','./application-engine.js');
+    if(!root.DispatcherEngine&&typeof importScripts==='function')importScripts('./dispatcher-core.js','./accounting-boundary.js','./fuel-engine.js','./fuel-audit.js','./writeoff-engine.js','../js/45-cost-engine.js','../js/47-procurement-engine.js','./application-engine.js');
     const api=factory(root.DispatcherEngine,root.DispatcherCore);root.DispatcherAnalysisWorker=api;
     if(typeof root.postMessage==='function'&&typeof importScripts==='function'){
       const endpoint=api.createHandler({postMessage:message=>root.postMessage(message)});

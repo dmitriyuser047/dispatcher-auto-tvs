@@ -22,12 +22,13 @@ function repairAndOrder(){
 }
 function generators(db){
   let workbook;
-  const context=vm.createContext({console,data:clone(db),DomainSources:sources,
+  const context=vm.createContext({console,data:clone(db),DomainSources:sources,TvsFuelEngine:require('../assets/core/fuel-engine.js'),AccountingBoundary:require('../assets/core/accounting-boundary.js'),
     fmtDate:value=>value,cmpDateAsc:(a,b)=>String(a).localeCompare(String(b)),fqValue:value=>value==null?null:Number(value),
     alert:message=>{throw Error(message);},
     XLSX:{utils:{encode_cell:position=>position.r+','+position.c,encode_range:range=>JSON.stringify(range),
       book_new:()=>({}),book_append_sheet:(book,sheet)=>book.sheet=sheet},writeFile:book=>{workbook=book;}}});
   vm.runInContext('function genRecsFor(id){return data.genRecords.filter(row=>row.generatorId===id);}function tanksAll(){return data.tanks;}',context);
+  vm.runInContext(read('assets/js/29-fuel-quality.js'),context);
   vm.runInContext(read('assets/js/16-generators.js'),context);
   return {context,export(){context.exportGenWriteOffAct('2026-09-01','2026-09-30',{actDate:'2026-09-30',loc:'__ALL__'});return workbook.sheet;}};
 }

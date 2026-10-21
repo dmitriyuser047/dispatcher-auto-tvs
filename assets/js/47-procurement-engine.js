@@ -1,5 +1,5 @@
 /* Procurement forecasts are estimates. Orders never mutate inventory or fuel journals. */
-(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.ProcurementEngine=factory();})(typeof globalThis!=='undefined'?globalThis:this,function(){
+(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('../core/accounting-boundary.js'));else root.ProcurementEngine=factory(root.AccountingBoundary);})(typeof globalThis!=='undefined'?globalThis:this,function(accounting){
  'use strict';
  const DAY=86400000,STATUSES=['draft','ordered','partial','received','cancelled'];
  const rows=(db,name)=>Array.isArray(db?.[name])?db[name]:[];
@@ -13,22 +13,27 @@
  function itemKey(kind,id){return kind+':'+id;}
  function item(db,kind,id){return rows(db,kind==='tank'?'tanks':'parts').find(r=>r.id===id);}
  function recordTank(db,r){return Object.hasOwn(r,'tankId')?r.tankId:rows(db,'generators').find(g=>g.id===r.generatorId)?.tankId;}
+ function tankAccounting(obj){if(accounting)return accounting.resolve('tanks',obj==null?{}:obj);if(obj&&Object.hasOwn(obj,'fuelAccounting'))throw Error('Не загружен модуль начала топливного учёта');return {mode:'legacy'};}
  function balance(db,kind,id,date){
   let value=0;
-  const at=r=>live(r)&&validDate(r.date)&&r.date<=date;
+  const boundary=kind==='tank'?tankAccounting(item(db,kind,id)):{mode:'legacy'};
+  if(boundary.mode==='explicit'&&date<boundary.from)return null;
+  const at=r=>live(r)&&validDate(r.date)&&r.date<=date&&(boundary.mode!=='explicit'||r.date>=boundary.from);
   if(kind==='part')rows(db,'partMovements').filter(r=>at(r)&&r.partId===id).forEach(r=>{value+=(['receipt','return'].includes(r.kind)?1:-1)*nonnegative(r.qty);});
   else{
-   value=number(item(db,kind,id)?.balanceInit)||0;
+   value=boundary.mode==='explicit'?boundary.opening:number(item(db,kind,id)?.balanceInit)||0;
    // Legacy tank transfers are two linked income rows with signed amounts.
    // Clamp invalid values, but preserve the negative outgoing half.
    rows(db,'tankIncomes').filter(r=>at(r)&&r.tankId===id).forEach(r=>{value+=number(r.liters??r.litres??r.amount??r.qty)||0;});
    rows(db,'genRecords').filter(r=>at(r)&&recordTank(db,r)===id).forEach(r=>{value-=nonnegative(r.fuelIssued);});
    rows(db,'fuelMovements').filter(at).forEach(r=>{const qty=nonnegative(r.qty);if(r.toTankId===id)value+=qty;if(r.fromTankId===id)value-=qty;});
   }
-  return round(value);
+  return boundary.mode==='explicit'?value:round(value);
  }
  function usage(db,kind,id,date){
-  const from=shift(date,-29),within=r=>live(r)&&validDate(r.date)&&r.date>=from&&r.date<=date;
+  const boundary=kind==='tank'?tankAccounting(item(db,kind,id)):{mode:'legacy'};
+  if(boundary.mode==='explicit'&&date<boundary.from)return {total:null,daily:null,count:0,from:null,to:date,observedDays:0,status:'outside-accounting'};
+  const from=boundary.mode==='explicit'&&boundary.from>shift(date,-29)?boundary.from:shift(date,-29),within=r=>live(r)&&validDate(r.date)&&r.date>=from&&r.date<=date;
   let total=0,count=0;
   const add=qty=>{const n=nonnegative(qty);if(n>0){total+=n;count++;}};
   if(kind==='part')rows(db,'partMovements').filter(r=>within(r)&&r.partId===id&&['issue','writeoff'].includes(r.kind)).forEach(r=>add(r.qty));
@@ -36,7 +41,8 @@
    rows(db,'genRecords').filter(r=>within(r)&&recordTank(db,r)===id).forEach(r=>add(r.fuelIssued));
    rows(db,'fuelMovements').filter(r=>within(r)&&r.fromTankId===id&&r.kind==='issue'&&!r.reversedBy).forEach(r=>add(r.qty));
   }
-  return {total:round(total),daily:total/30,count,from,to:date};
+  const days=boundary.mode==='explicit'?Math.min(30,Math.floor((new Date(date+'T12:00:00Z')-new Date(from+'T12:00:00Z'))/DAY)+1):30;
+  return {total:round(total),daily:total/days,count,from,to:date,...(boundary.mode==='explicit'?{observedDays:days}:{})};
  }
  function orderState(order){
   if(!order||order.status==='cancelled'||order.archived||order.deleted)return {undelivered:0,pendingPosting:0,coverage:0,draft:0};
@@ -76,6 +82,7 @@
   const date=options.date||today();if(!validDate(date))throw Error('Некорректная дата расчёта');
   const result=[];
   for(const kind of ['tank','part'])for(const obj of rows(db,kind==='tank'?'tanks':'parts').filter(live)){
+   if(kind==='tank'){const boundary=tankAccounting(obj);if(boundary.mode==='explicit'&&date<boundary.from)continue;}
    const rule=rows(db,'procurementRules').find(r=>!r.archived&&r.kind===kind&&r.itemId===obj.id);
    const leadDays=Number.isInteger(rule?.leadDays)&&rule.leadDays>=0&&rule.leadDays<=365?rule.leadDays:7;
    const coverDays=Number.isInteger(rule?.coverDays)&&rule.coverDays>=1&&rule.coverDays<=365?rule.coverDays:14;

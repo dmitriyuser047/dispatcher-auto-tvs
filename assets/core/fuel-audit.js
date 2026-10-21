@@ -1,9 +1,9 @@
 /* Portable read-only fuel diagnostics; the original audit algorithm is unchanged. */
 (function(root,factory){
   'use strict';
-  if(typeof module==='object'&&module.exports)module.exports=factory(require('./fuel-engine.js'));
-  else root.TvsFuelAudit=factory(root.TvsFuelEngine);
-})(typeof globalThis==='object'?globalThis:this,function(fuel){
+  if(typeof module==='object'&&module.exports)module.exports=factory(require('./fuel-engine.js'),()=>require('./accounting-boundary.js'));
+  else root.TvsFuelAudit=factory(root.TvsFuelEngine,()=>root.AccountingBoundary);
+})(typeof globalThis==='object'?globalThis:this,function(fuel,getAccounting){
   'use strict';
   if(!fuel||fuel.apiVersion!==1)throw Error('Fuel calculation core is unavailable');
   const {gsmNumber,gsmRound,gsmCardKey,gsmOrgKey,gsmGrade,gsmVehicleGrade,gsmFamily,gsmInPeriod,gsmValidDate,gsmCardAt,gsmVehicleOrgAt,fqValue}=fuel;
@@ -17,6 +17,8 @@ const GSM_AUDIT_RULES = {
   'journal-missing': ['error', 'Покупка не связана с журналом', 'Проверьте дату, фактическую машину и марку покупки; затем сохраните исправленную покупку.'],
   'journal-ambiguous': ['evidence', 'Несколько возможных записей журнала', 'Сверьте записи одного дня и привяжите покупку к правильной машине и виду топлива.'],
   'opening-difference': ['error', 'Начальные источники не равны остатку карточки', 'Сначала проверьте общий начальный остаток в карточке ТС, затем распределение этого же остатка. Это не остаток выбранного месяца.'],
+  'outside-accounting': ['warning','Период до начала учёта ГСМ','Выберите период начиная с указанной в карточке даты. Входящий остаток не является остатком на более раннюю дату.'],
+  'accounting-partial-month': ['warning','Месяц начинается до учёта ГСМ','Полная месячная сверка не сравнивается с частью месяца после начала учёта.'],
   'measurement-surplus': ['evidence', 'Замер выше расчётного остатка', 'Сверьте сам замер, заправки до него и ранее введённый расход. Корректировка не заменяет документ поступления.'],
   'consumption-missing': ['error', 'Есть пробег без основания расхода', 'Проверьте введённый расход или норму. Пробег не требуется менять.'],
   'negative-input': ['error', 'Отрицательное значение в журнале', 'Сверьте литры и пробег с источником; не заменяйте их целевым остатком.'],
@@ -35,11 +37,19 @@ function gsmAuditModel(input, options) {
   const array = value => Array.isArray(value) ? value.filter(row => row && typeof row === 'object') : [];
   const db = { ...input, vehicles: array(input.vehicles), records: array(input.records), fuelPurchases: array(input.fuelPurchases),
     fuelCards: array(input.fuelCards), monthlyFuel: array(input.monthlyFuel) };
+  const boundaries=new Map(db.vehicles.map(vehicle=>{
+    if(!Object.prototype.hasOwnProperty.call(vehicle,'fuelAccounting'))return [vehicle.id,{mode:'legacy'}];
+    const api=getAccounting();if(api?.apiVersion!==1)throw Object.assign(Error('Не загружены правила начала учёта ГСМ'),{code:'MODULE_UNAVAILABLE'});
+    return [vehicle.id,api.resolve('vehicles',vehicle)];
+  }));
+  const explicit=[...boundaries.values()].some(value=>value.mode==='explicit');
+  const current=row=>{const boundary=boundaries.get(row.vehicleId);return boundary?.mode!=='explicit'||!gsmValidDate(row.date)||row.date>=boundary.from;};
+  if(explicit){db.records=db.records.filter(current);db.fuelPurchases=db.fuelPurchases.filter(current);}
   const from = options.from || '', to = options.to || '';
   const vehicles = new Map(db.vehicles.map(row => [row.id, row]));
   const records = new Map(db.records.map(row => [row.id, row]));
   const purchases = new Map(db.fuelPurchases.filter(row => !row.deleted).map(row => [row.id, row]));
-  const ledger = options.ledger || gsmBuildLedger(db, { from, to });
+  const ledger = explicit?gsmBuildLedger(db,{from,to}):options.ledger || gsmBuildLedger(db, { from, to });
   const items = [], seen = new Set();
   const present = value => value != null && String(value).trim() !== '';
   const inPeriod = date => !gsmValidDate(date) || gsmInPeriod(date, from, to);
@@ -105,7 +115,8 @@ function gsmAuditModel(input, options) {
   });
   function stockTrace(row, cutoff) {
     const v = vehicles.get(row.vehicleId), grade = gsmVehicleGrade(v);
-    const initial = Array.isArray(v.fuelBalanceSources) && v.fuelBalanceSources.length ? v.fuelBalanceSources
+    const boundary=boundaries.get(v.id),at=boundary?.mode==='explicit'?boundary.from:'';
+    const initial = boundary?.mode==='explicit'?(boundary.sources||[{org:gsmVehicleOrgAt(v,at)||GSM_UNKNOWN_ORG,grade,qty:boundary.opening}]):Array.isArray(v.fuelBalanceSources) && v.fuelBalanceSources.length ? v.fuelBalanceSources
       : [{ org: gsmVehicleOrgAt(v, '') || GSM_UNKNOWN_ORG, grade, qty: gsmNumber(v.fuelBalance) }];
     let balance = initial.filter(source => gsmOrgKey(source.org || gsmVehicleOrgAt(v, '') || GSM_UNKNOWN_ORG) === gsmOrgKey(row.org) &&
       gsmGrade(source.grade, grade) === row.grade).reduce((sum, source) => sum + gsmNumber(source.qty), 0);

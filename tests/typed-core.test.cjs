@@ -66,6 +66,7 @@ test('public DTO types reject incompatible amounts, source names and identifiers
     import {createDomainSources, type FinancialProjection, type TankFlowEntry} from './src/core/financial-recognition';
     import type {IssueFuelInput,PlatformCommand,CommandEnvelope} from './src/core/platform-contracts';
     import type {CommandContext,CommandPlan} from './src/core/platform-commands';
+    import {createAccountingBoundary,type FuelAccounting,type AccountingWindow} from './src/core/accounting-boundary';
     const api=createDomainSources();
     const projection:FinancialProjection=api.projectFinancialSources({});
     const amount:number|undefined=projection.sources[0]?.sum;
@@ -92,6 +93,15 @@ test('public DTO types reject incompatible amounts, source names and identifiers
     // @ts-expect-error version changes require a new supported DTO contract
     command.version=2;
     void envelope;void context;void plan;void forged;
+    const opening:FuelAccounting={version:1,from:'2026-09-01',opening:923.537,basis:'Synthetic factual measurement'};
+    const boundary=createAccountingBoundary().resolve('vehicles',{fuelAccounting:opening});
+    const window:AccountingWindow=createAccountingBoundary().window(boundary,{});
+    const historyFrom:string|null=window.historyFrom;
+    // @ts-expect-error fractional litres are numeric facts, never a display string
+    opening.opening='923,537';
+    // @ts-expect-error explicit boundaries have a supported version and reason
+    const unknownBoundary:FuelAccounting={version:2,from:'2026-09-01',opening:0};
+    void historyFrom;void unknownBoundary;
     void invalidAmount;void invalidSource;
   `);
   assert.deepEqual(diagnostics.map(value=>ts.flattenDiagnosticMessageText(value.messageText,'\n')),[]);

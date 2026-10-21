@@ -10,6 +10,9 @@ let genExportMode = 'all';
 let exportingGenId = null;
 
 let genExportFormat = 'xls';
+function genExportFuelExplicit(asset){return Object.prototype.hasOwnProperty.call(asset,'fuelAccounting');}
+function genExportFuelRows(asset,records){return genExportFuelExplicit(asset)?records.filter(row=>fuelAccountingIncludes('generators',asset,row.date)):records;}
+function genExportFuelNumber(value,explicit){return value==null?'Учёт не начат':+value.toFixed(explicit?3:2);}
 function openGenExportAllModal(fmt) {
   if (!(data.generators||[]).length) { showToast('Нет дизельных генераторов для выгрузки'); return; }
   genExportMode = 'all';
@@ -126,34 +129,36 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
   fill(R(),fHS);rowH(R(),22);next();
   const gIss={diesel:0,gasoline:0,gas:0},gAct={diesel:0,gasoline:0,gas:0},gBal={diesel:0,gasoline:0,gas:0};
   const gNorm={diesel:0,gasoline:0,gas:0},gEcon={diesel:0,gasoline:0,gas:0},gOver={diesel:0,gasoline:0,gas:0};
+  const gExplicit={},gMissing={};
   gens.forEach(g=>{
     const ft=g.fuel||'diesel';
     let gn=0, ga=0;
-    filterGenRecs(g.id).forEach(r=>{gIss[ft]+=(r.fuelIssued||0);gAct[ft]+=(r.fuelActual||0);gn+=(r.fuelUsed||0);ga+=(r.fuelActual||0);});
+    genExportFuelRows(g,filterGenRecs(g.id)).forEach(r=>{gIss[ft]+=(r.fuelIssued||0);gAct[ft]+=(r.fuelActual||0);gn+=(r.fuelUsed||0);ga+=(r.fuelActual||0);});
     gNorm[ft]+=gn;
     gEcon[ft]+=Math.max(0,gn-ga);
     gOver[ft]+=Math.max(0,ga-gn);
     const bm=computeGenFuelBalances(g.id);
     const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
-    gBal[ft]+=sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
+    if(genExportFuelExplicit(g)){gExplicit[ft]=true;const value=fuelAccountingCurrentBalance('generators',g,genRecsFor(g.id),bm,dateTo||'');if(value==null)gMissing[ft]=true;else gBal[ft]+=value;}
+    else gBal[ft]+=sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
   });
   const usedFuels=new Set(gens.map(g=>g.fuel||'diesel'));
   ['diesel','gasoline','gas'].filter(ft=>usedFuels.has(ft)).forEach((ft,i)=>{
     const bg=i%2===0?P.white:P.gray1;
-    const bal=+gBal[ft].toFixed(2);
-    const bBg=bal<0?P.redPale:bal===0?P.gray2:P.greenPale;
+    const bal=gMissing[ft]?null:genExportFuelNumber(gBal[ft],gExplicit[ft]);
+    const bBg=bal==null?P.gray2:bal<0?P.redPale:bal===0?P.gray2:P.greenPale;
     const sL=cs({bold:true,sz:10,color:{rgb:P.text}},bg,{horizontal:'left',vertical:'center',indent:1},bAll('thin',P.gray3));
     const sN=cs({sz:10,color:{rgb:P.text}},bg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
     const sEcon=cs({bold:true,sz:10,color:{rgb:P.green}},P.greenPale,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
     const sOver=cs({bold:true,sz:10,color:{rgb:P.red}},P.redPale,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
-    const sB=cs({bold:true,sz:10,color:{rgb:bal<0?P.red:bal===0?P.gray4:P.green}},bBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
+    const sB=cs({bold:true,sz:10,color:{rgb:bal==null?P.gray4:bal<0?P.red:bal===0?P.gray4:P.green}},bBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
     put(R(),0,fuelLabels[ft],sL);merge(R(),0,R(),2);fill(R(),sL);
-    put(R(),3,+gIss[ft].toFixed(2),sN);merge(R(),3,R(),4);
-    put(R(),5,+gNorm[ft].toFixed(2),sN);merge(R(),5,R(),6);
-    put(R(),7,+gAct[ft].toFixed(2),sN);merge(R(),7,R(),8);
-    put(R(),9,+gEcon[ft].toFixed(2),gEcon[ft]>0?sEcon:sN);merge(R(),9,R(),10);
-    put(R(),11,+gOver[ft].toFixed(2),gOver[ft]>0?sOver:sN);merge(R(),11,R(),12);
-    put(R(),13,bal,sB);merge(R(),13,R(),16);
+    put(R(),3,genExportFuelNumber(gIss[ft],gExplicit[ft]),sN);merge(R(),3,R(),4);
+    put(R(),5,genExportFuelNumber(gNorm[ft],gExplicit[ft]),sN);merge(R(),5,R(),6);
+    put(R(),7,genExportFuelNumber(gAct[ft],gExplicit[ft]),sN);merge(R(),7,R(),8);
+    put(R(),9,genExportFuelNumber(gEcon[ft],gExplicit[ft]),gEcon[ft]>0?sEcon:sN);merge(R(),9,R(),10);
+    put(R(),11,genExportFuelNumber(gOver[ft],gExplicit[ft]),gOver[ft]>0?sOver:sN);merge(R(),11,R(),12);
+    put(R(),13,bal==null?'Учёт не начат':bal,sB);merge(R(),13,R(),16);
     rowH(R(),20);next();
   });
   spacer();
@@ -167,32 +172,36 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     [[0,4,'Наименование'],[4,4,'Местонахождение / Объект'],[8,2,'Вид топлива'],[10,2,'Объём, л'],[12,2,'Приход за период, л'],[14,2,'Расход за период, л'],[16,1,'Остаток, л']]
       .forEach(([c,span,t])=>{ put(R(),c,t,c===0||c===4?hTk:hTkC); merge(R(),c,R(),c+span-1); });
     rowH(R(),24);next();
-    let tkIncTot=0, tkIssTot=0, tkBalTot=0;
+    let tkIncTot=0, tkIssTot=0, tkBalTot=0,tkMissing=false,tkExplicit=false;
     tanksAll().slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','ru')).forEach((t,i)=>{
       const bg=i%2===0?P.white:P.gray1;
-      const income=(data.tankIncomes||[]).filter(r=>r.tankId===t.id&&inPeriod(r.date)).reduce((s,r)=>s+(r.amount||0),0);
+      const explicit=genExportFuelExplicit(t);
+      const flows=explicit?DomainSources.projectTankFlows(data,[t.id],{from:dateFrom,to:dateTo,accounting:true}):[];
+      const income=explicit?flows.reduce((sum,row)=>sum+Math.max(0,row.amount),0):(data.tankIncomes||[]).filter(r=>r.tankId===t.id&&inPeriod(r.date)).reduce((s,r)=>s+(r.amount||0),0);
       const boundGenIds=new Set((data.generators||[]).filter(g=>g.tankId===t.id).map(g=>g.id));
-      const issued=(data.genRecords||[]).filter(r=>boundGenIds.has(r.generatorId)&&inPeriod(r.date)).reduce((s,r)=>s+(r.fuelIssued||0),0);
+      const issued=explicit?flows.reduce((sum,row)=>sum+Math.max(0,-row.amount),0)+(data.genRecords||[]).filter(r=>genRecordTankId(r)===t.id&&inPeriod(r.date)&&fuelAccountingIncludes('tanks',t,r.date)).reduce((sum,row)=>sum+(Number(row.fuelIssued)||0),0):(data.genRecords||[]).filter(r=>boundGenIds.has(r.generatorId)&&inPeriod(r.date)).reduce((s,r)=>s+(r.fuelIssued||0),0);
       const cb=computeTankBalance(t.id);
-      tkIncTot+=income; tkIssTot+=issued; tkBalTot+=cb.balance;
-      const bBg=cb.balance<0?P.redPale:cb.balance===0?P.gray2:P.greenPale;
-      const sB=cs({bold:true,sz:10,color:{rgb:cb.balance<0?P.red:cb.balance===0?P.gray4:P.green}},bBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
+      const balance=explicit?computeTankBalanceAt(t.id,dateTo||dispatcherLocalDate(),true):cb.balance;
+      tkExplicit=tkExplicit||explicit;if(balance==null)tkMissing=true;
+      tkIncTot+=income; tkIssTot+=issued; tkBalTot+=balance??0;
+      const bBg=balance==null?P.gray2:balance<0?P.redPale:balance===0?P.gray2:P.greenPale;
+      const sB=cs({bold:true,sz:10,color:{rgb:balance==null?P.gray4:balance<0?P.red:balance===0?P.gray4:P.green}},bBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
       put(R(),0,t.name||'—',ST.tdL(bg));merge(R(),0,R(),3);
       put(R(),4,[t.location,t.object].filter(Boolean).join(' · ')||'—',ST.tdL(bg));merge(R(),4,R(),7);
       put(R(),8,fuelLabels[t.fuel||'diesel'],ST.tdC(bg));merge(R(),8,R(),9);
       put(R(),10,t.capacity!=null?+t.capacity:'—',ST.tdC(bg));merge(R(),10,R(),11);
-      put(R(),12,+income.toFixed(2),ST.tdR(bg));merge(R(),12,R(),13);
-      put(R(),14,+issued.toFixed(2),ST.tdR(bg));merge(R(),14,R(),15);
-      put(R(),16,+cb.balance.toFixed(2),sB);
+      put(R(),12,genExportFuelNumber(income,explicit),ST.tdR(bg));merge(R(),12,R(),13);
+      put(R(),14,genExportFuelNumber(issued,explicit),ST.tdR(bg));merge(R(),14,R(),15);
+      put(R(),16,genExportFuelNumber(balance,explicit),sB);
       rowH(R(),20);next();
     });
     const tkTL=cs({bold:true,sz:11,color:{rgb:P.text}},P.navyLight,{horizontal:'left',vertical:'center',indent:1},bAll('medium',P.navy));
     const tkTN=cs({bold:true,sz:11,color:{rgb:P.text}},P.navyLight,{horizontal:'right',vertical:'center',indent:1},bAll('medium',P.navy));
     put(R(),0,'ИТОГО',tkTL);merge(R(),0,R(),11);fill(R(),tkTL);
-    put(R(),12,+tkIncTot.toFixed(2),tkTN);merge(R(),12,R(),13);
-    put(R(),14,+tkIssTot.toFixed(2),tkTN);merge(R(),14,R(),15);
-    const tkBalRound=+tkBalTot.toFixed(2);
-    put(R(),16,tkBalRound,cs({bold:true,sz:11,color:{rgb:tkBalRound<0?P.red:P.green}},P.navyLight,{horizontal:'right',vertical:'center',indent:1},bAll('medium',P.navy)));
+    put(R(),12,genExportFuelNumber(tkIncTot,tkExplicit),tkTN);merge(R(),12,R(),13);
+    put(R(),14,genExportFuelNumber(tkIssTot,tkExplicit),tkTN);merge(R(),14,R(),15);
+    const tkBalRound=tkMissing?null:genExportFuelNumber(tkBalTot,tkExplicit);
+    put(R(),16,tkBalRound==null?'Учёт не начат':tkBalRound,cs({bold:true,sz:11,color:{rgb:tkBalRound==null?P.gray4:tkBalRound<0?P.red:P.green}},P.navyLight,{horizontal:'right',vertical:'center',indent:1},bAll('medium',P.navy)));
     rowH(R(),22);next();
     spacer();
   }
@@ -239,7 +248,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     .forEach((h,c)=>put(R(),c,h,ST.tHead));
   rowH(R(),28);next();
   const gensByLoc=gens.slice().sort((a,b)=>{const la=(a.location||'￿').toLowerCase(),lb=(b.location||'￿').toLowerCase();return la<lb?-1:la>lb?1:0;});
-  let totH=0,totIss=0,totNorm=0,totAct=0,totEcon=0,totOver=0,totBal=0,totCost=0, curLoc=null, gNum=0, zebra=0;
+  let totH=0,totIss=0,totNorm=0,totAct=0,totEcon=0,totOver=0,totBal=0,totCost=0, curLoc=null, gNum=0, zebra=0,missingBalance=false;
   gensByLoc.forEach(g=>{
     const locGroup=g.location||'— Без местонахождения —';
     if(locGroup!==curLoc){
@@ -249,20 +258,22 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     }
     const bg=zebra%2===0?P.white:P.gray1; zebra++; gNum++;
     const recs=filterGenRecs(g.id);
+    const fuelRecs=genExportFuelRows(g,recs),explicit=genExportFuelExplicit(g);
     const hours=recs.reduce((s,r)=>s+(r.hours||0),0);
-    const issued=recs.reduce((s,r)=>s+(r.fuelIssued||0),0);
-    const norm=recs.reduce((s,r)=>s+(r.fuelUsed||0),0);
-    const actual=recs.reduce((s,r)=>s+(r.fuelActual||0),0);
+    const issued=fuelRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
+    const norm=fuelRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
+    const actual=fuelRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
     const economy=Math.max(0,norm-actual);
     const overrun=Math.max(0,actual-norm);
     const bm=computeGenFuelBalances(g.id);
     const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
-    const bal=sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
+    const bal=explicit?fuelAccountingCurrentBalance('generators',g,genRecsFor(g.id),bm,dateTo||''):sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
+    if(bal==null)missingBalance=true;
     totH+=hours;totIss+=issued;totNorm+=norm;totAct+=actual;totEcon+=economy;totOver+=overrun;totBal+=bal;
     if(g.cost!=null) totCost+=g.cost;
-    const fBal=+bal.toFixed(2);
-    const bBg=fBal<0?P.redPale:fBal===0?P.gray2:P.greenPale;
-    const sB=cs({bold:true,sz:10,color:{rgb:fBal<0?P.red:fBal===0?P.gray4:P.green}},bBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
+    const fBal=bal==null?null:genExportFuelNumber(bal,explicit);
+    const bBg=fBal==null?P.gray2:fBal<0?P.redPale:fBal===0?P.gray2:P.greenPale;
+    const sB=cs({bold:true,sz:10,color:{rgb:fBal==null?P.gray4:fBal<0?P.red:fBal===0?P.gray4:P.green}},bBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
     const st=(g.status||'').toLowerCase();
     const sBg=!g.status?P.gray2:st==='в работе'?P.greenPale:st==='резерв'?P.bluePale:P.redPale;
     const sC=!g.status?P.gray4:st==='в работе'?P.green:st==='резерв'?P.blue:P.red;
@@ -273,20 +284,21 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     put(R(),3,g.responsible||'—',ST.tdL(bg));put(R(),4,g.location||'—',ST.tdL(bg));
     put(R(),5,g.power!=null?g.power:'—',ST.tdC(bg));put(R(),6,fuelLabels[g.fuel||'diesel'],ST.tdC(bg));
     put(R(),7,g.status||'—',sStatus);put(R(),8,+hours.toFixed(1),ST.tdR(bg));
-    put(R(),9,+issued.toFixed(2),ST.tdR(bg));put(R(),10,+norm.toFixed(2),ST.tdR(bg));put(R(),11,+actual.toFixed(2),ST.tdR(bg));
-    put(R(),12,economy>0?+economy.toFixed(2):'—',economy>0?sEcon:ST.tdR(bg));
-    put(R(),13,overrun>0?+overrun.toFixed(2):'—',overrun>0?sOver:ST.tdR(bg));
-    put(R(),14,fBal,sB);
+    put(R(),9,genExportFuelNumber(issued,explicit),ST.tdR(bg));put(R(),10,genExportFuelNumber(norm,explicit),ST.tdR(bg));put(R(),11,genExportFuelNumber(actual,explicit),ST.tdR(bg));
+    put(R(),12,economy>0?genExportFuelNumber(economy,explicit):'—',economy>0?sEcon:ST.tdR(bg));
+    put(R(),13,overrun>0?genExportFuelNumber(overrun,explicit):'—',overrun>0?sOver:ST.tdR(bg));
+    put(R(),14,fBal==null?'Учёт не начат':fBal,sB);
     put(R(),15,g.cost!=null?g.cost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tdR(bg));
     put(R(),16,g.note||'—',ST.tdL(bg));
     rowH(R(),20);next();
   });
   put(R(),0,'ИТОГО',ST.totL);merge(R(),0,R(),7);fill(R(),ST.totL);
-  put(R(),8,+totH.toFixed(1),ST.tot);put(R(),9,+totIss.toFixed(2),ST.tot);put(R(),10,+totNorm.toFixed(2),ST.tot);put(R(),11,+totAct.toFixed(2),ST.tot);
-  put(R(),12,+totEcon.toFixed(2),cs({bold:true,sz:10,color:{rgb:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
-  put(R(),13,+totOver.toFixed(2),cs({bold:true,sz:10,color:{rgb:P.red}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
-  const tBal=+totBal.toFixed(2);
-  put(R(),14,tBal,cs({bold:true,sz:10,color:{rgb:tBal<0?P.red:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
+  const anyExplicit=gens.some(genExportFuelExplicit);
+  put(R(),8,+totH.toFixed(1),ST.tot);put(R(),9,genExportFuelNumber(totIss,anyExplicit),ST.tot);put(R(),10,genExportFuelNumber(totNorm,anyExplicit),ST.tot);put(R(),11,genExportFuelNumber(totAct,anyExplicit),ST.tot);
+  put(R(),12,genExportFuelNumber(totEcon,anyExplicit),cs({bold:true,sz:10,color:{rgb:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
+  put(R(),13,genExportFuelNumber(totOver,anyExplicit),cs({bold:true,sz:10,color:{rgb:P.red}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
+  const tBal=missingBalance?null:genExportFuelNumber(totBal,anyExplicit);
+  put(R(),14,tBal==null?'Учёт не начат':tBal,cs({bold:true,sz:10,color:{rgb:tBal==null?P.gray4:tBal<0?P.red:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
   put(R(),15,totCost>0?totCost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tot);
   put(R(),16,'',ST.tot);
   rowH(R(),22);next();
@@ -407,25 +419,27 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
 
   hdr('  ПОКАЗАТЕЛИ ЗА ПЕРИОД', ST.secT);
   const totHours=filtRecs.reduce((s,r)=>s+(r.hours||0),0);
-  const totIssued=filtRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
-  const totNorm=filtRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
-  const totActual=filtRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
+  const fuelRecs=genExportFuelRows(g,filtRecs),explicit=genExportFuelExplicit(g);
+  const totIssued=fuelRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
+  const totNorm=fuelRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
+  const totActual=fuelRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
   const totEconomy=Math.max(0,totNorm-totActual);
   const totOverrun=Math.max(0,totActual-totNorm);
-  const avgCons=totHours>0&&totActual>0?totActual/totHours:0;
+  const fuelHours=fuelRecs.reduce((s,r)=>s+(r.hours||0),0);
+  const avgCons=fuelHours>0&&totActual>0?totActual/fuelHours:0;
   const balMap=computeGenFuelBalances(gid);
   const lastRec=allRecs[allRecs.length-1];
-  const curBal=lastRec?((balMap[lastRec.id]!=null?balMap[lastRec.id]:g.fuelBalance)||0):(g.fuelBalance||0);
+  const curBal=explicit?fuelAccountingCurrentBalance('generators',g,allRecs,balMap,dateTo||''):lastRec?((balMap[lastRec.id]!=null?balMap[lastRec.id]:g.fuelBalance)||0):(g.fuelBalance||0);
   [
     ['Наработка за период, мтч', +totHours.toFixed(1)],
     ['Количество записей', filtRecs.length],
-    ['Выдано топлива за период, л', +totIssued.toFixed(2)],
-    ['Расход по норме за период, л', +totNorm.toFixed(2)],
-    ['Фактический расход за период, л', +totActual.toFixed(2)],
-    ['Экономия топлива, л', totEconomy>0?+totEconomy.toFixed(2):'—'],
-    ['Перерасход топлива, л', totOverrun>0?+totOverrun.toFixed(2):'—'],
+    ['Выдано топлива за период, л', genExportFuelNumber(totIssued,explicit)],
+    ['Расход по норме за период, л', genExportFuelNumber(totNorm,explicit)],
+    ['Фактический расход за период, л', genExportFuelNumber(totActual,explicit)],
+    ['Экономия топлива, л', totEconomy>0?genExportFuelNumber(totEconomy,explicit):'—'],
+    ['Перерасход топлива, л', totOverrun>0?genExportFuelNumber(totOverrun,explicit):'—'],
     ['Средний расход, л/мтч', avgCons>0?+avgCons.toFixed(2):'—'],
-    ['Текущий остаток в баке, л', +curBal.toFixed(2)],
+    ['Текущий остаток в баке, л', genExportFuelNumber(curBal,explicit)],
   ].forEach(([label,val],i)=>{
     const bg=i%2===0?P.gray2:P.white;
     put(R(),0,label,cs({bold:true,sz:10,color:{rgb:P.textMid}},bg,{horizontal:'left',vertical:'center',indent:1},bAll('thin',P.gray3)));
@@ -453,7 +467,8 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
       const bBg=bal!=null?(bal<0?P.redPale:bal===0?P.gray2:P.greenPale):P.gray2;
       const sB=cs({bold:true,sz:10,color:{rgb:bal!=null?(bal<0?P.red:bal===0?P.gray4:P.green):P.gray4}},bBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
       const factLh=r.fuelActual&&r.hours>0?r.fuelActual/r.hours:null;
-      sH+=(r.hours||0);sIss+=(r.fuelIssued||0);sAct+=(r.fuelActual||0);
+      const current=!explicit||fuelAccountingIncludes('generators',g,r.date);
+      sH+=(r.hours||0);if(current){sIss+=(r.fuelIssued||0);sAct+=(r.fuelActual||0);}
       put(R(),0,`${fmtDate(r.date)} ${day}`,ST.tdC(bg));
       put(R(),1,r.hours!=null?+r.hours:'—',ST.tdR(bg));
       put(R(),2,r.meterStart!=null?+r.meterStart:'—',ST.tdR(bg));
@@ -461,17 +476,17 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
       put(R(),4,r.fuelIssued!=null?+r.fuelIssued:'—',ST.tdR(bg));
       put(R(),5,r.fuelUsed!=null?+r.fuelUsed:'—',ST.tdR(bg));
       put(R(),6,r.fuelActual!=null?+r.fuelActual:'—',ST.tdR(bg));
-      put(R(),7,bal!=null?+bal.toFixed(2):'—',sB);
+      put(R(),7,bal!=null?genExportFuelNumber(bal,explicit):'—',sB);
       put(R(),8,g.norm?+g.norm:'—',ST.tdC(bg));
       put(R(),9,factLh!=null?+factLh.toFixed(2):'—',ST.tdR(bg));
-      put(R(),10,r.note||'—',ST.tdL(bg));
+      put(R(),10,current?r.note||'—':(r.note?r.note+' · ':'')+'До учёта ГСМ',ST.tdL(bg));
       rowH(R(),18);next();
     });
     put(R(),0,'ИТОГО',ST.totL);merge(R(),0,R(),0);fill(R(),ST.totL);
     put(R(),1,+sH.toFixed(1),ST.tot);[2,3].forEach(c=>put(R(),c,'',ST.tot));
-    put(R(),4,+sIss.toFixed(2),ST.tot);put(R(),5,'',ST.tot);put(R(),6,+sAct.toFixed(2),ST.tot);
-    const cBal=+curBal.toFixed(2);
-    put(R(),7,cBal,cs({bold:true,sz:10,color:{rgb:cBal<0?P.red:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
+    put(R(),4,genExportFuelNumber(sIss,explicit),ST.tot);put(R(),5,'',ST.tot);put(R(),6,genExportFuelNumber(sAct,explicit),ST.tot);
+    const cBal=genExportFuelNumber(curBal,explicit);
+    put(R(),7,cBal,cs({bold:true,sz:10,color:{rgb:curBal==null?P.gray4:cBal<0?P.red:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
     [8,9,10].forEach(c=>put(R(),c,'',ST.tot));
     rowH(R(),22);next();
   }

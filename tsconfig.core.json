@@ -20,5 +20,5 @@
     "rootDir": "src/core",
     "outDir": ".typed-core-build"
   },
-  "files": ["src/core/financial-recognition.ts", "src/core/platform-contracts.ts", "src/core/platform-commands.ts"]
+  "files": ["src/core/financial-recognition.ts", "src/core/platform-contracts.ts", "src/core/platform-commands.ts", "src/core/accounting-boundary.ts"]
 }

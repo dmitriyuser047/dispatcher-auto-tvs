@@ -5,8 +5,10 @@
 function renderGenDetail(g) {
   const recs       = genRecsFor(g.id);
   const totalHours = recs.reduce((s, r) => s + (r.hours || 0), 0);
-  const totalFuel  = recs.reduce((s, r) => s + genActualSpent(g,r), 0);
-  const avgConsumption = totalHours > 0 && totalFuel > 0 ? totalFuel / totalHours : 0;
+  const fuelRecs=recs.filter(r=>fuelAccountingCurrentIncludes('generators',g,r.date));
+  const totalFuel  = fuelRecs.reduce((s, r) => s + genActualSpent(g,r), 0);
+  const fuelHours=fuelRecs.reduce((s,r)=>s+(r.hours||0),0);
+  const avgConsumption = fuelHours > 0 && totalFuel > 0 ? totalFuel / fuelHours : 0;
 
   const fuelLabels  = { diesel: 'Дизельное', gasoline: 'Бензин', gas: 'Газ (ГБО)' };
   const fuelClasses = { diesel: 'diesel', gasoline: 'gasoline', gas: 'gas' };
@@ -17,7 +19,7 @@ function renderGenDetail(g) {
   }).sort((a,b) => cmpDateAsc(a.date, b.date));
 
   const monthHours = monthRecs.reduce((s, r) => s + (r.hours || 0), 0);
-  const monthFuel  = monthRecs.reduce((s, r) => s + genActualSpent(g,r), 0);
+  const monthFuel  = monthRecs.filter(r=>fuelAccountingIncludes('generators',g,r.date)).reduce((s, r) => s + genActualSpent(g,r), 0);
 
   // Month tabs
   const months = getMonthsForGenerator(g.id);
@@ -43,7 +45,7 @@ function renderGenDetail(g) {
   const balMap      = computeGenFuelBalances(g.id);
   const allSorted   = recs.slice().sort((a,b) => cmpDateAsc(a.date, b.date));
   const lastRec     = allSorted[allSorted.length - 1];
-  const currentBal  = lastRec != null ? (balMap[lastRec.id] ?? (g.fuelBalance||0)) : (g.fuelBalance||0);
+  const currentBal  = fuelAccountingCurrentBalance('generators',g,recs,balMap);
 
   // Table rows
   let tableRows = '';
@@ -68,7 +70,7 @@ function renderGenDetail(g) {
         <td class="td-num">${r.fuelIssued!=null?r.fuelIssued.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
         <td class="td-num">${r.fuelUsed!=null?r.fuelUsed.toLocaleString('ru',{maximumFractionDigits:1}):'—'}</td>
         <td class="td-num">${r.fuelActual!=null?Number(r.fuelActual).toLocaleString('ru',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}<small style="display:block;color:var(--text3)">${r.fuelActualSource==='estimate'?'Оценка по нагрузке':r.fuelActualSource==='manual'?'Введено вручную':r.fuelActual!=null?'Источник не указан':''}</small></td>
-        <td class="td-num" style="color:${balColor};font-weight:600">${bal!=null?bal.toLocaleString('ru',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+        <td class="td-num" style="color:${balColor};font-weight:600">${bal!=null?bal.toLocaleString('ru',{minimumFractionDigits:2,maximumFractionDigits:3}):fuelAccountingIncludes('generators',g,r.date)?'—':'<small>До начала учёта</small>'}</td>
         <td class="td-num">${normLh!==null?normLh.toFixed(1):'—'}</td>
         <td class="td-num">${factLh!==null?factLh.toFixed(1)+factDevHtml:'—'}</td>
         <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.note||'—')}</td>
@@ -103,6 +105,7 @@ function renderGenDetail(g) {
         ${g.note?`<div style="margin-top:8px;font-size:12px;color:var(--text2);background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;max-width:600px">${htmlEsc(g.note)}</div>`:''}
       </div>
       <div class="vdh-actions">
+        <button class="btn btn-ghost btn-sm" onclick="fuelAccountingOpen('generators',${htmlEsc(JSON.stringify(g.id))})">Начало учёта ГСМ</button>
         <button class="btn btn-ghost btn-sm" onclick="openGenExportOneModal(${htmlJs(g.id)})">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           XLS
@@ -142,8 +145,8 @@ function renderGenDetail(g) {
       </div>
       <div class="stat-card ${currentBal<0?'accent-red':currentBal<50?'accent-yellow':'accent-green'}">
         <div class="stat-label">Остаток в баке</div>
-        <div class="stat-value" style="color:${currentBal<0?'var(--red)':currentBal<50?'var(--yellow)':'inherit'}">${currentBal.toLocaleString('ru',{maximumFractionDigits:1})} <span class="stat-unit">л</span></div>
-        <div class="stat-sub">${lastRec?'После последней записи':'Начальный остаток'}</div>
+        <div class="stat-value" style="color:${currentBal<0?'var(--red)':currentBal<50?'var(--yellow)':'inherit'}">${currentBal===null?'—':currentBal.toLocaleString('ru',{maximumFractionDigits:3})} <span class="stat-unit">л</span></div>
+        <div class="stat-sub">${currentBal===null?'Учёт ещё не начат':fuelAccountingStatusHtml('generators',g)}</div>
       </div>
     </div>
 
@@ -356,17 +359,20 @@ async function deleteToRecord(id) {
 
 // ─── GENERATOR FUEL BALANCE ──────────────────────────────
 function computeGenFuelBalances(gid) {
-  if (_genBalCache[gid]) return _genBalCache[gid];
+  const cacheKey=JSON.stringify([typeof gid,gid]);
+  if (Object.prototype.hasOwnProperty.call(_genBalCache,cacheKey)) return _genBalCache[cacheKey];
   const gen  = (data.generators || []).find(g => g.id === gid);
   const recs = genRecsFor(gid).slice().sort((a,b) => cmpDateAsc(a.date, b.date));
-  let balance = fqValue(gen?.fuelBalance)||0;
+  let balance = fuelAccountingOpening('generators',gen);
+  const explicit=fuelAccountingFor('generators',gen).mode==='explicit';
   const balMap = {};
   recs.forEach(r => {
+    if(!fuelAccountingIncludes('generators',gen,r.date))return;
     const spent = genActualSpent(gen, r);
     balance += (fqValue(r.fuelIssued)||0) - spent;
-    balMap[r.id] = +balance.toFixed(2);
+    balMap[r.id] = explicit?balance:+balance.toFixed(2);
   });
-  _genBalCache[gid] = balMap;
+  _genBalCache[cacheKey] = balMap;
   return balMap;
 }
 
@@ -423,10 +429,13 @@ function computeTankBalanceAt(tankId, boundary, inclusive) {
   const t = tanksAll().find(x => x.id === tankId);
   if (!t) return 0;
   if(typeof DomainSources==='undefined'||DomainSources.apiVersion!==1)throw Error('Модуль источников топлива не загружен');
-  const okDate = d => !boundary || (inclusive ? d <= boundary : d < boundary);
-  const flows = DomainSources.projectTankFlows(data,[tankId]).filter(row=>okDate(row.date)).reduce((sum,row)=>sum+row.amount,0);
+  const initial=fuelAccountingOpening('tanks',t,boundary);
+  if(initial===null)return null;
+  const okDate = d => fuelAccountingIncludes('tanks',t,d)&&(!boundary || (inclusive ? d <= boundary : d < boundary));
+  const flows = DomainSources.projectTankFlows(data,[tankId],{accounting:true}).filter(row=>okDate(row.date)).reduce((sum,row)=>sum+row.amount,0);
   const issued = (data.genRecords || []).filter(r => genRecordTankId(r) === tankId && okDate(r.date)).reduce((s, r) => s + (Number(r.fuelIssued) || 0), 0);
-  return +((Number(t.balanceInit) || 0) + flows - issued).toFixed(2);
+  const balance=initial+flows-issued;
+  return fuelAccountingFor('tanks',t).mode==='explicit'?balance:+balance.toFixed(2);
 }
 
 function genRecordTankId(r) {
@@ -497,12 +506,14 @@ function genActualSpent(g, r) {
 function computeGenBalanceAt(gid, boundary, inclusive) {
   const g = (data.generators || []).find(x => x.id === gid);
   if (!g) return 0;
-  const okDate = d => !boundary || (inclusive ? d <= boundary : d < boundary);
+  const initial=fuelAccountingOpening('generators',g,boundary);
+  if(initial===null)return null;
+  const okDate = d => fuelAccountingIncludes('generators',g,d)&&(!boundary || (inclusive ? d <= boundary : d < boundary));
   const recs = (data.genRecords || []).filter(r => r.generatorId === gid && okDate(r.date))
     .slice().sort((a,b) => cmpDateAsc(a.date, b.date));
-  let bal = fqValue(g.fuelBalance)||0;
+  let bal = initial;
   recs.forEach(r => { bal += (fqValue(r.fuelIssued)||0) - genActualSpent(g, r); });
-  return +bal.toFixed(2);
+  return fuelAccountingFor('generators',g).mode==='explicit'?bal:+bal.toFixed(2);
 }
 
 function exportGenWriteOffAct(dateFrom, dateTo, opts) {
@@ -520,6 +531,14 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
   const allLocs = genActLocations();
   const locsToRender = (opts.loc && opts.loc !== '__ALL__') ? [opts.loc] : allLocs;
   if (!locsToRender.length) { alert('Нет ДЭС для акта.'); return; }
+  let preciseFuel=false;
+  try{
+    const selected=(data.generators||[]).filter(g=>locsToRender.includes((g.location||'').trim()||'— Без местонахождения —'));
+    preciseFuel=selected.some(generator=>fuelAccountingFor('generators',generator).mode==='explicit');
+    for(const generator of selected)fuelAccountingRequireActRange('generators',generator,dateFrom,dateTo);
+    const selectedTankIds=new Set(selected.map(g=>g.tankId).filter(id=>id!=null&&id!==''));
+    for(const tank of tanksAll().filter(tank=>selectedTankIds.has(tank.id))){fuelAccountingRequireActRange('tanks',tank,dateFrom,dateTo);if(fuelAccountingFor('tanks',tank).mode==='explicit')preciseFuel=true;}
+  }catch(error){alert(error.message);return false;}
 
   const P = { navy:'1B3A6B', navyMid:'2D5A8E', navyLight:'D6E4F7', white:'FFFFFF',
     gray1:'F8FAFC', gray2:'F1F5F9', gray3:'E2E8F0', gray4:'94A3B8', text:'1E293B', green:'16A34A', red:'DC2626' };
@@ -545,7 +564,7 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
   const merge = (r1,c1,r2,c2) => ws['!merges'].push({ s:{r:r1,c:c1}, e:{r:r2,c:c2} });
   const fillRow = (r, style) => { for (let c=0;c<=NC;c++) if (!ws[XLSX.utils.encode_cell({r,c})]) put(r,c,'',style); };
   const rowH = (r, h) => ws['!rows'][r] = { hpt:h };
-  const num = (x, d) => +(Number(x)||0).toFixed(d==null?2:d);
+  const num = (x, d) => +(Number(x)||0).toFixed(d==null?(preciseFuel?3:2):d);
 
   let rendered = false;
 
@@ -587,9 +606,10 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
 
     let tHours=0, tNorm=0, tAct=0, tOstNoTank=0, tBak=0, i=0;
     gens.forEach(g => {
-      const recs = genRecsFor(g.id).filter(inPeriod).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
+      const recs = genRecsFor(g.id).filter(inPeriod).filter(row=>fuelAccountingIncludes('generators',g,row.date)).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
       const hours = recs.reduce((s,r)=>s+(r.hours||0),0);
-      const meterStart = recs.length ? (recs[0].meterStart!=null?recs[0].meterStart:(g.hoursInit!=null?g.hoursInit:'')) : (g.hoursInit!=null?g.hoursInit:'');
+      const explicit=fuelAccountingFor('generators',g).mode==='explicit';
+      const meterStart = recs.length ? (recs[0].meterStart!=null?recs[0].meterStart:explicit?'':(g.hoursInit!=null?g.hoursInit:'')) : (explicit?'':g.hoursInit!=null?g.hoursInit:'');
       const meterEnd = recs.length ? (recs[recs.length-1].meterEnd!=null?recs[recs.length-1].meterEnd:'') : '';
       const loadHours = recs.reduce((s,r)=>s+((r.load!=null?r.load:0)*(r.hours||0)),0);
       const loadAvg = hours>0 && loadHours>0 ? loadHours/hours : null;
@@ -609,7 +629,7 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
       if (!g.tankId) tOstNoTank += bakKon; // ёмкости суммируются один раз ниже, по linkedTanks
       const bg = i%2===0?P.white:P.gray1; i++;
       tHours+=hours; tNorm+=normSpent; tAct+=actSpent;
-      const nameCell = g.name + (g.serial ? ', ' + g.serial : '');
+      const nameCell = g.name + (g.serial ? ', ' + g.serial : '')+(explicit?' · учёт ГСМ с '+fuelAccountingFor('generators',g).from:'');
       put(n,0,nameCell,ST.tdL(bg));
       put(n,1,fuelLabels[g.fuel||'diesel'],ST.tdC(bg));
       put(n,2,'л',ST.tdC(bg));
@@ -637,7 +657,7 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
 
     // The same signed source projection feeds the balance and its breakdown.
     // Reversals remain separate opposite entries; internal transfers net to 0.
-    const incomes = DomainSources.projectTankFlows(data,linkedTanks,{from:dateFrom,to:dateTo});
+    const incomes = DomainSources.projectTankFlows(data,linkedTanks,{from:dateFrom,to:dateTo,accounting:true});
     put(n,0,'Приход и движения топлива за отчётный период',ST.totL); merge(n,0,n,NC); fillRow(n,ST.totL); rowH(n,18); n++;
     put(n,0,'Дата операции',ST.head); merge(n,0,n,1); put(n,2,'Изменение, л',ST.head); merge(n,2,n,3); put(n,4,'Источник / основание',ST.head); merge(n,4,n,NC); rowH(n,16); n++;
     if (incomes.length) {

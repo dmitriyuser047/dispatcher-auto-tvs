@@ -8,6 +8,46 @@ function fqMeasurementPlan(records, vehicle) { return TvsFuelEngine.fqMeasuremen
 function fqDate(value) { return TvsFuelEngine.fqDate(value); }
 function fqShiftDate(value, days) { return TvsFuelEngine.fqShiftDate(value, days); }
 function fqDays(from, to) { return TvsFuelEngine.fqDays(from, to); }
+// This scope applies to physical fuel only. recsFor/genRecsFor deliberately
+// retain the complete mileage, hour-meter and maintenance history.
+function fuelAccountingFor(section,asset){
+  if(typeof AccountingBoundary!=='undefined')return AccountingBoundary.resolve(section,asset==null?{}:asset);
+  if(asset&&Object.prototype.hasOwnProperty.call(asset,'fuelAccounting'))throw Error('Не загружен модуль начала топливного учёта');
+  return {mode:'legacy'};
+}
+function fuelAccountingIncludes(section,asset,date){
+  const boundary=fuelAccountingFor(section,asset);
+  return boundary.mode==='legacy'||AccountingBoundary.classify(boundary,date)==='current';
+}
+function fuelAccountingCurrentIncludes(section,asset,date){
+  const boundary=fuelAccountingFor(section,asset);
+  return boundary.mode==='legacy'||date<=dispatcherLocalDate()&&AccountingBoundary.classify(boundary,date)==='current';
+}
+function fuelAccountingOpening(section,asset,date){
+  const boundary=fuelAccountingFor(section,asset);
+  if(boundary.mode==='explicit')return date&&date<boundary.from?null:boundary.opening;
+  return fqValue(section==='tanks'?asset?.balanceInit:asset?.fuelBalance)||0;
+}
+function fuelAccountingCurrentBalance(section,asset,records,balances,to=''){
+  const boundary=fuelAccountingFor(section,asset);
+  const until=to||(boundary.mode==='explicit'?dispatcherLocalDate():'');
+  if(boundary.mode==='explicit'&&until&&until<boundary.from)return null;
+  const eligible=records.filter(row=>(!until||row.date<=until)&&fuelAccountingIncludes(section,asset,row.date)).slice().sort((a,b)=>cmpDateAsc(a.date,b.date));
+  const last=eligible.at(-1);
+  return last?balances[last.id]??fuelAccountingOpening(section,asset,until):fuelAccountingOpening(section,asset,until);
+}
+function fuelAccountingStatusHtml(section,asset){
+  const boundary=fuelAccountingFor(section,asset);
+  return boundary.mode==='explicit'?'<small>Топливный учёт с '+htmlEsc(boundary.from)+' · '+htmlEsc(boundary.basis)+'</small>':'<small>Начало топливного учёта не задано</small>';
+}
+function fuelAccountingRequireActRange(section,asset,from,to){
+  const boundary=fuelAccountingFor(section,asset);if(boundary.mode==='legacy')return;
+  const label=asset.name||asset.plate||String(asset.id);
+  if(!from||!to)throw Error('Для акта «'+label+'» укажите обе даты периода: начало учёта ГСМ задано на '+boundary.from+'.');
+  const range=AccountingBoundary.window(boundary,{from,to});
+  if(range.status==='outside-accounting')throw Error('За выбранный период учёт ГСМ «'+label+'» ещё не начат. Дата начала: '+boundary.from+'.');
+  if(range.status==='partial')throw Error('У «'+label+'» учёт ГСМ начинается '+boundary.from+'. Выберите период с этой даты, чтобы акт не выдавал входящий остаток за остаток на более раннюю дату.');
+}
 function fqSourceLabel(source) {
   return ({ actual: 'Введённый факт', norm: 'Расчёт по норме', missing: 'Нет расхода' })[source] || source;
 }

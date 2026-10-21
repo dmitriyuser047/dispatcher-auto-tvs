@@ -120,9 +120,11 @@ const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 function renderDetail(v) {
   const recs = recsFor(v.id);
   const totalKm = recs.reduce((s, r) => s + (r.km || 0), 0);
-  const totalFuel = recs.reduce((s, r) => s + (r.fuelActual || 0), 0);
-  const totalFuelIssued = recs.reduce((s, r) => s + (r.fuelIssued || 0), 0);
-  const avgConsumption = totalKm > 0 && totalFuel > 0 ? (totalFuel / totalKm * 100) : 0;
+  const fuelRecs=recs.filter(r=>fuelAccountingCurrentIncludes('vehicles',v,r.date));
+  const totalFuel = fuelRecs.reduce((s, r) => s + (r.fuelActual || 0), 0);
+  const totalFuelIssued = fuelRecs.reduce((s, r) => s + (r.fuelIssued || 0), 0);
+  const fuelKm=fuelRecs.reduce((s,r)=>s+(r.km||0),0);
+  const avgConsumption = fuelKm > 0 && totalFuel > 0 ? (totalFuel / fuelKm * 100) : 0;
 
   const fuelLabels = { diesel: 'Дизельное', gasoline: 'Бензин', gas: 'Газ (ГБО)' };
   const fuelClasses = { diesel: 'diesel', gasoline: 'gasoline', gas: 'gas' };
@@ -138,7 +140,7 @@ function renderDetail(v) {
   }).sort((a, b) => cmpDateAsc(a.date, b.date));
 
   const monthKm = monthRecs.reduce((s, r) => s + (r.km || 0), 0);
-  const monthFuel = monthRecs.reduce((s, r) => s + (r.fuelActual || 0), 0);
+  const monthFuel = monthRecs.filter(r=>fuelAccountingIncludes('vehicles',v,r.date)).reduce((s, r) => s + (r.fuelActual || 0), 0);
   // build month tabs grouped by year
   let monthTabsHtml = '';
   if (months.length === 0) {
@@ -170,9 +172,7 @@ function renderDetail(v) {
   // current fuel balance = balance after last record (or initial if no records)
   const allRecsSorted = recs.slice().sort((a, b) => cmpDateAsc(a.date, b.date));
   const lastRec = allRecsSorted[allRecsSorted.length - 1];
-  const currentFuelBalance = lastRec != null
-    ? (balMap[lastRec.id] ?? (v.fuelBalance || 0))
-    : (v.fuelBalance || 0);
+  const currentFuelBalance = fuelAccountingCurrentBalance('vehicles',v,recs,balMap);
 
   // rows
   let tableRows = '';
@@ -201,7 +201,7 @@ function renderDetail(v) {
         <td class="td-num">${r.fuelUsed ? r.fuelUsed.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td class="td-num">${r.fuelActual != null ? r.fuelActual.toLocaleString('ru', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</td>
         <td class="td-num">${r.fuelIdle != null ? r.fuelIdle.toLocaleString('ru', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</td>
-        <td class="td-num" style="color:${balColor};font-weight:600">${balance != null ? balance.toLocaleString('ru', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</td>
+        <td class="td-num" style="color:${balColor};font-weight:600">${balance != null ? balance.toLocaleString('ru', {minimumFractionDigits:2, maximumFractionDigits:3}) : fuelAccountingIncludes('vehicles',v,r.date)?'—':'<small>До начала учёта</small>'}</td>
         <td class="td-num">${normL100 !== null ? normL100.toFixed(1) : '—'}</td>
         <td class="td-num">${factL100 !== null ? factL100.toFixed(1) + factDevHtml : '—'}</td>
         <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.driver || '—')}</td>
@@ -260,6 +260,7 @@ function renderDetail(v) {
         ${v.justification ? `<div style="margin-top:8px;font-size:12px;color:var(--text2);background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;max-width:600px"><span style="color:var(--text3);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Обоснование: </span>${htmlEsc(v.justification)}</div>` : ''}
       </div>
       <div class="vdh-actions">
+        <button class="btn btn-ghost btn-sm" onclick="fuelAccountingOpen('vehicles',${htmlEsc(JSON.stringify(v.id))})">Начало учёта ГСМ</button>
         <button class="btn btn-ghost btn-sm" onclick="wfTimeline(${htmlJs('v:'+v.id)})">История</button>
         <button class="btn btn-ghost btn-sm" onclick="openEditVehicle(${htmlJs(v.id)})">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -297,8 +298,8 @@ function renderDetail(v) {
       </div>
       <div class="stat-card ${currentFuelBalance < 0 ? 'accent-red' : currentFuelBalance < 20 ? 'accent-yellow' : 'accent-green'}">
         <div class="stat-label">Остаток топлива</div>
-        <div class="stat-value" style="color:${currentFuelBalance < 0 ? 'var(--red)' : currentFuelBalance < 20 ? 'var(--yellow)' : 'inherit'}">${currentFuelBalance.toLocaleString('ru', {maximumFractionDigits:1})} <span class="stat-unit">л</span></div>
-        <div class="stat-sub">${lastRec ? 'После последней записи' : 'Начальный остаток'}</div>
+        <div class="stat-value" style="color:${currentFuelBalance < 0 ? 'var(--red)' : currentFuelBalance < 20 ? 'var(--yellow)' : 'inherit'}">${currentFuelBalance===null?'—':currentFuelBalance.toLocaleString('ru', {maximumFractionDigits:3})} <span class="stat-unit">л</span></div>
+        <div class="stat-sub">${currentFuelBalance===null?'Учёт ещё не начат':fuelAccountingStatusHtml('vehicles',v)}</div>
       </div>
     </div>`;
 

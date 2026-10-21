@@ -60,6 +60,7 @@ function wfDispatchProblems(job,old) {
 }
 function wfTankBalanceAt(id,date=wfToday()) {
   const tank=(data.tanks||[]).find(t=>t.id===id); if(!tank)return 0;
+  if(fuelAccountingFor('tanks',tank).mode==='explicit')return computeTankBalanceAt(id,date,true);
   let bal=Number(tank.balanceInit??0)||0;
   (data.tankIncomes||[]).filter(r=>r.tankId===id&&r.date<=date).forEach(r=>{bal+=Number(r.liters??r.litres??r.amount??r.qty??0)||0;});
   (data.genRecords||[]).filter(r=>genRecordTankId(r)===id&&r.date<=date).forEach(r=>{bal-=Number(r.fuelIssued)||0;});

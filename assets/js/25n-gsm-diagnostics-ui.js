@@ -113,7 +113,7 @@ function gsmDiagnosticsOpenRef(index) {
     if (!gsmVehicle(vid)) { showToast('Машина не найдена. Обновите проверку.'); return; }
     gsmDiagnosticsVehicleReturn = true; openEditVehicle(vid);
   } else if (ref.type === 'opening') {
-    if (gsmVehicle(vid)) gsmOpeningDialog(vid); else showToast('Машина не найдена. Обновите проверку.');
+    if (gsmVehicle(vid)) fuelAccountingOpen('vehicles',vid); else showToast('Машина не найдена. Обновите проверку.');
   } else if (ref.type === 'card') {
     const card = fcList().find(row => row.id === ref.id) || fcByNumber(ref.cardNo || ref.id);
     fcEdit(card?.id || '');

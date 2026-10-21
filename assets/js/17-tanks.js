@@ -15,6 +15,7 @@ const TANK_FUEL_LABELS = { diesel:'Дизель', gasoline:'Бензин', gas:'
 function tanksAll() { return data.tanks || []; }
 
 function tankReserveState(tank, balance) {
+  if(balance===null)return {level:'unstarted',color:'var(--text3)',label:'Топливный учёт ещё не начат'};
   const reserve = Number(tank.reserveLevel);
   if (balance < 0) return { level:'negative', color:'var(--red)', label:'Отрицательный расчётный остаток' };
   if (Number.isFinite(reserve) && reserve > 0 && balance <= reserve) return { level:'low', color:'var(--yellow)', label:'Достигнут резерв ' + reserve.toLocaleString('ru') + ' л' };
@@ -27,6 +28,17 @@ function tankToggleArchive() { tankShowArchived = !tankShowArchived; renderTankL
 function computeTankBalance(tankId) {
   const t = tanksAll().find(x => x.id === tankId);
   if (!t) return { init:0, income:0, issued:0, balance:0, capacity:0, fillPct:0 };
+  const accounting=fuelAccountingFor('tanks',t);
+  if(accounting.mode==='explicit'){
+    const today=dispatcherLocalDate(),active=row=>row.date<=today&&fuelAccountingIncludes('tanks',t,row.date);
+    const init=fuelAccountingOpening('tanks',t,today);
+    const flows=DomainSources.projectTankFlows(data,[tankId],{accounting:true,to:today});
+    const income=flows.filter(row=>row.sourceSection==='tankIncomes').reduce((sum,row)=>sum+row.amount,0);
+    const movements=flows.filter(row=>row.sourceSection!=='tankIncomes').reduce((sum,row)=>sum+row.amount,0);
+    const issued=(data.genRecords||[]).filter(row=>genRecordTankId(row)===tankId&&active(row)).reduce((sum,row)=>sum+(fqValue(row.fuelIssued)||0),0);
+    const balance=init===null?null:init+income+movements-issued,capacity=t.capacity||0;
+    return {init,income,movements,issued,balance,capacity,fillPct:capacity>0&&balance!==null?Math.max(0,Math.min(100,Math.round(balance/capacity*100))):0,accountingFrom:accounting.from};
+  }
   const income = (data.tankIncomes || []).filter(r => r.tankId === tankId).reduce((s,r) => s + (r.amount || 0), 0);
   const issued = (data.genRecords || []).filter(r => genRecordTankId(r) === tankId).reduce((s,r) => s + (r.fuelIssued || 0), 0);
   const init = t.balanceInit || 0;
@@ -93,7 +105,7 @@ function renderTankList() {
       </div>
       ${t.capacity ? `<div style="height:6px;background:var(--border);border-radius:4px;margin-top:8px;overflow:hidden"><div style="height:100%;width:${b.fillPct}%;background:${balColor}"></div></div>` : ''}
       <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;align-items:center">
-        <div style="font-size:11px;font-weight:700;color:${balColor};background:${balColor}1a;border:1px solid ${balColor}4d;padding:3px 9px;border-radius:20px;white-space:nowrap">${b.balance.toLocaleString('ru',{maximumFractionDigits:1})} л</div>
+        <div style="font-size:11px;font-weight:700;color:${balColor};background:${balColor}1a;border:1px solid ${balColor}4d;padding:3px 9px;border-radius:20px;white-space:nowrap">${b.balance===null?'Учёт ещё не начат':b.balance.toLocaleString('ru',{maximumFractionDigits:3})+' л'}</div>
         <span class="fuel-tag ${htmlEsc(t.fuel||'diesel')}" style="font-size:11px;padding:3px 9px">${TANK_FUEL_LABELS[t.fuel||'diesel']}</span>
         <div class="vc-badge">ДЭС: ${boundCount}</div>
       </div>
@@ -117,7 +129,7 @@ function renderTankDetail(t) {
   const balColor = reserveState.color;
   const incomes = (data.tankIncomes || []).filter(r => r.tankId === t.id).sort((a, b2) => cmpDateDesc(a.date, b2.date));
   const boundGens = (data.generators || []).filter(g => g.tankId === t.id);
-  const fmtL = x => (x||0).toLocaleString('ru',{maximumFractionDigits:1});
+  const fmtL = x => x===null?'—':(x||0).toLocaleString('ru',{maximumFractionDigits:3});
 
   const fmtR = x => (x||0).toLocaleString('ru',{minimumFractionDigits:2,maximumFractionDigits:2});
   const tankName = id => { const q = tanksAll().find(x => x.id === id); return q ? (q.object || q.name) : '—'; };
@@ -129,7 +141,7 @@ function renderTankDetail(t) {
       ? (r.kind === 'out' ? 'Перемещение на ' : 'Перемещение с ') + tankName(r.counterTankId)
       : (r.source || '—');
     return `<tr>
-      <td>${fmtDate(r.date)}${isMove ? ' <span style="font-size:10px;color:var(--text3);border:1px solid var(--border);border-radius:4px;padding:1px 4px">перемещение</span>' : ''}</td>
+      <td>${fmtDate(r.date)}${isMove ? ' <span style="font-size:10px;color:var(--text3);border:1px solid var(--border);border-radius:4px;padding:1px 4px">перемещение</span>' : ''}${fuelAccountingIncludes('tanks',t,r.date)?'':'<small> · До начала учёта</small>'}</td>
       <td style="text-align:right;font-weight:600;color:${col}">${neg ? '−' : '+'}${fmtL(Math.abs(r.amount))} л</td>
       <td style="text-align:right;white-space:nowrap">${r.sum ? fmtR(Math.abs(r.sum)) + ' ₽' : ''}</td>
       <td>${htmlEsc(label)}</td>
@@ -141,7 +153,7 @@ function renderTankDetail(t) {
     </tr>`; }).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:14px">Нет записей прихода</td></tr>`;
 
   const boundHtml = boundGens.length ? boundGens.map(g => {
-    const issued = (data.genRecords || []).filter(r => r.generatorId === g.id && genRecordTankId(r) === t.id).reduce((s,r) => s + (r.fuelIssued || 0), 0);
+    const issued = (data.genRecords || []).filter(r => r.generatorId === g.id && genRecordTankId(r) === t.id&&fuelAccountingCurrentIncludes('tanks',t,r.date)).reduce((s,r) => s + (r.fuelIssued || 0), 0);
     return `<div style="display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer" onclick="switchGenSubView('generators');selectGenerator(${htmlJs(g.id)})">
       <span>${htmlEsc(g.name)}${g.location ? ` <span style="color:var(--text3)">· ${htmlEsc(g.location)}</span>` : ''}</span>
       <span style="color:var(--red);font-weight:600;white-space:nowrap">−${fmtL(issued)} л</span>
@@ -156,6 +168,7 @@ function renderTankDetail(t) {
         <div style="color:var(--text3);font-size:13px;margin-top:2px">${t.serial ? 'Зав.№ '+ htmlEsc(t.serial) : ''}${t.object ? (t.serial?' · ':'')+'Объект: '+ htmlEsc(t.object) : ''}${t.owner ? ((t.serial||t.object)?' · ':'')+'Собственник: '+ htmlEsc(t.owner) : ''}</div>
       </div>
       <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="fuelAccountingOpen('tanks',${htmlEsc(JSON.stringify(t.id))})">Начало учёта ГСМ</button>
         ${t.archived ? `<button class="btn btn-primary" onclick="restoreTank(${htmlJs(t.id)})">Восстановить из архива</button>` : `<button class="btn btn-primary" onclick="openAddTankIncome()">Приход</button><button class="btn btn-ghost" onclick="openTankTransfer()">Перемещение</button>`}
         <button class="btn btn-ghost" onclick="openEditTank(${htmlJs(t.id)})"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg> Изменить</button>
       </div>
@@ -164,7 +177,7 @@ function renderTankDetail(t) {
       <div class="ss-card" style="flex:1;min-width:150px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px">
         <div style="font-size:12px;color:var(--text3)">Остаток</div>
         <div style="font-size:26px;font-weight:800;color:${balColor}">${fmtL(b.balance)} <span style="font-size:14px">л</span></div>
-        <div style="font-size:12px;color:var(--text3);margin-top:6px">${htmlEsc(reserveState.label)}</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:6px">${htmlEsc(reserveState.label)}<br>${fuelAccountingStatusHtml('tanks',t)}</div>
         ${b.capacity ? `<div style="height:8px;background:var(--border);border-radius:5px;margin-top:8px;overflow:hidden"><div style="height:100%;width:${b.fillPct}%;background:${balColor}"></div></div><div style="font-size:11px;color:var(--text3);margin-top:4px">${b.fillPct}% от ${b.capacity.toLocaleString('ru')} л</div>` : ''}
       </div>
       <div class="ss-card" style="flex:1;min-width:120px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px">

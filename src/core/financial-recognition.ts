@@ -1,4 +1,5 @@
 /** Pure projections of untrusted source snapshots; no storage, DOM or IO. */
+import type { AccountingBoundaryAPI, ResolvedAccountingBoundary } from './accounting-boundary';
 export type EntityId = string | number;
 export type ISODate = string & { readonly __isoDate: unique symbol };
 export type SourceKey = `${string}:${string}`;
@@ -67,7 +68,7 @@ type UnknownRow = Record<string, unknown>;
 type IdentifiedRow = UnknownRow & { id: EntityId };
 
 /** The build adapter exposes this frozen API identically in Node and browsers. */
-export function createDomainSources(): Readonly<DomainSourcesAPI> {
+export function createDomainSources(accounting?: Readonly<AccountingBoundaryAPI>): Readonly<DomainSourcesAPI> {
   const isRecord = (value: unknown): value is UnknownRow =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
       && Object.prototype.toString.call(value) === '[object Object]';
@@ -170,10 +171,24 @@ export function createDomainSources(): Readonly<DomainSourcesAPI> {
     const ids: unknown[] = Array.isArray(tankIds) ? tankIds : [tankIds];
     const selected = new Set<EntityId>(ids.filter(isEntityId)), entries: TankFlowEntry[] = [];
     const scope = isRecord(options) ? options : {};
+    if (scope.accounting !== undefined && typeof scope.accounting !== 'boolean') throw new TypeError('Некорректный режим учёта движений топлива');
     const from = date(scope.from), to = date(scope.to);
     if (scope.from != null && scope.from !== '' && !from || scope.to != null && scope.to !== '' && !to || from && to && from > to)
       throw new TypeError('Некорректный период движений топлива');
     const inPeriod = (value: ISODate): boolean => (!from || value >= from) && (!to || value <= to);
+    const boundaries = new Map<EntityId, ResolvedAccountingBoundary>();
+    if (scope.accounting === true) for (const id of selected) {
+      const matches=rows(database,'tanks').filter(row=>row.id===id);
+      if (!matches.some(row=>Object.prototype.hasOwnProperty.call(row,'fuelAccounting'))) continue;
+      if(matches.length!==1) throw new TypeError('Нельзя однозначно определить начало учёта ёмкости');
+      if (!accounting || accounting.apiVersion!==1) throw Object.assign(new Error('Не загружены правила начала учёта топлива'),{code:'MODULE_UNAVAILABLE'});
+      boundaries.set(id,accounting.resolve('tanks',matches[0]));
+    }
+    const currentLeg = (id: unknown, value: unknown): boolean => {
+      if (!isEntityId(id) || !selected.has(id)) return false;
+      const boundary=boundaries.get(id);
+      return !boundary || accounting?.classify(boundary,date(value))==='current';
+    };
     const add = (section: TankFlowSection, row: UnknownRow, amount: number | null, kind: string): void => {
       const day = date(row.date);
       if (!live(row) || !day || !inPeriod(day) || amount === null || amount === 0) return;
@@ -182,15 +197,17 @@ export function createDomainSources(): Readonly<DomainSourcesAPI> {
         reason: text(row.reason) || text(row.note), originalMovementId: optionalId(row.originalMovementId), reversedBy: optionalId(row.reversedBy) });
     };
     rows(database, 'tankIncomes').forEach(row => {
-      if (isEntityId(row.tankId) && selected.has(row.tankId))
+      if (currentLeg(row.tankId,row.date))
         add('tankIncomes', row, number(row.amount ?? row.liters ?? row.litres ?? row.qty), 'legacy');
     });
     rows(database, 'fuelMovements').forEach(row => {
       const qty = number(row.qty);
       if (qty === null || qty < 0) return;
-      // Keep the original and opposite reversal. Internal transfers net to zero.
-      const amount = (isEntityId(row.toTankId) && selected.has(row.toTankId) ? qty : 0)
-        - (isEntityId(row.fromTankId) && selected.has(row.fromTankId) ? qty : 0);
+      // Decide each signed leg before netting. Tanks may begin accounting on
+      // different dates; an excluded recipient must not erase a current issue.
+      // Raw history remains the default, including the original and reversal.
+      const amount = (currentLeg(row.toTankId,row.date) ? qty : 0)
+        - (currentLeg(row.fromTankId,row.date) ? qty : 0);
       add('fuelMovements', row, amount, text(row.kind) || 'movement');
     });
     return entries.sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));

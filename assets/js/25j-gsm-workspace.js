@@ -303,13 +303,15 @@ async function gsmSaveReceipt() {
   if (await saveData(data) === false) { data = JSON.parse(before); rebuildIndex(); return; }
   fpMonth = date.slice(0, 7); closeModal('genericModal'); renderFuelPurchases();
 }
-function gsmOpeningDialog(vid) {
-  const v = gsmVehicle(vid) || (data.vehicles || [])[0];
+function gsmOpeningDialog(vid,fromSelect=false) {
+  if(fromSelect){try{vid=wfCommandReference('vehicles',vid,'Машина',true);}catch(error){showToast(error.message);return;}}
+  const v = gsmVehicle(vid) || (vid==null||vid===''?(data.vehicles || [])[0]:null);
   if (!v) return;
+  if(Object.hasOwn(v,'fuelAccounting')){fuelAccountingOpen('vehicles',v.id);return;}
   const sources = v.fuelBalanceSources || [{ org: v.org || '', grade: gsmVehicleGrade(v), qty: gsmNumber(v.fuelBalance) }];
-  openGenericModal('Распределение начального остатка', '<div class="form-group"><label>Машина</label><select id="gsm_open_vehicle" onchange="gsmOpeningDialog(this.value)">' + fuelImportVehicleOptions(v.id, false) + '</select></div>' +
+  openGenericModal('Распределение начального остатка', '<div class="form-group"><label>Машина</label><select id="gsm_open_vehicle" onchange="gsmOpeningDialog(this.value,true)">' + fuelImportVehicleOptions(v.id, false) + '</select></div>' +
     '<p>Начальный остаток по карточке: <strong>' + fpNum(v.fuelBalance, 3) + ' л</strong></p><p class="gsm-status">Это исходный остаток за всё время учёта. Остаток на конкретную дату подтверждается замером в журнале. Здесь меняется только распределение источников, общая сумма сохраняется.</p><div id="gsm_open_rows">' + sources.map(gsmOpeningRow).join('') + '</div>' +
-    '<div class="gsm-actions"><button class="btn btn-ghost" onclick="document.getElementById(\'gsm_open_rows\').insertAdjacentHTML(\'beforeend\',gsmOpeningRow({}))">Добавить источник</button>' +
+    '<div class="gsm-actions"><button class="btn btn-ghost" onclick="fuelAccountingOpen(\'vehicles\','+htmlEsc(JSON.stringify(v.id))+')">Задать дату начала учёта</button><button class="btn btn-ghost" onclick="document.getElementById(\'gsm_open_rows\').insertAdjacentHTML(\'beforeend\',gsmOpeningRow({}))">Добавить источник</button>' +
     '<button class="btn btn-primary" onclick="gsmSaveOpening()">Сохранить</button></div>', 720);
 }
 function gsmOpeningRow(source) {
@@ -318,7 +320,9 @@ function gsmOpeningRow(source) {
     '<input aria-label="Литры остатка" data-field="qty" type="number" step="0.001" min="0" value="' + gsmNumber(source.qty) + '"><button class="btn btn-ghost" title="Удалить источник" aria-label="Удалить источник" onclick="this.parentElement.remove()">×</button></div>';
 }
 async function gsmSaveOpening() {
-  const v = gsmVehicle(document.getElementById('gsm_open_vehicle').value);
+  let id;try{id=wfCommandReference('vehicles',document.getElementById('gsm_open_vehicle').value,'Машина',true);}catch(error){showToast(error.message);return;}
+  const v = gsmVehicle(id);
+  if(v&&Object.hasOwn(v,'fuelAccounting')){fuelAccountingOpen('vehicles',v.id);return;}
   const sources = [...document.querySelectorAll('#gsm_open_rows .gsm-opening-row')].map(el => ({ org: el.querySelector('[data-field="org"]').value.trim(), grade: el.querySelector('[data-field="grade"]').value, qty: Number(el.querySelector('[data-field="qty"]').value) }));
   if (!sources.length || sources.some(s => !s.org || !Number.isFinite(s.qty) || s.qty < 0) || Math.abs(sources.reduce((sum, s) => sum + s.qty, 0) - gsmNumber(v.fuelBalance)) > 0.001) { alert('Укажите организации и распределите весь начальный остаток без изменения общей суммы.'); return; }
   if ((data.fuelPeriods || []).some(p => p.closed)) { alert('Начальный остаток влияет на закрытые месяцы. Сначала откройте их.'); return; }

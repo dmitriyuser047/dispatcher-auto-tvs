@@ -15,6 +15,7 @@ function renderSidebarSummary() {
   const issued  = { diesel: 0, gasoline: 0, gas: 0 };
   const used    = { diesel: 0, gasoline: 0, gas: 0 };
   const balance = { diesel: 0, gasoline: 0, gas: 0 };
+  const tracked = {diesel:0,gasoline:0,gas:0},unstarted={diesel:0,gasoline:0,gas:0};
 
   data.vehicles.forEach(v => {
     const ft = fuelTypeFromGrade(vehicleFuelGrade(v));
@@ -23,19 +24,15 @@ function renderSidebarSummary() {
     vRecs.forEach(r => {
       totalKm        += fqValue(r.km) || 0;
       totalKmGlonass += (!canonicalDays.has(r.date)||r.glonassCanonical)?Number(r.kmGlonass)||0:0;
-      issued[ft]     += fqValue(r.fuelIssued) || 0;
-      used[ft]       += fqRecord(r,v).total||0;
+      if(fuelAccountingCurrentIncludes('vehicles',v,r.date)){
+        issued[ft] += fqValue(r.fuelIssued) || 0;
+        used[ft] += fqRecord(r,v).total||0;
+      }
     });
     // end balance for this vehicle
     const bMap = computeFuelBalances(v.id);
-    const sorted = vRecs.slice().sort((a, b) => cmpDateAsc(a.date, b.date));
-    if (sorted.length) {
-      const last = sorted[sorted.length - 1];
-      balance[ft] += bMap[last.id] || 0;
-    } else {
-      // Нет записей — остаток равен начальному значению из карточки ТС
-      balance[ft] += fqValue(v.fuelBalance) || 0;
-    }
+    const physical=fuelAccountingCurrentBalance('vehicles',v,vRecs,bMap);
+    if(physical===null)unstarted[ft]++;else {balance[ft]+=physical;tracked[ft]++;}
   });
 
   const vehicleFuelTypes = new Set(data.vehicles.map(v => fuelTypeFromGrade(vehicleFuelGrade(v))));
@@ -58,8 +55,9 @@ function renderSidebarSummary() {
         </div>
         <div class="ss-row">
           <span class="ss-label">Остаток</span>
-          <span class="ss-value" style="color:${balColor}">${bal.toLocaleString('ru',{maximumFractionDigits:1})} л</span>
+          <span class="ss-value" style="color:${balColor}">${tracked[ft]?bal.toLocaleString('ru',{maximumFractionDigits:3})+' л':'Учёт ещё не начат'}</span>
         </div>
+        ${unstarted[ft]?'<small>Учёт ещё не начат: '+unstarted[ft]+'</small>':''}
       </div>`;
   });
 
