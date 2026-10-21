@@ -13,7 +13,7 @@ function switchSection(section, options = {}) {
     vehicles: 'Транспорт', generators: 'ДЭС', tanks: 'Ёмкости', workflows:'Рабочие процессы', dispatch:'Диспетчерская',
     reestr: 'Реестр', toSchedule: 'График ТО', repairs: 'Журнал ремонта',
     finances: 'Финансы', contragents: 'Контрагенты', reports: 'Отчёты',
-    costs: 'Стоимость работы', procurement: 'Планирование закупок',
+    costs: 'Стоимость работы', procurement: 'Планирование закупок', system:'Состояние программы',
     printForms: 'Печатные формы', fuelReport: 'Отчёт по топливу', fuelPurchases: 'ГСМ'
   };
 
@@ -67,6 +67,8 @@ function switchSection(section, options = {}) {
 
   if (isHome) {
     renderMainMenu();
+  } else if (section === 'system') {
+    renderPlatformSystem();
   } else if (section === 'workflows' || section === 'dispatch') {
     renderWorkflows();
   } else if (section === 'toSchedule') {

@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const vm = require('node:vm');
+const { createRequire } = require('node:module');
 const storage = require('../electron/storage');
 const server = require('../electron/server');
 
@@ -61,24 +62,27 @@ test('invalid full writes are rejected and absent optional sections are preserve
 });
 test('disk error during multi-section commit rolls back rows and revisions', t => {
   const dir = temp(t), db = database(); storage.writeAll(dir, db);
+  const baseline = storage.readAll(dir);
   const revs = storage.readRevisions(dir); let fail = true;
   const proxy = new Proxy(fs, { get(target, key) {
     if (key === 'renameSync') return (src, dst) => { if (fail && dst === storage.sectionFile(dir, 'records')) { fail = false; throw Error('disk failure'); } return fs.renameSync(src, dst); };
     return target[key];
   } });
-  const ctx = { require: id => id === 'fs' ? proxy : require(id), module: { exports: {} }, console };
+  const storageRequire = createRequire(path.join(__dirname, '../electron/storage.js'));
+  const ctx = { require: id => id === 'fs' ? proxy : storageRequire(id), module: { exports: {} }, console };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../electron/storage.js'), 'utf8'), ctx);
   assert.throws(() => ctx.module.exports.writeSections(dir, { base: revs, sections: { vehicles: [{ id: 'changed' }], records: [{ id: 'new' }] } }), /disk failure/);
-  assert.deepEqual(storage.readAll(dir), db);
+  assert.deepEqual(storage.readAll(dir), baseline);
   assert.deepEqual(storage.readRevisions(dir), revs);
 });
 test('restart rolls back an interrupted transaction before exposing sections', t => {
   const dir = temp(t), db = database(); storage.writeAll(dir, db);
+  const baseline = storage.readAll(dir);
   const base = storage.readRevisions(dir), revisions = { ...base, vehicles: base.vehicles + 1, records: base.records + 1 };
   const tx = { before: { vehicles: db.vehicles, records: db.records }, sections: { vehicles: [{ id: 'new-v' }], records: [{ id: 'new-r' }] }, base, revisions };
   fs.writeFileSync(path.join(storage.sectionsDir(dir), '.transaction.json'), JSON.stringify(tx));
   fs.writeFileSync(storage.sectionFile(dir, 'vehicles'), JSON.stringify(tx.sections.vehicles));
-  assert.deepEqual(storage.readAll(dir), db); assert.deepEqual(storage.readRevisions(dir), base);
+  assert.deepEqual(storage.readAll(dir), baseline); assert.deepEqual(storage.readRevisions(dir), base);
 });
 test('restart finishes a transaction only after its revision commit point', t => {
   const dir = temp(t), db = database(); storage.writeAll(dir, db);
@@ -91,7 +95,7 @@ test('restart finishes a transaction only after its revision commit point', t =>
 });
 test('closed periods are guarded in storage, including bulk and legacy writes', t => {
   const dir = temp(t), db = database(); db.fuelPeriods = [{ month: '2026-09', closed: true }]; storage.writeAll(dir, db);
-  assert.throws(() => storage.writeAll(dir, { ...db, records: [] }), /закрыт/);
+  assert.throws(() => storage.writeAll(dir, { ...storage.readAll(dir), records: [] }), /закрыт/);
   assert.throws(() => storage.writeSections(dir, { base: storage.readRevisions(dir), sections: { records: [] } }), /закрыт/);
   storage.writeSections(dir, { base: storage.readRevisions(dir), sections: { fuelPeriods: [] } });
   assert.equal(storage.writeSections(dir, { base: storage.readRevisions(dir), sections: { records: [] } }).ok, true);
@@ -120,7 +124,7 @@ test('authenticated server preserves split UTF-8 and survives malformed and abor
   assert.equal((await request(port, '/api/data', {})).status, 400);
   for (const route of ['/api/data', '/api/sections']) {
     const rows = [{ id: 'v', driver: 'Уренгой Ёж 中文' }];
-    const payload = route.endsWith('sections') ? { databaseToken:storage.databaseToken(dir), base: storage.readRevisions(dir), sections: { vehicles: rows } } : { databaseToken:storage.databaseToken(dir), data:{ ...db, vehicles: rows } };
+    const payload = route.endsWith('sections') ? { databaseToken:storage.databaseToken(dir), base: storage.readRevisions(dir), sections: { vehicles: rows } } : { databaseToken:storage.databaseToken(dir), data:{ ...storage.readAll(dir), vehicles: rows } };
     const bytes = Buffer.from(JSON.stringify(payload)), split = bytes.indexOf(Buffer.from('У')) + 1;
     assert.equal((await request(port, route, payload, undefined, split)).status, 200);
     assert.equal(storage.readAll(dir).vehicles[0].driver, rows[0].driver);

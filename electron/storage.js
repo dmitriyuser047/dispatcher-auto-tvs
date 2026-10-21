@@ -24,16 +24,7 @@ const runtimeProcess = require('node:process');
 const heldLocks = runtimeProcess[Symbol.for('tvs.storage.databaseLocks')] || (runtimeProcess[Symbol.for('tvs.storage.databaseLocks')] = new Map());
 
 // Порядок важен только для читаемости — файлы независимы
-const SECTIONS = [
-  'vehicles', 'records', 'generators', 'genRecords', 'toRecords',
-  'tanks', 'tankIncomes', 'vehicleTo', 'repairs',
-  'reestrRows', 'savedReestrs', 'payments', 'budget', 'contragents',
-  'fuelPurchases', 'fuelImports', 'fuelCards', 'fuelPeriods', 'fuelWriteoffs', 'monthlyFuel', 'appMeta',
-  'dispatchJobs', 'drivers', 'assetAssignments', 'workOrders', 'opsTasks',
-  'assetDocuments', 'fuelMovements', 'parts', 'partMovements', 'shiftReports',
-  'connectors', 'auditLog', 'savedViews', 'glonassTrips', 'glonassImports',
-  'costEntries', 'costProfiles', 'procurementOrders', 'procurementRules',
-];
+const SECTIONS = require('../assets/core/platform-schema.js').sections.slice();
 
 const REVISIONS_FILE = 'revisions.json';
 
@@ -368,11 +359,16 @@ function writeAll(dataDir, data, options = {}) {
   if (!data || !Array.isArray(data.vehicles) || !Array.isArray(data.records)) throw new Error('Неполная база: нужны vehicles и records');
   SECTIONS.forEach(n => { if (n in data) validateRows(n, data[n]); });
   const previous = readAll(dataDir);
-  data = prepareWriteoffSections(previous, data, options);
-  validatePlanningChanges(previous, data);
-  checkClosedPeriods(previous, data);
   if (!isSplit(dataDir)) migrate(dataDir);
   const revisions = readRevisions(dataDir);
+  const platform = require('./platform-service.cjs'), token = databaseToken(dataDir);
+  const prepared = platform.prepareTransaction(previous, data, { ...options, databaseToken:token, revisions,
+    prepareSections:sections => {
+      const canonical = prepareWriteoffSections(previous, sections, options);
+      validatePlanningChanges(previous, canonical); checkClosedPeriods(previous, canonical); return canonical;
+    } });
+  if (prepared.replayed) return platform.replayResult(previous, revisions, token, prepared.operation, Object.keys(data));
+  data = prepared.sections;
   const changed = [];
   const sections = {};
 
@@ -389,7 +385,8 @@ function writeAll(dataDir, data, options = {}) {
   });
 
   commitSections(dataDir, sections, revisions);
-  return { changed, revisions, ...(changed.includes('fuelWriteoffs') ? { canonicalSections:{ fuelWriteoffs:sections.fuelWriteoffs } } : {}) };
+  return { changed, revisions, databaseToken:token, canonicalSections:sections,
+    ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) };
 }
 
 /** Один раздел и его версия */
@@ -402,7 +399,7 @@ function readSection(dataDir, name) {
 
 function readSnapshot(dataDir) {
   const data = readAll(dataDir);
-  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir) };
+  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1 } };
 }
 
 /**
@@ -423,14 +420,21 @@ function writeSections(dataDir, payload, options = {}) {
   if (names.some(n => !SECTIONS.includes(n) || !Array.isArray(sections[n]))) throw new Error('Некорректные разделы');
   names.forEach(n => validateRows(n, sections[n]));
   const revisions = readRevisions(dataDir);
+  const platform = require('./platform-service.cjs');
+  const context = { ...options, operation:payload?.operation || options.operation, base, revisions, databaseToken:token };
+  const operation = platform.operationInfo(previous, sections, context);
+  if (operation?.receipt) return platform.replayResult(previous, revisions, token, operation, names);
   const conflicts = names.filter(n => (revisions[n] || 0) !== (base[n] || 0));
   if (conflicts.length) return { ok: false, conflicts, revisions, databaseToken: token };
-  sections = prepareWriteoffSections(previous, sections, options);
-  validatePlanningChanges(previous, sections);
-  checkClosedPeriods(previous, sections);
+  const prepared = platform.prepareTransaction(previous, sections, { ...context,
+    prepareSections:supplied => {
+      const canonical = prepareWriteoffSections(previous, supplied, options);
+      validatePlanningChanges(previous, canonical); checkClosedPeriods(previous, canonical); return canonical;
+    } });
+  sections = prepared.sections;
   const changed = [];
   const pending = {};
-  names.forEach(name => {
+  Object.keys(sections).forEach(name => {
     const next = Array.isArray(sections[name]) ? sections[name] : [];
     const file = sectionFile(dataDir, name);
     const nextRaw = JSON.stringify(next);
@@ -443,7 +447,7 @@ function writeSections(dataDir, payload, options = {}) {
   });
   commitSections(dataDir, pending, revisions);
   return { ok: true, changed, revisions, databaseToken: token,
-    ...(changed.includes('fuelWriteoffs') ? { canonicalSections:{ fuelWriteoffs:pending.fuelWriteoffs } } : {}) };
+    canonicalSections:pending, ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) };
 }
 
 /** Ежедневная резервная копия: складываем разделы обратно в один файл */

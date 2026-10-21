@@ -4,7 +4,6 @@ const https = require('https');
 const os = require('os');
 const net = require('net');
 const dns = require('dns').promises;
-const crypto = require('crypto');
 const storage = require('./storage');
 const access = require('./access-control');
 
@@ -26,7 +25,7 @@ function respond(res, status, value) {
   res.end(JSON.stringify(value));
 }
 function readable(principal, section) { return access.authorize(principal, 'read', section); }
-function visibleAudit(rows, principal) { return (rows || []).filter(row => row && typeof row.section === 'string' && readable(principal, row.section)); }
+function visibleAudit(rows, principal) { return require('./platform-service.cjs').visibleAudit(rows,principal); }
 function filteredData(all, principal) {
   return Object.fromEntries(storage.SECTIONS.map(name => [name, !readable(principal, name) ? [] : name === 'auditLog' ? visibleAudit(all[name], principal) : all[name] || []]));
 }
@@ -55,29 +54,6 @@ function readBody(req) {
   });
 }
 
-function canonicalAudit(previous, sections, principal) {
-  const entries = [];
-  Object.entries(sections).filter(([name]) => name !== 'auditLog').forEach(([section,next]) => {
-    const map = rows => {
-      const out = new Map();
-      rows.forEach((row,index) => {
-        const explicitId = row && typeof row === 'object' && row.id !== null && row.id !== undefined && row.id !== '';
-        const key = explicitId ? 'id:' + String(row.id) : 'legacy:' + section + ':row:' + index;
-        if (out.has(key)) throw new Error('Повторные ID в разделе ' + section + '. Исправьте записи перед сохранением.');
-        out.set(key,row);
-      });
-      return out;
-    };
-    const before = map(previous[section] || []), after = map(next);
-    new Set([...before.keys(),...after.keys()]).forEach(recordId => {
-      const oldRow = before.get(recordId), newRow = after.get(recordId);
-      if (JSON.stringify(oldRow) === JSON.stringify(newRow)) return;
-      entries.push({ id:'audit_' + crypto.randomUUID(), at:new Date().toISOString(), actor:principal.name, actorId:principal.id, actorRole:principal.role, source:'server', section, recordId:String(newRow?.id ?? oldRow?.id ?? recordId), action:!before.has(recordId) ? 'create' : !after.has(recordId) ? 'delete' : 'update', before:oldRow ?? null, after:newRow ?? null });
-    });
-  });
-  return [...(previous.auditLog || []), ...entries];
-}
-
 async function writeRequest(req,res,full,principal) {
   const dataDir = _dataDir, backup = _backupFn;
   try {
@@ -95,42 +71,21 @@ async function writeRequest(req,res,full,principal) {
       const sections = full ? Object.fromEntries(storage.SECTIONS.filter(name => name in supplied).map(name => [name,supplied[name]])) : { ...supplied };
       const names = Object.keys(sections);
       if (names.some(name => !storage.SECTIONS.includes(name) || !Array.isArray(sections[name]))) throw new Error('Некорректные разделы');
-      const forbidden = names.filter(name => !access.authorize(principal,'write',name));
-      if (forbidden.length) { respond(res,403,{ok:false,error:'Роль не разрешает изменение разделов: ' + forbidden.join(', ')}); return; }
       if (typeof payload.databaseToken !== 'string' || !payload.databaseToken) { respond(res,428,{ok:false,databaseToken:token,error:'Обновите клиент и заново загрузите базу: для сохранения нужен идентификатор прочитанной базы.'}); return; }
       if (payload.databaseToken !== token) { respond(res,409,{ok:false,databaseChanged:true,databaseToken:token,error:'База данных на сервере изменилась. Заново откройте её перед сохранением.'}); return; }
-      const previous = storage.readAll(dataDir), revisions = storage.readRevisions(dataDir);
-      if (!full) {
-        const base = payload.base || {};
-        const conflicts = names.filter(name => (base[name] || 0) !== (revisions[name] || 0));
-        if (conflicts.length) { respond(res,409,{ok:false,conflicts,revisions:filteredRevisions(revisions,principal),databaseToken:token}); return; }
-      }
-      try { names.forEach(name => access.validateAssetChanges(principal,name,previous[name] || [],sections[name])); }
-      catch (e) { respond(res,403,{ok:false,error:e.message}); return; }
-      if ('auditLog' in sections) {
-        const prefix = visibleAudit(previous.auditLog,principal), received = sections.auditLog;
-        if (received.length < prefix.length || prefix.some((row,index) => JSON.stringify(row) !== JSON.stringify(received[index]))) {
-          respond(res,403,{ok:false,error:'Сохранённую историю нельзя изменять или удалять. Обновите данные.'}); return;
-        }
-      }
       const writeContext = { principal, now:new Date().toISOString() };
-      Object.assign(sections, storage.prepareWriteoffSections(previous, sections, writeContext));
-      // Client events are hints only. The server records actual changes and
-      // supplies the authenticated author, time, before and after values.
-      if (storage.SECTIONS.includes('auditLog')) sections.auditLog = canonicalAudit(previous,sections,principal);
       if (backup) backup();
       const result = full
-        ? {ok:true,...storage.writeAll(dataDir,{...previous,...sections},{databaseToken:payload.databaseToken,...writeContext})}
-        : storage.writeSections(dataDir,{base:{...(payload.base || {}),auditLog:revisions.auditLog || 0},sections,databaseToken:payload.databaseToken},writeContext);
+        ? {ok:true,...storage.writeAll(dataDir,sections,{databaseToken:payload.databaseToken,operation:payload.operation,base:payload.base,...writeContext})}
+        : storage.writeSections(dataDir,{base:payload.base || {},sections,databaseToken:payload.databaseToken,operation:payload.operation},writeContext);
       result.databaseToken = token;
-      if (result.ok) {
-        result.revisions = filteredRevisions(result.revisions,principal);
-        if (storage.SECTIONS.includes('auditLog')) result.canonicalSections = { ...(result.canonicalSections || {}), auditLog:visibleAudit(sections.auditLog,principal) };
-      }
+      if (result.revisions) result.revisions = filteredRevisions(result.revisions,principal);
+      if (result.canonicalSections) result.canonicalSections = Object.fromEntries(Object.entries(result.canonicalSections)
+        .filter(([name]) => readable(principal,name)).map(([name,rows]) => [name,name === 'auditLog' ? visibleAudit(rows,principal) : rows]));
       respond(res,result.ok ? 200 : 409,result);
       });
     } finally { _writeLock = false; }
-  } catch (e) { respond(res,400,{ok:false,error:e.message}); }
+  } catch (e) { respond(res,e.status || 400,{ok:false,error:e.message,...(e.code ? {code:e.code} : {})}); }
 }
 
 function getLocalIPs() {
@@ -173,7 +128,7 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls}) {
       }
       if (req.url === '/api/data' || req.url === '/api/snapshot') {
         const snapshot = storage.readSnapshot(_dataDir), all = filteredData(snapshot.data,principal);
-        respond(res,200,req.url === '/api/data' ? all : {data:all,revisions:filteredRevisions(snapshot.revisions,principal),databaseToken:snapshot.databaseToken,access:publicAccess(principal)}); return;
+        respond(res,200,req.url === '/api/data' ? all : {data:all,revisions:filteredRevisions(snapshot.revisions,principal),databaseToken:snapshot.databaseToken,access:publicAccess(principal),platform:snapshot.platform}); return;
       }
       respond(res,404,{ok:false,error:'Неизвестный запрос'});
     } catch (e) { respond(res,500,{ok:false,error:e.message}); }

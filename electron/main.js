@@ -322,7 +322,8 @@ app.whenReady().then(() => {
     if (isClientMode()) {
       if(networkConfigError)return false;
       try {
-        const body = binding.databaseToken ? { databaseToken:binding.databaseToken, data } : data;
+        const body = binding.databaseToken ? { databaseToken:binding.databaseToken, data,
+          ...(payload.operation ? {operation:payload.operation} : {}) } : data;
         const res = await server.postData(settings.remoteHost, settings.remotePort || 3377, JSON.stringify(body));
         return identity === settingsIdentity() && res && res.ok;
       } catch (e) {
@@ -332,7 +333,7 @@ app.whenReady().then(() => {
     ensureDirs();
     createDailyBackup();
     try {
-      const res = storage.writeAll(getDataDir(), data, { databaseToken:binding.databaseToken,
+      const res = storage.writeAll(getDataDir(), data, { databaseToken:binding.databaseToken, operation:payload.operation,
         principal:{ id:'local-profile', name:getActiveUser().name || 'Локальный пользователь', role:'admin' } });
       if (res.changed.length) console.log('[write-data] разделы: ' + res.changed.join(', '));
       return true;
@@ -378,17 +379,25 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('get-revisions', async () => {
+    const identity = settingsIdentity();
     if(isClientMode()&&networkConfigError)return null;
     try {
-      if (isClientMode()) return await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/revisions', 5000);
+      if (isClientMode()) {
+        const result = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/revisions', 5000);
+        return identity === settingsIdentity() ? result : null;
+      }
         return { ...storage.readRevisions(getDataDir()), databaseToken:storage.databaseToken(getDataDir()) };
     } catch (e) { return null; }
   });
 
   ipcMain.handle('read-section', async (_event, name) => {
+    const identity = settingsIdentity();
     if(isClientMode()&&networkConfigError)return null;
     try {
-      if (isClientMode()) return await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/section/' + encodeURIComponent(name), 15000);
+      if (isClientMode()) {
+        const result = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/section/' + encodeURIComponent(name), 15000);
+        return identity === settingsIdentity() ? result : null;
+      }
       return storage.readSection(getDataDir(), name);
     } catch (e) { return null; }
   });
@@ -950,12 +959,8 @@ app.whenReady().then(() => {
         checkSnapshot(snapshot);
         storage.makeDailyBackup(dir, path.join(dir, 'backups'), 30);
         const sections = { reestrRows:rows }, base = { reestrRows:context.revision };
-        if (JSON.stringify(rows) !== JSON.stringify(context.baseRows)) {
-          const entry = { id:'audit_' + require('crypto').randomUUID(), at:new Date().toISOString(), actor:getActiveUser().name || 'Пользователь', actorId:'local-profile', actorRole:'admin', source:'local', section:'reestrRows', recordId:'registry', action:'replace', before:context.baseRows, after:rows };
-          sections.auditLog = [...(snapshot.data.auditLog || []),entry]; base.auditLog = snapshot.revisions.auditLog;
-        }
-        const saved = storage.writeSections(dir, { databaseToken:context.databaseToken, base, sections });
-        return { ...saved, canonicalSections:{ auditLog:sections.auditLog || snapshot.data.auditLog || [] } };
+        return storage.writeSections(dir, { databaseToken:context.databaseToken, base, sections }, {
+          principal:{ id:'local-profile', name:getActiveUser().name || 'Локальный пользователь', role:'admin' } });
       });
       if (!result?.ok) throw new Error(result?.error || 'Реестр изменён другим пользователем. Откройте его заново.');
       context.rows = rows; context.baseRows = rows; context.revision = result.revisions.reestrRows;

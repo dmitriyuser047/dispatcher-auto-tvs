@@ -6,8 +6,8 @@
   "main": "electron/main.js",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "test:ui": "node --test --test-concurrency=2 tests/ui-regression.cjs tests/unified-ui.cjs tests/cost-accounting-ui.cjs tests/procurement-ui.cjs tests/engine-integration-ui.cjs tests/writeoff-workflow-ui.cjs",
-    "test:engine": "node --test tests/dispatcher-core.test.cjs tests/fuel-engine.test.cjs tests/fuel-records-query.test.cjs tests/writeoff-engine.test.cjs",
+    "test:ui": "node --test --test-concurrency=2 tests/ui-regression.cjs tests/unified-ui.cjs tests/cost-accounting-ui.cjs tests/procurement-ui.cjs tests/engine-integration-ui.cjs tests/writeoff-workflow-ui.cjs tests/platform-ui.cjs",
+    "test:engine": "node --test tests/dispatcher-core.test.cjs tests/fuel-engine.test.cjs tests/fuel-records-query.test.cjs tests/writeoff-engine.test.cjs tests/platform-kernel.test.cjs tests/platform-integrity.test.cjs tests/platform-policies.test.cjs",
     "engine:demo": "node scripts/engine-demo.cjs",
     "test:electron": "node --test tests/unified-electron.cjs",
     "start": "electron .",

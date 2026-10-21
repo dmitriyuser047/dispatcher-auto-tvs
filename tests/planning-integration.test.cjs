@@ -31,8 +31,9 @@ test('older split databases gain empty planning sections without changing journa
  const loaded=storage.readAll(dir);for(const name of planning)assert.deepEqual(loaded[name],[]);
  assert.equal(storage.readRevisions(dir).records,7);assert.equal(loaded.records[0].km,100);
  for(const [file,symbol]of [['assets/js/25f-sync.js','SYNC_SECTIONS'],['assets/js/30-workflows.js','WF_SECTIONS']]){
-  const source=fs.readFileSync(path.join(root,file),'utf8'),match=source.match(new RegExp('const '+symbol+' = (\\[[\\s\\S]*?\\]);'));
-  assert.ok(match,file);const sections=vm.runInNewContext(match[1]);for(const name of planning)assert.ok(sections.includes(name),file+': '+name);
+  const source=fs.readFileSync(path.join(root,file),'utf8'),match=source.match(new RegExp('const '+symbol+' = ([\\s\\S]*?);'));
+  assert.ok(match,file);const sections=vm.runInNewContext(match[1],{PlatformSchema:require('../assets/core/platform-schema.js')});for(const name of planning)assert.ok(sections.includes(name),file+': '+name);
+  if(symbol==='SYNC_SECTIONS')assert.deepEqual(Array.from(sections),storage.SECTIONS);
  }
 });
 

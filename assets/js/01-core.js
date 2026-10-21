@@ -120,7 +120,7 @@ function validDatabase(value) {
 async function loadData() {
   let d = null;
   _loadWriteBlocked = false;
-  if (typeof _sync !== 'undefined') { _sync.enabled=false; _sync.revs={}; _sync.synced={}; _sync.databaseToken=null; _sync.access=null; }
+  if (typeof _sync !== 'undefined') { _sync.enabled=false; _sync.revs={}; _sync.synced={}; _sync.databaseToken=null; _sync.access=null; _sync.platform=null; _sync.lastResult=null; }
   localCacheKey = window.electronAPI ? null : STORAGE_KEY;
   // Снимок с версиями разделов — для синхронизации нескольких пользователей
   if (typeof syncLoad === 'function') {
@@ -183,6 +183,7 @@ async function loadData() {
   if (!d.fuelWriteoffs)  d.fuelWriteoffs  = [];
   if (!d.monthlyFuel)   d.monthlyFuel   = [];
   if (!d.appMeta)       d.appMeta       = [];
+  if (typeof PlatformSchema !== 'undefined') PlatformSchema.sections.forEach(name => { if (!d[name]) d[name]=[]; });
   if (typeof wfInitData === 'function') wfInitData(d);
   _lastPersisted = JSON.stringify(d);
   return d;
@@ -212,6 +213,19 @@ function scheduleLocalBackup(json) {
 }
 
 async function saveData(d = data, options) {
+  if (typeof platformExecuteSave === 'function') return platformExecuteSave(d, options, nextOptions => persistData(d,nextOptions));
+  return persistData(d, options);
+}
+function restoreSaveBaseline(d) {
+  if (d !== data || !_lastPersisted) return;
+  data = JSON.parse(_lastPersisted);
+  if (typeof _sync !== 'undefined' && _sync.enabled) Object.entries(_sync.synced).forEach(([name,json]) => { data[name]=JSON.parse(json); });
+  if (typeof reestrRows !== 'undefined') reestrRows=data.reestrRows || [];
+  rebuildIndex();
+}
+async function persistData(d = data, options) {
+  const identity = typeof dispatcherContext === 'function' ? dispatcherContext().identity : null;
+  const sameSession = () => identity === (typeof dispatcherContext === 'function' ? dispatcherContext().identity : null);
   showProgress();
   rebuildIndex();
   try {
@@ -225,6 +239,7 @@ async function saveData(d = data, options) {
         : await window.electronAPI.writeData(typeof _sync!=='undefined'&&_sync.databaseToken ? JSON.stringify({databaseToken:_sync.databaseToken,data:d}) : json);
       if (ok !== true) throw new Error('Изменения не записаны. Проверьте соединение и состояние базы.');
     }
+    if (!sameSession()) throw Object.assign(new Error('База или пользователь изменились во время сохранения. Проверьте результат в исходной базе.'),{code:'SESSION_CHANGED'});
     _lastPersisted = JSON.stringify(d);
     scheduleLocalBackup(_lastPersisted);
     // A successful section save can replace rows with the server's canonical
@@ -232,14 +247,8 @@ async function saveData(d = data, options) {
     rebuildIndex();
     return true;
   } catch (e) {
-    if (d === data && _lastPersisted) {
-      data = JSON.parse(_lastPersisted);
-      if (typeof _sync !== 'undefined' && _sync.enabled) {
-        Object.entries(_sync.synced).forEach(([name, json]) => { data[name] = JSON.parse(json); });
-      }
-      if (typeof reestrRows !== 'undefined') reestrRows = data.reestrRows || [];
-      rebuildIndex();
-    }
+    if (sameSession()) restoreSaveBaseline(d);
+    if (options?._platformManaged) throw e;
     showToast('Ошибка сохранения: ' + (e.message || e));
     return false;
   } finally {

@@ -12,7 +12,7 @@
 //
 // Если сервер старый (без записи по разделам), работает прежний способ.
 
-const SYNC_SECTIONS = [
+const SYNC_SECTIONS = typeof PlatformSchema !== 'undefined' ? PlatformSchema.sections.slice() : [
   'vehicles', 'records', 'generators', 'genRecords', 'toRecords',
   'tanks', 'tankIncomes', 'vehicleTo', 'repairs',
   'reestrRows', 'savedReestrs', 'payments', 'budget', 'contragents',
@@ -35,7 +35,15 @@ const SYNC_NAMES = {
 };
 const SYNC_POLL_MS = 20000;
 
-const _sync = { enabled: false, revs: {}, synced: {}, databaseToken:null, access:null, chain: Promise.resolve(), polling: null, needRefresh: [] };
+const _sync = { enabled: false, revs: {}, synced: {}, databaseToken:null, access:null, platform:null, lastResult:null, chain: Promise.resolve(), polling: null, needRefresh: [] };
+
+function syncSessionStamp() {
+  return JSON.stringify([typeof dispatcherContext === 'function' ? dispatcherContext().identity : _sync.databaseToken,
+    _sync.access?.user?.id, _sync.access?.user?.role, _sync.access?.readable, _sync.access?.writable]);
+}
+function syncEnsureSession(stamp) {
+  if (stamp !== syncSessionStamp()) throw Object.assign(new Error('База или права пользователя изменились во время операции. Обновите данные перед повтором.'),{code:'SESSION_CHANGED'});
+}
 
 function syncAssertDatabase(response) {
   if (!_sync.databaseToken || response?.databaseToken === _sync.databaseToken) return;
@@ -116,6 +124,7 @@ async function syncLoad() {
   _sync.synced = {};
   _sync.databaseToken = typeof snap.databaseToken === 'string' ? snap.databaseToken : null;
   _sync.access=snap.access||null;
+  _sync.platform=snap.platform?.apiVersion === 1 ? { ...snap.platform } : null;
   if(typeof wfInitData==='function')wfInitData(snap.data);
   if (snap.revisions) {
     _sync.enabled = true;
@@ -128,21 +137,24 @@ async function syncLoad() {
 // Сохранения идут строго по очереди — иначе два быстрых сохранения
 // отправили бы одну и ту же версию и поссорились друг с другом
 function syncSave(d, options) {
+  const stamp=syncSessionStamp();
   const p = _sync.chain.then(async () => {
+    syncEnsureSession(stamp);
     const revs = { ..._sync.revs }, synced = { ..._sync.synced };
     let saved = false;
-    try { saved = await syncSaveNow(d, options); return saved; }
+    try { saved = await syncSaveNow(d, options, stamp); return saved; }
     finally {
       // A failed merge must not turn the old form into a new change relative
       // to a newer server baseline when the user retries the same operation.
-      if (!saved) { _sync.revs = revs; _sync.synced = synced; }
+      if (!saved && stamp === syncSessionStamp()) { _sync.revs = revs; _sync.synced = synced; }
     }
   });
   _sync.chain = p.catch(() => false);
   return p;
 }
 
-async function syncSaveNow(d, options) {
+async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
+  _sync.lastResult=null;
   const requiredCanonical = options && options.requiredCanonicalSections || [];
   if (!Array.isArray(requiredCanonical) || requiredCanonical.some(name => !SYNC_SECTIONS.includes(name)))
     throw new Error('Некорректный список разделов для подтверждённого сохранения.');
@@ -155,17 +167,24 @@ async function syncSaveNow(d, options) {
   if (!changed.length) return true;
   const mergedNames = new Set();
   for (let attempt = 0; attempt < 4; attempt++) {
-    const payload = { base: {}, sections: {}, ...(_sync.databaseToken ? {databaseToken:_sync.databaseToken} : {}) };
+    syncEnsureSession(stamp);
+    const payload = { base: {}, sections: {}, ...(options?.operation ? {operation:options.operation} : {}), ...(_sync.databaseToken ? {databaseToken:_sync.databaseToken} : {}) };
     changed.forEach(n => { payload.base[n] = _sync.revs[n] || 0; payload.sections[n] = d[n] || []; });
     const res = await window.electronAPI.writeSections(JSON.stringify(payload));
+    syncEnsureSession(stamp);
     if (res && (res.databaseToken != null || res.ok || res.conflicts || res.databaseChanged)) syncAssertDatabase(res);
     if (res && res.unsupported) {
+      if (options?.requireOperationReceipt) throw new Error('Хранилище перестало поддерживать подтверждение операций. Загрузите базу заново перед сохранением.');
       if (requiredCanonical.length) throw new Error('Сервер не поддерживает подтверждённое сохранение актов. Обновите сервер перед проведением или аннулированием.');
       // Сервер старой версии — сохраняем по-старому, целиком
       _sync.enabled = false;
-      return await window.electronAPI.writeData(JSON.stringify(_sync.databaseToken ? {databaseToken:_sync.databaseToken,data:d} : d)) !== false;
+      const legacy=await window.electronAPI.writeData(JSON.stringify(_sync.databaseToken ? {databaseToken:_sync.databaseToken,data:d} : d));
+      syncEnsureSession(stamp); return legacy === true;
     }
     if (res && res.ok) {
+      if (options?.operation && (options.requireOperationReceipt || res.operationReceipt) &&
+          (!res.operationReceipt || res.operationReceipt.id !== options.operation.id || !['committed','replayed'].includes(res.operationReceipt.status)))
+        throw Object.assign(new Error('Хранилище не подтвердило именно эту операцию. Обновите данные и проверьте историю.'),{code:'OPERATION_ACK_REQUIRED'});
       if (requiredCanonical.some(name => !Array.isArray(res.canonicalSections?.[name]) ||
         !Number.isSafeInteger(res.revisions?.[name]) || res.revisions[name] < 0))
         throw new Error('Сервер не подтвердил сохранённый акт. Обновите данные и проверьте журнал актов; повторное проведение пока не подтверждено.');
@@ -174,6 +193,7 @@ async function syncSaveNow(d, options) {
         if (res.revisions && n in res.revisions) _sync.revs[n] = res.revisions[n];
       });
       Object.entries(res.canonicalSections||{}).forEach(([name,rows])=>{d[name]=rows;_sync.synced[name]=JSON.stringify(rows);if(res.revisions&&name in res.revisions)_sync.revs[name]=res.revisions[name];});
+      _sync.lastResult=res;
       if (mergedNames.size) {
         rebuildIndex();
         showToast('Сохранено вместе с правками другого пользователя: ' + [...mergedNames].map(n => SYNC_NAMES[n] || n).join(', '));
@@ -186,10 +206,12 @@ async function syncSaveNow(d, options) {
     // Кто-то успел поменять эти разделы — сливаем и пробуем снова
     for (const n of res.conflicts) {
       const remote = await window.electronAPI.readSection(n);
+      syncEnsureSession(stamp);
       if (!remote) return false;
       syncAssertDatabase(remote);
       const base = JSON.parse(_sync.synced[n] || '[]');
       d[n] = await syncResolveMerge(n,base,d[n]||[],remote.rows||[]);
+      syncEnsureSession(stamp);
       _sync.synced[n] = JSON.stringify(remote.rows || []);
       _sync.revs[n] = remote.rev || 0;
       mergedNames.add(n);
@@ -204,20 +226,23 @@ async function syncSaveNow(d, options) {
 // Подтянуть чужие изменения
 async function syncPoll() {
   if (!_sync.enabled || !window.electronAPI.getRevisions) return;
+  const stamp=syncSessionStamp();
   if (document.querySelector('.modal-overlay.open')) return;
   if (_sync.needRefresh.length) syncRefreshView([]);
   let revs;
-  try { revs = await window.electronAPI.getRevisions(); if (revs) syncAssertDatabase(revs); }
-  catch (error) { console.warn('[sync] ' + error.message); if (error.databaseChanged) showToast(error.message); return; }
+  try { revs = await window.electronAPI.getRevisions(); if (stamp !== syncSessionStamp()) return; if (revs) syncAssertDatabase(revs); }
+  catch (error) { if (stamp !== syncSessionStamp()) return; console.warn('[sync] ' + error.message); if (error.databaseChanged) showToast(error.message); return; }
   if (!revs) return;
   const stale = SYNC_SECTIONS.filter(n => (revs[n] || 0) !== (_sync.revs[n] || 0));
   if (!stale.length) return;
   // В очередь с сохранениями, чтобы не подтягивать посреди записи
   _sync.chain = _sync.chain.then(async () => {
+    if (stamp !== syncSessionStamp()) return;
     if (document.querySelector('.modal-overlay.open')) return;
     const got = [];
     for (const n of stale) {
       const remote = await window.electronAPI.readSection(n);
+      if (stamp !== syncSessionStamp()) return;
       if (!remote) continue;
       syncAssertDatabase(remote);
       if (document.querySelector('.modal-overlay.open')) return;
@@ -261,6 +286,7 @@ function syncRefreshView(names) {
     else if (activeSection === 'fuelReport') renderFuelReport();
     else if (activeSection === 'costs') renderCostsSection();
     else if (activeSection === 'procurement') renderProcurementSection();
+    else if (activeSection === 'system') renderPlatformSystem();
     else if (activeSection === 'generators' && typeof renderGeneratorCards === 'function' && !selectedGeneratorId) renderGeneratorCards();
   } catch (e) { console.warn('[sync] перерисовка: ' + e.message); }
 }

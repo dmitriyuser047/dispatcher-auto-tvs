@@ -26,14 +26,16 @@ test('earlier journal rows cannot change the opening balance of a later closed m
  const future=structuredClone(storage.readAll(dir));future.records.push({id:'future',vehicleId:'v',date:'2026-10-01',km:10});
  assert.equal(storage.writeAll(dir,future).changed.includes('records'),true);
  const cards=structuredClone(storage.readAll(dir).fuelCards);cards[0].assignments[0].to='2026-09-30';cards[0].assignments.push({from:'2026-10-01',vehicleId:'future-v',org:'B'});
- assert.equal(storage.writeSections(dir,{base:storage.readRevisions(dir),sections:{fuelCards:cards}}).ok,true);
  const vehicles=structuredClone(storage.readAll(dir).vehicles);vehicles.push({id:'future-v',fuelBalance:0,norm:20,fuel:'diesel'});
- assert.equal(storage.writeSections(dir,{base:storage.readRevisions(dir),sections:{vehicles}}).ok,true);
+ assert.equal(storage.writeSections(dir,{base:storage.readRevisions(dir),sections:{vehicles,fuelCards:cards}}).ok,true);
  vehicles.push({id:'new-opening',fuelBalance:1});
  assert.throws(()=>storage.writeSections(dir,{base:storage.readRevisions(dir),sections:{vehicles}}),/закрыт/);
 });
 test('new assets and cards cannot retroactively resolve closed unresolved fuel references',t=>{
- const dir=temp(t),db=database();db.fuelPurchases=[{id:'p',date:'2026-09-02',cardNo:'987-654',qty:10}];db.genRecords.push({id:'missing-tank-record',generatorId:'g',tankId:'missing-tank',date:'2026-09-02',fuelIssued:5});storage.writeAll(dir,db);
+ const dir=temp(t),db=database();db.fuelPurchases=[{id:'p',date:'2026-09-02',cardNo:'987-654',qty:10}];db.genRecords.push({id:'missing-tank-record',generatorId:'g',tankId:'missing-tank',date:'2026-09-02',fuelIssued:5});
+ // Existing legacy corruption is loaded, rather than newly introduced through
+ // a validated write. The closed-period guard must still reject a new binding.
+ fs.writeFileSync(path.join(dir,'data.json'),JSON.stringify(db));storage.readAll(dir);
  for(const [name,row] of [['fuelCards',{id:'new-card',number:'987654',org:'B'}],['vehicles',{id:'new-vehicle',fuelcard:'987654',fuelBalance:0,org:'B'}],['tanks',{id:'missing-tank',balanceInit:0}]]){
   const rows=[...storage.readAll(dir)[name],row];assert.throws(()=>storage.writeSections(dir,{base:storage.readRevisions(dir),sections:{[name]:rows}}),/закрыт/,name);
  }

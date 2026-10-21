@@ -109,6 +109,7 @@ test('canonical save and failed-save rollback both discard intermediate calculat
         dispatcherQuery('procurement', options);
         return true;
       };
+      data.tanks[0].name='Changed tank name';
       saved = await saveData(data);
       successEntries = dispatcherEngineStats().entries;
       canonicalJournalKm = recsFor('engine-v')[0].km;
@@ -118,6 +119,7 @@ test('canonical save and failed-save rollback both discard intermediate calculat
         dispatcherQuery('procurement', options);
         return false;
       };
+      data.tanks[0].name='Rejected tank name';
       rejected = await saveData(data);
       rollbackEntries = dispatcherEngineStats().entries;
     } finally { syncSave = originalSave; _sync.enabled = originallyEnabled; }

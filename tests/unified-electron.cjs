@@ -54,9 +54,11 @@ test('hidden Electron application persists synthetic journals, isolates registry
     const snap = JSON.parse(await window.electronAPI.readSnapshot());
     data.records.push({ id:'native-journal',vehicleId:'A',date:'2026-10-01',km:100,odoStart:1000,odoEnd:1100,fuelIssued:0,fuelActual:10,fuelGrade:'ДТ',driver:'Synthetic driver' });
     const saved = await saveData(data);
-    return { saved, token:snap.databaseToken, identity:await window.electronAPI.getDataIdentity() };
+    return { saved, token:snap.databaseToken, identity:await window.electronAPI.getDataIdentity(), operationReceipt:_sync.lastResult?.operationReceipt, platform:snap.platform };
   });
   assert.equal(first.saved, true);
+  assert.deepEqual(first.platform, {apiVersion:1,operations:1});
+  assert.equal(first.operationReceipt?.status, 'committed'); assert.ok(first.operationReceipt.id);
   assert.equal(storage.readAll(dataA).records[0].id, 'native-journal');
   assert.match(first.token, /^[a-f0-9]{64}$/);
   assert.ok(first.identity.endsWith(':'+first.token));
@@ -74,12 +76,30 @@ test('hidden Electron application persists synthetic journals, isolates registry
     const probe=await window.electronAPI.testNotification({key:state.key});
     const stale=await window.electronAPI.saveNotificationSettings({key:'0'.repeat(64),preferences});
     await openNotificationSettings();const modal=!!document.querySelector('#notificationsModal.open');document.getElementById('notificationsModal')?.remove();
-    return {saved,state,enabled,probe,stale,modal};
+    return {saved,state,enabled,probe,stale,modal,operationReceipt:_sync.lastResult?.operationReceipt};
   });
   assert.equal(features.saved,true);assert.equal(features.state.ok,true);assert.equal(features.state.preferences.enabled,false);
   assert.equal(features.state.supported,false);assert.equal(features.enabled.preferences.enabled,true);assert.equal(features.probe.ok,false);assert.equal(features.probe.code,'test-mode');assert.equal(features.stale.ok,false);assert.equal(features.modal,true);
   const featureData=storage.readAll(dataA);
   assert.equal(featureData.costEntries[0].amount,1000);assert.equal(featureData.costProfiles[0].salaryRate,5);assert.equal(featureData.procurementOrders[0].receivedQty,2);assert.equal(featureData.procurementRules[0].reserveQty,2);assert.deepEqual(featureData.partMovements,[]);
+  assert.equal(features.operationReceipt?.status,'committed');
+  for(const section of ['costEntries','costProfiles','parts','procurementRules','procurementOrders']){
+    const event=featureData.auditLog.find(row=>row.section===section&&row.operationId===features.operationReceipt.id);
+    assert.ok(event,section);assert.equal(event.actorId,'local-profile');assert.equal(event.actor,'Test A');assert.equal(event.actorRole,'admin');assert.equal(event.source,'platform');
+  }
+  assert.equal(featureData.auditLog.filter(row=>row.type==='transaction'&&row.operationId===features.operationReceipt.id).length,1);
+  const replayedNative=await page.evaluate(async()=>{
+    const snapshot=JSON.parse(await window.electronAPI.readSnapshot()),id='native-ipc-'+crypto.randomUUID();
+    const payload={databaseToken:snapshot.databaseToken,base:{opsTasks:snapshot.revisions.opsTasks},sections:{opsTasks:[...(snapshot.data.opsTasks||[]),{id:'native-idempotent-task',title:'Synthetic native command',status:'open'}]},operation:{id}};
+    const first=await window.electronAPI.writeSections(JSON.stringify(payload)),second=await window.electronAPI.writeSections(JSON.stringify(payload));
+    data=await loadData();rebuildIndex();
+    return{id,first,second};
+  });
+  assert.equal(replayedNative.first.ok,true);assert.equal(replayedNative.second.ok,true);assert.equal(replayedNative.second.replayed,true);assert.deepEqual(replayedNative.second.changed,[]);
+  assert.equal(replayedNative.second.operationReceipt.id,replayedNative.id);
+  const replayData=storage.readAll(dataA);
+  assert.equal(replayData.opsTasks.filter(row=>row.id==='native-idempotent-task').length,1);
+  assert.equal(replayData.auditLog.filter(row=>row.type==='transaction'&&row.operationId===replayedNative.id).length,1);
   for (const request of ['/electron/main.js','/package.json','/bundled-data/data-2.0.57.json']) assert.equal(await page.evaluate(url => fetch(url).then(res => res.status), request), 403);
 
   // The actual native section protocol must acknowledge the backend's document,
