@@ -7,7 +7,7 @@ const schema = require('../assets/core/platform-schema.js');
 const contracts = require('../assets/core/platform-contracts.js');
 const storage = require('./storage');
 const sqlite = require('./sqlite-storage.cjs');
-const SECTIONS = schema.sections, MANAGED = ['attachments', 'import-sources', 'reestr-knowledge'];
+const SECTIONS = schema.sections, MANAGED = ['attachments', 'import-sources', 'reestr-knowledge','document-archive'];
 const MAX_BYTES = 512 * 1024 * 1024, MAX_FILES = 10000;
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -83,9 +83,9 @@ function revisions(value = {}) { try {
 catch {
     fail('BACKUP_REVISIONS', 'Некорректные версии разделов');
 } return Object.fromEntries(SECTIONS.map(name => [name, value[name] ?? 0])); }
-function snapshotFiles(source) {
+function snapshotFiles(source,allowOwnedLock=false) {
     for (const name of ['.tvs-database.lock', '.tvs-database.lock.recovery', 'sections/.transaction.json'])
-        if (stat(path.join(source, ...name.split('/'))))
+        if (!(name==='.tvs-database.lock'&&allowOwnedLock&&storage.isDatabaseLockHeld(source))&&stat(path.join(source, ...name.split('/'))))
             fail('BACKUP_SOURCE_BUSY', 'База занята или содержит незавершённое сохранение');
     const result = [];
     let total = 0;
@@ -241,6 +241,7 @@ function readPackage(archivePath) {
         fail('BACKUP_MANIFEST', 'Неизвестный исходный формат базы');
     const checked = { files, data, settings: settings ? jsonObject(json(settings.bytes, 'settings.json'), 'settings.json') : null, revisions: revisions(manifest.revisions), sourceFormat: manifest.sourceFormat === 'sqlite' ? 'sqlite' : 'json', sourceFingerprint: typeof manifest.sourceFingerprint === 'string' && /^[a-f0-9]{64}$/.test(manifest.sourceFingerprint) ? manifest.sourceFingerprint : null, archiveSha256: sha(archive) };
     checked.referencedFileCount = references(data, files);
+    require('./document-archive.cjs').validateManaged(data,name=>files.find(entry=>entry.name===name)?.bytes);
     return checked;
 }
 function verifyPackage({ archivePath }) { return report(readPackage(archivePath)); }
@@ -258,7 +259,7 @@ function cleanPackage(filename, parent, identity) { if (!filename)
     return; const info = stat(filename); if (!info)
     return; if (fold(path.dirname(filename)) !== fold(parent) || !path.basename(filename).startsWith('.tvs-backup-package-') || !info.isFile() || info.isSymbolicLink() || info.dev !== identity.dev || info.ino !== identity.ino)
     fail('BACKUP_CLEANUP', 'Временный файл изменился; удаление остановлено'); fs.unlinkSync(filename); }
-function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir } = {}) {
+function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir,allowOwnedLock=false } = {}) {
     const source = directory(sourceDir), { parent, target } = newTarget(archivePath);
     if (knowledgeDir && fold(explicit(knowledgeDir)) !== fold(path.join(source, 'reestr-knowledge')))
         fail('BACKUP_PATH', 'База знаний должна принадлежать выбранной базе');
@@ -271,14 +272,14 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir } =
     jsonObject(settings, 'settings');
     let stage, identity, published = false;
     try {
-        const before = snapshotFiles(source), snapshot = sourceSnapshot(source, before), zip = new AdmZip(), files = [];
+        const before = snapshotFiles(source,allowOwnedLock), snapshot = sourceSnapshot(source, before), reachable=require('./document-archive.cjs').managedNames(source,snapshot.data),zip = new AdmZip(), files = [];
         let total = 0;
         const add = (name, bytes) => { total += bytes.length; if (total > MAX_BYTES || files.length >= MAX_FILES - 2)
             fail('BACKUP_LIMIT', 'Резервный пакет превышает допустимый размер'); zip.addFile(name, bytes); files.push({ name, size: bytes.length, sha256: sha(bytes) }); };
         add('database.json', Buffer.from(JSON.stringify(snapshot.data)));
         add('settings.json', Buffer.from(JSON.stringify(settings)));
         for (const entry of before) {
-            if (entry.type === 'directory' || !MANAGED.includes(entry.name.split('/')[0]))
+            if (entry.type === 'directory' || !MANAGED.includes(entry.name.split('/')[0])||entry.name.startsWith('document-archive/')&&!reachable.has(entry.name.slice('document-archive/'.length)))
                 continue;
             const bytes = readFile(path.join(source, ...entry.name.split('/')));
             if (bytes.length !== entry.size || sha(bytes) !== entry.sha256)
@@ -286,13 +287,14 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir } =
             add(entry.name, bytes);
         }
         references(snapshot.data, files);
+        require('./document-archive.cjs').validateManaged(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null);
         const sourceFingerprint = sha(JSON.stringify(before));
         zip.addFile('manifest.json', Buffer.from(JSON.stringify({ format: 'tvs-backup', version: 1, createdAt: new Date().toISOString(), files, revisions: snapshot.revisions, sourceFormat: snapshot.sourceFormat, sourceFingerprint })));
         stage = path.join(parent, '.tvs-backup-package-' + crypto.randomUUID() + '.zip');
         writeFile(stage, zip.toBuffer());
         identity = fs.lstatSync(stage);
         const verified = verifyPackage({ archivePath: stage });
-        if (JSON.stringify(before) !== JSON.stringify(snapshotFiles(source)))
+        if (JSON.stringify(before) !== JSON.stringify(snapshotFiles(source,allowOwnedLock)))
             fail('BACKUP_SOURCE_CHANGED', 'Источник изменился во время резервирования');
         if (stat(target) || fold(directory(parent)) !== fold(parent))
             fail('BACKUP_TARGET_EXISTS', 'Целевой путь изменился');

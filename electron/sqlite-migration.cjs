@@ -8,7 +8,7 @@ const schema = require('../assets/core/platform-schema.js');
 const contracts = require('../assets/core/platform-contracts.js');
 const sqlite = require('./sqlite-storage.cjs');
 const sections = schema.sections;
-const managed = ['attachments','import-sources','reestr-knowledge'];
+const managed = ['attachments','import-sources','reestr-knowledge','document-archive'];
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const fold = value => process.platform === 'win32' ? value.toLowerCase() : value;
@@ -164,11 +164,12 @@ function referencedFiles(data,manifest) {
   visit(data);
   return checked.size;
 }
-function copyManaged(source,stage,manifest) {
+function copyManaged(source,stage,manifest,data) {
   const copied = [];
+  const reachable=require('./document-archive.cjs').managedNames(source,data);
   for (const entry of manifest) {
     const directory = entry.path.split('/')[0];
-    if (!managed.includes(directory)) continue;
+    if (!managed.includes(directory)||directory==='document-archive'&&entry.type==='file'&&!reachable.has(entry.path.slice('document-archive/'.length))) continue;
     if (entry.type === 'directory') { fs.mkdirSync(path.join(stage,directory),{mode:0o700}); continue; }
     const {filename} = ordinaryFile(source,entry.path), target = path.join(stage,...entry.path.split('/'));
     fs.copyFileSync(filename,target,fs.constants.COPYFILE_EXCL);
@@ -183,6 +184,7 @@ function copyManaged(source,stage,manifest) {
 }
 function verifyDatabase(stage,source) {
   const data = sqlite.readAll(stage), revisions = sqlite.readRevisions(stage), inspected = sqlite.inspect(stage);
+  require('./document-archive.cjs').validateState(stage,data);
   if (!inspected.ok || !Array.isArray(inspected.integrity) || inspected.integrity.length !== 1 || inspected.integrity[0] !== 'ok' ||
       !Array.isArray(inspected.foreignKeyErrors) || inspected.foreignKeyErrors.length)
     fail('MIGRATION_SQLITE_INTEGRITY','Проверка целостности SQLite не пройдена');
@@ -217,10 +219,11 @@ function migrateCopy({sourceDir,targetDir} = {}) {
   let stage = null, identity;
   try {
     const manifest = sourceManifest(source), original = readSource(source,manifest);
+    require('./document-archive.cjs').validateState(source,original.data);
     const referencedFileCount = referencedFiles(original.data,manifest);
     stage = fs.mkdtempSync(path.join(parent,'.tvs-sqlite-stage-')); identity = fs.lstatSync(stage);
     sqlite.create(stage,{data:original.data,revisions:original.revisions});
-    const copiedFiles = copyManaged(source,stage,manifest), parity = verifyDatabase(stage,original);
+    const copiedFiles = copyManaged(source,stage,manifest,original.data), parity = verifyDatabase(stage,original);
     const after = sourceManifest(source);
     if (JSON.stringify(manifest) !== JSON.stringify(after)) fail('MIGRATION_SOURCE_CHANGED','Исходная база изменилась во время копирования. Целевая база не создана.');
     if (stat(target) || fold(checkedDirectory(path.dirname(target))) !== fold(parent)) fail('MIGRATION_TARGET_EXISTS','Целевой путь изменился во время копирования');

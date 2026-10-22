@@ -119,6 +119,8 @@
     return { issues,counts:{ error:issues.filter(issue=>issue.severity==='error').length,warning:issues.filter(issue=>issue.severity==='warning').length,total:issues.length } };
   }
   function validateChanges(previous,next,context) {
+    const archiveRows=db=>rows(db,'appMeta').filter(row=>row.id==='document-archive-head'||row.kind==='documentArchive').map(row=>Object.keys(row).sort().map(key=>[key,row[key]]));
+    if(JSON.stringify(archiveRows(previous))!==JSON.stringify(archiveRows(next))){const error=new Error('Архив печати изменяется только проверенным сохранением снимка');error.code='DOCUMENT_ARCHIVE_IMMUTABLE';error.status=403;throw error;}
     const calendar=getCalendarOperations?.();if(calendar?.apiVersion===1)calendar.validateChanges(previous,next,context);else if(['appMeta'].some(name=>JSON.stringify(rows(previous,name).filter(row=>row.id==='business-calendar'||row.kind==='businessCalendar'))!==JSON.stringify(rows(next,name).filter(row=>row.id==='business-calendar'||row.kind==='businessCalendar')))||['dispatchJobs','workOrders'].some(name=>rows(next,name).some(row=>{const matches=rows(previous,name).filter(old=>old.id===row.id),old=matches.length===1?matches[0]:{};return (name==='dispatchJobs'?['start','end','actualStart','actualEnd','timeContext']:['downtimeFrom','downtimeTo','completedAt','timeContext']).some(field=>JSON.stringify(old[field])!==JSON.stringify(row[field]));})))throw Object.assign(Error('Не загружены правила рабочего календаря'),{code:'MODULE_UNAVAILABLE'});
     const old = inspect(previous,context).issues, current = inspect(next,context).issues;
     const key = issue => JSON.stringify([issue.section,issue.recordId,issue.code,issue.field,issue.relatedRecordId || '']);

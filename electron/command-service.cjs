@@ -60,7 +60,7 @@ function execute(dataDir,input,options={}){
         return filteredResult(platform.replayResult(snapshot.data,snapshot.revisions,token,info,changed),principal);
       }
       storage.assertWritable(dataDir);
-      requireAccess(principal,'write',periodAction?footprint.filter(name=>name!=='fuelPeriods'):costPolicy?footprint.filter(name=>name!==command.input.target.section):footprint);
+      requireAccess(principal,'write',periodAction?footprint.filter(name=>name!=='fuelPeriods'):costPolicy?footprint.filter(name=>name!==command.input.target.section):command.type==='PrintAction'?[]:footprint);
       const missing=dependencies.filter(name=>!own(envelope.base,name));
       if(missing.length)fail('COMMAND_BASE_REQUIRED','Для команды нужны версии всех её зависимостей: '+missing.join(', '),428);
       const conflicts=dependencies.filter(name=>envelope.base[name]!==snapshot.revisions[name]);
@@ -82,7 +82,8 @@ function execute(dataDir,input,options={}){
     };
     // Do not split snapshot, dependency checks and business/audit writes across
     // SQLite snapshots. Nested storage calls reuse this write connection.
-    return sqlite.exists(dataDir)?sqlite.transaction(dataDir,action,{readOnly:sqlite.schemaVersion(dataDir)<2}):action();
+    const result=sqlite.exists(dataDir)?sqlite.transaction(dataDir,action,{readOnly:sqlite.schemaVersion(dataDir)<2}):action();
+    require('./document-archive.cjs').recover(dataDir);return result;
   });
 }
 module.exports=Object.freeze({execute});

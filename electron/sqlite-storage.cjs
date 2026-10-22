@@ -303,4 +303,4 @@ function inspect(dataDir){return transaction(dataDir,()=>{
     sections,rowCount:sections.reduce((total,row)=>total+row.count,0),linkCount:db.prepare('SELECT count(*) AS count FROM row_links').get().count,
     legacyIssues:db.prepare('SELECT issue_json FROM reference_issues ORDER BY id').all().map(row=>JSON.parse(row.issue_json)),integrity:integrityCheck,foreignKeyErrors};
 },{readOnly:true});}
-module.exports={exists,filename,readAll,readRows,queryRows,countLegacyAssetReferences,readRevisions,readIdentity,schemaVersion,commitSections,create,inspect,transaction};
+module.exports={inTransaction:dataDir=>held.has(location(dataDir).key),exists,filename,readAll,readRows,queryRows,countLegacyAssetReferences,readRevisions,readIdentity,schemaVersion,commitSections,create,inspect,transaction};

@@ -8,7 +8,7 @@ function platformPrepareBackgroundStatus(){return {active:_platformPrepareActive
 function platformPrepareAccessStamp(context){
   const list=value=>value==null?null:[...new Set(value)].sort();
   const procurement=context.procurementActions==null?null:{tank:list(context.procurementActions.tank),part:list(context.procurementActions.part)};
-  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fuelActions:list(context.fuelActions),procurementActions:procurement,costActions:list(context.costActions),repairActions:list(context.repairActions),calendarActions:list(context.calendarActions),calendar:context.calendar||null,fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
+  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fuelActions:list(context.fuelActions),procurementActions:procurement,costActions:list(context.costActions),repairActions:list(context.repairActions),calendarActions:list(context.calendarActions),printActions:list(context.printActions),calendar:context.calendar||null,fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
 }
 function platformPrepareError(code,message){return Object.assign(Error(message),{name:'PlatformKernelError',code});}
 function platformPrepareGuard(job){
@@ -74,6 +74,7 @@ function platformSessionContext() {
     costActions:access&&Array.isArray(access.costActions)?access.costActions.slice():undefined,
     repairActions:access&&Array.isArray(access.repairActions)?access.repairActions.slice():undefined,
     calendarActions:access&&Array.isArray(access.calendarActions)?access.calendarActions.slice():undefined,
+    ...(Array.isArray(access?.printActions)?{printActions:access.printActions.slice()}:{}),
     calendar:calendar?{version:calendar.version,mode:calendar.mode,timeZone:calendar.timeZone,stamp:calendar.stamp}:undefined,
     fieldPermissions:access?.fieldPermissions || null,
     actor:user ? { id:user.id, name:user.name || user.id, role:user.role } : { id:'local', name:'Локальный пользователь', role:'admin' },
@@ -139,12 +140,37 @@ async function platformExecuteSave(database, options, persist) {
   }
 }
 const _platformCommandIntents=new Map(),PLATFORM_COMMAND_HISTORY=64;
+function platformCapturePrintArchiveContext(){
+  return {database:data,stamp:syncSessionStamp(),access:platformPrepareAccessStamp(platformSessionContext()),databaseToken:_sync.databaseToken,
+    source:Object.fromEntries(['appMeta','auditLog'].map(name=>[name,JSON.stringify(data[name]||[])])),
+    synced:Object.fromEntries(['appMeta','auditLog'].map(name=>[name,_sync.synced[name]||'[]']))};
+}
+function platformApplyPrintArchiveAck(result,captured){
+  if(result?.archiveHeadChanged!==true)return {ok:true};
+  try{
+    if(!captured||captured.database!==data||captured.stamp!==syncSessionStamp()||captured.access!==platformPrepareAccessStamp(platformSessionContext())||captured.databaseToken!==_sync.databaseToken||result.databaseToken!==captured.databaseToken||_sync.platform?.documentPrint!==1)
+      throw Error('База или права изменились во время выгрузки.');
+    const canonical=result.canonicalSections,names=['appMeta','auditLog'];
+    if(!canonical||Object.keys(canonical).some(name=>!names.includes(name))||names.some(name=>!Array.isArray(canonical[name])||!Number.isSafeInteger(result.revisions?.[name])||result.revisions[name]<(_sync.revs[name]||0)))throw Error('Не подтверждены версии архива печати.');
+    PlatformContracts.validateSections(canonical,PlatformSchema.sections);
+    if(names.some(name=>captured.source[name]!==captured.synced[name]||captured.source[name]!==JSON.stringify(data[name]||[])||captured.synced[name]!==(_sync.synced[name]||'[]')))throw Error('В связанных настройках или истории появились изменения.');
+    const ordinary=rows=>rows.filter(row=>row.id!=='document-archive-head'&&row.kind!=='documentArchive');
+    if(PlatformKernel.stableSerialize(ordinary(canonical.appMeta))!==PlatformKernel.stableSerialize(ordinary(data.appMeta||[])))throw Error('Настройки базы изменились на другом компьютере.');
+    const baseline=platformSaveBaseline();
+    for(const name of names){const rows=JSON.parse(JSON.stringify(canonical[name]));data[name]=rows;baseline[name]=JSON.parse(JSON.stringify(rows));_sync.synced[name]=JSON.stringify(rows);_sync.revs[name]=result.revisions[name];}
+    _lastPersisted=JSON.stringify(baseline);scheduleLocalBackup(_lastPersisted);return {ok:true};
+  }catch(error){
+    _sync.needRefresh=[...new Set([...(_sync.needRefresh||[]),'appMeta','auditLog'])];
+    return {ok:false,needsReload:true,code:'PRINT_ARCHIVE_RELOAD',error:error.message+' Сохранённый экземпляр не потерян; обновите данные перед следующей операцией.'};
+  }
+}
 function platformCommandFailure(code,message,extra={}){return {ok:false,code,error:message,message,...extra};}
 function platformCompactCommandResult(result){
   const retained={};
   for(const key of ['ok','unknown','queued','committed','needsReload','code','databaseToken'])if(Object.hasOwn(result,key))retained[key]=result[key];
   for(const key of ['error','message'])if(typeof result[key]==='string')retained[key]=result[key].slice(0,2000);
   if(result.operationReceipt)retained.operationReceipt=Object.fromEntries(['id','digest','status','at'].filter(key=>Object.hasOwn(result.operationReceipt,key)).map(key=>[key,result.operationReceipt[key]]));
+  if(result.archive&&typeof result.archive.id==='string')retained.archive=Object.fromEntries(['id','snapshotFingerprint'].filter(key=>typeof result.archive[key]==='string').map(key=>[key,result.archive[key]]));
   return retained;
 }
 function platformCommandDocumentScope(command,source){
@@ -235,6 +261,8 @@ function platformExecuteCommand(value,options={}){
           throw platformPrepareError('UNSUPPORTED_REPAIRS','Подключение не поддерживает проверенный ремонтный процесс. Загрузите данные из совместимой версии программы.');
         if(command.type==='CalendarAction'&&_sync.platform?.calendar!==1)
           throw platformPrepareError('UNSUPPORTED_CALENDAR','Подключение не поддерживает учётный календарь. Загрузите данные из совместимой версии программы.');
+        if(command.type==='PrintAction'&&_sync.platform?.documentPrint!==1)
+          throw platformPrepareError('UNSUPPORTED_DOCUMENT_PRINT','Подключение не поддерживает сохранённые печатные редакции. Загрузите данные из совместимой версии программы.');
         if(platformCommandNeedsPersonnelPlanning(command,source)&&_sync.platform?.personnelPlanning!==1)
           throw platformPrepareError('UNSUPPORTED_PERSONNEL_PLANNING','Подключение не поддерживает планирование сотрудников. Загрузите данные из совместимой версии программы.');
         if(names.some(name=>captured[name]!==(_sync.synced[name]||'[]')))
@@ -256,15 +284,17 @@ function platformExecuteCommand(value,options={}){
           return platformCommandFailure('ACK_REQUIRED','Ответ не подтвердил именно эту команду. Проверьте её в очереди операций.',{unknown:true,queued:true});
         acknowledged=true;guard();
         let canonical=response.canonicalSections,revisions=response.revisions;
-        const expected=[...new Set([...writes,'auditLog'])];
-        if(!canonical||writes.some(name=>!Array.isArray(canonical[name]))){
+        const archiveExtra=response.archiveHeadChanged===true&&_sync.platform?.documentPrint===1?['appMeta']:[];
+        const requiredWrites=[...new Set([...writes,...archiveExtra])];
+        const expected=[...new Set([...writes,...archiveExtra,'auditLog'])];
+        if(!canonical||requiredWrites.some(name=>!Array.isArray(canonical[name]))){
           const raw=await window.electronAPI.readSnapshot();syncEnsureSession(stamp);
           const snapshot=typeof raw==='string'?JSON.parse(raw):raw;
           syncAssertDatabase(snapshot);guard();
           if(JSON.stringify(snapshot?.access||null)!==JSON.stringify(_sync.access||null))throw platformPrepareError('STALE_ACCESS','Права изменились. Загрузите базу заново.');
           canonical=Object.fromEntries(expected.filter(name=>Array.isArray(snapshot?.data?.[name])).map(name=>[name,snapshot.data[name]]));revisions=snapshot?.revisions;
         }
-        if(!canonical||Object.keys(canonical).some(name=>!expected.includes(name))||writes.some(name=>!Array.isArray(canonical[name]))||Object.keys(canonical).some(name=>!Number.isSafeInteger(revisions?.[name])||revisions[name]<0))
+        if(!canonical||Object.keys(canonical).some(name=>!expected.includes(name))||requiredWrites.some(name=>!Array.isArray(canonical[name]))||Object.keys(canonical).some(name=>!Number.isSafeInteger(revisions?.[name])||revisions[name]<0))
           throw platformPrepareError('CANONICAL_ACK_REQUIRED','Операция сохранена, но её данные не удалось подтвердить. Загрузите базу заново.');
         PlatformContracts.validateSections(canonical,PlatformSchema.sections);guard();
         // Only acknowledged sections become persisted. Other unsaved local
@@ -288,6 +318,7 @@ function platformExecuteCommand(value,options={}){
 async function platformFlushForClose(){
   let ready=typeof frcFlush==='function'?await frcFlush():true;
   if(typeof personnelPlanningFlush==='function'&&!await personnelPlanningFlush())ready=false;
+  if(typeof documentPrintFlush==='function'&&!await documentPrintFlush())ready=false;
   if(ready)document.activeElement?.blur();
   while(typeof _pendingSaveOperations!=='undefined'&&_pendingSaveOperations.size){
     const results=await Promise.allSettled([..._pendingSaveOperations]);
@@ -295,6 +326,7 @@ async function platformFlushForClose(){
   }
   if(typeof frcHasPendingEdits==='function'&&frcHasPendingEdits())ready=false;
   if(typeof personnelPlanningHasPendingEdits==='function'&&personnelPlanningHasPendingEdits())ready=false;
+  if(typeof documentPrintHasPendingEdits==='function'&&documentPrintHasPendingEdits())ready=false;
   return ready;
 }
 if(window.electronAPI?.onPrepareClose)window.electronAPI.onPrepareClose(async nonce=>{

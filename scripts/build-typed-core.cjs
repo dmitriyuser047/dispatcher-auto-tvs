@@ -20,6 +20,12 @@ const ENTRIES=Object.freeze([
     {path:'./personnel-engine.js',global:'TvsPersonnelEngine',lazy:true}, {path:'./document-engine.js',global:'DocumentEngine',lazy:true},
     {path:'./business-calendar.js',global:'BusinessCalendar',lazy:true},
   ]}),
+  Object.freeze({source:'src/core/document-print.ts',output:'assets/core/document-print.js',global:'DocumentPrint',factory:'createDocumentPrint',dependencies:[
+    {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./platform-schema.js',global:'PlatformSchema'},
+    {path:'./entity-identity.js',global:'EntityIdentity'}, {path:'./decimal-core.js',global:'DecimalCore'},
+    {path:'./document-engine.js',global:'DocumentEngine',lazy:true}, {path:'./business-calendar.js',global:'BusinessCalendar',lazy:true},
+    {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
+  ]}),
   Object.freeze({source:'src/core/document-engine.ts',output:'assets/core/document-engine.js',global:'DocumentEngine',factory:'createDocumentEngine',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./platform-schema.js',global:'PlatformSchema'},
     {path:'./entity-identity.js',global:'EntityIdentity'}, {path:'./decimal-core.js',global:'DecimalCore'},
@@ -109,6 +115,7 @@ const ENTRIES=Object.freeze([
     {path:'./calendar-operations.js',global:'CalendarOperations'},
     {path:'./business-calendar.js',global:'BusinessCalendar'},
     {path:'./personnel-planning.js',global:'PersonnelPlanning'},
+    {path:'./document-print.js',global:'DocumentPrint',lazy:true},
   ]}),
 ]);
 const normalize=text=>text.replace(/\r\n?/g,'\n');

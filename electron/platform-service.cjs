@@ -18,6 +18,7 @@ function principalOf(principal) {
 }
 function visibleAudit(rows, principal) {
   return (rows || []).filter(row => row && typeof row.section === 'string' && require('./document-access.cjs').permitted(principal, 'read', row.section) &&
+    (!(row.printCapture||row.printArtifact)||Array.isArray(row.archiveReadSections)&&row.archiveReadSections.every(name=>require('./document-access.cjs').permitted(principal,'read',name)))&&
     (row.type !== 'transaction' || Array.isArray(row.changedSections) && row.changedSections.every(name => require('./document-access.cjs').permitted(principal, 'read', name)))&&require('./document-access.cjs').auditAccess(principal,row)&&require('./period-access.cjs').auditAccess(principal,row)).map(row=>require('./period-access.cjs').visibleAuditRow(row,principal));
 }
 function visibleRows(name,rows,principal){return name==='auditLog'?visibleAudit(rows,principal):name==='fuelPeriods'?require('./period-access.cjs').visibleRows(rows,principal):require('./document-access.cjs').visibleRows(name,rows,principal);}
@@ -26,6 +27,7 @@ function findReceipt(rows,query,principal,token){
   const operation=contracts().validateOperation(query),actor=principalOf(principal);
   const receipt=(rows||[]).find(row=>row?.source==='platform'&&row.type==='transaction'&&row.operationId===operation.id&&
     row.actorId===actor.id&&row.actorRole===actor.role&&row.databaseToken===token&&row.requestDigest===operation.digest&&
+    (!(row.printCapture||row.printArtifact)||Array.isArray(row.archiveReadSections)&&row.archiveReadSections.every(name=>require('./document-access.cjs').permitted(principal||actor,'read',name)))&&
     Array.isArray(row.changedSections)&&row.changedSections.every(name=>require('./document-access.cjs').permitted(principal||actor,'read',name))&&require('./document-access.cjs').auditAccess(principal||actor,row)&&require('./period-access.cjs').auditAccess(principal||actor,row));
   return receipt ? {id:operation.id,digest:receipt.requestDigest,status:'committed',at:receipt.at} : null;
 }
@@ -41,7 +43,7 @@ function operationInfo(previous, sections, options = {}) {
   const receipt = (previous.auditLog || []).find(row => row.source === 'platform' && row.type === 'transaction' && row.operationId === operation.id);
   if (receipt && (receipt.requestDigest !== digest || receipt.actorId !== actor.id || receipt.actorRole !== actor.role || receipt.databaseToken !== options.databaseToken))
     fail('OPERATION_REUSED', 'Этот идентификатор операции уже использован для другого состава, пользователя или базы', 409);
-  return { id:operation.id, digest, actor, receipt };
+  return { id:operation.id, digest, actor, principal:options.principal||actor, receipt };
 }
 function replayResult(previous, revisions, token, info, names) {
   if (!info?.receipt) return null;
@@ -50,7 +52,10 @@ function replayResult(previous, revisions, token, info, names) {
     if (!access.authorize(info.actor, 'read', name)) continue;
     canonicalSections[name] = visibleRows(name,previous[name],info.actor);
   }
+  const archive=info.receipt.printCapture?info.receipt.archiveSeals?.[0]:null;
+  if(archive&&Array.isArray(info.receipt.archiveReadSections)&&info.receipt.archiveReadSections.some(name=>!require('./document-access.cjs').permitted(info.principal||info.actor,'read',name)))fail('ACCESS_DENIED','Недостаточно прав для печатного снимка',403);
   return { ok:true, changed:[], revisions, databaseToken:token, canonicalSections, replayed:true,
+    ...(info.receipt.archiveSeals?.length?{archiveHeadChanged:true}:{}),...(archive?{archive:{id:archive.id,snapshotFingerprint:archive.snapshotFingerprint}}:{}),
     operationReceipt:{ id:info.id, digest:info.digest, status:'replayed', at:info.receipt.at } };
 }
 function assertAuditPrefix(previous, sections, actor) {
@@ -95,8 +100,9 @@ function canonicalShiftAcceptance(previous,sections,actor,at,context) {
 function prepareTransaction(previous, supplied, options = {}) {
   const registry = schema().sections, actor = principalOf(options.principal);
   contracts().validateSections(supplied,registry);
-  const info = operationInfo(previous, supplied, { ...options, principal:actor });
+  const info = operationInfo(previous, supplied, { ...options, principal:options.principal||actor });
   if (info?.receipt) return { replayed:true, operation:info };
+  require('./document-archive.cjs').assertHead(previous,{...previous,...supplied});
   assertAuditPrefix(previous, supplied, options.principal||actor);
   // Client-generated audit suffixes are hints, never persisted as trusted facts.
   let sections = require('./period-access.cjs').mergePeriods(previous,require('./document-access.cjs').mergeDrafts(previous,Object.fromEntries(Object.entries(supplied).filter(([name]) => name !== 'auditLog')),options.principal||actor),options.principal||actor);

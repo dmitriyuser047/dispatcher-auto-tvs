@@ -17,11 +17,12 @@ interface RepairActions {apiVersion:number;dependencies(input:RepairActionInput)
 interface CalendarActions {apiVersion:number;dependencies(input:CalendarActionInput):string[];footprint(input:CalendarActionInput):string[];plan(database:unknown,input:CalendarActionInput,context:CommandContext):CommandPlan}
 interface BusinessCalendar {apiVersion:number;context(database:unknown,context:CommandContext):unknown;canonicalizeIntervals(previous:unknown,sections:SectionRows,context:CommandContext,options?:unknown):SectionRows}
 interface PersonnelPlanning {apiVersion:number;dependencies():string[];captureShiftContext(database:unknown,shift:JsonRow,context:CommandContext):{snapshot:JsonRow}}
+interface DocumentPrint {apiVersion:number;dependencies(request:unknown):string[];prepare(database:unknown,request:unknown,context:unknown):{canCapture:boolean;sourceFingerprint:string;blockers:unknown[]};capture(database:unknown,request:unknown,context:unknown):unknown}
 type Contracts = ReturnType<typeof createPlatformContracts>;
 interface CommandError extends Error { code: string; status: number; field?: string }
 
 /** Pure semantic actions. Storage still owns ACL, CAS, audit and atomic commit. */
-export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, fuel: FuelRules, fuelEngine: FuelEngine,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions,calendarActions?:CalendarActions,calendar?:BusinessCalendar,planning?:PersonnelPlanning) {
+export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, fuel: FuelRules, fuelEngine: FuelEngine,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions,calendarActions?:CalendarActions,calendar?:BusinessCalendar,planning?:PersonnelPlanning,getPrinting?:()=>DocumentPrint) {
   if (!contracts || contracts.apiVersion !== 1 || !personnel || personnel.apiVersion !== 1 || !fuel || fuel.apiVersion !== 1 || typeof fuelEngine?.parseFuelGrade !== 'function')
     throw new Error('Не загружены общие правила команд платформы');
   function fail(code: string,message: string,field?: string): never {
@@ -45,8 +46,10 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   function costOperations():CostActions {if(!costActions||costActions.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены общие правила себестоимости');return costActions;}
   function repairOperations():RepairActions {if(!repairActions||repairActions.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены общие правила ремонтного процесса');return repairActions;}
   function calendarOperations():CalendarActions {if(!calendarActions||calendarActions.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила учётного календаря');return calendarActions;}
+  function printModule():DocumentPrint {const printing=getPrinting?.();if(!printing||printing.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены печатные модели документов');return printing;}
   function footprint(value: unknown): string[] {
     const command=parseCommand(value);
+    if(command.type==='PrintAction')return ['appMeta'];
     if(command.type==='DocumentAction')return documentModule().footprint(command.input);
     if(command.type==='PeriodAction')return periodModule().footprint(command.input);
     if(command.type==='FuelAction')return fuelOperations().footprint(command.input);
@@ -64,6 +67,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   }
   function commandDependencies(value: unknown): string[] {
     const command=parseCommand(value);
+    if(command.type==='PrintAction')return printModule().dependencies(command.input.request);
     if(command.type==='DocumentAction')return documentModule().dependencies(command.input);
     if(command.type==='PeriodAction')return periodModule().dependencies(command.input);
     if(command.type==='FuelAction')return fuelOperations().dependencies(command.input);
@@ -218,7 +222,14 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     const command=parseCommand(value),ctx=context(metadata),db=database(source,dependencies(command));
     calendar?.context(db,ctx);
     let result:CommandPlan;
-    if(command.type==='DocumentAction')result=documentModule().plan(db,command.input,ctx);
+    if(command.type==='PrintAction'){
+      const prepared=printModule().prepare(db,command.input.request,{...ctx,timing:command.input.request.mode==='manual'?'manual':'late'});
+      if(!prepared.canCapture)fail('PRINT_SOURCE_UNAVAILABLE','Печатная модель недоступна; проверьте исходный документ');
+      if(prepared.sourceFingerprint!==command.input.reviewFingerprint)fail('STALE_REVIEW','Источники печати изменились после проверки');
+      printModule().capture(db,command.input.request,{...ctx,timing:command.input.request.mode==='manual'?'manual':'late'});
+      result={sections:{},readSections:dependencies(command),writeSections:['appMeta'],entityIds:{}};
+    }
+    else if(command.type==='DocumentAction')result=documentModule().plan(db,command.input,ctx);
     else if(command.type==='PeriodAction')result=periodModule().plan(db,command.input,ctx);
     else if(command.type==='FuelAction')result=fuelOperations().plan(db,command.input,ctx);
     else if(command.type==='ProcurementAction')result=procurementOperations().plan(db,command.input,ctx);

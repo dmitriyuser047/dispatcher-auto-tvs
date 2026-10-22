@@ -356,6 +356,7 @@ function writeAll(dataDir, data, options = {}) {
   // A confirmed command can be retried after its own commit advanced revisions.
   // Resolve it before CAS, just as writeSections does.
   if (operation?.receipt) return platform.filteredResult(platform.replayResult(previous, revisions, token, operation, Object.keys(data)),options.principal);
+  require('./document-archive.cjs').validateState(dataDir,previous);
   assertWritable(dataDir);
   if (options.replace !== true && (options.requireBase || options.base !== undefined)) {
     const base = options.base;
@@ -384,12 +385,13 @@ function writeAll(dataDir, data, options = {}) {
     const conflicts = candidates.filter(name => revisions[name] !== base[name]);
     if (conflicts.length) return { ok:false, conflicts, revisions, databaseToken:token };
   }
-  const prepared = platform.prepareTransaction(previous, data, { ...options, databaseToken:token, revisions,
+  let prepared = platform.prepareTransaction(previous, data, { ...options, databaseToken:token, revisions,
     prepareSections:sections => {
       const canonical = prepareWriteoffSections(previous, sections, options);
       validatePlanningChanges(previous, canonical); return canonical;
     } });
   if (prepared.replayed) return platform.filteredResult(platform.replayResult(previous, revisions, token, prepared.operation, Object.keys(data)),options.principal);
+  prepared=require('./document-archive.cjs').prepareCommit(dataDir,previous,prepared,options);
   data = prepared.sections;
   const changed = [];
   const sections = {};
@@ -409,6 +411,7 @@ function writeAll(dataDir, data, options = {}) {
   if(changed.length&&options.beforeCommit!==undefined){if(typeof options.beforeCommit!=='function')throw Error('Ожидалась синхронная подготовка записи');const result=options.beforeCommit();if(result&&typeof result.then==='function')throw Error('Подготовка записи должна быть синхронной');}
   commitSections(dataDir, sections, revisions);
   return platform.filteredResult({ ok:true, changed, revisions, databaseToken:token, canonicalSections:sections,
+    ...(prepared.archiveHeadChanged?{archiveHeadChanged:true}:{}),...(prepared.archive?{archive:prepared.archive}:{}),
     ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) },options.principal);
 }
 
@@ -425,7 +428,8 @@ function readSnapshot(dataDir,options={}) {
   let data = readAll(dataDir);
   if(options.principal)data=Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?require('./platform-service.cjs').visibleRows(name,data[name],options.principal):[]]));
   const version=schemaVersion(dataDir);
-  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:version,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,calendar:version>=2?1:0,personnelPlanning:version>=2?1:0,needsSchemaUpgrade:version<2 } };
+  require('./document-archive.cjs').validateState(dataDir,data);
+  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:version,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,calendar:version>=2?1:0,personnelPlanning:version>=2?1:0,documentPrint:version>=2?1:0,needsSchemaUpgrade:version<2 } };
 }
 function readOperation(dataDir,query,principal){
   const token=databaseToken(dataDir),audit=readSection(dataDir,'auditLog');
@@ -454,16 +458,18 @@ function writeSections(dataDir, payload, options = {}) {
   const context = { ...options, operation:payload?.operation || options.operation, base, revisions, databaseToken:token };
   const operation = platform.operationInfo(previous, sections, context);
   if (operation?.receipt) return platform.filteredResult(platform.replayResult(previous, revisions, token, operation, names),options.principal);
+  require('./document-archive.cjs').validateState(dataDir,previous);
   assertWritable(dataDir);
   const calendarRead=names.some(name=>(name==='dispatchJobs'||name==='workOrders')&&JSON.stringify(previous[name])!==JSON.stringify(sections[name]));
   if(calendarRead&&(!Object.hasOwn(base,'appMeta')||!Number.isSafeInteger(base.appMeta)||base.appMeta<0)){const error=new Error('Для сохранения интервала нужна исходная версия рабочего календаря. Загрузите базу заново.');error.code='CALENDAR_CONTEXT_REQUIRED';error.status=428;throw error;}
   const conflicts = [...new Set([...names,...(calendarRead?['appMeta']:[])])].filter(n => (revisions[n] || 0) !== (base[n] || 0));
   if (conflicts.length) return { ok: false, conflicts, revisions, databaseToken: token };
-  const prepared = platform.prepareTransaction(previous, sections, { ...context,
+  let prepared = platform.prepareTransaction(previous, sections, { ...context,
     prepareSections:supplied => {
       const canonical = prepareWriteoffSections(previous, supplied, options);
       validatePlanningChanges(previous, canonical); return canonical;
     } });
+  prepared=require('./document-archive.cjs').prepareCommit(dataDir,previous,prepared,options);
   sections = prepared.sections;
   const changed = [];
   const pending = {};
@@ -487,7 +493,7 @@ function writeSections(dataDir, payload, options = {}) {
   }
   commitSections(dataDir, pending, revisions);
   return platform.filteredResult({ ok: true, changed, revisions, databaseToken: token,
-    canonicalSections:pending, ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) },options.principal);
+    canonicalSections:pending,...(prepared.archiveHeadChanged?{archiveHeadChanged:true}:{}),...(prepared.archive?{archive:prepared.archive}:{}), ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) },options.principal);
 }
 
 /** Ежедневная резервная копия: складываем разделы обратно в один файл */
@@ -495,12 +501,13 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
   if(schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION)return null;
   if (!isSplit(dataDir)) return null;
   const today = new Date().toISOString().slice(0, 10);
-  const dest = path.join(backupDir, 'data_' + today + '.json');
+  const archiveAware=!!require('./document-archive.cjs').head(readAll(dataDir));
+  const dest = path.join(backupDir, 'data_' + today + (archiveAware?'.zip':'.json'));
   if (fs.existsSync(dest)) return null;
   fs.mkdirSync(backupDir, { recursive: true });
-  writeJsonAtomic(dest, readAll(dataDir));
+  if(archiveAware)require('./backup-service.cjs').createPackage({sourceDir:dataDir,archivePath:dest,allowOwnedLock:true});else writeJsonAtomic(dest, readAll(dataDir));
   const list = fs.readdirSync(backupDir)
-    .filter(f => f.startsWith('data_') && f.endsWith('.json')).sort();
+    .filter(f => /^data_\d{4}-\d{2}-\d{2}\.(?:json|zip)$/.test(f)).sort();
   const keep = keepDays || 30;
   if (list.length > keep) {
     list.slice(0, list.length - keep).forEach(f => {
@@ -514,9 +521,13 @@ module.exports = {
   SECTIONS, sectionsDir, sectionFile, revisionsFile,schemaVersion,assertWritable,encodeRevisions:storageFormat.encodeRevisions,
   databaseToken, withDatabaseLock, validateRows, prepareWriteoffSections,
   executeCommand:(dataDir,envelope,options)=>require('./command-service.cjs').execute(dataDir,envelope,options),
+  commitPrintArtifact:(dataDir,input,options)=>withDatabaseLock(dataDir,()=>{const sql=sqliteBackend(dataDir),action=()=>require('./document-archive.cjs').commitArtifact(dataDir,input,options,commitSections);const result=sql?sql.transaction(dataDir,action):action();require('./document-archive.cjs').recover(dataDir);return result;}),
+  isDatabaseLockHeld:dataDir=>heldLocks.has(canonicalDirectory(dataDir)),
   ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot,readOperation }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, () => {
     const sqlite = sqliteBackend(dataDir), action = () => operation(dataDir,...args);
-    if (!sqlite || ['isSplit','migrate'].includes(name)) return action();
-    return sqlite.transaction(dataDir,action,{ readOnly:!['writeAll','writeSections'].includes(name)||sqlite.schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION });
+    const writing=['writeAll','writeSections'].includes(name),nested=sqlite?.inTransaction(dataDir);
+    const result=!sqlite||['isSplit','migrate'].includes(name)?action():sqlite.transaction(dataDir,action,{readOnly:!writing||sqlite.schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION});
+    if(writing&&!nested)require('./document-archive.cjs').recover(dataDir);
+    return result;
   })])),
 };

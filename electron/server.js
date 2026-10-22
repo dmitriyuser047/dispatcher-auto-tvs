@@ -33,7 +33,7 @@ function filteredRevisions(revisions, principal) {
   return Object.fromEntries(storage.SECTIONS.map(name => [name, readable(principal, name) ? revisions[name] || 0 : 0]));
 }
 function publicAccess(principal) {
-  return { user:{ id:principal.id, name:principal.name, role:principal.role, legacy:!!principal.legacy }, readable:storage.SECTIONS.filter(n => readable(principal,n)), writable:storage.SECTIONS.filter(n => access.authorize(principal,'write',n)), fieldPermissions:access.fieldPermissions(principal),periodActions:require('./period-access.cjs').actions(principal),fuelActions:access.fuelActions(principal),procurementActions:access.procurementActions(principal),costActions:access.costActions(principal),repairActions:access.repairActions(principal),calendarActions:access.calendarActions(principal) };
+  return { user:{ id:principal.id, name:principal.name, role:principal.role, legacy:!!principal.legacy }, readable:storage.SECTIONS.filter(n => readable(principal,n)), writable:storage.SECTIONS.filter(n => access.authorize(principal,'write',n)), fieldPermissions:access.fieldPermissions(principal),periodActions:require('./period-access.cjs').actions(principal),fuelActions:access.fuelActions(principal),procurementActions:access.procurementActions(principal),costActions:access.costActions(principal),repairActions:access.repairActions(principal),calendarActions:access.calendarActions(principal),printActions:access.printActions(principal) };
 }
 
 function readBody(req) {
@@ -114,7 +114,7 @@ function getLocalIPs() {
   return Object.values(os.networkInterfaces()).flat().filter(net => net && net.family === 'IPv4' && !net.internal).map(net => net.address);
 }
 
-function start({port,dataDir,backupFn,serverName,key,settings,users,tls}) {
+function start({port,dataDir,backupFn,serverName,key,settings,users,tls,renderPdf}) {
   if (_server) return {ok:false,error:'Сервер уже запущен'};
   if (typeof settings !== 'function') configureAccess(settings || {networkKey:key,serverUsers:users || []});
   const settingsProvider = typeof settings === 'function' ? settings : () => _accessSettings;
@@ -139,6 +139,9 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls}) {
     }
     if(req.method==='POST'&&req.url==='/api/commands'){
       void commandRequest(req,res,authenticateRequest);return;
+    }
+    if(req.method==='POST'&&req.url==='/api/document-print'){
+      void (async()=>{try{const payload=await readBody(req);const result=await require('./document-archive.cjs').handle(dataDir,payload,{principal,renderPdf,getPrincipal:authenticateRequest});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'DOCUMENT_PRINT_FAILED',error:error.message});}})();return;
     }
     if (req.method !== 'GET') { respond(res,404,{ok:false,error:'Неизвестный запрос'}); return; }
     try {
@@ -262,6 +265,7 @@ async function postCommands(host,port,jsonStr) {
   if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_COMMANDS'};
   return parseResponse(response,true);
 }
+async function postDocumentPrint(host,port,jsonStr){const response=await request(host,port,'/api/document-print',jsonStr,45000);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_DOCUMENT_PRINT'};return parseResponse(response,true);}
 async function ping(host,port) { try { return parseResponse(await request(host,port,'/api/ping',null,5000)); } catch { return null; } }
 
-module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,postCommands,configureKey,configureTransport,configureAccess};
+module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,postCommands,postDocumentPrint,configureKey,configureTransport,configureAccess};

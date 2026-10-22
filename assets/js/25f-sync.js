@@ -39,7 +39,7 @@ const _sync = { enabled: false, revs: {}, synced: {}, databaseToken:null, access
 
 function syncSessionStamp() {
   return JSON.stringify([typeof dispatcherContext === 'function' ? dispatcherContext().identity : _sync.databaseToken,
-    _sync.access?.user?.id, _sync.access?.user?.role, _sync.access?.readable, _sync.access?.writable, _sync.access?.fieldPermissions, _sync.access?.periodActions, _sync.access?.fuelActions, _sync.access?.procurementActions, _sync.access?.costActions, _sync.access?.repairActions, _sync.access?.calendarActions]);
+    _sync.access?.user?.id, _sync.access?.user?.role, _sync.access?.readable, _sync.access?.writable, _sync.access?.fieldPermissions, _sync.access?.periodActions, _sync.access?.fuelActions, _sync.access?.procurementActions, _sync.access?.costActions, _sync.access?.repairActions, _sync.access?.calendarActions, _sync.access?.printActions]);
 }
 function syncEnsureSession(stamp) {
   if (stamp !== syncSessionStamp()) throw Object.assign(new Error('База или права пользователя изменились во время операции. Обновите данные перед повтором.'),{code:'SESSION_CHANGED'});

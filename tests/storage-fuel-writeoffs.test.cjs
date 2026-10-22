@@ -41,13 +41,18 @@ function posted(t) {
 }
 
 test('old databases gain an empty writeoff section and backups preserve posted snapshots', t => {
-  const dir = temp(t), source = fixture(); storage.writeAll(dir, source);
+  const root = temp(t), dir=path.join(root,'source'), source = fixture(); storage.writeAll(dir, source);
   assert.deepEqual(storage.readAll(dir).fuelWriteoffs, []);
   assert.deepEqual(storage.readAll(dir).records, source.records);
   const result = save(dir, { fuelWriteoffs:[document(storage.readAll(dir))] });
   assert.ok(result.changed.includes('fuelWriteoffs'));
-  const backup = storage.makeDailyBackup(dir, path.join(dir, 'backups'));
-  assert.deepEqual(JSON.parse(fs.readFileSync(backup, 'utf8')).fuelWriteoffs, storage.readAll(dir).fuelWriteoffs);
+  const backup = storage.makeDailyBackup(dir, path.join(root, 'backups'));
+  assert.match(backup,/\.zip$/);
+  const recovery=require('../electron/backup-service.cjs'),restored=path.join(root,'restored');
+  assert.equal(recovery.verifyPackage({archivePath:backup}).ok,true);
+  recovery.restorePackage({archivePath:backup,targetDir:restored,protectedDir:dir});
+  assert.deepEqual(storage.readSnapshot(restored).data.fuelWriteoffs, storage.readAll(dir).fuelWriteoffs);
+  assert.equal(require('../electron/document-archive.cjs').head(storage.readAll(restored)),require('../electron/document-archive.cjs').head(storage.readAll(dir)));
 });
 
 test('storage validates a post and replaces client authors and timestamps with trusted metadata', t => {

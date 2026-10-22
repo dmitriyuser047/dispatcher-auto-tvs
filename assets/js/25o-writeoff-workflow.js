@@ -70,6 +70,7 @@ function gsmWriteoffWorkspaceHtml() {
     '<section class="gsm-writeoff-registry" aria-label="Сохранённые акты"><h3>Сохранённые акты <span>' + docs.length + '</span></h3><p class="gsm-status">Выгрузка проведённого акта использует сохранённый снимок. Аннулированные акты остаются в истории.</p>' +
     (docs.length ? docs.map(doc => '<article class="gsm-writeoff-document"><div><strong>Акт № ' + fpEsc(doc.number) + '</strong><span class="gsm-writeoff-state' + (doc.status === 'void' ? ' is-void' : '') + '">' + (doc.status === 'void' ? 'Аннулирован' : 'Проведён') + '</span><p>' + fpEsc([doc.scope.org || 'Все организации', doc.scope.grade || 'Все марки топлива', fmtDate(doc.date)].join(' · ')) + '</p><small>' + fpEsc(gsmWriteoffActorName(doc.postedBy)) + ' · ' + fpEsc(new Date(doc.postedAt).toLocaleString('ru-RU')) + '</small>' +
       (doc.basisNote ? '<p>Основание: ' + fpEsc(doc.basisNote) + '</p>' : '') + (doc.status === 'void' ? '<p>Причина: ' + fpEsc(doc.voidReason || doc.reason || '') + '</p>' : '') + '</div><div class="gsm-actions"><button type="button" class="btn btn-ghost btn-sm" data-writeoff-action="export-posted" data-writeoff-id="' + fpEsc(doc.id) + '" onclick="gsmExportPostedWriteoff(' + gsmArg(doc.id) + ')">Выгрузить ' + (doc.status === 'void' ? 'копию' : 'акт') + '</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-writeoff-action="print-copy" onclick="gsmPrintWriteoff(' + gsmArg(doc.id) + ')">Предпросмотр / сохранить печатный экземпляр</button><button type="button" class="btn btn-ghost btn-sm" data-writeoff-action="print-archive" onclick="documentPrintArchiveOpen({section:&quot;fuelWriteoffs&quot;,id:' + gsmArg(doc.id) + '})">Архив печати</button>' +
       (doc.status === 'posted' && gsmWriteoffCanWrite() ? '<button type="button" class="btn btn-ghost btn-sm" data-writeoff-action="void" data-writeoff-id="' + fpEsc(doc.id) + '" onclick="gsmVoidWriteoffDialog(' + gsmArg(doc.id) + ')">Аннулировать</button>' : '') + '</div></article>').join('') : '<div class="gsm-overview-empty">За выбранный месяц и фильтры проведённых актов пока нет.</div>') + '</section></section>';
 }
 function gsmWriteoffIssueLinks(issue) {
@@ -195,7 +196,7 @@ function gsmWriteoffWorkbook(doc, draft) {
   const wb = gsmActWorkbook(doc.snapshot.ledger, doc.scope.org, { sourceData, issues:doc.issues, draft:!!draft, voided:doc.status === 'void', voidReason:doc.voidReason,
     actNo:doc.number || gsmActNo, actDate:doc.date || gsmActDateValue(), fuelGrade:doc.scope.grade });
   gsmExportSheet(wb, 'Паспорт акта', [['Поле','Значение'], ['Статус',doc.status === 'void' ? 'Аннулирован' : draft ? 'Черновик' : 'Проведён'],
-    ['Идентификатор',doc.id || ''], ['Номер',doc.number || ''], ['Период',doc.scope.month], ['Организация',doc.scope.org || 'Все организации'], ['Топливо',doc.scope.grade || 'Все марки'],
+    ['Идентификатор',doc.id ?? ''], ['Номер',doc.number || ''], ['Период',doc.scope.month], ['Организация',doc.scope.org || 'Все организации'], ['Топливо',doc.scope.grade || 'Все марки'],
     ['Проведён',doc.postedAt || ''], ['Пользователь',gsmWriteoffActorName(doc.postedBy)], ['Основание',doc.basisNote || ''], ['Отпечаток источников',doc.sourceFingerprint],
     ['Аннулирован',doc.voidedAt || ''], ['Кем аннулирован',gsmWriteoffActorName(doc.voidedBy)], ['Причина аннулирования',doc.voidReason || doc.reason || '']], 2);
   return wb;
@@ -216,3 +217,5 @@ function gsmExportPostedWriteoff(id) {
     XLSX.writeFile(wb, (doc.status === 'void' ? 'Аннулированный_акт_ГСМ_' : 'Акт_ГСМ_') + name + '_' + doc.scope.month + '.xlsx'); return wb;
   } catch (error) { showToast(error.message); return null; }
 }
+
+function gsmPrintWriteoff(id){if(!gsmWriteoffCanRead()){showToast('Недостаточно прав для чтения сохранённого акта.');return null;}return documentPrintOpen({mode:'document',source:{section:'fuelWriteoffs',id},revision:'exact',templateId:'fuelWriteoff',templateVersion:1});}

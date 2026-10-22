@@ -4,7 +4,7 @@
   if(typeof module==='object'&&module.exports)module.exports=factory(require('./platform-schema.js'),require('./platform-integrity.js'));
   else{
     if((!root.PlatformIntegrity||!root.PlatformPolicies)&&typeof importScripts==='function')importScripts(
-      './dispatcher-core.js','./entity-identity.js','./accounting-boundary.js','./decimal-core.js','./effective-periods.js','./temporal-policy.js','./fuel-engine.js','./writeoff-engine.js','./platform-schema.js','./reference-graph.js','./catalog-merge.js','./catalog-policy.js','./platform-contracts.js','./business-calendar.js','./calendar-operations.js','./personnel-planning.js','./document-engine.js','./fuel-stock.js','./inventory-stock.js','./period-policy.js','./fuel-operations.js','./procurement-operations.js','./precision-policy.js',
+      './dispatcher-core.js','./entity-identity.js','./accounting-boundary.js','./decimal-core.js','./effective-periods.js','./temporal-policy.js','./fuel-engine.js','./writeoff-engine.js','./platform-schema.js','./reference-graph.js','./catalog-merge.js','./catalog-policy.js','./platform-contracts.js','./business-calendar.js','./calendar-operations.js','./personnel-planning.js','./document-print.js','./document-engine.js','./fuel-stock.js','./inventory-stock.js','./period-policy.js','./fuel-operations.js','./procurement-operations.js','./precision-policy.js',
       './personnel-engine.js','./financial-recognition.js','./fuel-movement-policy.js','./cost-valuation.js','./cost-operations.js','./repair-process.js','./repair-operations.js','./document-lifecycle.js',
       './workflow-policy.js','./platform-policies.js','./platform-integrity.js');
     const api=factory(root.PlatformSchema,root.PlatformIntegrity);root.PlatformHealthWorker=api;

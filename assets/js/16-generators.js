@@ -573,6 +573,7 @@ function exportGenWriteOffActProjected(dateFrom, dateTo, opts) {
     put(n,0,loc,ST.org); merge(n,0,n,6); rowH(n,15); n++;
     put(n,0,'',ST.sp); merge(n,0,n,NC); rowH(n,4); n++;
     // Заголовок
+    put(n,0,'ЧЕРНОВИК · По текущим данным · Не проведённый документ',ST.title); merge(n,0,n,NC); fillRow(n,ST.title); rowH(n,20); n++;
     put(n,0,`Акт на списание материалов № ${opts.actNo||'____'} от ${fmtDate(opts.actDate)} г.`,ST.title); merge(n,0,n,NC); fillRow(n,ST.title); rowH(n,20); n++;
     put(n,0,'Настоящий акт составлен о том, что нижеперечисленные материалы израсходованы в полном объеме.',ST.plain); merge(n,0,n,NC); rowH(n,14); n++;
     put(n,0,`Цель расхода: Производственно-хозяйственные нужды ${loc}   ·   Период: ${periodLabel}`,ST.plain); merge(n,0,n,NC); rowH(n,14); n++;
@@ -676,6 +677,6 @@ function exportGenWriteOffActProjected(dateFrom, dateTo, opts) {
   const d = new Date();
   const ds = `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}.${d.getFullYear()}`;
   const suffix = (opts.loc && opts.loc!=='__ALL__') ? '_'+opts.loc.replace(/[^\wА-Яа-яЁё]+/g,'').slice(0,20) : '_все';
-  XLSX.writeFile(wb, `Акт_ГСМ_ДЭС${suffix}_${ds}.xlsx`);
+  XLSX.writeFile(wb, `Черновик_Акт_ГСМ_ДЭС${suffix}_${ds}.xlsx`);
 }
 

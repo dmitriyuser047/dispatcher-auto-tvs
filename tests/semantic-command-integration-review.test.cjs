@@ -33,7 +33,7 @@ function fixture(t,format='json'){
   vm.runInContext('let _loadWriteBlocked=false;\n'+fs.readFileSync(path.join(__dirname,'../assets/js/25f-sync.js'),'utf8')+'\n'+fs.readFileSync(path.join(__dirname,'../assets/js/51-platform-bridge.js'),'utf8')+
     '\nglobalThis.state=_sync;globalThis.entries=_platformCommandIntents;globalThis.runCommand=platformExecuteCommand;globalThis.getBaseline=()=>JSON.parse(_lastPersisted);'+
     'globalThis.replaceData=(database,baseline)=>{data=database;_lastPersisted=JSON.stringify(baseline);};',realm);
-  const state=realm.state;state.enabled=true;state.databaseToken=snapshot.databaseToken;state.platform={apiVersion:1,operations:1,commands:1,outbox:1};state.revs={...snapshot.revisions};
+  const state=realm.state;state.enabled=true;state.databaseToken=snapshot.databaseToken;state.platform={...snapshot.platform};state.revs={...snapshot.revisions};
   state.synced=Object.fromEntries(schema.sections.map(name=>[name,JSON.stringify(snapshot.data[name]||[])]));
   return {dir,box,realm,state,context,calls,config,principal,command:{type:'IssueFuel',version:1,input:{tankId:5,target:{section:'vehicles',id:7},date:'2026-10-22',qty:100,reason:'Synthetic independent review'}},
     setSend:hook=>{sendHook=hook;},setRead:hook=>{readHook=hook;},restart:()=>{service=freshService(createCommandOutbox(config));},
@@ -44,7 +44,7 @@ function fixture(t,format='json'){
 for(const format of ['json','sqlite']){
   test(format+' actual bridge applies acknowledged command while keeping unrelated dirty editors out of the persisted baseline',async t=>{
     const f=fixture(t,format),before=copy(f.realm.getBaseline());f.realm.data.parts.push({id:'unsaved-part',name:'Unrelated local editor'});
-    const result=await f.realm.runCommand(f.command,{operationId:'review-known'});assert.equal(result.ok,true);
+    const result=await f.realm.runCommand(f.command,{operationId:'review-known'});assert.equal(result.ok,true,JSON.stringify(result));
     assert.equal(f.realm.data.records.length,1);assert.equal(f.realm.data.fuelMovements.length,1);assert.equal(f.realm.data.parts.length,1);
     assert.deepEqual(copy(f.realm.getBaseline().parts),before.parts);assert.deepEqual(f.disk().data.parts,before.parts);
     assert.equal(f.realm.getBaseline().records.length,1);assert.equal(f.realm.__backups.length,1);assert.deepEqual(JSON.parse(f.realm.__backups[0]).parts,before.parts);
@@ -86,7 +86,7 @@ test('a mismatched committed receipt cannot apply canonical rows or turn the dur
   assert.equal((await f.reconcile('review-wrong-receipt')).committed,true);assert.equal(f.disk().data.fuelMovements.length,1);
 });
 test('a malformed canonical payload after a valid commit receipt reports needsReload and never partially applies its sections',async t=>{
-  const f=fixture(t),before=JSON.stringify(f.realm.data);f.setSend(async(ctx,json)=>({...f.send(json),canonicalSections:{records:[],fuelMovements:[],unknown:[]}}));
+  const f=fixture(t),before=JSON.stringify(f.realm.data);f.setSend(async(ctx,json)=>{const result=f.send(json);return{...result,canonicalSections:{...result.canonicalSections,unknown:[]}};});
   const result=await f.realm.runCommand(f.command,{operationId:'review-bad-canonical'});assert.equal(result.ok,false);assert.equal(result.committed,true);assert.equal(result.needsReload,true);assert.equal(JSON.stringify(f.realm.data),before);assert.equal(f.realm.__backups.length,0);assert.equal(f.box.list(f.context.scope)[0].status,'committed');
 });
 test('a missing canonical ACK triggers readSnapshot and rechecks local dependencies after that second await',async t=>{
@@ -100,7 +100,7 @@ test('two identical renderer calls share one pending request and a changed body 
   const changed=copy(f.command);changed.input.qty=1;const rejected=await f.realm.runCommand(changed,{operationId:'review-join'});assert.equal(rejected.code,'COMMAND_ID_REUSED');gate.resolve();assert.equal((await first).ok,true);assert.equal(f.calls.length,1);assert.equal(f.disk().data.fuelMovements.length,1);
 });
 test('completed renderer command history retains only a compact proof and an exact small intent, while an already-applied repeat performs no I/O',async t=>{
-  const f=fixture(t),result=await f.realm.runCommand(f.command,{operationId:'review-compact'});assert.equal(result.ok,true);assert.ok(result.canonicalSections.records.length);
+  const f=fixture(t),result=await f.realm.runCommand(f.command,{operationId:'review-compact'});assert.equal(result.ok,true,JSON.stringify(result));assert.ok(result.canonicalSections.records.length);
   const entry=f.realm.entries.get('review-compact');assert.equal(entry.pending,null);
   for(const name of ['canonicalSections','revisions','changed','issues','sections'])assert.equal(Object.hasOwn(entry.result,name),false);
   assert.ok(JSON.stringify(entry.result).length<2048);assert.deepEqual(copy(entry.envelope.command),f.command);assert.equal(entry.envelope.operation.digest,result.operationReceipt.digest);

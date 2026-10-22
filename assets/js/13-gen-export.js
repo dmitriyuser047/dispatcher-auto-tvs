@@ -317,7 +317,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
   const toHdrs=['Генератор','Дата','Вид ТО','Счётчик, мтч','След. ТО, мтч','Дата след. ТО','Стоимость ТО, руб.','Исполнитель','Примечание'];
   toHdrs.forEach((h,c)=>put(R(),c,h,ST.tHead));
   merge(R(),8,R(),NC);fill(R(),ST.tHead);rowH(R(),28);next();
-  const allToRecs=(data.toRecords||[]).filter(r=>(data.generators||[]).some(g=>g.id===r.generatorId))
+  const allToRecs=(typeof DocumentEngine!=='undefined'?DocumentEngine.activeRows(data,'toRecords'):data.toRecords||[]).filter(r=>(data.generators||[]).some(g=>g.id===r.generatorId)&&(!dateFrom||r.date>=dateFrom)&&(!dateTo||r.date<=dateTo))
     .sort((a,b)=>cmpDateAsc(a.date, b.date));
   if(!allToRecs.length){
     const sE=cs({sz:10,italic:true,color:{rgb:P.gray4}},P.white,{horizontal:'center',vertical:'center'},bAll('thin',P.gray3));
@@ -505,7 +505,7 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
 
   // ─── ИСТОРИЯ ТО ───────────────────────────────────────────
   hdr('  ИСТОРИЯ ТЕХНИЧЕСКОГО ОБСЛУЖИВАНИЯ', ST.secT);
-  const toRecs=(data.toRecords||[]).filter(r=>r.generatorId===gid)
+  const toRecs=(typeof DocumentEngine!=='undefined'?DocumentEngine.activeRows(data,'toRecords'):data.toRecords||[]).filter(r=>r.generatorId===gid&&(!dateFrom||r.date>=dateFrom)&&(!dateTo||r.date<=dateTo))
     .sort((a,b)=>cmpDateAsc(a.date, b.date));
   ['Дата','Вид ТО','Счётчик, мтч','След. ТО, мтч','Дата след. ТО','Стоимость ТО, руб.','Исполнитель','Примечание','','','']
     .forEach((h,c)=>put(R(),c,h,ST.tHead));

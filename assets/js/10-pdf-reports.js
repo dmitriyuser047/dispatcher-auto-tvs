@@ -289,7 +289,7 @@ function exportAllGensToPdf(dateFrom, dateTo){
     +'</tr></thead><tbody>'+rows+'</tbody></table>';
 
   // ── История ТО ──
-  const allToRecs=(data.toRecords||[]).filter(r=>gens.some(g=>g.id===r.generatorId)).sort((a,b)=>cmpDateAsc(a.date, b.date));
+  const allToRecs=(typeof DocumentEngine!=='undefined'?DocumentEngine.activeRows(data,'toRecords'):data.toRecords||[]).filter(r=>gens.some(g=>g.id===r.generatorId)&&(!dateFrom||r.date>=dateFrom)&&(!dateTo||r.date<=dateTo)).sort((a,b)=>cmpDateAsc(a.date, b.date));
   let toBody='';
   if(!allToRecs.length){
     toBody='<tr><td colspan="9" class="c zero" style="font-style:italic">Нет записей ТО</td></tr>';

@@ -65,6 +65,10 @@ export type RepairActionInput =
 export type CalendarActionInput =
   | {action:'configure';timeZone:string;reason:string;reviewFingerprint:string}
   | {action:'confirmInterval';target:{section:'dispatchJobs'|'workOrders';id:Identifier};reason:string;reviewFingerprint:string};
+export type PrintRequest =
+  | {mode:'document';source:{section:DocumentSection;id:Identifier};revision:'exact'|'current';templateId:'document'|'fuelWriteoff';templateVersion:1}
+  | {mode:'manual';form:'waybill'|'fuelRequest'|'workAct';target:{section:'vehicles';id:Identifier};fields:{date?:string|null;number?:string|null;route?:string|null;qty?:number|null;fuelType?:string|null;description?:string|null;amount?:number|null;org?:string|null;driver?:string|null};templateVersion:1};
+export interface PrintActionInput {request:PrintRequest;reviewFingerprint:string}
 export type DocumentActionInput =
   | {action:'saveDraft';section:DocumentSection;draftId?:Identifier;payload:JsonRow;correctionOf?:DocumentReference;reason?:string}
   | {action:'postDraft';section:DocumentSection;draftId:Identifier;reviewFingerprint:string}
@@ -83,7 +87,8 @@ export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelI
   | { type: 'ProcurementAction'; version: 1; input: ProcurementActionInput }
   | { type: 'CostAction'; version: 1; input: CostActionInput }
   | { type: 'RepairAction'; version: 1; input: RepairActionInput }
-  | { type: 'CalendarAction'; version: 1; input: CalendarActionInput };
+  | { type: 'CalendarAction'; version: 1; input: CalendarActionInput }
+  | { type: 'PrintAction'; version: 1; input: PrintActionInput };
 export interface CommandEnvelope { protocolVersion: 1; databaseToken: string; operation: OperationDescriptor; base: Revisions; command: PlatformCommand }
 export interface ContractError extends Error { code: string; field: string; status: number }
 
@@ -230,10 +235,35 @@ export function createPlatformContracts() {
   }
   function costText(value:unknown,field:string):string {const result=commandText(value,field,true,2000);if(result.trim().length<3)fail('INVALID_COMMAND',field,'Укажите основание от 3 до 2000 знаков');return result;}
   function costAmount(value:unknown,field:string):number {if(typeof value!=='number'||!Number.isFinite(value)||value<0||value>1e12)fail('INVALID_COMMAND',field,'Нужно неотрицательное число до 1 000 000 000 000');return value;}
+  function validatePrintRequest(value:unknown):PrintRequest {
+    const request=commandObject(commandJson(value,'request'),'request');
+    if(request.templateVersion!==1)fail('COMMAND_VERSION','request.templateVersion','Версия печатного шаблона не поддерживается');
+    if(request.mode==='document'){
+      keys(request,['mode','source','revision','templateId','templateVersion'],'request');
+      const source=commandObject(request.source,'request.source');keys(source,['section','id'],'request.source');
+      if(request.revision!=='exact'&&request.revision!=='current')fail('INVALID_COMMAND','request.revision','Выберите точную или текущую редакцию');
+      if(request.templateId!=='document'&&request.templateId!=='fuelWriteoff')fail('INVALID_COMMAND','request.templateId','Выберите печатный шаблон');
+      return {mode:'document',source:{section:documentSection(source.section,'request.source.section'),id:commandId(source.id,'request.source.id')},revision:request.revision,templateId:request.templateId,templateVersion:1};
+    }
+    if(request.mode!=='manual')fail('INVALID_COMMAND','request.mode','Выберите документ или явно заполненную форму');
+    keys(request,['mode','form','target','fields','templateVersion'],'request');
+    if(request.form!=='waybill'&&request.form!=='fuelRequest'&&request.form!=='workAct')fail('INVALID_COMMAND','request.form','Неизвестная ручная форма');
+    const selected=target(request.target,'request.target');if(selected.section!=='vehicles')fail('INVALID_COMMAND','request.target.section','Ручная форма предназначена для транспорта');
+    const fields=commandObject(request.fields,'request.fields');keys(fields,['date','number','route','qty','fuelType','description','amount','org','driver'],'request.fields');
+    const result:Extract<PrintRequest,{mode:'manual'}>={mode:'manual',form:request.form,target:{section:'vehicles',id:selected.id},fields:{},templateVersion:1};
+    if(fields.date!==undefined)result.fields.date=fields.date===null||fields.date===''?fields.date:commandDate(fields.date,'request.fields.date');
+    for(const key of ['number','route','fuelType','description','org','driver'] as const)if(fields[key]!==undefined)result.fields[key]=fields[key]===null?null:commandText(fields[key],'request.fields.'+key,false);
+    for(const key of ['qty','amount'] as const)if(fields[key]!==undefined)result.fields[key]=fields[key]===null?null:costAmount(fields[key],'request.fields.'+key);
+    return result;
+  }
   function validateCommand(value: unknown): PlatformCommand {
     const row = commandObject(commandJson(value,'command'),'command'); keys(row,['type','version','input'],'command');
     if (row.version !== 1) fail('COMMAND_VERSION', 'command.version', 'Версия команды не поддерживается');
     const input = commandObject(row.input,'command.input'), path = 'command.input.';
+    if(row.type==='PrintAction'){
+      keys(input,['request','reviewFingerprint'],'command.input');
+      return {type:'PrintAction',version:1,input:{request:validatePrintRequest(input.request),reviewFingerprint:reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint')}};
+    }
     if (row.type === 'IssueFuel') {
       keys(input,['tankId','target','date','qty','reason','legacyOverlapConfirmed'],'command.input');
       if (typeof input.qty !== 'number' || !Number.isFinite(input.qty) || input.qty <= 0) fail('INVALID_COMMAND',path+'qty','Количество топлива должно быть больше нуля');
@@ -447,5 +477,5 @@ export function createPlatformContracts() {
     const token=commandText(row.databaseToken,'databaseToken',true,16384);
     return {protocolVersion:1,databaseToken:token,operation:validateOperation(operation),base:validateRevisions(row.base,registry),command:validateCommand(row.command)};
   }
-  return Object.freeze({ apiVersion: 1 as const, identifier, validateOperation, validateSections, validateRevisions, parseSectionWrite, validateCommand, parseCommandEnvelope });
+  return Object.freeze({ apiVersion: 1 as const, identifier, validateOperation, validateSections, validateRevisions, parseSectionWrite, validateCommand, parseCommandEnvelope,validatePrintRequest });
 }

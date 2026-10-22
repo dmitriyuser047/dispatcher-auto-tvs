@@ -99,6 +99,11 @@ function assertDataBinding(event, token) {
   return binding;
 }
 let recoveryService=null;
+let documentPrintRenderer=null;
+function renderArchivedDocumentPdf(snapshot){
+  if(!documentPrintRenderer)documentPrintRenderer=require('./document-print-renderer.cjs').createDocumentPrintRenderer({BrowserWindow,session});
+  return documentPrintRenderer(snapshot);
+}
 function capturedOperationContext(event,binding=assertDataBinding(event)){
   const client=settings.networkMode==='client',principal=client?binding.notificationAccess?.user:{id:'local-profile',name:getActiveUser().name||'Локальный пользователь',role:'admin'};
   const identity=settingsIdentity(),scope=require('node:crypto').createHash('sha256').update(JSON.stringify([
@@ -530,6 +535,25 @@ app.whenReady().then(() => {
       return { ok: false, error: e.message };
     }
   });
+  ipcMain.handle('document-print',async(event,payload)=>{
+    let archiveAck={};
+    try{
+      const context=await verifiedOperationContext(event);
+      if(dataBindings.get(context.senderId)?.platform?.documentPrint!==1)return {ok:false,unsupported:true,code:'UNSUPPORTED_DOCUMENT_PRINT',error:'Подключение не поддерживает сохранённые печатные редакции.'};
+      if(!payload||typeof payload!=='object'||Array.isArray(payload)||!['preview','list','read','export'].includes(payload.action))throw Object.assign(Error('Неизвестное действие печати'),{code:'PRINT_ACTION'});
+      const invoke=()=>context.client?server.postDocumentPrint(context.host,context.port,JSON.stringify(payload)):require('./document-archive.cjs').handle(context.directory,payload,{principal:context.principal,renderPdf:renderArchivedDocumentPdf});
+      const result=await invoke();assertOperationContext(context);
+      if(payload.action!=='export'||result?.ok!==true)return result;
+      archiveAck=Object.fromEntries(['archiveHeadChanged','canonicalSections','revisions','databaseToken'].filter(name=>Object.hasOwn(result,name)).map(name=>[name,result[name]]));
+      const bytes=require('./document-print-export.cjs').verifiedBytes(result,payload);
+      const format=payload.format;
+      const choice=await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender),{title:'Сохранить печатную редакцию',defaultPath:path.join(app.getPath('documents'),'Документ_'+payload.archiveId+'.'+format),filters:[{name:format==='pdf'?'PDF документ':'Книга Excel',extensions:[format]}]});
+      if(choice.canceled||!choice.filePath)return {ok:false,canceled:true,archiveId:payload.archiveId,format,...archiveAck};
+      assertOperationContext(context);await verifiedOperationContext(event);assertOperationContext(context);
+      fs.writeFileSync(choice.filePath,bytes);
+      return {ok:true,saved:true,archiveId:payload.archiveId,format,size:bytes.length,sha256:result.sha256,path:choice.filePath,...archiveAck};
+    }catch(error){return {ok:false,code:error.code||'PRINT_FAILED',error:error.message,...archiveAck};}
+  });
   ipcMain.handle('execute-command',async(event,json)=>{
     try{
       const contracts=require('../assets/core/platform-contracts.js');
@@ -596,7 +620,7 @@ app.whenReady().then(() => {
       const hasLegacy = fs.existsSync(path.join(dir, 'data.json'));
       let backups = [];
       try {
-        backups = fs.readdirSync(getBackupDir()).filter(name => /^data_\d{4}-\d{2}-\d{2}\.json$/.test(name))
+        backups = fs.readdirSync(getBackupDir()).filter(name => /^data_\d{4}-\d{2}-\d{2}\.(?:json|zip)$/.test(name))
           .map(name => ({ name, time: fs.statSync(path.join(getBackupDir(), name)).mtimeMs }))
           .sort((a, b) => b.time - a.time);
       } catch {}
@@ -652,6 +676,7 @@ app.whenReady().then(() => {
       dataDir: startupDir,
       backupFn: () => { storage.makeDailyBackup(startupDir,path.join(startupDir,'backups'),30); },
       serverName: user.name || os.hostname(),
+      renderPdf:renderArchivedDocumentPdf,
       key: settings.networkKey,
       settings:()=>settings,
       tls:settings.serverProtocol==='https:'?{cert:fs.readFileSync(settings.serverTlsCert),key:fs.readFileSync(settings.serverTlsKey)}:null,

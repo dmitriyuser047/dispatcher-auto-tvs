@@ -83,3 +83,21 @@ test('explicit exports fail before output when metadata or its shared dependency
  }
  const invalid=fixture();invalid.vehicles[0].fuelAccounting.opening='923.537';const h=app(invalid);assert.throws(()=>h.context.exportAllToXlsx(),{code:'INVALID_ACCOUNTING_BOUNDARY'});assert.equal(h.books.length,0);
 });
+
+test('actual DES PDF and both XLSX exports use each active TO revision once and preserve typed zero roots',()=>{
+ const db=fixture(),actor={id:'synthetic',name:'Synthetic receiver',role:'admin'};
+ db.toRecords=[{id:0,generatorId:'g',date:'2026-09-10',type:'SYNTHETIC_OLD_100',cost:100},{id:'revision',generatorId:'g',date:'2026-09-10',type:'SYNTHETIC_CURRENT_80',cost:80,lifecycle:{version:1,postedAt:'2026-10-22T10:00:00.000Z',postedActor:actor,operationId:'revision',correctionOf:{section:'toRecords',id:0}}},{id:'0',generatorId:'g',date:'2026-09-10',type:'SYNTHETIC_TEXT_ROOT_7',cost:7},{id:'outside',generatorId:'g',date:'2026-08-10',type:'SYNTHETIC_OUTSIDE_PERIOD',cost:50}];
+ const h=app(db);h.context.DocumentEngine=require('../assets/core/document-engine.js');
+ for(const [name,args]of [['exportAllGensToXlsx',[]],['exportOneGenToXlsx',['g']]]){
+  const sheet=h.xlsx(name,...args,'2026-09-01','2026-09-30'),all=rows(sheet).flat().join('|');
+  assert.match(all,/SYNTHETIC_CURRENT_80/);assert.match(all,/SYNTHETIC_TEXT_ROOT_7/);assert.doesNotMatch(all,/SYNTHETIC_OLD_100|SYNTHETIC_OUTSIDE_PERIOD/);
+ }
+ const html=h.pdf('exportAllGensToPdf','2026-09-01','2026-09-30');assert.match(html,/SYNTHETIC_CURRENT_80/);assert.match(html,/SYNTHETIC_TEXT_ROOT_7/);assert.doesNotMatch(html,/SYNTHETIC_OLD_100|SYNTHETIC_OUTSIDE_PERIOD/);
+});
+
+test('an ambiguous TO correction chain stops actual exports instead of printing a partial total',()=>{
+ for(const [name,args]of [['exportAllGensToXlsx',[]],['exportOneGenToXlsx',['g']],['exportAllGensToPdf',[]]]){
+  const db=fixture(),parent={section:'toRecords',id:0};db.toRecords=[{id:0,generatorId:'g',date:'2026-09-10',cost:100},...['first','second'].map(id=>({id,generatorId:'g',date:'2026-09-10',cost:80,lifecycle:{version:1,correctionOf:parent}}))];
+  const h=app(db);h.context.DocumentEngine=require('../assets/core/document-engine.js');assert.throws(()=>h.context[name](...args),{code:'DOCUMENT_CHAIN'});assert.equal(h.books.length,0);assert.equal(h.pdfs.length,0);
+ }
+});

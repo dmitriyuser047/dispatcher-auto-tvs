@@ -122,14 +122,15 @@ test('unknown ACK retry reuses the exact envelope including original dependency 
  const second=await page.evaluate(async()=>{window.__nativeMode='ok';for(const name of PlatformCommands.dependencies(window.__nativeCommand))_sync.revs[name]+=10;return platformExecuteCommand(window.__nativeCommand,{operationId:'unknown-native-command'});});assert.equal(second.ok,true);assert.equal(second.operationReceipt.status,'replayed');const requests=await page.evaluate(()=>window.__nativeRequests);assert.equal(requests.length,2);assert.equal(requests[0],requests[1]);assert.equal(await page.evaluate(()=>window.__nativeCommits),1);assert.equal(await page.evaluate(()=>data.fuelMovements.length),1);
 });
 
-for(const kind of ['database','role','fieldPermissions','costActions','source'])test('a '+kind+' change during IPC prevents the late canonical ACK from overwriting current data',async()=>{
- if(kind==='fieldPermissions'||kind==='costActions')await page.evaluate(()=>{_sync.access={user:{id:'same-admin',name:'Same admin',role:'admin'},readable:PlatformSchema.sections.slice(),writable:PlatformSchema.sections.slice(),fieldPermissions:{vehicles:['plate']},costActions:['savePolicy']};});
+for(const kind of ['database','role','fieldPermissions','costActions','printActions','source'])test('a '+kind+' change during IPC prevents the late canonical ACK from overwriting current data',async()=>{
+ if(kind==='fieldPermissions'||kind==='costActions'||kind==='printActions')await page.evaluate(()=>{_sync.access={user:{id:'same-admin',name:'Same admin',role:'admin'},readable:PlatformSchema.sections.slice(),writable:PlatformSchema.sections.slice(),fieldPermissions:{vehicles:['plate']},costActions:['savePolicy'],printActions:['capture']};});
  const baseline=await page.evaluate(()=>_lastPersisted);await start('stale-native-'+kind);
  await page.evaluate(kind=>{
   if(kind==='database'){const replacement=structuredClone(data);replacement.vehicles[0].plate='NEW-SYNTHETIC-DATABASE';data=replacement;_sync.databaseToken='synthetic-command-IPC-B';_lastPersisted=JSON.stringify(replacement);}
   else if(kind==='role')_sync.access={user:{id:'synthetic-viewer',name:'Viewer',role:'viewer'},readable:PlatformSchema.sections.slice(),writable:[]};
   else if(kind==='fieldPermissions')_sync.access.fieldPermissions.vehicles.push('note');
   else if(kind==='costActions')_sync.access.costActions.push('saveAllocation');
+  else if(kind==='printActions')_sync.access.printActions=[];
   else data.vehicles[0].note='New local source change';
  },kind);const captured=await page.evaluate(()=>({data:JSON.stringify(data),baseline:_lastPersisted}));await release();const result=await page.evaluate(async()=>({result:await window.__nativeOperation,data:JSON.stringify(data),baseline:_lastPersisted,movements:data.fuelMovements.length,records:data.records.length,commits:window.__nativeCommits,raw:window.__nativeRawWrites}));assert.equal(result.result.ok,false);assert.equal(result.data,captured.data);assert.equal(result.baseline,captured.baseline);assert.equal(result.movements,0);assert.equal(result.records,0);assert.equal(result.commits,1);assert.equal(result.raw,0);if(kind!=='database')assert.equal(result.baseline,baseline);if(kind==='source'){assert.equal(result.result.committed,true);assert.equal(result.result.needsReload,true);}
 });
