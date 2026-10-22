@@ -158,10 +158,15 @@ function costActions(principal) {
   const narrowed=principal?.writable,writable=name=>authorize(principal,'write',name)&&(!narrowed||narrowed.includes('*')||narrowed.includes(name));
   return [...(writable('costProfiles')?['savePolicy']:[]),...(writable('costEntries')?['saveAllocation']:[])];
 }
+function repairActions(principal) {
+  const narrowed=principal?.writable;
+  return ['admin','mechanic'].includes(principal?.role)&&authorize(principal,'write','workOrders')&&(!narrowed||narrowed.includes('*')||narrowed.includes('workOrders'))
+    ? ['saveOrder','approve','start','cancel'] : [];
+}
 
 function publicUser(user) {
   return { id:user.id, name:user.name, role:user.role, enabled:user.enabled !== false,
     createdAt:user.createdAt || null, rotatedAt:user.rotatedAt || null, expiresAt:user.expiresAt || null };
 }
 
-module.exports = { ROLES, FINANCIAL_SECTIONS, hashToken, issueToken, normalizeServerUsers, authenticate, authorize, publicUser, validateAssetChanges, fieldPermissions,fuelActions,procurementActions,costActions };
+module.exports = { ROLES, FINANCIAL_SECTIONS, hashToken, issueToken, normalizeServerUsers, authenticate, authorize, publicUser, validateAssetChanges, fieldPermissions,fuelActions,procurementActions,costActions,repairActions };

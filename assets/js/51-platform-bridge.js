@@ -8,7 +8,7 @@ function platformPrepareBackgroundStatus(){return {active:_platformPrepareActive
 function platformPrepareAccessStamp(context){
   const list=value=>value==null?null:[...new Set(value)].sort();
   const procurement=context.procurementActions==null?null:{tank:list(context.procurementActions.tank),part:list(context.procurementActions.part)};
-  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fuelActions:list(context.fuelActions),procurementActions:procurement,costActions:list(context.costActions),fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
+  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fuelActions:list(context.fuelActions),procurementActions:procurement,costActions:list(context.costActions),repairActions:list(context.repairActions),fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
 }
 function platformPrepareError(code,message){return Object.assign(Error(message),{name:'PlatformKernelError',code});}
 function platformPrepareGuard(job){
@@ -71,6 +71,7 @@ function platformSessionContext() {
     fuelActions:access && Array.isArray(access.fuelActions) ? access.fuelActions.slice() : undefined,
     procurementActions:access?.procurementActions?{tank:Array.isArray(access.procurementActions.tank)?access.procurementActions.tank.slice():[],part:Array.isArray(access.procurementActions.part)?access.procurementActions.part.slice():[]}:undefined,
     costActions:access&&Array.isArray(access.costActions)?access.costActions.slice():undefined,
+    repairActions:access&&Array.isArray(access.repairActions)?access.repairActions.slice():undefined,
     fieldPermissions:access?.fieldPermissions || null,
     actor:user ? { id:user.id, name:user.name || user.id, role:user.role } : { id:'local', name:'Локальный пользователь', role:'admin' },
     revisions:typeof _sync === 'undefined' ? {} : { ..._sync.revs },
@@ -172,6 +173,11 @@ function platformCommandNeedsCostAccounting(command,source){
     return false;
   });
 }
+function platformCommandNeedsRepairs(command,source){
+  if(command.type==='RepairAction')return true;
+  const scope=platformCommandDocumentScope(command,source);if(!scope)return false;
+  return scope.section==='workOrders'||scope.section==='partMovements'&&scope.candidates.some(row=>row.workOrderId!==undefined&&row.workOrderId!==null&&row.workOrderId!==''||Object.hasOwn(row,'repairReturn'));
+}
 function platformExecuteCommand(value,options={}){
   let command,id,stamp,signature,entry;
   try{
@@ -214,6 +220,8 @@ function platformExecuteCommand(value,options={}){
           throw platformPrepareError('UNSUPPORTED_PROCUREMENT','Подключение не поддерживает связанные закупки и поставки. Загрузите данные из совместимой версии программы.');
         if(platformCommandNeedsCostAccounting(command,source)&&_sync.platform?.costAccounting!==1)
           throw platformPrepareError('UNSUPPORTED_COST_ACCOUNTING','Подключение не поддерживает проверенную оценку и распределение затрат. Загрузите данные из совместимой версии программы.');
+        if(platformCommandNeedsRepairs(command,source)&&_sync.platform?.repairs!==1)
+          throw platformPrepareError('UNSUPPORTED_REPAIRS','Подключение не поддерживает проверенный ремонтный процесс. Загрузите данные из совместимой версии программы.');
         if(names.some(name=>captured[name]!==(_sync.synced[name]||'[]')))
           throw platformPrepareError('UNSAVED_COMMAND_SOURCE','Сначала сохраните или отмените изменения исходных данных команды.');
         const persisted=platformSaveBaseline();

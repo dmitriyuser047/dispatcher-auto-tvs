@@ -3,11 +3,11 @@
   'use strict';
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(require('./dispatcher-core.js'), require('./fuel-engine.js'),
-      require('../js/45-cost-engine.js'), require('../js/47-procurement-engine.js'), require('./writeoff-engine.js'),require('./fuel-audit.js'));
+      require('../js/45-cost-engine.js'), require('../js/47-procurement-engine.js'), require('./writeoff-engine.js'),require('./fuel-audit.js'),require('./repair-process.js'));
   } else {
-    root.DispatcherEngine = factory(root.DispatcherCore, root.TvsFuelEngine, root.TvsCostEngine, root.ProcurementEngine, root.TvsWriteoffEngine,root.TvsFuelAudit);
+    root.DispatcherEngine = factory(root.DispatcherCore, root.TvsFuelEngine, root.TvsCostEngine, root.ProcurementEngine, root.TvsWriteoffEngine,root.TvsFuelAudit,root.RepairProcess);
   }
-})(typeof globalThis === 'object' ? globalThis : this, function (core, fuel, costs, procurement, writeoff,audit) {
+})(typeof globalThis === 'object' ? globalThis : this, function (core, fuel, costs, procurement, writeoff,audit,repairs) {
   'use strict';
 
   const writeoffSections = Object.freeze(['vehicles', 'records', 'fuelPurchases', 'fuelCards', 'monthlyFuel', 'fuelWriteoffs']);
@@ -22,6 +22,7 @@
     costs: Object.freeze(['vehicles', 'generators', 'records', 'genRecords', 'repairs', 'vehicleTo',
       'toRecords', 'workOrders', 'payments', 'fuelPurchases', 'partMovements', 'costEntries', 'costProfiles']),
     costValuation: costValuationSections,
+    repairProcess: Object.freeze([...new Set([...costValuationSections,'shiftReports','documentDrafts'])]),
     procurement: Object.freeze(['tanks', 'parts', 'tankIncomes', 'genRecords', 'generators',
       'fuelMovements', 'partMovements', 'dispatchJobs', 'procurementRules', 'procurementOrders'])
   });
@@ -46,13 +47,17 @@
           calculate:(db, query) => writeoff.prepare(db, query) },
         writeoffPost: { version:'4', sections:sections.writeoffPost,
           calculate:(db, query) => writeoff.post(db, query.request, query.metadata) },
-        costs: { version:'4', sections:sections.costs,
+        costs: { version:'5', sections:sections.costs,
           calculate:(db, query) => costs.buildReport(db, query) },
-        costValuation: { version:'1', sections:sections.costValuation,
+        costValuation: { version:'2', sections:sections.costValuation,
           calculate:(db,query) => {
             if(typeof costs.buildFullReport!=='function')throw Object.assign(Error('Не загружен расчёт полной себестоимости'),{code:'MODULE_UNAVAILABLE'});
             return costs.buildFullReport(db,query);
           } },
+        repairProcess: {version:'1',sections:sections.repairProcess,calculate:(db,query)=>{
+          if(repairs?.apiVersion!==1||typeof repairs.packet!=='function')throw Object.assign(Error('Не загружен ремонтный процесс'),{code:'MODULE_UNAVAILABLE'});
+          return repairs.packet(db,{section:'workOrders',id:query.id},query);
+        }},
         procurement: { version:'4', sections:sections.procurement,
           calculate:(db, query) => {
             if (!query.date) throw Error('Укажите дату расчёта закупок');

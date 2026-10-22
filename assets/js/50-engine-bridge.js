@@ -36,7 +36,7 @@ function dispatcherQuery(name, options) {
   // Resolve the moving date before constructing a cache key; yesterday's plan
   // must never be returned for an otherwise identical query after midnight.
   if (name === 'procurement' && !query.date) query.date = dispatcherLocalDate();
-  if(['fuel','fuelAudit','writeoff','costs','costValuation','procurement'].includes(name)) { const prepared=dispatcherPreparedQuery(name,query);if(prepared!==null)return prepared; }
+  if(['fuel','fuelAudit','writeoff','costs','costValuation','repairProcess','procurement'].includes(name)) { const prepared=dispatcherPreparedQuery(name,query);if(prepared!==null)return prepared; }
   if (!_dispatcherRuntime) _dispatcherRuntime = DispatcherEngine.create({ maxEntries:16 });
   return _dispatcherRuntime.query(name, data, query, dispatcherContext());
 }
@@ -82,7 +82,7 @@ function dispatcherPreparedQuery(name,options) {
   return entry?structuredClone(entry.value):null;
 }
 function dispatcherRememberPrepared(name,options,value,stamp) {
-  if(!['fuel','fuelAudit','writeoff','costs','costValuation','procurement'].includes(name))return;
+  if(!['fuel','fuelAudit','writeoff','costs','costValuation','repairProcess','procurement'].includes(name))return;
   if(_dispatcherPreparedStamp!==stamp){_dispatcherPrepared.clear();_dispatcherPreparedCharacters=0;_dispatcherPreparedStamp=stamp;}
   const key=dispatcherPreparedKey(name,options),characters=JSON.stringify(value).length;
   if(characters>32*1024*1024)return;

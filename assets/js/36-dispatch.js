@@ -69,7 +69,7 @@ function dxOverviewFleetState(asset, jobs, date) {
   const linked = jobs.filter(job => job.assetRef === asset.ref && ['assigned', 'started'].includes(job.status));
   const status = String(asset.context.status || asset.row.status || '').trim();
   const repair = dxOverviewCanRead('workOrders') && (data.workOrders || []).some(order =>
-    !order.archived && order.assetRef === asset.ref && ['approved', 'repairing'].includes(order.status) &&
+    !order.archived && order.assetRef === asset.ref && order.downtime?.mode!=='none' && ['approved', 'repairing'].includes(order.status) &&
     (!order.downtimeFrom || order.downtimeFrom.slice(0, 10) <= date) &&
     (!order.downtimeTo || order.downtimeTo.slice(0, 10) >= date));
   if (repair || /ремонт|дтп|списан|продан/i.test(status)) return { label: 'Проверить статус', tone: 'is-danger', detail: repair ? 'Есть незакрытый ремонтный заказ' : status, rank: 0 };

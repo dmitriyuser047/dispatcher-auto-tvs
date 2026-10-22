@@ -18,7 +18,7 @@ beforeEach(async()=>{
  page=await browser.newPage();errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.addInitScript(()=>{
   window.__writes=0;window.__pageCalls=[];
-  window.__disk={vehicles:[{id:'async-v',plate:'SYNTHETIC-ASYNC',norm:10,fuelBalance:100,fuelGrade:'ДТ'}],records:[{id:'async-r',vehicleId:'async-v',date:'2026-10-01',km:100,fuelActual:10}],costEntries:[{id:'async-cost',assetRef:'v:async-v',date:'2026-10-01',kind:'expense',amount:100,title:'Synthetic cost',independent:true}],tanks:[{id:'async-t',name:'Synthetic tank',balanceInit:100}],appMeta:[{id:'meta',toPlanInit:'test'}]};
+  window.__disk={vehicles:[{id:'async-v',plate:'SYNTHETIC-ASYNC',norm:10,fuelBalance:100,fuelGrade:'ДТ'}],records:[{id:'async-r',vehicleId:'async-v',date:'2026-10-01',km:100,fuelActual:10}],costEntries:[{id:'async-cost',assetRef:'v:async-v',date:'2026-10-01',kind:'expense',amount:100,title:'Synthetic cost',independent:true}],workOrders:[{id:'async-repair',assetRef:'v:async-v',status:'new',title:'Synthetic defect'}],tanks:[{id:'async-t',name:'Synthetic tank',balanceInit:100}],appMeta:[{id:'meta',toPlanInit:'test'}]};
   window.electronAPI={readData:async()=>JSON.stringify(window.__disk),writeData:async()=>{window.__writes++;return false;},queryRows:async query=>{
    window.__pageCalls.push(structuredClone(query));
    if(window.__holdPage)return new Promise(resolve=>window.__resolvePage=resolve);
@@ -32,12 +32,12 @@ afterEach(async()=>{await page?.close();assert.deepEqual(errors,[]);});
 test('real browser worker returns the same isolated results for every calculation',async()=>{
  const result=await page.evaluate(async()=>{
   const before=JSON.stringify(data),answers=[];
-  for(const [name,options]of [['fuel',{from:'2026-10-01',to:'2026-10-31'}],['fuelRecords',{vehicleId:'async-v'}],['costs',{from:'2026-10-01',to:'2026-10-31'}],['costValuation',{from:'2026-10-01',to:'2026-10-31'}],['procurement',{date:'2026-10-21'}],['writeoff',{month:'2026-10',date:'2026-10-21'}]]){
+  for(const [name,options]of [['fuel',{from:'2026-10-01',to:'2026-10-31'}],['fuelRecords',{vehicleId:'async-v'}],['costs',{from:'2026-10-01',to:'2026-10-31'}],['costValuation',{from:'2026-10-01',to:'2026-10-31'}],['repairProcess',{id:'async-repair'}],['procurement',{date:'2026-10-21'}],['writeoff',{month:'2026-10',date:'2026-10-21'}]]){
    const actual=await dispatcherQueryAsync(name,options),expected=dispatcherQuery(name,options);answers.push({name,same:JSON.stringify(actual)===JSON.stringify(expected)});
   }
   return {answers,unchanged:before===JSON.stringify(data),writes:window.__writes};
  });
- assert.deepEqual(result.answers.map(row=>[row.name,row.same]),[['fuel',true],['fuelRecords',true],['costs',true],['costValuation',true],['procurement',true],['writeoff',true]]);assert.equal(result.unchanged,true);assert.equal(result.writes,0);
+ assert.deepEqual(result.answers.map(row=>[row.name,row.same]),[['fuel',true],['fuelRecords',true],['costs',true],['costValuation',true],['repairProcess',true],['procurement',true],['writeoff',true]]);assert.equal(result.unchanged,true);assert.equal(result.writes,0);
 });
 test('large cost workspace calculates off the UI thread and renders current totals',async()=>{
  await page.evaluate(()=>{data.records=Array.from({length:1500},(_,id)=>({id,vehicleId:'async-v',date:'2026-10-01',km:1,fuelActual:0}));costPeriodFrom='2026-10-01';costPeriodTo='2026-10-31';window.__ticks=0;window.__tick=setInterval(()=>window.__ticks++,1);switchSection('costs');});

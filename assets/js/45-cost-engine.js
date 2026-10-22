@@ -223,7 +223,8 @@
       add(entry, true);
     }
     for (const row of db.workOrders.filter(live)) {
-      const entry = sourceEntry('workOrders', row, { date:dateOf(row.downtimeTo || row.completedAt), amount:number(row.actualCost != null && row.actualCost !== '' ? row.actualCost : row.incurred === true ? row.cost : null), category:'Ремонт' });
+      const sourceApi=getSources();if(typeof sourceApi?.workOrderDate!=='function')throw Object.assign(Error('Не загружена дата фактического ремонта'),{code:'MODULE_UNAVAILABLE'});
+      const entry = sourceEntry('workOrders', row, { date:sourceApi.workOrderDate(row), amount:number(row.actualCost != null && row.actualCost !== '' ? row.actualCost : row.incurred === true ? row.cost : null), category:'Ремонт' });
       if (row.status !== 'accepted') { if (inPeriod(entry.date)) exclude(entry, 'Заказ не принят: согласованная сумма не является фактическим расходом', false); continue; }
       if ([row.repairId,row.vehicleToId,row.toRecordId].some(value=>value!==undefined&&value!==null&&value!=='')) { if (inPeriod(entry.date)) exclude(entry, 'Заказ связан с первичным журналом; используется сумма журнала', true); continue; }
       const possible = documents.find(document => document.assetRef === entry.assetRef && document.date === entry.date && document.category === 'Ремонт');

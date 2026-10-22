@@ -51,6 +51,17 @@ export interface CostAllocationPayload {source:CostExpenseReference;method:'manu
 export type CostActionInput =
   | {action:'savePolicy';target:CostTarget;payload:CostPolicyPayload;reason:string;reviewFingerprint:string}
   | {action:'saveAllocation';allocationId?:Identifier;payload:CostAllocationPayload;reason:string;reviewFingerprint:string};
+export interface RepairPrimaryReference {section:'repairs'|'vehicleTo'|'toRecords';id:Identifier}
+export type RepairDowntime = {mode:'interval';from:string;to?:string}|{mode:'none';basis:string};
+export interface RepairOrderPayload {
+  title:string;target:AssetTarget;owner?:string;site?:string;org?:string;description?:string;work?:string;
+  cost?:number|null;actualCost?:number|null;costIncludesMaterials?:boolean|null;contragentId?:Identifier;invoiceNo?:string;
+  primary?:RepairPrimaryReference|null;downtime?:RepairDowntime;completedAt?:string;result?:string;acceptedBy?:string;
+  source?:{section:'shiftReports';id:Identifier};warrantyUntil?:string;repeatOf?:Identifier;
+}
+export type RepairActionInput =
+  | {action:'saveOrder';orderId?:Identifier;payload:RepairOrderPayload;reason:string;reviewFingerprint:string}
+  | {action:'approve'|'start'|'cancel';orderId:Identifier;reason:string;reviewFingerprint:string};
 export type DocumentActionInput =
   | {action:'saveDraft';section:DocumentSection;draftId?:Identifier;payload:JsonRow;correctionOf?:DocumentReference;reason?:string}
   | {action:'postDraft';section:DocumentSection;draftId:Identifier;reviewFingerprint:string}
@@ -67,7 +78,8 @@ export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelI
   | { type: 'PeriodAction'; version: 1; input: PeriodActionInput }
   | { type: 'FuelAction'; version: 1; input: FuelActionInput }
   | { type: 'ProcurementAction'; version: 1; input: ProcurementActionInput }
-  | { type: 'CostAction'; version: 1; input: CostActionInput };
+  | { type: 'CostAction'; version: 1; input: CostActionInput }
+  | { type: 'RepairAction'; version: 1; input: RepairActionInput };
 export interface CommandEnvelope { protocolVersion: 1; databaseToken: string; operation: OperationDescriptor; base: Revisions; command: PlatformCommand }
 export interface ContractError extends Error { code: string; field: string; status: number }
 
@@ -189,6 +201,10 @@ export function createPlatformContracts() {
     if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0,10) !== value) fail('INVALID_COMMAND', field, 'Проверьте дату команды');
     return value;
   }
+  function commandTime(value:unknown,field:string):string {
+    if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?$/.test(value)||+value.slice(11,13)>23||+value.slice(14,16)>59||value.length>16&&value[16]===':'&&+value.slice(17,19)>59||!Number.isFinite(Date.parse(value)))fail('INVALID_COMMAND',field,'Укажите корректные дату и время факта');
+    commandDate(value.slice(0,10),field);return value;
+  }
   function target(value: unknown, field: string): AssetTarget {
     const row = commandObject(value, field); keys(row, ['section','id'], field);
     if (row.section !== 'vehicles' && row.section !== 'generators') fail('INVALID_COMMAND', field + '.section', 'Выберите транспорт или ДЭС');
@@ -269,6 +285,29 @@ export function createPlatformContracts() {
       const result:MergeCatalogInput={section:input.section as CatalogSection,sourceId:commandId(input.sourceId,path+'sourceId'),targetId:commandId(input.targetId,path+'targetId'),reason:commandText(input.reason,path+'reason',true),mutableRefs,reviewFingerprint:input.reviewFingerprint};
       if(result.sourceId===result.targetId)fail('INVALID_COMMAND',path+'targetId','Нельзя объединить карточку с самой собой');
       return {type:'MergeCatalog',version:1,input:result};
+    }
+    if(row.type==='RepairAction'){
+      const reason=costText(input.reason,path+'reason'),fingerprint=reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint');let result:RepairActionInput;
+      if(input.action==='saveOrder'){
+        keys(input,['action','orderId','payload','reason','reviewFingerprint'],'command.input');
+        const p=commandObject(input.payload,path+'payload'),field=path+'payload.';
+        keys(p,['title','target','owner','site','org','description','work','cost','actualCost','costIncludesMaterials','contragentId','invoiceNo','primary','downtime','completedAt','result','acceptedBy','source','warrantyUntil','repeatOf'],path+'payload');
+        const payload:RepairOrderPayload={title:commandText(p.title,field+'title',true,300),target:target(p.target,field+'target')};
+        for(const name of ['owner','site','org','invoiceNo','acceptedBy'] as const)if(p[name]!==undefined)payload[name]=commandText(p[name],field+name,false,300);
+        for(const name of ['description','work','result'] as const)if(p[name]!==undefined)payload[name]=commandText(p[name],field+name,false,10000);
+        for(const name of ['cost','actualCost'] as const)if(p[name]!==undefined)payload[name]=p[name]===null?null:costAmount(p[name],field+name);
+        for(const name of ['contragentId','repeatOf'] as const)if(p[name]!==undefined)payload[name]=commandId(p[name],field+name);
+        if(p.costIncludesMaterials!==undefined){if(p.costIncludesMaterials!==null&&typeof p.costIncludesMaterials!=='boolean')fail('INVALID_COMMAND',field+'costIncludesMaterials','Укажите явно, включены ли материалы в стоимость');payload.costIncludesMaterials=p.costIncludesMaterials;}
+        if(p.completedAt!==undefined)payload.completedAt=commandTime(p.completedAt,field+'completedAt');
+        if(p.warrantyUntil!==undefined)payload.warrantyUntil=commandDate(p.warrantyUntil,field+'warrantyUntil');
+        if(p.primary!==undefined){if(p.primary===null)payload.primary=null;else{const primary=commandObject(p.primary,field+'primary');keys(primary,['section','id'],field+'primary');if(!['repairs','vehicleTo','toRecords'].includes(primary.section as string))fail('INVALID_COMMAND',field+'primary.section','Выберите единственный первичный ремонт или ТО');payload.primary={section:primary.section as RepairPrimaryReference['section'],id:commandId(primary.id,field+'primary.id')};}}
+        if(p.source!==undefined){const source=commandObject(p.source,field+'source');keys(source,['section','id'],field+'source');if(source.section!=='shiftReports')fail('INVALID_COMMAND',field+'source.section','Укажите исходный дефект смены');payload.source={section:'shiftReports',id:commandId(source.id,field+'source.id')};}
+        if(p.downtime!==undefined){const downtime=commandObject(p.downtime,field+'downtime');if(downtime.mode==='interval'){keys(downtime,['mode','from','to'],field+'downtime');const interval:Extract<RepairDowntime,{mode:'interval'}>={mode:'interval',from:commandTime(downtime.from,field+'downtime.from')};if(downtime.to!==undefined){interval.to=commandTime(downtime.to,field+'downtime.to');if(Date.parse(interval.to)<Date.parse(interval.from))fail('INVALID_COMMAND',field+'downtime.to','Конец простоя раньше начала');}payload.downtime=interval;}else if(downtime.mode==='none'){keys(downtime,['mode','basis'],field+'downtime');payload.downtime={mode:'none',basis:costText(downtime.basis,field+'downtime.basis')};}else fail('INVALID_COMMAND',field+'downtime.mode','Укажите фактический простой либо работу без простоя с основанием');}
+        result={action:'saveOrder',payload,reason,reviewFingerprint:fingerprint};if(input.orderId!==undefined)result.orderId=commandId(input.orderId,path+'orderId');
+      }else{
+        keys(input,['action','orderId','reason','reviewFingerprint'],'command.input');if(input.action!=='approve'&&input.action!=='start'&&input.action!=='cancel')fail('INVALID_COMMAND',path+'action','Действие с ремонтным заказом не поддерживается');result={action:input.action,orderId:commandId(input.orderId,path+'orderId'),reason,reviewFingerprint:fingerprint};
+      }
+      return {type:'RepairAction',version:1,input:result};
     }
     if(row.type==='CostAction'){
       const reason=costText(input.reason,path+'reason'),fingerprint=reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint');let result:CostActionInput;

@@ -19,6 +19,7 @@ const ENTRIES=Object.freeze([
     {path:'./fuel-operations.js',global:'FuelOperations',lazy:true},
     {path:'./procurement-operations.js',global:'ProcurementOperations',lazy:true},
     {path:'./financial-recognition.js',global:'DomainSources',lazy:true},
+    {path:'./repair-process.js',global:'RepairProcess',lazy:true},
   ]}),
   Object.freeze({source:'src/core/period-policy.ts',output:'assets/core/period-policy.js',global:'PeriodPolicy',factory:'createPeriodPolicy',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./platform-schema.js',global:'PlatformSchema'},
@@ -65,6 +66,18 @@ const ENTRIES=Object.freeze([
     {path:'./document-engine.js',global:'DocumentEngine',lazy:true}, {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true},
     {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
   ]}),
+  Object.freeze({source:'src/core/repair-process.ts',output:'assets/core/repair-process.js',global:'RepairProcess',factory:'createRepairProcess',dependencies:[
+    {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./entity-identity.js',global:'EntityIdentity'},
+    {path:'./decimal-core.js',global:'DecimalCore'}, {path:'./document-engine.js',global:'DocumentEngine',lazy:true},
+    {path:'./financial-recognition.js',global:'DomainSources',lazy:true}, {path:'./inventory-stock.js',global:'InventoryStock',lazy:true},
+    {path:'./cost-valuation.js',global:'CostValuation',lazy:true},
+  ]}),
+  Object.freeze({source:'src/core/repair-operations.ts',output:'assets/core/repair-operations.js',global:'RepairOperations',factory:'createRepairOperations',dependencies:[
+    {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./platform-schema.js',global:'PlatformSchema'},
+    {path:'./entity-identity.js',global:'EntityIdentity'}, {path:'./decimal-core.js',global:'DecimalCore'},
+    {path:'./document-engine.js',global:'DocumentEngine',lazy:true}, {path:'./repair-process.js',global:'RepairProcess',lazy:true},
+    {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true}, {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
+  ]}),
   Object.freeze({source:'src/core/platform-commands.ts',output:'assets/core/platform-commands.js',global:'PlatformCommands',factory:'createPlatformCommands',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./personnel-engine.js',global:'TvsPersonnelEngine'},
     {path:'./fuel-movement-policy.js',global:'FuelMovementPolicy'}, {path:'./fuel-engine.js',global:'TvsFuelEngine'},
@@ -74,6 +87,7 @@ const ENTRIES=Object.freeze([
     {path:'./fuel-operations.js',global:'FuelOperations'},
     {path:'./procurement-operations.js',global:'ProcurementOperations'},
     {path:'./cost-operations.js',global:'CostOperations'},
+    {path:'./repair-operations.js',global:'RepairOperations'},
   ]}),
 ]);
 const normalize=text=>text.replace(/\r\n?/g,'\n');

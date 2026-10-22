@@ -74,6 +74,7 @@ export interface DomainSourcesAPI {
   resolveExpense(database: unknown, reference: unknown): ExpenseSource;
   indexExpenses(database: unknown): {projection:ExpenseProjection;resolve(reference:unknown):ExpenseSource};
   acquisitionObligation(database: unknown, reference: unknown): AcquisitionObligation;
+  workOrderDate(value: unknown): string;
 }
 export interface ExpenseIssue {severity:'error'|'warning';section:string;recordId:EntityId|null;code:string;message:string}
 export interface ExpenseSource {root:{section:string;id:EntityId};current:{section:string;id:EntityId};date:string;amount:number;assetRef:string|null;assetTarget:{section:'vehicles'|'generators';id:EntityId}|null;vehicleId:EntityId|null;recognitionKey:string;legacyKey:string;category:string;description:string;fingerprint:string;snapshot:JsonRow}
@@ -85,6 +86,7 @@ type IdentifiedRow = UnknownRow & { id: EntityId };
 
 /** The build adapter exposes this frozen API identically in Node and browsers. */
 export function createDomainSources(_accounting?: Readonly<AccountingBoundaryAPI>,getDocuments?:()=>Readonly<DocumentEngineAPI>|undefined,getStock?:()=>Readonly<FuelStockAPI>|undefined,decimal?:Readonly<DecimalCoreAPI>,identity?:Readonly<EntityIdentityAPI>,getWriteoff?:()=>{sha256(text:string):string}): Readonly<DomainSourcesAPI> {
+  function workOrderDate(value:unknown):string {if(value===null||typeof value!=='object'||Array.isArray(value))return '';const ownValue=(name:string):unknown=>{const descriptor=Object.getOwnPropertyDescriptor(value,name);return descriptor&&!descriptor.get&&!descriptor.set?descriptor.value:undefined;},textValue=(name:string):string=>typeof ownValue(name)==='string'?ownValue(name) as string:'';return (Object.prototype.hasOwnProperty.call(value,'downtime')?textValue('completedAt'):textValue('downtimeTo')||textValue('completedAt')).slice(0,10);}
   const isRecord = (value: unknown): value is UnknownRow => {
     if(value===null||typeof value!=='object'||Array.isArray(value))return false;
     const prototype:unknown=Object.getPrototypeOf(value);return prototype===null||typeof prototype==='object'&&prototype!==null&&Object.getPrototypeOf(prototype)===null;
@@ -184,7 +186,7 @@ export function createDomainSources(_accounting?: Readonly<AccountingBoundaryAPI
         }
       }
       const rawDate = source === 'repair' ? row.invoiceDate
-        : source === 'workOrder' ? (text(row.downtimeTo) || text(row.completedAt)).slice(0, 10) : row.date;
+        : source === 'workOrder' ? workOrderDate(row) : row.date;
       const day = date(rawDate);
       if (!day) {
         exclude(source, projectedRow, 'invalid-source-date', 'У источника нет действительной даты фактического расхода. Проверьте дату перед импортом.'); return;
@@ -257,7 +259,7 @@ export function createDomainSources(_accounting?: Readonly<AccountingBoundaryAPI
         const section=sourceSections[row.source]!,sourceId=optionalId(row.sourceId),acquisition=section==='tankIncomes'||section==='partMovements';if(sourceId===null||!hasPrimary(section,sourceId))issue(name,row,'SOURCE_LINK','Источник обязательства не найден; требуется сверка');else{const primary=primaryIndex.get(typedSourceKey(section,sourceId))![0]!;if(section==='partMovements'&&primary.kind!=='receipt')issue(name,row,'SOURCE_LINK','Обязательство закупки должно ссылаться на фактический приход');let amount=number(section==='workOrders'?primary.actualCost??(primary.incurred===true?primary.cost:null):primary.cost);if(acquisition){amount=number(primary.grossSum);const net=number(primary.sum),vat=number(primary.vatAmount);if(amount===null&&net!==null&&vat!==null&&decimal)amount=decimal.toNumberExact(decimal.add(net,vat));if(amount===null&&net!==null&&number(primary.vatRate)===0)amount=net;if(amount===null)result.diagnostics.push({severity:'warning',section:name,recordId:id,code:'SOURCE_PURCHASE_AMOUNT_UNKNOWN',message:'У закупки нет подтверждённой суммы с НДС; обязательство не переписано и не включено повторно в расход'});}const saved=number(row.sum);if(amount!==null&&saved!==null&&decimal&&decimal.compare(amount,saved)!==0)result.diagnostics.push({severity:'warning',section:name,recordId:id,code:'SOURCE_DISCREPANCY',message:'Сохранённое обязательство отличается от действующей стоимости первичного документа'});}exclude(acquisition?'inventory-acquisition-obligation':'linked-primary');continue;
       }
       const amount=number(name==='workOrders'?row.actualCost??(row.incurred===true?row.cost:null):name==='payments'?row.sum:name==='costEntries'?row.amount:row.cost);
-      const day=date(name==='repairs'?row.invoiceDate:name==='workOrders'?(text(row.downtimeTo)||text(row.completedAt)).slice(0,10):row.date);
+      const day=date(name==='repairs'?row.invoiceDate:name==='workOrders'?workOrderDate(row):row.date);
       if(amount===null||amount<0){issue(name,row,'SOURCE_AMOUNT','Фактическая стоимость не задана или некорректна');continue;}
       if(!day){issue(name,row,'SOURCE_DATE','У фактического расхода нет действительной даты');continue;}
       let assetRef=typeof row.assetRef==='string'&&row.assetRef?row.assetRef:null;const vehicleId=optionalId(row.vehicleId),generatorId=optionalId(row.generatorId);let assetTarget:ExpenseSource['assetTarget']=null;
@@ -340,5 +342,5 @@ export function createDomainSources(_accounting?: Readonly<AccountingBoundaryAPI
     });
     return entries.sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
   }
-  return Object.freeze({ apiVersion: 1, projectFinancialSources, projectTankFlows, sourceKey,typedSourceKey,projectExpenses,resolveExpense,indexExpenses,acquisitionObligation });
+  return Object.freeze({ apiVersion: 1, projectFinancialSources, projectTankFlows, sourceKey,typedSourceKey,projectExpenses,resolveExpense,indexExpenses,acquisitionObligation,workOrderDate });
 }

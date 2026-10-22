@@ -33,7 +33,7 @@ function filteredRevisions(revisions, principal) {
   return Object.fromEntries(storage.SECTIONS.map(name => [name, readable(principal, name) ? revisions[name] || 0 : 0]));
 }
 function publicAccess(principal) {
-  return { user:{ id:principal.id, name:principal.name, role:principal.role, legacy:!!principal.legacy }, readable:storage.SECTIONS.filter(n => readable(principal,n)), writable:storage.SECTIONS.filter(n => access.authorize(principal,'write',n)), fieldPermissions:access.fieldPermissions(principal),periodActions:require('./period-access.cjs').actions(principal),fuelActions:access.fuelActions(principal),procurementActions:access.procurementActions(principal),costActions:access.costActions(principal) };
+  return { user:{ id:principal.id, name:principal.name, role:principal.role, legacy:!!principal.legacy }, readable:storage.SECTIONS.filter(n => readable(principal,n)), writable:storage.SECTIONS.filter(n => access.authorize(principal,'write',n)), fieldPermissions:access.fieldPermissions(principal),periodActions:require('./period-access.cjs').actions(principal),fuelActions:access.fuelActions(principal),procurementActions:access.procurementActions(principal),costActions:access.costActions(principal),repairActions:access.repairActions(principal) };
 }
 
 function readBody(req) {

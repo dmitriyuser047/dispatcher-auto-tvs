@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const policies = require('../assets/core/platform-policies.js');
+const repairs = require('../assets/core/repair-operations.js'),documents = require('../assets/core/document-engine.js');
 const at = { now:'2026-10-21T12:00:00Z' };
 function fixture() { return { vehicles:[{id:'v'},{id:'v2'}],drivers:[{id:'d'},{id:'d2'}],parts:[{id:'p'}],dispatchJobs:[],workOrders:[],partMovements:[] }; }
 function job(patch = {}) { return { id:'job',status:'assigned',assetRef:'v:v',driverId:'d',start:'2026-10-21T09:00',end:'2026-10-21T11:00',...patch }; }
@@ -24,9 +25,13 @@ test('simultaneous reservations cannot double-book either equipment or a driver'
 test('confirmed work and accepted repairs retain their existing required acceptance details', () => {
   const before = fixture();
   assert.throws(() => policies.validateChanges(before,{...before,dispatchJobs:[job({status:'confirmed'})]},at));
-  const accepted = {id:'order',status:'accepted',assetRef:'v:v',acceptedBy:'Inspector',result:'Done',downtimeFrom:'2026-10-20T09:00',downtimeTo:'2026-10-20T12:00'};
-  assert.equal(policies.validateChanges(before,{...before,workOrders:[accepted]},at),true);
-  for(const field of ['acceptedBy','result','downtimeTo']) assert.throws(() => policies.validateChanges(before,{...before,workOrders:[{...accepted,[field]:''}]},at));
+  let db=before;const context=id=>({id,now:'2026-10-21T12:00:00.000Z',today:'2026-10-21',actor:{id:'synthetic-mechanic',name:'Synthetic mechanic',role:'mechanic'}});
+  for(const [id,input]of [['order',{action:'saveOrder',payload:{title:'Actual synthetic repair',target:{section:'vehicles',id:'v'},downtime:{mode:'interval',from:'2026-10-20T09:00'}},reason:'Actual user entered defect'}],['approve',{action:'approve',orderId:'order',reason:'Explicit approved repair'}],['start',{action:'start',orderId:'order',reason:'Actual repair started'}]]){
+    const review=repairs.preview(db,input,{today:'2026-10-21'});assert.equal(review.canApply,true,JSON.stringify(review.issues));const command={type:'RepairAction',version:1,input:{...input,reviewFingerprint:review.fingerprint}},plan=repairs.plan(db,command.input,context(id)),next={...db,...plan.sections};assert.equal(policies.validateChanges(db,next,{...context(id),commandIntent:{command}}),true);db=next;
+  }
+  const payload={acceptedBy:'Inspector',result:'Done',downtimeTo:'2026-10-20T12:00',completedAt:'2026-10-20T12:00'},input={action:'post',section:'workOrders',id:'order',payload},snapshot=JSON.stringify(db);
+  for(const field of ['acceptedBy','result','downtimeTo','completedAt'])assert.equal(documents.preview(db,{...input,payload:{...payload,[field]:''}},{today:'2026-10-21'}).canPost,false,field);
+  assert.equal(JSON.stringify(db),snapshot);const review=documents.preview(db,input,{today:'2026-10-21'});assert.equal(review.canPost,true,JSON.stringify(review.issues));const command={type:'DocumentAction',version:1,input:{...input,reviewFingerprint:review.fingerprint}},plan=documents.plan(db,command.input,context('accept')),next={...db,...plan.sections};assert.equal(policies.validateChanges(db,next,{...context('accept'),commandIntent:{command}}),true);assert.equal(next.workOrders[0].status,'accepted');assert.equal(next.workOrders[0].acceptedBy,'Inspector');assert.equal(next.workOrders[0].acceptedAt,'2026-10-21T12:00:00.000Z');
 });
 
 test('unchanged historical deficiencies permit attachments and independent work while accepted content stays frozen', () => {

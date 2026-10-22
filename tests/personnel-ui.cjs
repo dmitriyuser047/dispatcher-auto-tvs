@@ -49,7 +49,7 @@ afterEach(async()=>{await page?.close();assert.deepEqual(errors,[]);});
 
 async function openSection(section){await page.locator('#unifiedNav [data-section="'+section+'"]').click();await page.waitForFunction(section=>activeSection===section,section);}
 async function openPerson(id){await page.evaluate(id=>personnelOpenPerson(id),id);}
-async function submitPerson(){await page.locator('#personnelForm [type="submit"]').click();await page.waitForFunction(()=>!document.querySelector('#personnelForm')?.closest('.modal-overlay')?.classList.contains('open'));}
+async function submitPerson(){await page.locator('#personnelForm [type="submit"]').click();await page.waitForFunction(()=>!document.querySelector('#personnelForm')?.closest('.modal-overlay')?.classList.contains('open'),null,{timeout:6000}).catch(async error=>{throw Error(error.message+'\n'+await page.evaluate(()=>JSON.stringify({form:document.querySelector('#personnelForm')?.innerText,toast:document.getElementById('globalToast')?.textContent})));});}
 async function fillAssignment(assetRef,from,site='Новый объект'){
  const form=page.locator('#personnelAssignmentForm');await form.locator('[name="assetRef"]').selectOption(assetRef);await form.locator('[name="from"]').fill(from);await form.locator('[name="site"]').fill(site);await form.locator('[name="reason"]').fill('Тестовое назначение по приказу');
 }

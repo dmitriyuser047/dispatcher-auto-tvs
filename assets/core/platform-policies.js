@@ -1,9 +1,9 @@
 /* Shared dispatch, acceptance and inventory rules from the existing workflows. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'),()=>require('./catalog-policy.js'),()=>require('./entity-identity.js'),()=>require('./period-policy.js'),()=>require('./platform-integrity.js'),()=>require('./inventory-stock.js'),()=>require('./procurement-operations.js'),()=>require('./cost-operations.js'));
-  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy,()=>root.CatalogPolicy,()=>root.EntityIdentity,()=>root.PeriodPolicy,()=>root.PlatformIntegrity,()=>root.InventoryStock,()=>root.ProcurementOperations,()=>root.CostOperations);
-})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal,getCatalog,getIdentity,getPeriods,getIntegrity,getInventory,getProcurement,getCosts) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'),()=>require('./catalog-policy.js'),()=>require('./entity-identity.js'),()=>require('./period-policy.js'),()=>require('./platform-integrity.js'),()=>require('./inventory-stock.js'),()=>require('./procurement-operations.js'),()=>require('./cost-operations.js'),()=>require('./repair-process.js'),()=>require('./repair-operations.js'));
+  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy,()=>root.CatalogPolicy,()=>root.EntityIdentity,()=>root.PeriodPolicy,()=>root.PlatformIntegrity,()=>root.InventoryStock,()=>root.ProcurementOperations,()=>root.CostOperations,()=>root.RepairProcess,()=>root.RepairOperations);
+})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal,getCatalog,getIdentity,getPeriods,getIntegrity,getInventory,getProcurement,getCosts,getRepairs,getRepairOperations) {
   'use strict';
   const rows = (db, section) => Array.isArray(db?.[section]) ? db[section] : [];
   const present = value => value != null && String(value).trim() !== '';
@@ -22,6 +22,14 @@
   }
   function catalogModule(previous,next){let api;try{api=getCatalog();}catch{}if(api?.apiVersion===1)return api;
     if([previous,next].some(db=>['vehicles','generators','tanks','drivers','parts','contragents','fuelCards'].some(section=>rows(db,section).some(row=>Object.hasOwn(row,'mergedInto'))))){const error=new Error('Не загружены правила объединения справочников');error.code='MODULE_UNAVAILABLE';throw error;}return null;
+  }
+  function repairModuleRequired(previous,next){
+    const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b),fields=['status','assetRef','repairId','vehicleToId','toRecordId','downtime','downtimeFrom','downtimeTo','completedAt','repairProcess','defectSource','defectSnapshot'];
+    for(const value of rows(next,'workOrders')){const matches=rows(previous,'workOrders').filter(old=>old.id===value.id),old=matches.length===1?matches[0]:null;if(['repairProcess','downtime','defectSource','defectSnapshot'].some(key=>Object.hasOwn(value,key)))return true;if(!old){if(value.status!=='new'||['repairId','vehicleToId','toRecordId'].some(key=>present(value[key])))return true;continue;}if(fields.some(key=>!same(old[key],value[key])))return true;if(['approved','repairing'].includes(old.status)&&['description','work','cost','repeatOf','warrantyUntil'].some(key=>!same(old[key],value[key])))return true;}
+    for(const value of rows(previous,'workOrders'))if((Object.hasOwn(value,'repairProcess')||['approved','repairing','accepted','cancelled'].includes(value.status))&&!rows(next,'workOrders').some(row=>row.id===value.id))return true;
+    for(const [field,name]of [['repairId','repairs'],['vehicleToId','vehicleTo'],['toRecordId','toRecords']])if([...rows(previous,'workOrders'),...rows(next,'workOrders')].some(value=>present(value[field]))&&!same(rows(previous,name),rows(next,name)))return true;
+    for(const value of rows(next,'partMovements')){const matches=rows(previous,'partMovements').filter(old=>old.id===value.id),old=matches.length===1?matches[0]:null;if((present(value.workOrderId)||present(old?.workOrderId)||Object.hasOwn(value,'repairReturn')||old&&Object.hasOwn(old,'repairReturn'))&&!same(old,value))return true;}
+    return false;
   }
   function dispatchOverlapPeers(jobs) {
     const peers=jobs.map(()=>new Set()),groups=new Map();
@@ -99,7 +107,7 @@
     for (const order of rows(db,'workOrders')) {
       if (order.downtimeFrom && order.downtimeTo && Date.parse(order.downtimeFrom) > Date.parse(order.downtimeTo))
         add('workOrders',order,'WORK_ORDER_INTERVAL','downtimeFrom/downtimeTo','Конец простоя раньше начала',[order.downtimeFrom,order.downtimeTo]);
-      if (order.status === 'accepted') for (const [field,label] of [['acceptedBy','принявший'],['result','результат'],['downtimeTo','конец простоя']])
+      if (order.status === 'accepted'&&!Object.hasOwn(order,'downtime')&&!Object.hasOwn(order,'repairProcess')) for (const [field,label] of [['acceptedBy','принявший'],['result','результат'],['downtimeTo','конец простоя']])
         if (!present(order[field])) add('workOrders',order,'WORK_ORDER_ACCEPTANCE_REQUIRED',field,'Для приёмки нужен ' + label,[order[field]]);
     }
     issues.push(...inspectStock(db,context).issues);
@@ -108,6 +116,7 @@
     for (const module of [getFuelMovements(),getDocuments(),getWorkflow(),getTemporal(),periodsModule()]) if (module && module.apiVersion === 1) issues.push(...module.inspect(db,context).issues);
     const catalog=catalogModule(db);if(catalog)issues.push(...catalog.inspect(db,context).issues);
     let costs;try{costs=getCosts();}catch{}if(costs?.apiVersion===1&&typeof costs.inspect==='function')issues.push(...costs.inspect(db,context).issues);
+    let repairs;try{repairs=getRepairs();}catch{}if(repairs?.apiVersion===1)issues.push(...repairs.inspect(db,context).issues);
     return { issues,counts:{ error:issues.filter(issue=>issue.severity==='error').length,warning:issues.filter(issue=>issue.severity==='warning').length,total:issues.length } };
   }
   function validateChanges(previous,next,context) {
@@ -117,7 +126,7 @@
     const blocking = current.filter(issue => {
       // Personnel uses field/assignment delta semantics below. Its read-only
       // report may show legacy rows and active links that need manual review.
-      if (/^(PERSONNEL_|FUEL_|DOCUMENT_|WORKFLOW_|TEMPORAL_|CATALOG_|PERIOD_|PART_|PROCUREMENT_|COST_)/.test(issue.code)) return false;
+      if (/^(PERSONNEL_|FUEL_|DOCUMENT_|WORKFLOW_|TEMPORAL_|CATALOG_|PERIOD_|PART_|PROCUREMENT_|COST_|REPAIR_)/.test(issue.code)) return false;
       const before = prior.get(key(issue));
       if (!before) return true;
       if (issue.code === 'PART_STOCK_DEFICIT') return issue.deficit > before.deficit + 1e-9;
@@ -144,6 +153,9 @@
     let costs;try{costs=getCosts();}catch{}
     if(costs?.apiVersion===1)costs.validateChanges(previous,next,context);
     else if([previous,next].some(db=>['tanks','parts','vehicles','generators'].some(name=>rows(db,name).some(row=>Object.hasOwn(row,'costValuation')))||rows(db,'costEntries').some(row=>Object.hasOwn(row,'costAllocation')||row.kind==='allocation')))throw Object.assign(Error('Не загружены правила стоимости'),{code:'MODULE_UNAVAILABLE'});
+    let repairs,repairOperations;try{repairs=getRepairs();repairOperations=getRepairOperations();}catch{}
+    if(repairs?.apiVersion===1&&repairOperations?.apiVersion===1){repairOperations.validateChanges(previous,next,context);repairs.validateChanges(previous,next,context);}
+    else if(repairModuleRequired(previous,next))throw Object.assign(Error('Не загружены правила ремонтного процесса'),{code:'MODULE_UNAVAILABLE'});
     return true;
   }
   return Object.freeze({ apiVersion:1,inspect,inspectStock,inspectFuel,periodRowIdentity,scopePeriods,validatePeriodChanges,validateStockChanges,validateFuelChanges,validateChanges });

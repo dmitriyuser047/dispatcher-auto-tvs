@@ -94,6 +94,22 @@ test('acquisition obligations, receipt pricing and valued fuel issues require th
  });assert.equal(result.replies.length,5);for(const reply of result.replies){assert.equal(reply.ok,false);assert.equal(reply.code,'UNSUPPORTED_COST_ACCOUNTING');}assert.equal(result.requests,0);assert.equal(result.raw,0);
 });
 
+test('repair actions and linked material documents refuse an older server across direct, draft and historical routes',async()=>{
+ const result=await page.evaluate(async()=>{
+  _sync.platform.repairs=0;_sync.platform.costAccounting=1;_sync.platform.procurement=1;_sync.platform.fuelOperations=1;
+  const fingerprint='sha256:'+'0'.repeat(64);data.workOrders.push({id:0,status:'repairing',assetRef:'v:712'});data.partMovements.push({id:0,kind:'issue',partId:0,workOrderId:0,assetRef:'v:712',qty:1,date:'2026-09-10'},{id:'revision',lifecycle:{correctionOf:{section:'partMovements',id:0}}});
+  data.documentDrafts.push({id:'repair-draft',section:'workOrders',payload:{title:'Synthetic retained order'}},{id:'material-draft',section:'partMovements',payload:{kind:'return',partId:0,qty:1,workOrderId:0,repairReturn:{version:1,issueId:0}}});
+  const commands=[{type:'RepairAction',version:1,input:{action:'approve',orderId:0,reason:'Synthetic approval',reviewFingerprint:fingerprint}},...[
+   {action:'saveDraft',section:'workOrders',payload:{title:'Synthetic order'}},
+   {action:'postDraft',section:'workOrders',draftId:'repair-draft',reviewFingerprint:fingerprint},
+   {action:'saveDraft',section:'partMovements',payload:{kind:'issue',partId:0,qty:1,workOrderId:0}},
+   {action:'postDraft',section:'partMovements',draftId:'material-draft',reviewFingerprint:fingerprint},
+   {action:'saveDraft',section:'partMovements',correctionOf:{section:'partMovements',id:'revision'},reason:'Synthetic correction',payload:{qty:1}}
+  ].map(input=>({type:'DocumentAction',version:1,input}))],replies=[];
+  for(const[index,command]of commands.entries())replies.push(await platformExecuteCommand(command,{operationId:'unsupported-repair-'+index}));return {replies,requests:__nativeRequests.length,raw:__nativeRawWrites};
+ });assert.equal(result.replies.length,6);for(const reply of result.replies){assert.equal(reply.ok,false);assert.equal(reply.code,'UNSUPPORTED_REPAIRS');}assert.equal(result.requests,0);assert.equal(result.raw,0);
+});
+
 test('real helper double calls share one IPC and apply canonical rows and persisted baselines only after ACK',async()=>{
  const before=await page.evaluate(()=>({data:JSON.stringify(data),baseline:_lastPersisted}));await start();await page.evaluate(()=>{window.__nativeDuplicate=platformExecuteCommand(window.__nativeCommand,{operationId:'synthetic-native-command'});});
  assert.deepEqual(await page.evaluate(()=>({data:JSON.stringify(data),baseline:_lastPersisted,requests:window.__nativeRequests.length,raw:window.__nativeRawWrites})),{...before,requests:1,raw:0});await release();

@@ -26,7 +26,7 @@
   sections.forEach(section=>date(section,'createdAt updatedAt archivedAt','datetime'));
   date('records','date');date('vehicles','orgHistory[].from orgHistory[].to');date('genRecords','date');date('vehicleTo','date nextDate');date('toRecords','date nextDate');date('vehicleTo','completedAt','dateOrDatetime');date('toRecords','completedAt','dateOrDatetime');date('repairs','invoiceDate');date('tankIncomes','date');
   date('payments','date dueDate paidDate');date('fuelPurchases','date');date('fuelImports','at','datetime');date('fuelCards','assignments[].from assignments[].to orgHistory[].from orgHistory[].to');date('fuelPeriods','month','month');date('fuelPeriods','closedAt reopenedAt','datetime');date('fuelWriteoffs','date');date('fuelWriteoffs','postedAt voidedAt','datetime');date('monthlyFuel','month','month');date('appMeta','at','datetime');
-  date('dispatchJobs','start end actualStart actualEnd','datetime');date('assetAssignments','from to');date('workOrders','downtimeFrom downtimeTo','datetime');date('workOrders','warrantyUntil');date('opsTasks','due','date');date('assetDocuments','date expires');date('fuelMovements','date');date('partMovements','date');date('shiftReports','date');date('auditLog','at','datetime');date('glonassTrips','date');date('glonassImports','at','datetime');date('costEntries','date');date('procurementOrders','deliveryDate');
+  date('dispatchJobs','start end actualStart actualEnd','datetime');date('assetAssignments','from to');date('workOrders','downtimeFrom downtimeTo completedAt repairProcess.events[].at','datetime');date('workOrders','warrantyUntil');date('opsTasks','due','date');date('assetDocuments','date expires');date('fuelMovements','date');date('partMovements','date');date('shiftReports','date');date('auditLog','at','datetime');date('glonassTrips','date');date('glonassImports','at','datetime');date('costEntries','date');date('procurementOrders','deliveryDate');
   date('drivers','driverLicenseExpires medicalExpires briefingExpires certificateExpires');
   number('vehicles','norm normCity normHighway normIdle odometer fuelBalance tankVolume toIntervalKm toIntervalMonths maintenanceRules[].km maintenanceRules[].months',{min:0});
   number('records','km kmGlonass fuelIssued fuelActual fuelUsed fuelIdle fuelSum odoStart odoEnd tankMeasured',{min:0});
@@ -55,6 +55,7 @@
   for(const section of ['dispatchJobs','assetAssignments','assetDocuments','shiftReports'])direct(section,'driverId','drivers');
   for(const section of ['payments','budget','repairs','vehicleTo','toRecords','workOrders'])direct(section,'contragentId','contragents');
   direct('partMovements','partId','parts');direct('partMovements','workOrderId','workOrders');direct('workOrders','repeatOf','workOrders');direct('workOrders','repairId','repairs');direct('workOrders','vehicleToId','vehicleTo');direct('workOrders','toRecordId','toRecords');direct('shiftReports','jobId','dispatchJobs');direct('dispatchJobs','partRequirements[].partId','parts');
+  direct('workOrders','defectSource.id','shiftReports');direct('partMovements','repairReturn.issueId','partMovements');
   for(const field of ['fromTankId','toTankId'])direct('fuelMovements',field,'tanks');
   for(const field of ['originalMovementId','reversedBy'])direct('fuelMovements',field,'fuelMovements');
   relations.push({id:'fuelMovements.measurement.target.id',from:'fuelMovements',field:'measurement.target.id',kind:'discriminator',selector:'measurement.target.section',targets:{tanks:'tanks'},optional:true,archivePolicy:'existing'});
@@ -80,6 +81,7 @@
   for(const prefix of ['correctionOf','result'])relations.push({id:'documentDrafts.'+prefix+'.id',from:'documentDrafts',field:prefix+'.id',kind:'discriminator',selector:prefix+'.section',targets:documentTargets,optional:true,archivePolicy:'existing'});
   asset('documentDrafts','payload.assetRef');
   for(const [field,target]of [['vehicleId','vehicles'],['generatorId','generators'],['driverId','drivers'],['partId','parts'],['fromTankId','tanks'],['toTankId','tanks'],['tankId','tanks'],['counterTankId','tanks'],['workOrderId','workOrders'],['jobId','dispatchJobs'],['contragentId','contragents'],['repeatOf','workOrders'],['repairId','repairs'],['vehicleToId','vehicleTo'],['toRecordId','toRecords']])direct('documentDrafts','payload.'+field,target);
+  direct('documentDrafts','payload.repairReturn.issueId','partMovements');
   relations.push({id:'documentDrafts.payload.sourceId',from:'documentDrafts',field:'payload.sourceId',kind:'discriminator',selector:'payload.source',targets:{repair:'repairs',to:'vehicleTo',vehicleTo:'vehicleTo',toRecord:'toRecords',workOrder:'workOrders',fuelPurchase:'fuelPurchases',tankIncome:'tankIncomes',partReceipt:'partMovements'},unknownPolicy:'advisory',optional:true,archivePolicy:'existing'});
   direct('documentDrafts','payload.partRequirements[].partId','parts');
   direct('documentDrafts','payload.procurementReceipt.orderId','procurementOrders');
