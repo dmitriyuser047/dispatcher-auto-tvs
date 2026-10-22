@@ -193,8 +193,10 @@ function assertScopeSnapshots(previous,sections,commandIntent){
   if(commandIntent&&inputHasProof(commandIntent.command?.input))fail('ACCESS_SCOPE_IMMUTABLE','Принадлежность проведённой записи формируется программой.',403);
   for(const [name,rows]of Object.entries(sections)){
     if(name==='auditLog')continue;const before=previous[name]||[];
-    for(const row of rows){const matches=before.filter(value=>key(value)===key(row)),old=matches.length===1?matches[0]:null;
-      if(old&&stable(old.scopeSnapshot)!==stable(row.scopeSnapshot)||!old&&row.scopeSnapshot!==undefined&&(!commandIntent||!before.some(value=>stable(value.scopeSnapshot)===stable(row.scopeSnapshot))))fail('ACCESS_SCOPE_IMMUTABLE','Сохранённую принадлежность записи нельзя менять или задавать вручную.',403);
+    const groups=new Map();let snapshots;
+    for(const row of before){const id=key(row),group=groups.get(id);if(group)group.push(row);else groups.set(id,[row]);}
+    for(const row of rows){const matches=groups.get(key(row)),old=matches?.length===1?matches[0]:null;
+      if(old&&stable(old.scopeSnapshot)!==stable(row.scopeSnapshot)||!old&&row.scopeSnapshot!==undefined&&(!commandIntent||!(snapshots??=new Set(before.map(value=>stable(value.scopeSnapshot)))).has(stable(row.scopeSnapshot))))fail('ACCESS_SCOPE_IMMUTABLE','Сохранённую принадлежность записи нельзя менять или задавать вручную.',403);
     }
   }
 }
@@ -255,7 +257,10 @@ function prepareTransaction(previous, supplied, options = {}) {
     writable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'write', name)||name==='fuelPeriods'&&periodCommand||name===costTarget&&costCommand) });
   plan=stampPostingScopes(previous,plan,{now:at,actor});
   const finalAccess=accessContext().create(previous,{...previous,...plan.sections},principal,{writableOverrides:[...(periodCommand?['fuelPeriods']:[]),...(costTarget?[costTarget]:[])],...(costTarget?{writeFields:{[costTarget]:['costProfile']}}:{})});
-  if(accessContext().hasNarrowing(principal))for(const [name,rows] of Object.entries(plan.sections))if(name!=='auditLog')finalAccess.validateChanges(name,rows.map(row=>{const old=(previous[name]||[]).find(value=>value.id===row.id);if(!old?.scopeSnapshot&&row.scopeSnapshot){const {scopeSnapshot,...business}=row;return business;}return row;}));
+  if(accessContext().hasNarrowing(principal))for(const [name,rows] of Object.entries(plan.sections))if(name!=='auditLog'){
+    const firstById=new Map();for(const row of previous[name]||[])if(!firstById.has(row.id))firstById.set(row.id,row);
+    finalAccess.validateChanges(name,rows.map(row=>{const old=firstById.get(row.id);if(!old?.scopeSnapshot&&row.scopeSnapshot){const {scopeSnapshot,...business}=row;return business;}return row;}));
+  }
   require('./attachment-access.cjs').validateChanges(options.dataDir,previous,{...previous,...plan.sections},{principal,databaseToken:options.databaseToken});
   const changes = (plan.rowChanges || []).filter(row => row.section !== 'auditLog');
   const result = { ...plan.sections };
@@ -301,7 +306,7 @@ function prepareHistoryCommit(dataDir,previous,sections,revisions,options={}){
   }
   const selected=collector.selectedTargets.slice();
   if(options.importSource){const section=options.importSource.sourceScopes?.[0];if(!schema().sections.includes(section))fail('OPERATION_EVIDENCE_INVALID','Не подтверждены разделы исходного импорта',409);selected.push({section,kind:'source',value:options.importSource});}
-  selected.push(...require('./document-archive.cjs').operationEvidenceModels(dataDir,literal));
+  selected.push(...require('./document-archive.cjs').operationEvidenceModels(dataDir,literal,sections));
   const proof=evidence.createProof({previous,next,principal,mode:'transaction',sections:{complete:collector.complete,readSections:collector.readSections,writeSections:writes,selectedTargets:selected},receipt,events,...(options.commandIntent?{commandIntent:options.commandIntent}:{})});
   if(!evidence.authorizeProof(proof,principal,receipt))fail('OPERATION_EVIDENCE_ACCESS','Текущие права не подтверждают все источники и результат операции.',403);
   const prepared=store.prepareCommit(dataDir,{expectedOperationState:store.readState(dataDir),previousHotRows:before,newEvents:events,receipt,evidence:proof});

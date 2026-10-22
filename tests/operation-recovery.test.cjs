@@ -17,14 +17,13 @@ function temp(t){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-operation-recovery-'));
   t.after(()=>{const target=path.resolve(root);assert.equal(path.dirname(target),path.resolve(os.tmpdir()));assert.ok(path.basename(target).startsWith('tvs-operation-recovery-'));fs.rmSync(target,{recursive:true,force:true});});return root;
 }
-function fixture(t,format='json'){
+function fixture(t,format='json',prepare=()=>{}){
   const root=temp(t),dir=path.join(root,'database'),rootDir=path.join(root,'local-client','outbox');
   const data={...Object.fromEntries(storage.SECTIONS.map(name=>[name,[]])),
     vehicles:[{id:7,plate:'SYNTHETIC NUMBER',fuel:'diesel',fuelGrade:'ДТ',fuelBalance:923.537,norm:10},{id:'7',plate:'SYNTHETIC STRING',fuelBalance:0,norm:10}],
     records:[{id:'recovery-record',vehicleId:7,date:'2026-09-01',km:10,fuelActual:1,note:'Before'}],
     payments:[{id:'recovery-payment',date:'2026-09-01',sum:12.5,description:privateText}]};
-  if(format==='sqlite')sqlite.create(dir,{data,revisions:Object.fromEntries(storage.SECTIONS.map(name=>[name,10]))});
-  else{fs.mkdirSync(dir);storage.writeAll(dir,data);}
+  require('./helpers/literal-history25-seed.cjs').seedWithLiteralHistory(dir,format,{data,revisions:Object.fromEntries(storage.SECTIONS.map(name=>[name,10])),prepare});
   const databaseToken=storage.databaseToken(dir),ctx={scope:sha(JSON.stringify([databaseToken,admin.id,admin.role,'access-v1'])),databaseToken,supportsOperations:true};
   const config={rootDir},box=createCommandOutbox(config);
   const send=async(context,json)=>storage.writeSections(dir,JSON.parse(json),{principal:admin});
@@ -210,15 +209,12 @@ test('real HTTP receipt lookup is compact, read-only and bound to the current ac
   settings={...settings,serverUsers:access.normalizeServerUsers(settings.serverUsers.map(user=>user.id===admin.id?{...user,role:'dispatcher'}:user))};
   const roleChanged=await request(started.port,route,tokens.admin);assert.equal(roleChanged.status,200);assert.equal(roleChanged.body.operationReceipt,null);
   assert.deepEqual(storage.readSnapshot(f.dir),before);assert.equal(sha(fs.readFileSync(sqlite.filename(f.dir))),fileBefore);
-  // A legacy receipt may already exist for a now-forbidden section. Lookup must
-  // check current read rights in addition to matching the actor and role.
-  const audit=storage.readAll(f.dir).auditLog,transaction=audit.find(row=>row.type==='transaction'&&row.operationId===id);
-  const synthetic={...transaction,operationId:'hidden-financial-receipt',actorRole:'dispatcher',changedSections:['payments']};
-  sqlite.commitSections(f.dir,{auditLog:[...audit,synthetic]},storage.readRevisions(f.dir));
-  const hidden=await request(started.port,'/api/operation?id=hidden-financial-receipt&digest='+encodeURIComponent(proof.digest),tokens.admin);assert.equal(hidden.body.operationReceipt,null);assert.ok(!JSON.stringify(hidden).includes(privateText));
-  sqlite.commitSections(f.dir,{auditLog:audit},storage.readRevisions(f.dir));
   settings={...settings,serverUsers:access.normalizeServerUsers(settings.serverUsers.map(user=>user.id===admin.id?{...user,enabled:false}:user))};
   const revoked=await request(started.port,route,tokens.admin);assert.equal(revoked.status,401);assert.ok(!JSON.stringify(revoked).includes(privateText));
   assert.deepEqual(storage.readSnapshot(f.dir),before);assert.equal(transactions(f.dir,id).length,1);
   assert.equal((await request(started.port,route,'invalid-token')).status,401);
+});
+
+test('real HTTP imported literal legacy receipt remains unavailable to its current dispatcher even when actor and digest match',async t=>{
+ const digest='sha256:'+'a'.repeat(64),id='hidden-financial-receipt',f=fixture(t,'sqlite',({data,revisions,databaseToken})=>{data.auditLog=[{id:'operation:'+id,source:'platform',type:'transaction',action:'transaction',section:'auditLog',operationId:id,recordId:id,actor:admin.name,actorId:admin.id,actorRole:'dispatcher',databaseToken,requestDigest:digest,at:'2026-09-01T00:00:00.000Z',changedSections:['payments'],revisions}];}),token='synthetic-legacy-dispatcher-123456789',settings={serverAccessConfigured:true,serverUsers:access.normalizeServerUsers([{...admin,role:'dispatcher',enabled:true,tokenHash:access.hashToken(token)},{id:'legacy-recovery-owner',name:'Synthetic active owner',role:'admin',enabled:true,tokenHash:access.hashToken('synthetic-legacy-owner-token-12345')}])},started=await server.start({port:0,dataDir:f.dir,settings,backupFn:()=>{}});assert.equal(started.ok,true);t.after(()=>server.stop());const before=storage.readSnapshot(f.dir),fileBefore=sha(fs.readFileSync(sqlite.filename(f.dir))),stored=require('../electron/operation-store.cjs'),entry=stored.engine(f.dir).inspectReceipt(stored.readState(f.dir).head,id);assert.equal(entry.proof.status,'legacy-unverified');assert.equal(entry.receipt.operation.actorRole,'dispatcher');const hidden=await request(started.port,'/api/operation?id='+id+'&digest='+encodeURIComponent(digest),token);assert.equal(hidden.status,200);assert.equal(hidden.body.operationReceipt,null);assert.ok(!JSON.stringify(hidden).includes(privateText));assert.deepEqual(storage.readSnapshot(f.dir),before);assert.equal(sha(fs.readFileSync(sqlite.filename(f.dir))),fileBefore);
 });

@@ -9,7 +9,7 @@ function fixture(t,backend='json',extra={}){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-scoped-access-'));t.after(()=>{assert.equal(path.dirname(path.resolve(dir)),path.resolve(os.tmpdir()));assert.ok(path.basename(dir).startsWith('tvs-scoped-access-'));fs.rmSync(dir,{recursive:true,force:true});});
  const data=Object.fromEntries(schema.sections.map(name=>[name,[]]));Object.assign(data,{vehicles:[{id:0,org:'A',site:'north',plate:'A-zero',norm:10,note:'A-PRIVATE'},{id:'0',org:'B',site:'south',plate:'B-hidden',note:'B-PRIVATE'},{id:'a2',org:'A',site:'north',plate:'A-two',norm:12,note:'A-PRIVATE-TWO'}]},extra);
  const revisions=Object.fromEntries(schema.sections.map(name=>[name,1]));
- if(backend==='sqlite')sqlite.create(dir,{data,revisions});else{fs.mkdirSync(path.join(dir,'sections'));for(const name of schema.sections)fs.writeFileSync(path.join(dir,'sections',name+'.json'),JSON.stringify(data[name]));fs.writeFileSync(path.join(dir,'sections','revisions.json'),JSON.stringify(storage.encodeRevisions(revisions)));}
+ if(backend==='sqlite')sqlite.create(dir,{data,revisions});else storage.createJson(dir,{data,revisions});
  return {dir,data,revisions};
 }
 function payload(snapshot,rows,id='scoped-save'){const value={databaseToken:snapshot.databaseToken,base:{vehicles:snapshot.revisions.vehicles},sections:{vehicles:rows},scopeViews:{vehicles:snapshot.scopeViews.vehicles}};return {...value,operation:{id,digest:kernel.requestDigest(value)}};}
@@ -36,8 +36,12 @@ for(const backend of ['json','sqlite']){
   assert.deepEqual(storage.readAll(f.dir).vehicles,f.data.vehicles);
  });
  test(backend+' composite audits deny mixed owner receipts and project private before/after fields',t=>{
-  const f=fixture(t,backend),user=principal(),rows=[{id:'a',section:'vehicles',operationId:'aop',source:'platform',action:'update',fields:['plate','note'],before:f.data.vehicles[0],after:{...f.data.vehicles[0],plate:'edited'}},{id:'b',section:'vehicles',operationId:'mixed',source:'platform',action:'update',fields:['plate'],before:f.data.vehicles[1],after:f.data.vehicles[1]},{id:'receipt-a',type:'transaction',section:'auditLog',operationId:'aop',changedSections:['vehicles']},{id:'receipt-mixed',type:'transaction',section:'auditLog',operationId:'mixed',changedSections:['vehicles']}],db={...f.data,auditLog:rows};
-  const visible=platform.visibleAudit(rows,user,db);assert.deepEqual(visible.map(row=>row.id),['a','receipt-a']);assert.equal(visible[0].before.note,undefined);assert.deepEqual(visible[0].fields,['plate']);assert.equal(JSON.stringify(visible).includes('PRIVATE'),false);
+  const f=fixture(t,backend),user=principal(),snapshot=storage.readSnapshot(f.dir,{principal:user});
+  storage.writeSections(f.dir,payload(snapshot,snapshot.data.vehicles.map(row=>row.id===0?{...row,plate:'edited'}:row),'aop'),{principal:user});
+  const before=storage.readSnapshot(f.dir);storage.writeSections(f.dir,{databaseToken:before.databaseToken,base:before.revisions,sections:{vehicles:before.data.vehicles.map(row=>row.id==='0'?{...row,plate:'changed B'}:row)},operation:{id:'mixed'}},{principal:{id:'global-reviewer',role:'admin',name:'Synthetic global reviewer'}});
+  const db=storage.readAll(f.dir),visible=platform.visibleAudit(db.auditLog,user,db);assert.deepEqual(visible.map(row=>[row.operationId,row.type||'event']),[['aop','event'],['aop','transaction']]);assert.equal(visible[0].before.note,undefined);assert.deepEqual(visible[0].fields,['plate']);assert.equal(JSON.stringify(visible).includes('PRIVATE'),false);
+  const unverified=[{section:'vehicles',operationId:'unverified',before:f.data.vehicles[0],after:f.data.vehicles[0]}];assert.deepEqual(platform.visibleAudit(unverified,user,{...db,auditLog:unverified}),[]);
+
  });
 }
 test('authentication retains normalized policy and computes a trusted stamp; roles and typed mechanic IDs remain ceilings',()=>{

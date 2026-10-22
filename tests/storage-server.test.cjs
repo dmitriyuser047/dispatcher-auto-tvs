@@ -5,10 +5,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
-const vm = require('node:vm');
-const { createRequire } = require('node:module');
+const { spawnSync } = require('node:child_process');
 const storage = require('../electron/storage');
-const storageFormat = require('../electron/storage-format.cjs');
+const operationStore = require('../electron/operation-store.cjs');
 const server = require('../electron/server');
 
 function database() {
@@ -67,35 +66,27 @@ test('invalid full writes are rejected and absent optional sections are preserve
 test('disk error during multi-section commit rolls back rows and revisions', t => {
   const dir = temp(t), db = database(); storage.writeAll(dir, db);
   const baseline = storage.readAll(dir);
-  const revs = storage.readRevisions(dir); let fail = true;
-  const proxy = new Proxy(fs, { get(target, key) {
-    if (key === 'renameSync') return (src, dst) => { if (fail && dst === storage.sectionFile(dir, 'records')) { fail = false; throw Error('disk failure'); } return fs.renameSync(src, dst); };
-    return target[key];
-  } });
-  const storageRequire = createRequire(path.join(__dirname, '../electron/storage.js'));
-  const ctx = { require: id => id === 'fs' ? proxy : storageRequire(id), module: { exports: {} }, console };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../electron/storage.js'), 'utf8'), ctx);
-  assert.throws(() => ctx.module.exports.writeSections(dir, { base: revs, sections: { vehicles: [{ id: 'changed' }], records: [{ id: 'new' }] } }), /disk failure/);
+  const revs = storage.readRevisions(dir),state=operationStore.readState(dir),rename=fs.renameSync;let injected=false;
+  try{fs.renameSync=function(src,dst){if(!injected&&path.resolve(dst)===path.resolve(storage.sectionFile(dir,'records'))){injected=true;throw Error('disk failure');}return rename.apply(this,arguments);};assert.throws(()=>storage.writeSections(dir,{base:revs,sections:{vehicles:baseline.vehicles.map(row=>({...row,note:'Synthetic next vehicle'})),records:baseline.records.map(row=>({...row,km:101}))}}),/disk failure/);}finally{fs.renameSync=rename;}
+  assert.equal(injected,true);
   assert.deepEqual(storage.readAll(dir), baseline);
   assert.deepEqual(storage.readRevisions(dir), revs);
+  assert.deepEqual(operationStore.readState(dir),state);
 });
+function interruptedSave(dir,phase){const before=storage.readSnapshot(dir),payload={databaseToken:before.databaseToken,base:before.revisions,sections:{vehicles:before.data.vehicles.map(row=>({...row,note:'committed'})),records:before.data.records.map(row=>({...row,km:101}))},operation:{id:'restart-'+phase}},script=String.raw`const storage=require(process.argv[1]),fs=require('node:fs'),path=require('node:path'),dir=process.argv[2],payload=JSON.parse(process.argv[3]),phase=process.argv[4],rename=fs.renameSync,target=phase==='before'?storage.sectionFile(dir,'vehicles'):storage.revisionsFile(dir);fs.renameSync=function(src,dst){const result=rename.apply(this,arguments);if(path.resolve(dst)===path.resolve(target))process.exit(71);return result;};storage.writeSections(dir,payload);process.exit(99);`,result=spawnSync(process.execPath,['-e',script,require.resolve('../electron/storage.js'),dir,JSON.stringify(payload),phase],{windowsHide:true,timeout:30000,encoding:'utf8',maxBuffer:1024*1024});assert.equal(result.status,71,result.stderr||result.error?.message||result.stdout);assert.equal(fs.existsSync(path.join(storage.sectionsDir(dir),'.transaction.json')),true);return payload;}
 test('restart rolls back an interrupted transaction before exposing sections', t => {
   const dir = temp(t), db = database(); storage.writeAll(dir, db);
-  const baseline = storage.readAll(dir);
-  const base = storage.readRevisions(dir), revisions = { ...base, vehicles: base.vehicles + 1, records: base.records + 1 };
-  const tx = { schemaVersion:storageFormat.SCHEMA_VERSION,before: { vehicles: db.vehicles, records: db.records }, sections: { vehicles: [{ id: 'new-v' }], records: [{ id: 'new-r' }] }, base:storage.encodeRevisions(base), revisions:storage.encodeRevisions(revisions) };
-  fs.writeFileSync(path.join(storage.sectionsDir(dir), '.transaction.json'), JSON.stringify(tx));
-  fs.writeFileSync(storage.sectionFile(dir, 'vehicles'), JSON.stringify(tx.sections.vehicles));
+  const baseline = storage.readAll(dir),base=storage.readRevisions(dir),state=operationStore.readState(dir);interruptedSave(dir,'before');
+  assert.equal(JSON.parse(fs.readFileSync(storage.sectionFile(dir,'vehicles')))[0].note,'committed');assert.equal(JSON.parse(fs.readFileSync(storage.sectionFile(dir,'records')))[0].km,100);
   assert.deepEqual(storage.readAll(dir), baseline); assert.deepEqual(storage.readRevisions(dir), base);
+  assert.deepEqual(operationStore.readState(dir),state);assert.equal(operationStore.engine(dir).inspectReceipt(state.head,'restart-before'),null);
 });
 test('restart finishes a transaction only after its revision commit point', t => {
   const dir = temp(t), db = database(); storage.writeAll(dir, db);
-  const base = storage.readRevisions(dir), revisions = { ...base, vehicles: base.vehicles + 1 };
-  const tx = { schemaVersion:storageFormat.SCHEMA_VERSION,before: { vehicles: db.vehicles }, sections: { vehicles: [{ id: 'committed' }] }, base:storage.encodeRevisions(base), revisions:storage.encodeRevisions(revisions) };
-  fs.writeFileSync(path.join(storage.sectionsDir(dir), '.transaction.json'), JSON.stringify(tx));
-  fs.writeFileSync(storage.revisionsFile(dir), JSON.stringify(storage.encodeRevisions(revisions)));
-  assert.equal(storage.readAll(dir).vehicles[0].id, 'committed');
+  const base=storage.readRevisions(dir),state=operationStore.readState(dir);interruptedSave(dir,'after');const revisions={...base,vehicles:base.vehicles+1,records:base.records+1,auditLog:base.auditLog+1};
+  assert.equal(storage.readAll(dir).vehicles[0].note,'committed');assert.equal(storage.readAll(dir).records[0].km,101);
   assert.deepEqual(storage.readRevisions(dir), revisions);
+  const committed=operationStore.readState(dir);assert.notEqual(committed.transactionId,state.transactionId);assert.equal(operationStore.engine(dir).inspectReceipt(committed.head,'restart-after').kind,'receipt');assert.equal(storage.readAll(dir).auditLog.filter(row=>row.type==='transaction'&&row.operationId==='restart-after').length,1);
 });
 test('closed periods are guarded in storage, including bulk and legacy writes', t => {
   const dir = temp(t), db = database(); db.fuelPeriods = [{ month: '2026-09', closed: true }]; require('./period-test-support.cjs').seedDatabase(dir,db);

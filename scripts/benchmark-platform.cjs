@@ -33,12 +33,10 @@ function fixture(count){
  data.appMeta=[{id:'meta',toPlanInit:'synthetic'}];return data;
 }
 function makeJson(dir,data){
- fs.mkdirSync(path.join(dir,'sections'),{recursive:true});
- for(const name of schema.sections)fs.writeFileSync(path.join(dir,'sections',name+'.json'),JSON.stringify(data[name]));
- fs.writeFileSync(path.join(dir,'sections','revisions.json'),JSON.stringify(Object.fromEntries(schema.sections.map(name=>[name,1]))));
+ storage.createJson(dir,{data,revisions:Object.fromEntries(schema.sections.map(name=>[name,1]))});
 }
-function removeOwned(dir){
- const absolute=path.resolve(dir);if(path.dirname(absolute)!==path.resolve(os.tmpdir())||!path.basename(absolute).startsWith('tvs-perf-step5-'))throw Error('Refuse cleanup outside owned synthetic temp');
+function removeOwned(dir,pin){
+ const absolute=path.resolve(dir),current=fs.lstatSync(absolute);if(path.dirname(absolute)!==path.resolve(os.tmpdir())||!path.basename(absolute).startsWith('tvs-perf-step5-')||current.isSymbolicLink()||current.dev!==pin.dev||current.ino!==pin.ino)throw Error('Refuse cleanup outside owned synthetic temp');
  fs.rmSync(absolute,{recursive:true,force:true});
 }
 function folderBytes(dir){return fs.readdirSync(dir,{withFileTypes:true}).reduce((total,item)=>total+(item.isDirectory()?folderBytes(path.join(dir,item.name)):fs.statSync(path.join(dir,item.name)).size),0);}
@@ -113,7 +111,7 @@ async function measure(name,action,repeats=3){
  return {metric:result,last};
 }
 async function child(count){
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-perf-step5-'));
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-perf-step5-')),pin=fs.lstatSync(dir);
  try{
   const data=fixture(count),jsonDir=path.join(dir,'json'),sqliteDir=path.join(dir,'sqlite'),metrics=[];
   const warm=fixture(10),warmEngine=application.create();warmEngine.query('fuel',warm,{from:'2026-10-01',to:'2026-10-31'});policies.validateChanges(warm,clone(warm),context);
@@ -202,18 +200,18 @@ async function child(count){
    const revisions={...sqlState.revisions,records:sqlState.revisions.records+rawSequence};sqlite.commitSections(sqliteDir,{records:rows},revisions);return true;
   },1);
   return {count,assets:data.vehicles.length,jobs:data.dispatchJobs.length,drivers:data.drivers.length,assignments:data.assetAssignments.length,purchases:data.fuelPurchases.length,totalRows:Object.values(data).reduce((sum,rows)=>sum+rows.length,0),jsonMiB:mb(Buffer.byteLength(JSON.stringify(data))),filesMiB:{json:mb(folderBytes(jsonDir)),sqlite:mb(folderBytes(sqliteDir))},policyIssues:report.counts,queryPlan,queryPages,fuelCache:{afterCold:cacheAfterCold,afterRepeat:cacheAfterRepeat},workerFuel:{coldStages:workerStages,afterCold:workerCold.stats,afterRepeat:workerRepeat.stats,loadedFingerprint:loaded.sourceFingerprint},workerPrepare:{coldStages:prepareStages,digest:workerPrepared.plan.requestDigest,parity:true},rendererPreflight:{...preflightStats,stubPersists,operationId:preflightReceipt.plan.id,changed:preflightReceipt.plan.changed},peakRssMiB:round(process.resourceUsage().maxRSS/1024),metrics};
- }finally{removeOwned(dir);}
+ }finally{removeOwned(dir,pin);}
 }
 async function main(){
  const at=process.argv.indexOf('--records');
  if(at>=0){const count=Number(process.argv[at+1]);if(![1000,5000,10000].includes(count))throw Error('Only synthetic 1000/5000/10000 record scales are supported');console.log(JSON.stringify(await child(count)));return;}
- const report={timestamp:new Date().toISOString(),runtime:{node:process.version,sqlite:process.versions.sqlite,platform:process.platform,arch:process.arch,cpus:os.cpus().length,cpu:os.cpus()[0]?.model,totalMemoryGiB:round(os.totalmem()/1024**3)},method:{syntheticOnly:true,perScaleIsolatedProcess:true,gcBeforeSample:true,samples:'3 unless a sample takes >750ms; trusted saves, low-level commit and worker cold startup measured once',timing:'wall performance.now; main-thread zero-delay timer and monitorEventLoopDelay resolution=1ms, no cold disk eviction',memory:'main heap before/after plus 5ms sampler during async jobs; process RSS includes worker threads; neither is an exact peak V8 heap',fixture:'10 records per vehicle, one linked purchase per vehicle, one driver, assignment and simultaneous assigned job per vehicle; no live rows or settings',queries:'Production data-query.queryRows page25 with exact authorised COUNT and date/asset/search filters; separate raw SQL probe excludes the trusted query boundary',worker:'Actual engine-worker.js and transaction-worker.js endpoints through worker_threads bootstrap; cold roundtrip includes startup+source capture+first calculation+result transfer; direct synchronous kernel.prepare excludes startup',preflight:'Actual createRuntime.run plus 51-platform-bridge prepare provider, immutable input capture, source/access guards and returned-plan validation; one actual transaction worker per operation. Persist is an explicit in-memory ACK stub, with no storage/IPC/backend domain work. Full trusted JSON/SQLite save metrics remain separate'},scales:[]};
+ const report={timestamp:new Date().toISOString(),runtime:{node:process.version,sqlite:process.versions.sqlite,platform:process.platform,arch:process.arch,cpus:os.cpus().length,cpu:os.cpus()[0]?.model,totalMemoryGiB:round(os.totalmem()/1024**3)},method:{syntheticOnly:true,perScaleIsolatedProcess:true,gcBeforeSample:true,childTimeoutMs:15*60*1000,samples:'3 unless a sample takes >750ms; trusted saves, low-level commit and worker cold startup measured once',timing:'wall performance.now; main-thread zero-delay timer and monitorEventLoopDelay resolution=1ms, no cold disk eviction',memory:'main heap before/after plus 5ms sampler during async jobs; process RSS includes worker threads; neither is an exact peak V8 heap',fixture:'10 records per vehicle, one linked purchase per vehicle, one driver, assignment and simultaneous assigned job per vehicle; no live rows or settings',queries:'Production data-query.queryRows page25 with exact authorised COUNT and date/asset/search filters; separate raw SQL probe excludes the trusted query boundary',worker:'Actual engine-worker.js and transaction-worker.js endpoints through worker_threads bootstrap; cold roundtrip includes startup+source capture+first calculation+result transfer; direct synchronous kernel.prepare excludes startup',preflight:'Actual createRuntime.run plus 51-platform-bridge prepare provider, immutable input capture, source/access guards and returned-plan validation; one actual transaction worker per operation. Persist is an explicit in-memory ACK stub, with no storage/IPC/backend domain work. Full trusted JSON/SQLite save metrics remain separate'},scales:[]};
  for(const count of [1000,5000,10000]){
-  const run=spawnSync(process.execPath,['--expose-gc',__filename,'--records',String(count)],{cwd:root,encoding:'utf8',timeout:110000,maxBuffer:16*1024*1024,windowsHide:true});
+  const run=spawnSync(process.execPath,['--expose-gc',__filename,'--records',String(count)],{cwd:root,encoding:'utf8',timeout:15*60*1000,maxBuffer:16*1024*1024,windowsHide:true});
   process.stderr.write(run.stderr||'');if(run.error||run.status!==0)throw run.error||Error(run.stdout+'\n'+run.stderr);report.scales.push(JSON.parse(run.stdout.trim()));
   fs.mkdirSync(path.join(root,'audit'),{recursive:true});fs.writeFileSync(path.join(root,'audit','performance-step5-after.json'),JSON.stringify(report,null,2));
  }
  console.log(JSON.stringify({file:'audit/performance-step5-after.json',scales:report.scales.map(scale=>({records:scale.count,peakRssMiB:scale.peakRssMiB,metrics:scale.metrics.map(({name,medianMs,maxEventLoopDelayMs,maxObservedHeapMiB})=>({name,ms:medianMs,eventLoopDelayMs:maxEventLoopDelayMs,heapMiB:maxObservedHeapMiB}))}))},null,2));
 }
-module.exports={fixture};
+module.exports={fixture,makeJson};
 if(require.main===module)main().catch(error=>{console.error(error.stack);process.exitCode=1;});

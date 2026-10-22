@@ -1,0 +1,12 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),{functionDeclarations}=require('./helpers/source-harness.cjs');
+const sandbox=vm.createContext({kernel:()=>require('../assets/core/platform-kernel.js'),fail:(code,message,status)=>{throw Object.assign(Error(message),{code,status});}});vm.runInContext(functionDeclarations('electron/platform-service.cjs',['assertScopeSnapshots']),sandbox);const guard=sandbox.assertScopeSnapshots,refused=action=>assert.throws(action,error=>error.code==='ACCESS_SCOPE_IMMUTABLE'&&error.status===403),proof=org=>({version:1,literalOrg:org,blank:''});
+test('actual snapshot guard preserves typed ID matching and exact blank/missing/null snapshot values',()=>{
+ const before={records:[{id:0,scopeSnapshot:proof('A')},{id:'0',scopeSnapshot:proof('B')},{id:'null',scopeSnapshot:null},{id:'blank',scopeSnapshot:''},{id:'missing'}]};guard(before,structuredClone(before));for(const change of [rows=>rows[0].scopeSnapshot=proof('B'),rows=>rows[1].scopeSnapshot=proof('A'),rows=>delete rows[2].scopeSnapshot,rows=>rows[3].scopeSnapshot=null,rows=>rows[4].scopeSnapshot={}]){const next=structuredClone(before);change(next.records);refused(()=>guard(before,next));}
+});
+test('actual snapshot index preserves duplicate ambiguity, trusted snapshot reuse and recursive input-proof refusal',()=>{
+ const a=proof('A'),b=proof('B'),before={records:[{id:0,scopeSnapshot:a},{id:0,scopeSnapshot:b},{id:'0',scopeSnapshot:proof('STRING')}]},next={records:[{id:0,scopeSnapshot:a}]},intent={command:{type:'DocumentAction',input:{id:'trusted-creation'}}};refused(()=>guard(before,next));guard(before,next,intent);guard(before,{records:[{id:'new',scopeSnapshot:structuredClone(b)}]},intent);refused(()=>guard(before,{records:[{id:'new',scopeSnapshot:proof('UNKNOWN')}]},intent));refused(()=>guard(before,{records:[{id:'new',scopeSnapshot:b}]}));refused(()=>guard(before,next,{command:{input:{nested:{scopeSnapshot:a}}}}));
+});
+test('actual snapshot guard reads IDs linearly for an unchanged 5000-row section instead of comparing every pair',()=>{
+ let reads=0;const rows=Array.from({length:5000},(_,id)=>Object.defineProperty({note:'Synthetic unchanged'},'id',{enumerable:true,get(){reads++;return id;}}));guard({records:rows},{records:rows});assert.ok(reads<=rows.length*5+20,'Snapshot identity reads must grow linearly; observed '+reads);
+});

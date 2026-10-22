@@ -71,11 +71,11 @@ function createOperationRecovery({outbox,send,lookup,onWarning=()=>{},onEvent}){
   async function reconcile(context,id){
     const stored=outbox.getForRetry(context.scope,id);
     if(!stored)throw Error('Операция не найдена в очереди этой базы и учётной записи');
-    if(stored.metadata.status==='committed'){observed(context,id,'recovery-looked-up',matchesReceipt(stored.receipt,id,stored.requestDigest)?'committed':'unknown');return {ok:true,committed:true,operationReceipt:stored.receipt};}
+    if(stored.metadata.status==='committed'&&matchesReceipt(stored.receipt,id,stored.requestDigest)){observed(context,id,'recovery-looked-up','committed');return {ok:true,committed:true,operationReceipt:stored.receipt};}
     let result;try{result=await lookup(context,id,stored.requestDigest);}catch(error){observed(context,id,'recovery-looked-up','unknown');throw error;}
     if(result?.databaseToken!==context.databaseToken){observed(context,id,'recovery-looked-up','unknown');throw Object.assign(Error('База изменилась. Очередь не применялась.'),{code:'DATABASE_CHANGED'});}
     if(result.ok!==true){observed(context,id,'recovery-looked-up','unknown');throw Object.assign(Error('Сервер не подтвердил результат проверки'),{code:'LOOKUP_UNCONFIRMED'});}
-    if(!result.operationReceipt){observed(context,id,'recovery-looked-up','not-found');return {ok:true,committed:false,status:stored.metadata.status};}
+    if(!result.operationReceipt){if(stored.metadata.status==='committed'){observed(context,id,'recovery-looked-up','unknown');throw Object.assign(Error('Прежнее подтверждение не содержит точного отпечатка запроса; сервер не подтвердил его повторно.'),{code:'LOOKUP_UNCONFIRMED'});}observed(context,id,'recovery-looked-up','not-found');return {ok:true,committed:false,status:stored.metadata.status};}
     if(!matchesReceipt(result.operationReceipt,id,stored.requestDigest)){
       outcome(context,id,{status:'unknown',code:'ACK_MISMATCH'});
       observed(context,id,'recovery-looked-up','unknown');

@@ -27,6 +27,21 @@ function makeSubject(sectionName,before,after,beforeFacts,afterFacts,fields=chan
 }
 function grouped(sectionName,rows){const groups=new Map();for(const [index,row]of rows.entries()){const key=load('assets/core/platform-integrity.js').rowIdentity(sectionName,row,index),list=groups.get(key)||[];list.push(row);groups.set(key,list);}return {groups};}
 function ownedDatabase(value){if(!object(value))fail();const result={};for(const name of schema.sections){const rows=value[name]??[];if(!Array.isArray(rows)||rows.some(row=>!object(row)))fail();result[name]=rows;}return result;}
+function archiveCapture(selected,bound){
+ const value=selected.value;if(!object(value)||value.type!=='document-print-seal')return null;
+ if(value.version!==1||value.previous!==null&&!/^[a-f0-9]{64}$/.test(value.previous)||!object(value.snapshot)||!object(value.accessScope)||value.accessScope.version!==1||!Array.isArray(value.accessScope.rows))fail();
+ load('assets/core/document-print.js').verify(value.snapshot);const declared=list(value.snapshot.requiredReadSections),database=ownedDatabase({});
+ for(const item of value.accessScope.rows){if(!object(item)||!names.has(item.section)||!object(item.row))fail();database[item.section].push(item.row);}
+ const resolver=scope.createResolver(database),sourceRows=value.accessScope.rows.map(item=>{const facts=resolver.resolve(item.section,item.row),subject=makeSubject(item.section,item.row,null,facts,null,Object.keys(item.row).sort());subject.kind='archive-source';subject.fullReadRequired=true;return subject;}),sourceFacts=sourceRows.map(item=>item.beforeFacts),owners=sourceFacts.flatMap(facts=>facts.owners),requiredSections=[...new Set([...declared,...sourceFacts.flatMap(facts=>facts.readRequirements?.sections||[])])].sort();
+ const facts={kind:sourceFacts.length&&sourceFacts.every(facts=>facts.kind==='shared')?'shared':'owned',owners,readRequirements:{sections:requiredSections,owners:[...owners,...sourceFacts.flatMap(facts=>facts.readRequirements?.owners||[])],complete:sourceFacts.length>0&&sourceFacts.every(complete)}};
+ let record=value;if(own(selected,'record')){record=selected.record;if(!object(record)||record.version!==1||record.type!=='document-print-artifact'||record.previous!==null&&!/^[a-f0-9]{64}$/.test(record.previous)||!object(record.artifact)||record.artifact.archiveId!==digest(value).slice(7)||!['pdf','xlsx'].includes(record.artifact.format)||!/^[a-f0-9]{64}$/.test(record.artifact.sha256)||!Number.isSafeInteger(record.artifact.size)||record.artifact.size<=0||record.capture?.operationId!==bound.id)fail();}
+ return {facts,sourceRows,record,hash:digest(record).slice(7)};
+}
+function archiveHead(row){return object(row)&&Object.keys(row).length===4&&row.id==='document-archive-head'&&row.kind==='documentArchive'&&row.version===1&&typeof row.head==='string'&&/^[a-f0-9]{64}$/.test(row.head);}
+function provenArchiveHead(previous,next,captures){
+ const select=database=>database.appMeta.filter(row=>row.id==='document-archive-head'||row.kind==='documentArchive'),before=select(previous),after=select(next);if(before.length>1||after.length!==1||before.length&&!archiveHead(before[0])||!archiveHead(after[0]))return false;
+ const expected=before[0]?.head??null,records=new Map([...captures.values()].map(item=>[item.hash,item.record])),seen=new Set();let cursor=after[0].head;while(cursor!==expected){if(seen.has(cursor)||!records.has(cursor))return false;seen.add(cursor);cursor=records.get(cursor).previous;}return seen.size>0;
+}
 
 function createProof(input){
  const source=safe(input),previous=ownedDatabase(source.previous),next=ownedDatabase(source.next),beforeResolver=scope.createResolver(previous),afterResolver=scope.createResolver(next),receipt=source.receipt;
@@ -38,25 +53,32 @@ function createProof(input){
  const writes=descriptor?list(descriptor.writeSections):Array.isArray(source.sections)?list(source.sections):list(receipt.changedSections||[]);
  const reads=descriptor?list(descriptor.readSections):writes.slice();
  const requested=descriptor&&Array.isArray(descriptor.selectedTargets)?descriptor.selectedTargets:[];
+ const archives=new Map();for(const selected of requested)if(object(selected)&&selected.kind==='archive'){const capture=archiveCapture(selected,bound);if(capture)archives.set(selected,capture);}
+ const trustedArchiveHead=provenArchiveHead(previous,next,archives),headFacts={kind:'shared',owners:[]};
  let verified=source.mode==='transaction'&&descriptor?.complete===true&&Array.isArray(descriptor.selectedTargets)&&Array.isArray(source.events);
  if(!verified)issues.push('historical-or-incomplete-collector');
  if(source.commandIntent){try{const command=source.commandIntent.command||source.commandIntent,required=load('assets/core/platform-commands.js').dependencies(command);if(required.some(name=>!reads.includes(name)))verified=false;}catch{verified=false;}if(!verified)issues.push('unconfirmed-command-closure');}
  const subjects=[];
  for(const name of writes){if(name==='auditLog')continue;const left=grouped(name,previous[name]),right=grouped(name,next[name]);
-  for(const key of new Set([...left.groups.keys(),...right.groups.keys()])){const a=left.groups.get(key)||[],b=right.groups.get(key)||[];if(same(a,b))continue;for(let index=0;index<Math.max(a.length,b.length);index++){const before=a[index]||null,after=b[index]||null;if(same(before,after))continue;const beforeFacts=before===null?null:beforeResolver.resolve(name,before),afterFacts=after===null?null:afterResolver.resolve(name,after);subjects.push(makeSubject(name,before,after,beforeFacts,afterFacts));}}
+  for(const key of new Set([...left.groups.keys(),...right.groups.keys()])){const a=left.groups.get(key)||[],b=right.groups.get(key)||[];if(same(a,b))continue;for(let index=0;index<Math.max(a.length,b.length);index++){const before=a[index]||null,after=b[index]||null;if(same(before,after))continue;const technical=name==='appMeta'&&trustedArchiveHead&&(before===null||archiveHead(before))&&(after===null||archiveHead(after)),beforeFacts=before===null?null:technical?headFacts:beforeResolver.resolve(name,before),afterFacts=after===null?null:technical?headFacts:afterResolver.resolve(name,after);subjects.push(makeSubject(name,before,after,beforeFacts,afterFacts));}}
  }
  // Explicit selected rows are the collector's actual read closure, including
  // no-op targets. There is no independent command-to-target guess here.
  const selectedTargets=[];
  for(const selected of requested){if(!object(selected))fail();const name=section(selected.section),kind=selected.kind||'row';let before=null,after=null,beforeFacts=null,afterFacts=null;
-  if(kind==='archive'||kind==='source'){if(!object(selected.value))fail();before=selected.value;after=selected.value;const declared=kind==='source'?before.sourceScopes:before.snapshot?.requiredReadSections??before.requiredReadSections;if(!Array.isArray(declared)||declared.some(name=>!names.has(name))){verified=false;issues.push('unclassified-composite-source');}beforeFacts=kind==='archive'?beforeResolver.resolveArchive(before):beforeResolver.resolveSource(before);afterFacts=kind==='archive'?afterResolver.resolveArchive(after):afterResolver.resolveSource(after);}
+  if(kind==='archive'||kind==='source'){if(!object(selected.value))fail();before=selected.value;after=selected.value;const declared=kind==='source'?before.sourceScopes:before.snapshot?.requiredReadSections??before.requiredReadSections;if(!Array.isArray(declared)||declared.some(name=>!names.has(name))){verified=false;issues.push('unclassified-composite-source');}const captured=archives.get(selected);beforeFacts=captured?captured.facts:kind==='archive'?beforeResolver.resolveArchive(before):beforeResolver.resolveSource(before);afterFacts=captured?captured.facts:kind==='archive'?afterResolver.resolveArchive(after):afterResolver.resolveSource(after);if(captured)selectedTargets.push(...captured.sourceRows);}
   else if(kind==='row'){
    if(own(selected,'id')){if(!identifier(selected.id))fail();const a=byId('before',name,selected.id),b=byId('after',name,selected.id);if(a.length>1||b.length>1||!a.length&&!b.length){verified=false;issues.push('selected-target-missing-or-ambiguous');}before=a.length===1?a[0]:null;after=b.length===1?b[0]:null;}
    else {for(const phase of ['before','after'])if(selected[phase]!==null&&selected[phase]!==undefined){const row=selected[phase];if(!object(row))fail();const rows=(phase==='before'?previous:next)[name],position=selected[phase+'Index'];let matched;if(position!==undefined){if(!Number.isSafeInteger(position)||position<0||position>=rows.length||!same(rows[position],row))fail();matched=rows[position];}else{const matches=rows.filter(value=>same(value,row));if(matches.length!==1){verified=false;issues.push('idless-target-not-unique');}else matched=matches[0];}if(matched){if(phase==='before')before=matched;else after=matched;}}}
    beforeFacts=before===null?null:beforeResolver.resolve(name,before);afterFacts=after===null?null:afterResolver.resolve(name,after);
   }else fail();
   if(before===null&&after===null){verified=false;issues.push('unverified-selected-target');}
-  const item=makeSubject(name,before,after,beforeFacts,afterFacts,[]);item.kind=kind;selectedTargets.push(item);
+  const item=makeSubject(name,before,after,beforeFacts,afterFacts,[]);
+  // A row dependency already retains its exact typed identity in both phase
+  // fragments. Avoid repeating that identity and the default discriminator in
+  // every selected row of a large reviewed source closure.
+  if(kind==='row')delete item.id;else item.kind=kind;
+  selectedTargets.push(item);
  }
  const actual=[...new Set(subjects.map(row=>row.section))].sort(),declared=list(receipt.changedSections||[]).filter(name=>name!=='auditLog');if(!same(actual,declared)){verified=false;issues.push('changed-section-coverage-mismatch');}
  const requiredSections=[...new Set([...reads,...writes,...selectedTargets.map(row=>row.section),...subjects.flatMap(row=>[...(row.beforeFacts?.readRequirements?.sections||[]),...(row.afterFacts?.readRequirements?.sections||[])]),...selectedTargets.flatMap(row=>[...(row.beforeFacts?.readRequirements?.sections||[]),...(row.afterFacts?.readRequirements?.sections||[])])])].sort();
@@ -74,6 +96,7 @@ function validateSubject(subject){
  if(!object(subject)||!names.has(subject.section)||!Array.isArray(subject.changedFields)||subject.changedFields.length>1000||new Set(subject.changedFields).size!==subject.changedFields.length||subject.changedFields.some(field=>typeof field!=='string'||!field)||!['create','update','delete'].includes(subject.action)||own(subject,'id')&&!identifier(subject.id))fail();
  for(const phase of ['before','after']){const row=subject[phase],facts=subject[phase+'Facts'],hash=subject[phase+'Hash'];if(row===null){if(facts!==null||hash!==null)fail();}else {if(!object(row)||!/^sha256:[a-f0-9]{64}$/.test(hash))fail();validateFacts(facts);if(own(subject,'id')&&row.id!==subject.id)fail();}}
  if(subject.before===null&&subject.after===null||subject.action!==(subject.before===null?'create':subject.after===null?'delete':'update'))fail();
+ if(own(subject,'fullReadRequired')&&(subject.fullReadRequired!==true||subject.kind!=='archive-source'||subject.before===null||subject.after!==null||!same(subject.changedFields,Object.keys(subject.before).sort())))fail();
  return subject;
 }
 function validateProof(input){
@@ -101,7 +124,7 @@ function permitted(env,proof,bindActor){
  if(bindActor&&(env.current.id!==proof.request.actor.id||env.current.role!==proof.request.actor.role))return false;
  if(!proof.requiredSections.length||proof.requiredSections.some(name=>!access.sectionAllowed(env.current,'read',name)))return false;
  if(proof.status!=='verified')return legacyAllowed(env,proof);
- return proof.subjects.every(row=>subjectAllowed(env,row,{changedFields:true}))&&proof.request.selectedTargets.every(row=>subjectAllowed(env,row));
+ return proof.subjects.every(row=>subjectAllowed(env,row,{changedFields:true}))&&proof.request.selectedTargets.every(row=>subjectAllowed(env,row,{changedFields:row.fullReadRequired===true}));
 }
 function authorizeProof(proof,principal,receipt){try{const checked=validateProof(proof);if(receipt!==undefined&&!same(operation(receipt.operation||receipt),checked.request.operation))return false;return permitted(environment(principal),checked,true);}catch{return false;}}
 function eventSubject(event,proof){const fields=changed(event.before||null,event.after||null);return proof.subjects.find(row=>row.section===event.section&&same(row.changedFields,fields)&&['before','after'].every(phase=>(event[phase]??null)===null?row[phase]===null:digest(event[phase])===row[phase+'Hash']&&same(fragment(event[phase],row.changedFields,event.section),row[phase])));}

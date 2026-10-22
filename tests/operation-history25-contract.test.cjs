@@ -10,7 +10,7 @@ test('whole compact receipt retains complete A+B authority through a real partia
 });
 
 test('no-op receipt keeps its typed selected target after archival and complete grant revocation',()=>{
- const db=database({vehicles:[row(0,'A'),row('0','B')]}),value=prepared('no-op-target',db,db,{targets:[{section:'vehicles',id:'0'}]}),store=memory();store.append(value);assert.deepEqual(value.receipt.changedSections,[]);assert.deepEqual(store.head.hot,[]);store.archive(0,[]);assert.equal(store.lookup('no-op-target',A),null);assert.equal(store.lookup('no-op-target',none),null);assert.equal(store.lookup('no-op-target',B).status,'committed');assert.throws(()=>store.lookup('no-op-target',none,{mode:'replay'}),{code:'ACCESS_DENIED'});assert.equal(value.proof.request.selectedTargets[0].id,'0');
+ const db=database({vehicles:[row(0,'A'),row('0','B')]}),value=prepared('no-op-target',db,db,{targets:[{section:'vehicles',id:'0'}]}),store=memory();store.append(value);assert.deepEqual(value.receipt.changedSections,[]);assert.deepEqual(store.head.hot,[]);store.archive(0,[]);assert.equal(store.lookup('no-op-target',A),null);assert.equal(store.lookup('no-op-target',none),null);assert.equal(store.lookup('no-op-target',B).status,'committed');assert.throws(()=>store.lookup('no-op-target',none,{mode:'replay'}),{code:'ACCESS_DENIED'});assert.equal(value.proof.request.selectedTargets[0].before.id,'0');assert.equal(value.proof.request.selectedTargets[0].after.id,'0');
 });
 
 test('one ownership-transfer event requires frozen before A and after B despite later source mutation',()=>{
