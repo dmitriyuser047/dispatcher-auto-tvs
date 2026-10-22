@@ -89,7 +89,7 @@ test('SQLite remains opt-in and ordinary synthetic JSON directories are not conv
 
 test('shared storage reads exact SQLite sections, revisions, typed IDs and 923.537 litre values without JSON shadows',t=>{
   const {dir,initial,revisions}=fixture(t),file=adapter().filename(dir),before=hash(file),guard=assertGuardOnly(dir),snapshot=storage.readSnapshot(dir);
-  assert.deepEqual(snapshot.data,initial);assert.deepEqual(snapshot.revisions,revisions);assert.deepEqual(snapshot.platform,{apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:2,documentDrafts:1,needsSchemaUpgrade:false});
+  assert.deepEqual(snapshot.data,initial);assert.deepEqual(snapshot.revisions,revisions);assert.deepEqual(snapshot.platform,{apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:2,documentDrafts:1,periods:1,needsSchemaUpgrade:false});
   assert.equal(snapshot.data.vehicles[0].fuelBalance,923.537);assert.equal(typeof snapshot.data.vehicles[0].id,'number');assert.equal(typeof snapshot.data.vehicles[1].id,'string');
   assert.equal(storage.readSection(dir,'records').rows[0].vehicleId,7);assert.equal(storage.readSection(dir,'records').rows[1].vehicleId,'7');
   assert.equal(hash(file),before);assertGuardOnly(dir,guard);
@@ -189,7 +189,7 @@ for(const format of ['SQLite','JSON']){
   test('closed '+format+' periods distinguish numeric/textual IDs: descriptive edits pass, actual fuel edits fail',t=>{
     let dir;
     if(format==='SQLite')dir=fixture(t,db=>{db.fuelPeriods=[{month:'2026-09',closed:true}];}).dir;
-    else{dir=temp(t);const initial=data();initial.fuelPeriods=[{month:'2026-09',closed:true}];storage.writeAll(dir,initial,{principal:admin});}
+    else{dir=temp(t);const initial=data();initial.fuelPeriods=[{month:'2026-09',closed:true}];require('./period-test-support.cjs').seedDatabase(dir,initial);}
     const before=storage.readSnapshot(dir),vehicles=before.data.vehicles.map((row,index)=>index===0?{...row,note:'Description only for numeric ID'}:row);
     const result=storage.writeSections(dir,payload(dir,{vehicles}),{principal:admin});assert.equal(result.ok,true);
     const current=storage.readSnapshot(dir);assert.equal(current.data.vehicles[0].id,7);assert.equal(current.data.vehicles[0].fuelBalance,923.537);

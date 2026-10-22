@@ -84,10 +84,10 @@ for(const format of ['json','sqlite']){
   const f=fixture(t,format,data=>{for(const section of ['vehicles','generators','tanks'])data[section][0].fuelAccounting=anchor(100);data.fuelPeriods=[{month:'2026-09',closed:true}];}),before=snapshot(f.dir);
   for(const section of ['vehicles','generators','tanks'])for(const change of ['from','opening','basis','remove'])for(const full of [false,true]){
    const row=clone(before.data[section][0]);if(change==='remove')delete row.fuelAccounting;else row.fuelAccounting[change]=change==='opening'?100.001:change==='from'?'2026-10-01':'Changed basis';
-   assert.throws(()=>save(f.dir,{[section]:[row]},full),/Месяц закрыт/);assert.deepEqual(snapshot(f.dir),before);
+   assert.throws(()=>save(f.dir,{[section]:[row]},full),{code:'PERIOD_CLOSED'});assert.deepEqual(snapshot(f.dir),before);
   }
   const reordered=Object.fromEntries(Object.entries(anchor(100)).reverse());assert.equal(save(f.dir,{vehicles:[{...before.data.vehicles[0],fuelAccounting:reordered,note:'Closed-period descriptive edit'}]},true).ok,true);
-  const legacy=fixture(t,format,data=>{data.fuelPeriods=[{month:'2026-09',closed:true}];}),initial=snapshot(legacy.dir);assert.throws(()=>save(legacy.dir,{vehicles:initial.data.vehicles.map(row=>({...row,fuelAccounting:anchor()}))}),/Месяц закрыт/);assert.deepEqual(snapshot(legacy.dir),initial);
+  const legacy=fixture(t,format,data=>{data.fuelPeriods=[{month:'2026-09',closed:true}];}),initial=snapshot(legacy.dir);assert.throws(()=>save(legacy.dir,{vehicles:initial.data.vehicles.map(row=>({...row,fuelAccounting:anchor()}))}),{code:'PERIOD_CLOSED'});assert.deepEqual(snapshot(legacy.dir),initial);
  });
 
  test(format+' asset ACL forbids a mechanic from changing anchors while dispatcher retains ordinary card ownership',t=>{
@@ -118,7 +118,7 @@ for(const format of ['json','sqlite']){
   const denied=await request(started.port,'/api/sections',tokens.mechanic,{databaseToken:current.databaseToken,base:current.revisions,sections:{vehicles:metadata.vehicles}});assert.equal(denied.status,403);assert.deepEqual(snapshot(f.dir),current);
   const accepted=await request(started.port,'/api/sections',tokens.admin,{databaseToken:current.databaseToken,base:current.revisions,sections:metadata});assert.equal(accepted.status,200,accepted.text);const anchored=snapshot(f.dir),command=await request(started.port,'/api/commands',tokens.admin,issue(f.dir));assert.equal(command.status,400,command.text);assert.equal(command.body.ok,false);assert.deepEqual(snapshot(f.dir),anchored);
   const raw={id:'http-prestart',date:'2026-08-31',kind:'receipt',fromTankId:'',toTankId:'t',qty:1,reason:'Synthetic raw prestart'};const rejected=await request(started.port,'/api/sections',tokens.admin,{databaseToken:anchored.databaseToken,base:anchored.revisions,sections:{fuelMovements:[raw]}});assert.equal(rejected.status,400,rejected.text);assert.deepEqual(snapshot(f.dir),anchored);
-  const closed=snapshot(f.dir);assert.equal(save(f.dir,{fuelPeriods:[{month:'2026-10',closed:true}]}).ok,true);const sealed=snapshot(f.dir),blocked=await request(started.port,'/api/data',tokens.admin,{databaseToken:sealed.databaseToken,base:sealed.revisions,data:{...sealed.data,vehicles:sealed.data.vehicles.map(row=>({...row,fuelAccounting:{...row.fuelAccounting,opening:1}}))}});assert.equal(blocked.status,400,blocked.text);assert.deepEqual(snapshot(f.dir),sealed);assert.ok(backups>=1);assert.equal(closed.data.records.length,sealed.data.records.length);
+  const closed=snapshot(f.dir);require('./period-test-support.cjs').seedSections(f.dir,{fuelPeriods:[{month:'2026-10',closed:true}]});const sealed=snapshot(f.dir),blocked=await request(started.port,'/api/data',tokens.admin,{databaseToken:sealed.databaseToken,base:sealed.revisions,data:{...sealed.data,vehicles:sealed.data.vehicles.map(row=>({...row,fuelAccounting:{...row.fuelAccounting,opening:1}}))}});assert.equal(blocked.status,400,blocked.text);assert.deepEqual(snapshot(f.dir),sealed);assert.ok(backups>=1);assert.equal(closed.data.records.length,sealed.data.records.length);
  });
 }
 

@@ -83,15 +83,16 @@ function fuelPeriods() { return data.fuelPeriods || (data.fuelPeriods = []); }
 function fuelPeriod(month) { return fuelPeriods().find(p => p.month === month); }
 function fuelMonthClosed(dateOrMonth) {
   const m = String(dateOrMonth || '').slice(0, 7);
-  const p = m && fuelPeriod(m);
-  return !!(p && p.closed);
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(m))return false;
+  if(typeof PeriodPolicy!=='undefined')return PeriodPolicy.isClosed(data,'fuel',m);
+  const p=fuelPeriod(m);return !!(p&&p.closed);
 }
 // Проверка перед правкой: true — можно, false — месяц закрыт (с сообщением)
 function fuelEditAllowed(...dates) {
   const closed = [...new Set(dates.filter(Boolean).map(d => String(d).slice(0, 7)))].filter(fuelMonthClosed);
   if (!closed.length) return true;
-  alert('Месяц закрыт: ' + closed.map(m => fpMonthLabel(m)).join(', ') +
-    '.\nЧтобы внести правку, откройте месяц: Заправки → Закрытие месяца.');
+  alert('Период защищён закрытием: ' + closed.map(m => fpMonthLabel(m)).join(', ') +
+    '.\nПроверьте защиту периода: Заправки → Закрытие месяца. Более поздние закрытые месяцы также влияют на правки.');
   return false;
 }
 
@@ -416,81 +417,18 @@ function fcChecklist(month) {
 }
 
 function fcCloseHtml() {
-  const months = [...new Set([...fpCmpMonths(), ...fpMonthsList()])].sort().reverse();
-  if (!fcCloseMonth || !months.includes(fcCloseMonth)) fcCloseMonth = months.find(m => !fuelMonthClosed(m)) || months[0] || '';
-  if (!fcCloseMonth) return '<div class="welcome" style="padding:60px 0"><p>Нет данных</p></div>';
-  const per = fuelPeriod(fcCloseMonth);
-  const closed = fuelMonthClosed(fcCloseMonth);
-  const items = fcChecklist(fcCloseMonth);
-  const problems = items.filter(i => i.bad);
-
-  const list = items.map(i => `
-    <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 14px;border-bottom:1px solid var(--border)">
-      <div style="font-size:18px;line-height:1.2;color:${i.bad ? (i.soft ? '#d97706' : 'var(--red)') : 'var(--green)'}">${i.bad ? '⚠' : '✓'}</div>
-      <div style="flex:1">
-        <div style="font-weight:600">${fpEsc(i.title)}${i.bad ? ` <span style="color:var(--text3);font-weight:400">— ${i.bad}</span>` : ''}</div>
-        ${i.detail ? `<div style="font-size:12px;color:var(--text3);margin-top:2px">${fpEsc(i.detail)}</div>` : ''}
-      </div>
-      ${i.bad && i.tab ? `<button class="btn btn-ghost btn-sm" onclick="fpView='${i.tab}';fpMonth='${fcCloseMonth}';frcMonth='${fcCloseMonth}';renderFuelPurchases()">Открыть</button>` : ''}
-    </div>`).join('');
-
-  const hist = (per && per.history || []).slice().reverse().map(h =>
-    `<div style="font-size:12px;color:var(--text3)">${new Date(h.at).toLocaleString('ru')} — ${h.action === 'close' ? 'закрыт' : 'открыт'}${h.note ? ': ' + fpEsc(h.note) : ''}</div>`).join('');
-
-  return `
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
-      <select class="fsel" onchange="fcCloseMonth=this.value;renderFuelPurchases()">
-        ${months.map(m => `<option value="${m}"${m === fcCloseMonth ? ' selected' : ''}>${fpMonthLabel(m)}${fuelMonthClosed(m) ? ' — закрыт' : ''}</option>`).join('')}
-      </select>
-      <span style="font-weight:700;color:${closed ? 'var(--green)' : 'var(--text2)'}">${closed ? '🔒 Месяц закрыт' : 'Месяц открыт'}</span>
-      <span style="margin-left:auto"></span>
-      ${closed
-        ? `<button class="btn btn-ghost" onclick="fcReopen('${fcCloseMonth}')">Открыть месяц</button>`
-        : `<button class="btn btn-primary" onclick="fcClose('${fcCloseMonth}')">Закрыть месяц</button>`}
-    </div>
-    <div class="table-wrap" style="margin-bottom:14px">
-      <div class="table-toolbar"><div class="table-toolbar-left">Проверка перед закрытием · ${fpMonthLabel(fcCloseMonth)}</div>
-        <div style="font-size:13px;color:${problems.length ? '#d97706' : 'var(--green)'}">${problems.length ? 'замечаний: ' + problems.length : 'всё в порядке'}</div></div>
-      ${list}
-    </div>
-    ${hist ? `<div style="margin-bottom:10px"><div style="font-weight:600;margin-bottom:4px">История</div>${hist}</div>` : ''}
-    <div style="font-size:12px;color:var(--text3)">
-      В закрытом месяце нельзя менять журнал пробега и заправки, а загрузка выписок пропускает его строки.
-      Закрыть можно и с замечаниями — программа покажет их ещё раз. Месяц можно открыть обратно, это попадёт в историю.
-    </div>`;
+  const months=[...new Set([...fpCmpMonths(),...fpMonthsList(),...(data.fuelPeriods||[]).map(row=>row.month)])].filter(month=>/^\d{4}-(0[1-9]|1[0-2])$/.test(month)).sort().reverse();
+  if(!fcCloseMonth||!months.includes(fcCloseMonth))fcCloseMonth=months[0]||'';
+  return '<div class="wf-note"><h3>Периоды учёта ГСМ</h3><p>Закрытие и открытие выполняются через общую проверку. Основание и история сохраняются после подтверждения базы. Более поздний закрытый месяц может продолжать защищать ранние данные.</p><button type="button" class="btn btn-primary" onclick="periodControlOpen(\'fuel\','+htmlEsc(JSON.stringify(fcCloseMonth))+')">Проверить период ГСМ</button></div>';
 }
-
-async function fcClose(month) {
-  const problems = fcChecklist(month).filter(i => i.bad);
-  if (problems.length && !confirm('Есть замечания:\n— ' + problems.map(i => i.title + ' (' + i.bad + ')').join('\n— ') +
-      '\n\nВсё равно закрыть ' + fpMonthLabel(month).toLowerCase() + '?')) return;
-  if (!problems.length && !confirm('Закрыть ' + fpMonthLabel(month).toLowerCase() + '? Журнал и заправки за месяц станут недоступны для правки.')) return;
-  let p = fuelPeriod(month);
-  if (!p) { p = { month, history: [] }; fuelPeriods().push(p); }
-  p.closed = true;
-  p.closedAt = new Date().toISOString();
-  (p.history || (p.history = [])).push({ action: 'close', at: p.closedAt, note: problems.length ? 'с замечаниями: ' + problems.length : '' });
-  await saveData(data);
-  renderFuelPurchases();
+function fcClose(month){return periodControlOpen('fuel',month,'close');}
+function fcReopen(month){
+  let selected=month;
+  try{
+    if(typeof PeriodPolicy!=='undefined'&&periodControlReadable('fuel')){const status=PeriodPolicy.status(data,'fuel',month);if(!status.closed&&status.protectingMonths.length)selected=status.protectingMonths[0];}
+    const state=periodControlOpen('fuel',selected,'reopen');
+    if(state&&selected!==month){const note=document.createElement('p');note.className='wf-wide wf-note';note.dataset.periodOrigin='';note.textContent='Исходный месяц '+month+' защищён закрытым месяцем '+selected+'. Для проверки выбрано открытие '+selected+'. Действие потребует отдельного основания и подтверждения.';state.form.querySelector('[data-period-status]').before(note);}
+    return state;
+  }catch(error){showToast(error.message);return null;}
 }
-
-function fcReopen(month) {
-  openGenericModal('Открыть ' + fpMonthLabel(month).toLowerCase(), `
-    <div class="form-group"><label>Причина (попадёт в историю месяца)</label>
-      <input type="text" id="fcReopenNote" placeholder="например: пришла выписка за конец месяца"></div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
-      <button class="btn btn-ghost" onclick="closeModal('genericModal')">Отмена</button>
-      <button class="btn btn-primary" onclick="fcReopenSave('${month}')">Открыть месяц</button>
-    </div>`, 480);
-}
-
-async function fcReopenSave(month) {
-  const p = fuelPeriod(month);
-  if (!p) return;
-  p.closed = false;
-  (p.history || (p.history = [])).push({ action: 'open', at: new Date().toISOString(),
-    note: (document.getElementById('fcReopenNote')?.value || '').trim() });
-  closeModal('genericModal');
-  await saveData(data);
-  renderFuelPurchases();
-}
+function fcReopenSave(month){return fcReopen(month);}

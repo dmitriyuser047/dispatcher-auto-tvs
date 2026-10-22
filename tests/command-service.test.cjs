@@ -53,7 +53,7 @@ for(const format of ['json','sqlite']){
   const f=fixture(t,format),before=snapshot(f.dir);
   for(const command of [issue({qty:1000}),issue({tankId:'missing'}),issue({target:{section:'vehicles',id:'missing'}})]){assert.throws(()=>execute(f.dir,envelope(f.dir,command)));assert.deepEqual(snapshot(f.dir),before);}
   assert.equal(patch(f.dir,{tanks:before.data.tanks.map(row=>({...row,fuel:'gasoline'}))}).ok,true);const wrongFuel=snapshot(f.dir);assert.throws(()=>execute(f.dir,envelope(f.dir,issue())),policyCode('FUEL_GRADE_MISMATCH'));assert.deepEqual(snapshot(f.dir),wrongFuel);
-  assert.equal(patch(f.dir,{tanks:before.data.tanks,fuelPeriods:[{month:'2026-09',closed:true}]}).ok,true);const closed=snapshot(f.dir);
+  assert.equal(patch(f.dir,{tanks:before.data.tanks}).ok,true);require('./period-test-support.cjs').seedSections(f.dir,{fuelPeriods:[{month:'2026-09',closed:true}]});const closed=snapshot(f.dir);
   for(const date of ['2026-09-10','2026-08-31']){assert.throws(()=>execute(f.dir,envelope(f.dir,issue({date}))));assert.deepEqual(snapshot(f.dir),closed);}
  });
 

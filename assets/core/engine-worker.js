@@ -3,7 +3,7 @@
   'use strict';
   if(typeof module==='object'&&module.exports)module.exports=factory(require('./application-engine.js'),require('./dispatcher-core.js'));
   else{
-    if(!root.DispatcherEngine&&typeof importScripts==='function')importScripts('./dispatcher-core.js','./entity-identity.js','./decimal-core.js','./accounting-boundary.js','./effective-periods.js','./temporal-policy.js','./fuel-engine.js','./fuel-audit.js','./writeoff-engine.js','./platform-schema.js','./platform-contracts.js','./document-engine.js','./financial-recognition.js','../js/45-cost-engine.js','../js/47-procurement-engine.js','./application-engine.js');
+    if(!root.DispatcherEngine&&typeof importScripts==='function')importScripts('./dispatcher-core.js','./entity-identity.js','./decimal-core.js','./accounting-boundary.js','./effective-periods.js','./temporal-policy.js','./fuel-engine.js','./fuel-audit.js','./writeoff-engine.js','./platform-schema.js','./platform-contracts.js','./document-engine.js','./period-policy.js','./financial-recognition.js','../js/45-cost-engine.js','../js/47-procurement-engine.js','./application-engine.js');
     const api=factory(root.DispatcherEngine,root.DispatcherCore);root.DispatcherAnalysisWorker=api;
     if(typeof root.postMessage==='function'&&typeof importScripts==='function'){
       const endpoint=api.createHandler({postMessage:message=>root.postMessage(message)});

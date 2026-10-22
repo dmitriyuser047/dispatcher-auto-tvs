@@ -18,15 +18,15 @@ function principalOf(principal) {
 }
 function visibleAudit(rows, principal) {
   return (rows || []).filter(row => row && typeof row.section === 'string' && require('./document-access.cjs').permitted(principal, 'read', row.section) &&
-    (row.type !== 'transaction' || Array.isArray(row.changedSections) && row.changedSections.every(name => require('./document-access.cjs').permitted(principal, 'read', name)))&&require('./document-access.cjs').auditAccess(principal,row));
+    (row.type !== 'transaction' || Array.isArray(row.changedSections) && row.changedSections.every(name => require('./document-access.cjs').permitted(principal, 'read', name)))&&require('./document-access.cjs').auditAccess(principal,row)&&require('./period-access.cjs').auditAccess(principal,row)).map(row=>require('./period-access.cjs').visibleAuditRow(row,principal));
 }
-function visibleRows(name,rows,principal){return name==='auditLog'?visibleAudit(rows,principal):require('./document-access.cjs').visibleRows(name,rows,principal);}
+function visibleRows(name,rows,principal){return name==='auditLog'?visibleAudit(rows,principal):name==='fuelPeriods'?require('./period-access.cjs').visibleRows(rows,principal):require('./document-access.cjs').visibleRows(name,rows,principal);}
 function filteredResult(result,principal){if(!principal)return result;const out={...result};if(out.canonicalSections)out.canonicalSections=Object.fromEntries(Object.entries(out.canonicalSections).filter(([name])=>require('./document-access.cjs').permitted(principal,'read',name)).map(([name,rows])=>[name,visibleRows(name,rows,principal)]));return out;}
 function findReceipt(rows,query,principal,token){
   const operation=contracts().validateOperation(query),actor=principalOf(principal);
   const receipt=(rows||[]).find(row=>row?.source==='platform'&&row.type==='transaction'&&row.operationId===operation.id&&
     row.actorId===actor.id&&row.actorRole===actor.role&&row.databaseToken===token&&row.requestDigest===operation.digest&&
-    Array.isArray(row.changedSections)&&row.changedSections.every(name=>require('./document-access.cjs').permitted(principal||actor,'read',name))&&require('./document-access.cjs').auditAccess(principal||actor,row));
+    Array.isArray(row.changedSections)&&row.changedSections.every(name=>require('./document-access.cjs').permitted(principal||actor,'read',name))&&require('./document-access.cjs').auditAccess(principal||actor,row)&&require('./period-access.cjs').auditAccess(principal||actor,row));
   return receipt ? {id:operation.id,digest:receipt.requestDigest,status:'committed',at:receipt.at} : null;
 }
 function operationInfo(previous, sections, options = {}) {
@@ -92,10 +92,11 @@ function prepareTransaction(previous, supplied, options = {}) {
   if (info?.receipt) return { replayed:true, operation:info };
   assertAuditPrefix(previous, supplied, options.principal||actor);
   // Client-generated audit suffixes are hints, never persisted as trusted facts.
-  let sections = require('./document-access.cjs').mergeDrafts(previous,Object.fromEntries(Object.entries(supplied).filter(([name]) => name !== 'auditLog')),options.principal||actor);
+  let sections = require('./period-access.cjs').mergePeriods(previous,require('./document-access.cjs').mergeDrafts(previous,Object.fromEntries(Object.entries(supplied).filter(([name]) => name !== 'auditLog')),options.principal||actor),options.principal||actor);
+  const periodCommand=options.commandIntent?.command?.type==='PeriodAction'&&require('./period-access.cjs').canManage(options.principal||actor,options.commandIntent.command.input?.scope);
   for (const [name, rows] of Object.entries(sections)) {
     if (JSON.stringify(previous[name] || []) === JSON.stringify(rows)) continue;
-    if (!access.authorize(actor, 'write', name)) fail('ACCESS_DENIED', 'Роль не разрешает изменение раздела: ' + name, 403);
+    if (!access.authorize(actor, 'write', name)&&!(name==='fuelPeriods'&&periodCommand)) fail('ACCESS_DENIED', 'Роль не разрешает изменение раздела: ' + name, 403);
     try { access.validateAssetChanges(actor, name, previous[name] || [], rows); }
     catch (error) { fail('ACCESS_DENIED', error.message, 403); }
   }
@@ -107,12 +108,12 @@ function prepareTransaction(previous, supplied, options = {}) {
   const id = info?.id || 'backend:' + crypto.randomUUID();
   // This proof is derived from the semantic execution option, never a section
   // request field. Raw/full writes cannot authorize their own catalog aliases.
-  const commandProof=['MergeCatalog','DocumentAction'].includes(options.commandIntent?.command?.type)
+  const commandProof=['MergeCatalog','DocumentAction','PeriodAction'].includes(options.commandIntent?.command?.type)
     ? {commandIntent:contracts().parseCommandEnvelope(options.commandIntent,registry)} : {};
   const plan = kernel().prepare(previous, sections, { id, identity:options.databaseToken || 'local-storage', actor,
     revisions:options.revisions || {}, now:at,today:at.slice(0,10),...commandProof,
     readable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'read', name)),
-    writable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'write', name)) });
+    writable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'write', name)||name==='fuelPeriods'&&periodCommand) });
   const changes = (plan.rowChanges || []).filter(row => row.section !== 'auditLog');
   const result = { ...plan.sections };
   delete result.auditLog;
@@ -128,6 +129,7 @@ function prepareTransaction(previous, supplied, options = {}) {
     operationId:id, requestDigest:digest, databaseToken:options.databaseToken, at,
     actor:actor.name, actorId:actor.id, actorRole:actor.role, changedSections:changed, revisions };
   if(changed.includes('documentDrafts'))receipt.changedDocumentSections=require('./document-access.cjs').changedOrigins(previous.documentDrafts,result.documentDrafts);
+  if(changed.includes('fuelPeriods'))receipt.changedPeriodScopes=require('./period-access.cjs').changedScopes(previous.fuelPeriods,result.fuelPeriods);
   result.auditLog = [...(previous.auditLog || []), ...entries, receipt];
   return { sections:result, plan, operationReceipt:{ id, digest, status:'committed', at } };
 }

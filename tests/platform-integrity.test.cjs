@@ -30,7 +30,8 @@ test('one immutable platform registry covers every current section and ten appli
 });
 
 test('CommonJS and browser modules inspect a graph without DOM, storage or global application data',()=>{
-  const context=vm.createContext({});for(const name of ['platform-schema.js','personnel-engine.js','fuel-engine.js','fuel-movement-policy.js','document-lifecycle.js','workflow-policy.js','platform-policies.js','platform-integrity.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name),'utf8'),context);
+  const context=vm.createContext({}),scripts=[...fs.readFileSync(path.resolve(__dirname,'../index.html'),'utf8').matchAll(/<script src="assets\/core\/([^"]+)"/g)].map(match=>match[1]);
+  for(const name of scripts.slice(0,scripts.indexOf('platform-integrity.js')+1))vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name),'utf8'),context);
   const db=validGraph(),before=JSON.stringify(db);assert.equal(context.PlatformIntegrity.inspect(db).counts.error,0);assert.equal(JSON.stringify(db),before);
   assert.equal(integrity.inspect([]).issues[0].code,'invalid-database');
 });

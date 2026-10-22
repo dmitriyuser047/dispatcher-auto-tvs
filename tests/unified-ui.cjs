@@ -401,16 +401,19 @@ test('GSM diagnostics shows source causes and keeps live search, scope and suppo
 test('GSM diagnostic typed repair links open existing source forms and cancellation never changes data',async()=>{
  await loadGsmDiagnosticsFixture(true);
  assert.equal(await page.getByRole('button',{name:'Небезопасная команда',exact:true}).count(),0);
- const cases=[['Открыть покупку','genericModal'],['Открыть запись','recordModal'],['Открыть карточку ТС','vehicleModal'],['Открыть начальные источники','wfModal'],['Открыть карту','genericModal'],['Открыть закрытый месяц','genericModal']];
+ const cases=[['Открыть покупку','genericModal'],['Открыть запись','recordModal'],['Открыть карточку ТС','vehicleModal'],['Открыть начальные источники','wfModal'],['Открыть карту','genericModal'],['Открыть закрытый месяц','wfModal']];
  for(const [label,modalId]of cases){
   await page.getByRole('button',{name:label,exact:true}).click();
   const modal=page.locator('#'+modalId);assert.equal(await modal.evaluate(el=>el.classList.contains('open')),true);
   if(label==='Открыть покупку')assert.equal(await page.locator('#fpe_qty').inputValue(),'10.123');
   if(label==='Открыть карту')assert.equal(await page.locator('#fc_move').isChecked(),false);
   if(label==='Открыть начальные источники'){assert.equal(await modal.locator('#fuelAccountingForm').count(),1);assert.equal(await modal.locator('[name="from"]').inputValue(),'');assert.equal(await modal.locator('[name="opening"]').inputValue(),'');}
-  await modal.locator('.modal-header .icon-btn').click();
+  if(label==='Открыть закрытый месяц'){
+   const form=modal.locator('#periodControlForm');assert.equal(await form.count(),1);assert.equal(await form.locator('[name="scope"]').inputValue(),'fuel');assert.equal(await form.locator('[name="month"]').inputValue(),'2026-08');assert.equal(await form.locator('[name="action"]').inputValue(),'reopen');await form.locator('[name="reason"]').fill('Synthetic cancelled period action');await form.locator('[data-period-cancel]').click();
+  }else await modal.locator('.modal-header .icon-btn').click();
   await page.waitForFunction(()=>!document.querySelector('.modal-overlay.open'));
   assert.equal(await page.locator('#gsmDiagnostics').isVisible(),true);
+  assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__diagBefore,writes:window.__writes})),{same:true,writes:0});
  }
  await page.getByRole('button',{name:'Открыть выписку',exact:true}).click();assert.equal(await page.locator('#gsmReceiptOperations').count(),1);
  await page.getByRole('button',{name:'Проверить ГСМ',exact:true}).click();

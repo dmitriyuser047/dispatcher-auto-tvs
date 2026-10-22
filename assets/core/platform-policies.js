@@ -1,9 +1,9 @@
 /* Shared dispatch, acceptance and inventory rules from the existing workflows. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'),()=>require('./catalog-policy.js'),()=>require('./entity-identity.js'));
-  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy,()=>root.CatalogPolicy,()=>root.EntityIdentity);
-})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal,getCatalog,getIdentity) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'),()=>require('./catalog-policy.js'),()=>require('./entity-identity.js'),()=>require('./period-policy.js'),()=>require('./platform-integrity.js'));
+  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy,()=>root.CatalogPolicy,()=>root.EntityIdentity,()=>root.PeriodPolicy,()=>root.PlatformIntegrity);
+})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal,getCatalog,getIdentity,getPeriods,getIntegrity) {
   'use strict';
   const rows = (db, section) => Array.isArray(db?.[section]) ? db[section] : [];
   const present = value => value != null && String(value).trim() !== '';
@@ -90,6 +90,29 @@
       return low?group.prefix[low-1].balance:0;
     };
   }
+  function inspectStock(db,context) {
+    context=context||{};const issues=[];const add=(section,row,code,field,message,proof,extra)=>issues.push({severity:'error',section,recordId:row.id??'',code,field,message,proof,...extra});
+    const clock = new Date(context.now || Date.now());
+    const localDay = Number.isFinite(clock.getTime()) ? `${clock.getFullYear()}-${String(clock.getMonth()+1).padStart(2,'0')}-${String(clock.getDate()).padStart(2,'0')}` : '';
+    const today = date(context.today,false) ? context.today : localDay;
+    const movements = rows(db,'partMovements');
+    const stockAt = partStockIndex(movements);
+    for (const row of movements) {
+      if (!(Number.isFinite(Number(row.qty)) && Number(row.qty) > 0)) add('partMovements',row,'PART_QUANTITY','qty','Количество должно быть больше нуля',[row.qty]);
+      if (!['receipt','return','issue','writeoff'].includes(row.kind)) add('partMovements',row,'PART_KIND','kind','Неизвестный вид складской операции',[row.kind]);
+      if (!present(row.partId) || !rows(db,'parts').some(part => part.id === row.partId)) add('partMovements',row,'PART_REQUIRED','partId','Выберите существующую номенклатуру',[row.partId]);
+      if (row.cancelled || row.deleted || !['issue','writeoff'].includes(row.kind) || !date(row.date,false)) continue;
+      for (const [field,at,label] of [['date',row.date,'на дату операции'],['today',today,'на текущую дату']]) {
+        const balance = stockAt(row.partId,at);
+        if (balance < -1e-9) add('partMovements',row,'PART_STOCK_DEFICIT',field,'Недостаточно остатка на складе ' + label,[row.partId,at],{ partId:row.partId,deficit:-balance });
+      }
+    }
+    return {issues,counts:{error:issues.length,warning:0,total:issues.length}};
+  }
+  function inspectFuel(db,context) {return getFuelMovements().inspect(db,context);}
+  function periodRowIdentity(section,row,index) {return getIntegrity().rowIdentity(section,row,index);}
+  function periodsModule() {const api=getPeriods();if(!api||api.apiVersion!==1){const error=new Error('Не загружены правила закрытия периодов');error.code='MODULE_UNAVAILABLE';throw error;}return api;}
+  function validatePeriodChanges(previous,next,context) {return periodsModule().validateChanges(previous,next,context);}
   function inspect(db, context) {
     context = context || {};
     const issues = [];
@@ -118,24 +141,10 @@
       if (order.status === 'accepted') for (const [field,label] of [['acceptedBy','принявший'],['result','результат'],['downtimeTo','конец простоя']])
         if (!present(order[field])) add('workOrders',order,'WORK_ORDER_ACCEPTANCE_REQUIRED',field,'Для приёмки нужен ' + label,[order[field]]);
     }
-    const clock = new Date(context.now || Date.now());
-    const localDay = Number.isFinite(clock.getTime()) ? `${clock.getFullYear()}-${String(clock.getMonth()+1).padStart(2,'0')}-${String(clock.getDate()).padStart(2,'0')}` : '';
-    const today = date(context.today,false) ? context.today : localDay;
-    const movements = rows(db,'partMovements');
-    const stockAt = partStockIndex(movements);
-    for (const row of movements) {
-      if (!(Number.isFinite(Number(row.qty)) && Number(row.qty) > 0)) add('partMovements',row,'PART_QUANTITY','qty','Количество должно быть больше нуля',[row.qty]);
-      if (!['receipt','return','issue','writeoff'].includes(row.kind)) add('partMovements',row,'PART_KIND','kind','Неизвестный вид складской операции',[row.kind]);
-      if (!present(row.partId) || !rows(db,'parts').some(part => part.id === row.partId)) add('partMovements',row,'PART_REQUIRED','partId','Выберите существующую номенклатуру',[row.partId]);
-      if (row.cancelled || row.deleted || !['issue','writeoff'].includes(row.kind) || !date(row.date,false)) continue;
-      for (const [field,at,label] of [['date',row.date,'на дату операции'],['today',today,'на текущую дату']]) {
-        const balance = stockAt(row.partId,at);
-        if (balance < -1e-9) add('partMovements',row,'PART_STOCK_DEFICIT',field,'Недостаточно остатка на складе ' + label,[row.partId,at],{ partId:row.partId,deficit:-balance });
-      }
-    }
+    issues.push(...inspectStock(db,context).issues);
     const personnel = getPersonnel();
     if (personnel && personnel.apiVersion === 1) issues.push(...personnel.inspect(db,context).issues);
-    for (const module of [getFuelMovements(),getDocuments(),getWorkflow(),getTemporal()]) if (module && module.apiVersion === 1) issues.push(...module.inspect(db,context).issues);
+    for (const module of [getFuelMovements(),getDocuments(),getWorkflow(),getTemporal(),periodsModule()]) if (module && module.apiVersion === 1) issues.push(...module.inspect(db,context).issues);
     const catalog=catalogModule(db);if(catalog)issues.push(...catalog.inspect(db,context).issues);
     return { issues,counts:{ error:issues.filter(issue=>issue.severity==='error').length,warning:issues.filter(issue=>issue.severity==='warning').length,total:issues.length } };
   }
@@ -146,7 +155,7 @@
     const blocking = current.filter(issue => {
       // Personnel uses field/assignment delta semantics below. Its read-only
       // report may show legacy rows and active links that need manual review.
-      if (/^(PERSONNEL_|FUEL_|DOCUMENT_|WORKFLOW_|TEMPORAL_|CATALOG_)/.test(issue.code)) return false;
+      if (/^(PERSONNEL_|FUEL_|DOCUMENT_|WORKFLOW_|TEMPORAL_|CATALOG_|PERIOD_)/.test(issue.code)) return false;
       const before = prior.get(key(issue));
       if (!before) return true;
       if (issue.code === 'PART_STOCK_DEFICIT') return issue.deficit > before.deficit + 1e-9;
@@ -161,7 +170,7 @@
       const error = new Error('Не загружено ядро сотрудников');error.code='MODULE_UNAVAILABLE';throw error;
     }
     personnel.validateChanges(previous,next,context);
-    for (const module of [getDocuments(),getFuelMovements(),getWorkflow(),getTemporal()]) {
+    for (const module of [getDocuments(),getFuelMovements(),getWorkflow(),getTemporal(),periodsModule()]) {
       if (!module || module.apiVersion !== 1) {
         const error = new Error('Не загружены правила проведения документов и движения топлива');error.code='MODULE_UNAVAILABLE';throw error;
       }
@@ -170,5 +179,5 @@
     const catalog=catalogModule(previous,next);if(catalog)catalog.validateChanges(previous,next,context);
     return true;
   }
-  return Object.freeze({ apiVersion:1,inspect,validateChanges });
+  return Object.freeze({ apiVersion:1,inspect,inspectStock,inspectFuel,periodRowIdentity,validatePeriodChanges,validateChanges });
 });

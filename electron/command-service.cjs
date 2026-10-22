@@ -35,6 +35,8 @@ function execute(dataDir,input,options={}){
   const envelope=contracts.parseCommandEnvelope(input,schema.sections),command=commands.parseCommand(envelope.command),principal=checkedPrincipal(options.principal);
   const catalogMerge=command.type==='MergeCatalog';
   if(catalogMerge&&principal.role!=='admin')fail('ACCESS_DENIED','Объединение справочников доступно администратору.',403);
+  const periodAction=command.type==='PeriodAction';
+  if(periodAction&&!require('./period-access.cjs').canManage(principal,command.input.scope))fail('ACCESS_DENIED','Недостаточно прав для управления выбранной областью периода.',403);
   const dependencies=commands.dependencies(command),footprint=commands.footprint(command);
   if(!Array.isArray(dependencies)||!Array.isArray(footprint)||dependencies.some(name=>!schema.sections.includes(name)||name==='auditLog'&&!catalogMerge)||footprint.some(name=>name==='auditLog'||!dependencies.includes(name)))fail('COMMAND_DEFINITION','Некорректно определены зависимости команды',500);
   requireAccess(principal,'read',dependencies);
@@ -52,7 +54,7 @@ function execute(dataDir,input,options={}){
         return filteredResult(platform.replayResult(snapshot.data,snapshot.revisions,token,info,changed),principal);
       }
       storage.assertWritable(dataDir);
-      requireAccess(principal,'write',footprint);
+      requireAccess(principal,'write',periodAction?footprint.filter(name=>name!=='fuelPeriods'):footprint);
       const missing=dependencies.filter(name=>!own(envelope.base,name));
       if(missing.length)fail('COMMAND_BASE_REQUIRED','Для команды нужны версии всех её зависимостей: '+missing.join(', '),428);
       const conflicts=dependencies.filter(name=>envelope.base[name]!==snapshot.revisions[name]);

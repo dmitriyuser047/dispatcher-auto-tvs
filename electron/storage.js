@@ -193,7 +193,7 @@ function prepareWriteoffSections(previous, sections, options = {}) {
   const principal = options.principal || { id:'local-profile', name:'Локальный пользователь', role:'admin' };
   for (const name of SECTIONS.filter(name => Object.hasOwn(sections, name))) {
     if (JSON.stringify(previous[name] || []) === JSON.stringify(sections[name])) continue;
-    if (!access.authorize(principal, 'write', name)) throw new Error('Роль не разрешает изменение раздела: ' + name);
+    if (!access.authorize(principal, 'write', name)&&!(name==='fuelPeriods'&&options.commandIntent?.command?.type==='PeriodAction'&&require('./period-access.cjs').canManage(principal,options.commandIntent.command.input?.scope))) throw new Error('Роль не разрешает изменение раздела: ' + name);
     access.validateAssetChanges(principal, name, previous[name] || [], sections[name]);
   }
   const documentSources = ['fuelWriteoffs', 'vehicles', 'records', 'fuelPurchases', 'fuelCards', 'monthlyFuel'];
@@ -272,71 +272,9 @@ function commitSections(dataDir, sections, revisions) {
   try { fs.unlinkSync(journal); } catch (e) { console.error('[storage] cleanup: ' + e.message); }
 }
 
-function checkClosedPeriods(previous, next) {
-  const closed = new Set((previous.fuelPeriods || []).filter(p => p.closed).map(p => p.month));
-  if (!closed.size) return;
-  const lastClosed = [...closed].sort().at(-1);
-  const historical = row => { const month = String(row.date || row.month || '').slice(0, 7); return /^\d{4}-\d{2}$/.test(month) && month <= lastClosed; };
-  for (const name of ['records', 'fuelPurchases', 'monthlyFuel', 'genRecords', 'tankIncomes', 'fuelMovements']) {
-    if (!(name in next)) continue;
-    const old = previous[name] || [], rows = next[name];
-    // Earlier movements also determine the opening balance of a closed month.
-    if (JSON.stringify(old.filter(historical)) !== JSON.stringify(rows.filter(historical))) throw new Error('Месяц закрыт: ' + lastClosed + '. Сначала откройте его: более ранние операции влияют на начальный остаток.');
-  }
-  const fields = {
-    // Effective norm and organization values are protected by TemporalPolicy
-    // under this same lock, allowing identical bridges and future-only appends.
-    vehicles: ['fuelAccounting', 'fuelBalance', 'fuelBalanceSources', 'fuelGrade', 'fuel', 'fuelcard'],
-    generators: ['fuelAccounting', 'fuelBalance', 'fuelGrade', 'fuel', 'org', 'orgHistory', 'tankId'],
-    tanks: ['fuelAccounting', 'balanceInit', 'fuelGrade', 'fuel', 'org'],
-    fuelCards: ['number', 'provider', 'assignments'],
-  };
-  const [closedYear,closedMonth] = lastClosed.split('-').map(Number);
-  const end = new Date(Date.UTC(closedYear,closedMonth,0)).toISOString().slice(0,10);
-  const numeric = new Set(['fuelBalance', 'balanceInit', 'norm', 'norm100', 'norm50', 'normIdle', 'power']);
-  const project = (row, keys) => Object.fromEntries(keys.map(key => {
-    let value = row[key];
-    if (numeric.has(key)) value = value == null || value === '' ? (['fuelBalance','balanceInit'].includes(key) ? 0 : null) : Number(value);
-    else if (['orgHistory','assignments'].includes(key)) value = (Array.isArray(value) ? value : []).filter(entry => !entry.from || entry.from <= end).map(entry => ({from:entry.from||'',to:entry.to&&entry.to<end?entry.to:end,org:String(entry.org||'').trim(),...(key==='assignments'?{vehicleId:entry.vehicleId||''}:{})}));
-    else if (key === 'fuelBalanceSources') {
-      const fallbackGrade = row.fuelGrade || (row.fuel==='gasoline'?'Бензин':row.fuel==='gas'?'Газ':'ДТ'), fallbackOrg = String(row.org||'').trim() || 'Организация не определена';
-      value = (Array.isArray(value)&&value.length ? value : [{org:fallbackOrg,grade:fallbackGrade,qty:Number(row.fuelBalance)||0}]).map(entry => ({org:String(entry.org||fallbackOrg).trim(),grade:entry.grade||fallbackGrade,qty:Number(entry.qty)||0}));
-    } else if (key === 'fuelAccounting') value = value == null ? '' : require('../assets/core/platform-kernel.js').stableSerialize(value);
-    else value = value == null ? '' : value;
-    return [key,value];
-  }));
-  const nonzeroOpening = row => ['fuelBalance', 'balanceInit'].some(key => Number(row[key]) !== 0 && Number.isFinite(Number(row[key]))) || (row.fuelBalanceSources || []).some(entry => Number(entry.qty)) || Object.hasOwn(row,'fuelAccounting') && Number(row.fuelAccounting?.opening)!==0;
-  const cardKey = value => { const text=String(value||'').trim();return text.replace(/\D/g,'')||text.toUpperCase(); };
-  const historicalCardRows = [...(previous.records||[]),...(previous.fuelPurchases||[]),...(previous.monthlyFuel||[])].filter(historical);
-  for (const [name, keys] of Object.entries(fields)) {
-    if (!(name in next)) continue;
-    const old = previous[name] || [], after = new Map();
-    const identity = (row,index) => require('../assets/core/platform-integrity.js').rowIdentity(name,row,index);
-    next[name].forEach((row,index) => {
-      const key=identity(row,index);
-      if (!after.has(key)) after.set(key,[]);
-      after.get(key).push(row);
-    });
-    for (const [index,row] of old.entries()) {
-      const candidates=after.get(identity(row,index)) || [], before=JSON.stringify(project(row,keys));
-      const match=candidates.findIndex(updated => before === JSON.stringify(project(updated,keys)));
-      if (match < 0) throw new Error('Месяц закрыт: ' + lastClosed + '. Исходные данные ГСМ (' + name + ') изменят закрытые расчёты. Сначала откройте период.');
-      candidates.splice(match,1);
-    }
-    // A new asset with no opening stock and only future events does not
-    // change historical fuel. A new card may resolve an old unmatched card.
-    for (const row of [...after.values()].flat()) {
-      const historicalReference = name === 'fuelCards'
-        ? !!cardKey(row.number) && historicalCardRows.some(entry => cardKey(entry.fuelCardNum || entry.cardNo || entry.cardNumber) === cardKey(row.number))
-        : name === 'vehicles'
-          ? historicalCardRows.some(entry => [entry.vehicleId, entry.cardVehicleId].includes(row.id) || !!cardKey(row.fuelcard) && cardKey(entry.fuelCardNum || entry.cardNo || entry.cardNumber) === cardKey(row.fuelcard))
-          : name === 'generators' ? (previous.genRecords || []).some(entry => historical(entry) && entry.generatorId === row.id)
-          : [...(previous.tankIncomes || []),...(previous.genRecords||[]),...(previous.fuelMovements||[])].some(entry => historical(entry) && [entry.tankId,entry.fromTankId,entry.toTankId].includes(row.id)) || (previous.genRecords||[]).some(entry => historical(entry) && !Object.prototype.hasOwnProperty.call(entry,'tankId') && (previous.generators||[]).some(generator=>generator.id===entry.generatorId && generator.tankId===row.id));
-      if (nonzeroOpening(row) || historicalReference) throw new Error('Месяц закрыт: ' + lastClosed + '. Новый источник начального остатка или привязка изменит закрытые расчёты.');
-    }
-  }
-}
-
+// PeriodPolicy, registered in the shared kernel, owns fuel/stock/finance
+// cutoffs for every write path. Its fuel projection preserves the previous
+// historical-opening guard and typed identity semantics.
 function isSplit(dataDir) {
   if (sqliteBackend(dataDir)) return true;
   return fs.existsSync(revisionsFile(dataDir));
@@ -443,7 +381,7 @@ function writeAll(dataDir, data, options = {}) {
   const prepared = platform.prepareTransaction(previous, data, { ...options, databaseToken:token, revisions,
     prepareSections:sections => {
       const canonical = prepareWriteoffSections(previous, sections, options);
-      validatePlanningChanges(previous, canonical); checkClosedPeriods(previous, canonical); return canonical;
+      validatePlanningChanges(previous, canonical); return canonical;
     } });
   if (prepared.replayed) return platform.filteredResult(platform.replayResult(previous, revisions, token, prepared.operation, Object.keys(data)),options.principal);
   data = prepared.sections;
@@ -481,7 +419,7 @@ function readSnapshot(dataDir,options={}) {
   let data = readAll(dataDir);
   if(options.principal)data=Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?require('./platform-service.cjs').visibleRows(name,data[name],options.principal):[]]));
   const version=schemaVersion(dataDir);
-  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:version,documentDrafts:version>=2?1:0,needsSchemaUpgrade:version<2 } };
+  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:version,documentDrafts:version>=2?1:0,periods:version>=2?1:0,needsSchemaUpgrade:version<2 } };
 }
 function readOperation(dataDir,query,principal){
   const token=databaseToken(dataDir),audit=readSection(dataDir,'auditLog');
@@ -516,7 +454,7 @@ function writeSections(dataDir, payload, options = {}) {
   const prepared = platform.prepareTransaction(previous, sections, { ...context,
     prepareSections:supplied => {
       const canonical = prepareWriteoffSections(previous, supplied, options);
-      validatePlanningChanges(previous, canonical); checkClosedPeriods(previous, canonical); return canonical;
+      validatePlanningChanges(previous, canonical); return canonical;
     } });
   sections = prepared.sections;
   const changed = [];

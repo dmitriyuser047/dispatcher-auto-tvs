@@ -96,6 +96,7 @@ function queryRows(dataDir,input,principal){
         const candidates=matching.filter(entry=>entry.position>afterPosition),page=candidates.slice(0,query.limit);
         rows=page.map(entry=>entry.row);positions=page.map(entry=>entry.position);hasMore=candidates.length>query.limit;
       }
+      rows=require('./platform-service.cjs').visibleRows(query.section,rows,principal);
       return {ok:true,section:query.section,revision,databaseToken,rows,total,nextCursor:hasMore?cursorFor(binding,positions.at(-1)):null,backend:sql?'sqlite':'json'};
     };
     return sql?sqlite.transaction(dataDir,action,{readOnly:true}):action();

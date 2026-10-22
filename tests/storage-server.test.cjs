@@ -96,11 +96,12 @@ test('restart finishes a transaction only after its revision commit point', t =>
   assert.deepEqual(storage.readRevisions(dir), revisions);
 });
 test('closed periods are guarded in storage, including bulk and legacy writes', t => {
-  const dir = temp(t), db = database(); db.fuelPeriods = [{ month: '2026-09', closed: true }]; storage.writeAll(dir, db);
+  const dir = temp(t), db = database(); db.fuelPeriods = [{ month: '2026-09', closed: true }]; require('./period-test-support.cjs').seedDatabase(dir,db);
+  const before=storage.readSnapshot(dir);
   assert.throws(() => storage.writeAll(dir, { ...storage.readAll(dir), records: [] }), /закрыт/);
   assert.throws(() => storage.writeSections(dir, { base: storage.readRevisions(dir), sections: { records: [] } }), /закрыт/);
-  storage.writeSections(dir, { base: storage.readRevisions(dir), sections: { fuelPeriods: [] } });
-  assert.equal(storage.writeSections(dir, { base: storage.readRevisions(dir), sections: { records: [] } }).ok, true);
+  assert.throws(()=>storage.writeSections(dir, { base: storage.readRevisions(dir), sections: { fuelPeriods: [] } }));
+  assert.deepEqual(storage.readSnapshot(dir),before);
 });
 
 const key = 'test-key-not-a-real-secret-123456';

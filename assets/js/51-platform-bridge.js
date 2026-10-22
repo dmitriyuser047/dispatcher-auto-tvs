@@ -7,7 +7,7 @@ const _platformPrepareQueue=[],PLATFORM_PREPARE_LIMIT=8,PLATFORM_PREPARE_CHARACT
 function platformPrepareBackgroundStatus(){return {active:_platformPrepareActive?1:0,queued:_platformPrepareQueue.length,limit:PLATFORM_PREPARE_LIMIT};}
 function platformPrepareAccessStamp(context){
   const list=value=>value==null?null:[...new Set(value)].sort();
-  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
+  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
 }
 function platformPrepareError(code,message){return Object.assign(Error(message),{name:'PlatformKernelError',code});}
 function platformPrepareGuard(job){
@@ -66,6 +66,7 @@ function platformSessionContext() {
   const user = access?.user;
   return { identity:base.identity, readable:base.readable,
     writable:access && Array.isArray(access.writable) ? access.writable.slice() : undefined,
+    periodActions:access && Array.isArray(access.periodActions) ? access.periodActions.slice() : undefined,
     fieldPermissions:access?.fieldPermissions || null,
     actor:user ? { id:user.id, name:user.name || user.id, role:user.role } : { id:'local', name:'Локальный пользователь', role:'admin' },
     revisions:typeof _sync === 'undefined' ? {} : { ..._sync.revs },
@@ -169,6 +170,8 @@ function platformExecuteCommand(value,options={}){
         if(context.blocked||!_sync.enabled||!_sync.databaseToken)throw platformPrepareError('COMMAND_CONNECTION_REQUIRED','Для команды нужно подтверждённое подключение к основной базе.');
         if(_sync.platform?.apiVersion!==1||_sync.platform?.commands!==1||_sync.platform?.operations!==1||_sync.platform?.outbox!==1||!window.electronAPI?.executeCommand)
           throw platformPrepareError('UNSUPPORTED_COMMANDS','Подключение не поддерживает атомарные команды. Загрузите данные из совместимой версии программы.');
+        if(command.type==='PeriodAction'&&_sync.platform?.periods!==1)
+          throw platformPrepareError('UNSUPPORTED_PERIODS','Подключение не поддерживает проверенное закрытие периодов. Загрузите данные из совместимой версии программы.');
         if(names.some(name=>captured[name]!==(_sync.synced[name]||'[]')))
           throw platformPrepareError('UNSAVED_COMMAND_SOURCE','Сначала сохраните или отмените изменения исходных данных команды.');
         const persisted=platformSaveBaseline();

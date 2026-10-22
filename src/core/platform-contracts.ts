@@ -25,6 +25,10 @@ export interface MergeCatalogInput {
 }
 export type DocumentSection = 'shiftReports' | 'workOrders' | 'dispatchJobs' | 'fuelMovements' | 'partMovements' | 'fuelWriteoffs' | 'payments' | 'repairs' | 'vehicleTo' | 'toRecords';
 export interface DocumentReference {section:DocumentSection;id:Identifier}
+export type PeriodScope = 'fuel' | 'stock' | 'finance';
+export interface PeriodActionInput {
+  action:'close'|'reopen';scope:PeriodScope;month:string;reason:string;reviewFingerprint:string;
+}
 export type DocumentActionInput =
   | {action:'saveDraft';section:DocumentSection;draftId?:Identifier;payload:JsonRow;correctionOf?:DocumentReference;reason?:string}
   | {action:'postDraft';section:DocumentSection;draftId:Identifier;reviewFingerprint:string}
@@ -37,7 +41,8 @@ export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelI
   | { type: 'AcceptShift'; version: 1; input: { shiftId: Identifier; changes: AcceptShiftChanges } }
   | { type: 'AssignPerson'; version: 1; input: AssignPersonInput }
   | { type: 'MergeCatalog'; version: 1; input: MergeCatalogInput }
-  | { type: 'DocumentAction'; version: 1; input: DocumentActionInput };
+  | { type: 'DocumentAction'; version: 1; input: DocumentActionInput }
+  | { type: 'PeriodAction'; version: 1; input: PeriodActionInput };
 export interface CommandEnvelope { protocolVersion: 1; databaseToken: string; operation: OperationDescriptor; base: Revisions; command: PlatformCommand }
 export interface ContractError extends Error { code: string; field: string; status: number }
 
@@ -231,6 +236,16 @@ export function createPlatformContracts() {
       const result:MergeCatalogInput={section:input.section as CatalogSection,sourceId:commandId(input.sourceId,path+'sourceId'),targetId:commandId(input.targetId,path+'targetId'),reason:commandText(input.reason,path+'reason',true),mutableRefs,reviewFingerprint:input.reviewFingerprint};
       if(result.sourceId===result.targetId)fail('INVALID_COMMAND',path+'targetId','Нельзя объединить карточку с самой собой');
       return {type:'MergeCatalog',version:1,input:result};
+    }
+    if(row.type==='PeriodAction'){
+      keys(input,['action','scope','month','reason','reviewFingerprint'],'command.input');
+      if(input.action!=='close'&&input.action!=='reopen')fail('INVALID_COMMAND',path+'action','Выберите закрытие или открытие периода');
+      if(input.scope!=='fuel'&&input.scope!=='stock'&&input.scope!=='finance')fail('INVALID_COMMAND',path+'scope','Выберите ГСМ, склад запчастей или финансы');
+      if(typeof input.month!=='string'||!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(input.month))fail('INVALID_COMMAND',path+'month','Укажите учётный месяц в формате ГГГГ-ММ');
+      const reason=commandText(input.reason,path+'reason',true,2000);
+      if(reason.trim().length<3)fail('INVALID_COMMAND',path+'reason','Укажите основание от 3 до 2000 знаков');
+      const result:PeriodActionInput={action:input.action,scope:input.scope,month:input.month,reason,reviewFingerprint:reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint')};
+      return {type:'PeriodAction',version:1,input:result};
     }
     if(row.type==='DocumentAction'){
       const section=documentSection(input.section,path+'section');let result:DocumentActionInput;

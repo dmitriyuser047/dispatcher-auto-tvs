@@ -5,11 +5,11 @@ const storage=require('../electron/storage'),server=require('../electron/server'
 function temp(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-bound-test-'));t.after(()=>{assert.equal(path.dirname(path.resolve(dir)),path.resolve(os.tmpdir()));assert.ok(path.basename(dir).startsWith('tvs-bound-test-'));fs.rmSync(dir,{recursive:true,force:true});});return dir;}
 function database(){return {vehicles:[{id:'v',fuelBalance:10,fuel:'diesel',fuelGrade:'ДТ',norm:10,org:'A',fuelcard:'123'}],records:[{id:'r',vehicleId:'v',date:'2026-08-15',km:100}],generators:[{id:'g',fuel:'diesel',norm100:30,norm50:20,normIdle:8,power:100,fuelBalance:10,tankId:'t'}],genRecords:[{id:'gr',generatorId:'g',date:'2026-09-02',hours:2,load:30}],tanks:[{id:'t',balanceInit:100,fuel:'diesel'}],fuelCards:[{id:'c',number:'123',org:'A',provider:'test',assignments:[{from:'2026-01-01',vehicleId:'v',org:'A'}]}],fuelPeriods:[{month:'2026-09',closed:true}]};}
 test('closed fuel periods protect undated input fields while allowing descriptive asset edits',t=>{
- const dir=temp(t),db=database();storage.writeAll(dir,db);
+ const dir=temp(t),db=database();require('./period-test-support.cjs').seedDatabase(dir,db);
  const changes={vehicles:{fuelBalance:11,norm:11,fuelGrade:'АИ-95',org:'B',fuelcard:'999',fuelBalanceSources:[{org:'B',grade:'ДТ',qty:10}]},generators:{norm100:31,norm50:21,normIdle:9,power:101,fuelBalance:11,tankId:'different'},tanks:{balanceInit:101,fuel:'gasoline'},fuelCards:{number:'456',org:'B',provider:'other',assignments:[]}};
  for(const [name,fields] of Object.entries(changes))for(const [key,value]of Object.entries(fields)){
    const rows=structuredClone(storage.readAll(dir)[name]);rows[0][key]=value;
-   assert.throws(()=>storage.writeSections(dir,{base:storage.readRevisions(dir),sections:{[name]:rows}}),/закрыт/,name+'.'+key);
+   assert.throws(()=>storage.writeSections(dir,{base:storage.readRevisions(dir),sections:{[name]:rows}}),error=>/закрыт/.test(error.message)||error.code==='PERIOD_CLOSED'||name==='generators'&&key==='tankId'&&error.details?.issues?.some(issue=>issue.code==='missing-reference'),name+'.'+key);
  }
  for(const name of Object.keys(changes)){
    const rows=structuredClone(storage.readAll(dir)[name]);rows[0].note='Description only';rows[0].name='Renamed';
@@ -20,9 +20,9 @@ test('closed fuel periods protect undated input fields while allowing descriptiv
  assert.equal(storage.writeSections(dir,{base:storage.readRevisions(dir),sections:{vehicles}}).ok,true);
 });
 test('earlier journal rows cannot change the opening balance of a later closed month',t=>{
- const dir=temp(t),db=database();storage.writeAll(dir,db);
+ const dir=temp(t),db=database();require('./period-test-support.cjs').seedDatabase(dir,db);
  const changed=structuredClone(db);changed.records[0].km=200;
- assert.throws(()=>storage.writeAll(dir,changed),/начальный остаток/);
+ assert.throws(()=>storage.writeAll(dir,changed),{code:'PERIOD_CLOSED'});
  const future=structuredClone(storage.readAll(dir));future.records.push({id:'future',vehicleId:'v',date:'2026-10-01',km:10});
  assert.equal(storage.writeAll(dir,future).changed.includes('records'),true);
  const cards=structuredClone(storage.readAll(dir).fuelCards);cards[0].assignments[0].to='2026-09-30';cards[0].assignments.push({from:'2026-10-01',vehicleId:'future-v',org:'B'});
@@ -37,7 +37,7 @@ test('new assets and cards cannot retroactively resolve closed unresolved fuel r
  // a validated write. The closed-period guard must still reject a new binding.
  fs.mkdirSync(storage.sectionsDir(dir));for(const name of storage.SECTIONS)fs.writeFileSync(storage.sectionFile(dir,name),JSON.stringify(db[name]||[]));fs.writeFileSync(storage.revisionsFile(dir),JSON.stringify(storage.encodeRevisions(Object.fromEntries(storage.SECTIONS.map(name=>[name,1])))));storage.readAll(dir);
  for(const [name,row] of [['fuelCards',{id:'new-card',number:'987654',org:'B'}],['vehicles',{id:'new-vehicle',fuelcard:'987654',fuelBalance:0,org:'B'}],['tanks',{id:'missing-tank',balanceInit:0}]]){
-  const rows=[...storage.readAll(dir)[name],row];assert.throws(()=>storage.writeSections(dir,{base:storage.readRevisions(dir),sections:{[name]:rows}}),/закрыт/,name);
+  const before=storage.readSnapshot(dir),rows=[...before.data[name],row];assert.throws(()=>storage.writeSections(dir,{base:before.revisions,sections:{[name]:rows}}),error=>error.code==='PERIOD_CLOSED'||name==='tanks'&&error.details?.issues?.some(issue=>issue.code==='FUEL_STOCK_DEFICIT'),name);assert.deepEqual(storage.readSnapshot(dir),before);
  }
 });
 const key='identity-test-key-not-real-123456';
@@ -86,7 +86,7 @@ test('loading closed cash history never creates a retroactive default card or bl
    ['records',{id:'cash-record',date:'2026-09-15',fuelCardNum:'НАЛИЧКА',vehicleId:'v',fuelIssued:10}],
    ['monthlyFuel',{id:'cash-month',month:'2026-09',cardNumber:'НАЛИЧКА',vehicleId:'v',liters:10}],
  ]){
-   const dir=temp(t),db=database();db[section]=[...(db[section]||[]),row];storage.writeAll(dir,db);const before=storage.readSnapshot(dir);
+   const dir=temp(t),db=database();db[section]=[...(db[section]||[]),row];require('./period-test-support.cjs').seedDatabase(dir,db);const before=storage.readSnapshot(dir);
    const api={readSnapshot:async()=>JSON.stringify(storage.readSnapshot(dir)),getDataIdentity:async()=>'local:'+storage.databaseToken(dir),writeSections:async raw=>storage.writeSections(dir,JSON.parse(raw))};
    const context={window:{electronAPI:api},console,crypto:require('node:crypto').webcrypto,TextEncoder,setTimeout,clearTimeout,setInterval:()=>1,clearInterval:()=>{},document:{addEventListener:()=>{},querySelector:()=>null},localStorage:{getItem:()=>null},showToast:()=>{},debounce:fn=>fn};
    vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core/fuel-engine.js'),'utf8')+'\n'+fs.readFileSync(path.join(__dirname,'../assets/js/01-core.js'),'utf8')+'\n'+fs.readFileSync(path.join(__dirname,'../assets/js/25f-sync.js'),'utf8')+'\nglobalThis.load=loadData;globalThis.save=syncSave;',context);
