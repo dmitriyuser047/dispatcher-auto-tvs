@@ -156,7 +156,7 @@ function referencedFiles(data,manifest) {
     if (!plain(value)) return;
     for (const [name,child] of Object.entries(value)) {
       if (name === 'attachments' && Array.isArray(child)) child.forEach(row => reference('attachments',row));
-      if (['sourceArchive','lastImportArchive'].includes(name) && plain(child) && (child.available === true || child.id != null)) reference('import-sources',child);
+      if (['sourceArchive','lastImportArchive','sourceManifest'].includes(name) && plain(child) && (child.available === true || child.id != null)) reference('import-sources',child);
       if (name === 'sourceArchives' && Array.isArray(child)) child.forEach(row => { if (plain(row) && (row.available === true || row.id != null)) reference('import-sources',row); });
       visit(child);
     }
@@ -184,7 +184,7 @@ function copyManaged(source,stage,manifest,data) {
 }
 function verifyDatabase(stage,source) {
   const data = sqlite.readAll(stage), revisions = sqlite.readRevisions(stage), inspected = sqlite.inspect(stage);
-  require('./document-archive.cjs').validateState(stage,data);
+  require('./document-archive.cjs').validateState(stage,data);require('./import-source.cjs').validateState(stage,data);
   if (!inspected.ok || !Array.isArray(inspected.integrity) || inspected.integrity.length !== 1 || inspected.integrity[0] !== 'ok' ||
       !Array.isArray(inspected.foreignKeyErrors) || inspected.foreignKeyErrors.length)
     fail('MIGRATION_SQLITE_INTEGRITY','Проверка целостности SQLite не пройдена');
@@ -219,7 +219,7 @@ function migrateCopy({sourceDir,targetDir} = {}) {
   let stage = null, identity;
   try {
     const manifest = sourceManifest(source), original = readSource(source,manifest);
-    require('./document-archive.cjs').validateState(source,original.data);
+    require('./document-archive.cjs').validateState(source,original.data);require('./import-source.cjs').validateState(source,original.data);
     const referencedFileCount = referencedFiles(original.data,manifest);
     stage = fs.mkdtempSync(path.join(parent,'.tvs-sqlite-stage-')); identity = fs.lstatSync(stage);
     sqlite.create(stage,{data:original.data,revisions:original.revisions});

@@ -357,16 +357,10 @@ test('an exported file preserves the original merged headings and numeric totals
   assert.equal(actDataRows(restored)[0][19], 30); assert.equal(rows.find(r => r[0] === 'ИТОГО:')[21], 10);
   assert.ok(restored.Sheets['Акт списания ГСМ']['!merges'].some(m => ctx.XLSX.utils.encode_range(m) === 'O6:T6'));
 });
-test('import uses the actual vehicle before the assigned card vehicle', () => {
-  const source = fs.readFileSync(path.join(root, 'assets/js/11-import.js'), 'utf8');
-  const helpers = source.slice(source.indexOf('      const plateChars'), source.indexOf('      const transactions = []'));
-  const matcher = source.slice(source.indexOf('      function matchVehicle(tx)'), source.indexOf('      // Покупки из выписок'));
-  const a = { id: 'a', plate: 'Р559НВ716', make: 'УАЗ' }, b = { id: 'b', plate: '6763АА16', make: 'Трэкол' };
-  const local = vm.createContext({ data: { vehicles: [a, b] }, cVehicle: 0, headers: ['автомобиль'], fcVehicleAt: () => a });
-  vm.runInContext(helpers + matcher, local);
-  assert.equal(local.matchVehicle({ date: '2026-08-01', vehicleText: 'Трэкол 6763', comment: '', cardNo: '111111' }).id, 'b');
-  assert.equal(local.matchVehicle({ date: '2026-08-01', vehicleText: 'Р999РР716', comment: '', cardNo: '111111' }), null);
-  local.headers = ['закреплена']; assert.equal(local.matchVehicle({ date: '2026-08-01', vehicleText: 'Р559НВ716', comment: '6763АА16', cardNo: '111111' }).id, 'b');
+test('source vehicle evidence never silently binds the assigned card vehicle; an explicit reviewed recipient wins', () => {
+  const imports=require('../assets/core/import-engine.js'),schema=require('../assets/core/platform-schema.js'),a={id:'a',plate:'Р559НВ716',make:'УАЗ'},b={id:'b',plate:'6763АА16',make:'Трэкол'},db={...Object.fromEntries(schema.sections.map(name=>[name,[]])),vehicles:[a,b],fuelCards:[{id:'card',number:'111111',assignments:[{vehicleId:'a',from:'',to:''}]}]},before=JSON.stringify(db),normalized={date:'2026-08-01',qty:10,product:'ДТ',cardNo:'111111',vehicleText:'Трэкол 6763',comment:'6763АА16'},source=imports.normalize('fuel-statement',{version:1,sourceId:'a'.repeat(64),profile:'fuel-statement',sections:['fuelPurchases'],sourceArchive:{id:'original.xlsx',sha256:'b'.repeat(64),size:100,name:'ORIGINAL.xlsx'},parser:{id:'fuel-statement',version:1},decodedFingerprint:'sha256:'+'c'.repeat(64),rows:[{rowId:'source-1',section:'fuelPurchases',locator:{sheet:'Выписка',row:2},raw:normalized,normalized}]}),context={id:'reviewed-recipient',now:'2026-10-22T12:00:00.000Z',today:'2026-10-22',actor:{id:'r',name:'Reviewer',role:'admin'},importSource:source},input={sourceId:source.sourceId,profile:'fuel-statement',sections:['fuelPurchases'],decisions:[],reason:'Recipient checked against original statement'};
+  const unassigned=imports.preview(db,input,context);assert.equal(unassigned.canApply,true);const first=imports.plan(db,{...input,reviewFingerprint:unassigned.fingerprint},context);assert.equal(first.sections.fuelPurchases[0].vehicleId,null);assert.equal(first.sections.records,undefined);assert.equal(JSON.stringify(db),before);
+  input.decisions=[{rowId:'source-1',action:'map',target:{section:'vehicles',id:'b'},basis:'Actual vehicle in original source is Трэкол 6763'}];const review=imports.preview(db,input,context),plan=imports.plan(db,{...input,reviewFingerprint:review.fingerprint},context);assert.equal(plan.sections.fuelPurchases[0].vehicleId,'b');assert.equal(plan.sections.records[0].vehicleId,'b');assert.equal(plan.sections.records[0].fuelIssued,10);assert.equal(Object.hasOwn(plan.sections.records[0],'km'),false);assert.equal(JSON.stringify(db),before);
 });
 test('production packages contain no bundled working database or automatic seed path', () => {
   const source = fs.readFileSync(path.join(root, 'electron/main.js'), 'utf8');

@@ -3,7 +3,7 @@ const { dialog, shell, BrowserWindow } = require('electron');
 const backup = require('./backup-service.cjs');
 const SAFE_EXT = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.txt', '.csv', '.xlsx', '.xls', '.docx', '.odt', '.ods']);
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
-function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir }) {
+function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir, getPrincipal }) {
     const local = () => { if (isClientMode())
         throw Error('Файлы и резервный пакет создаются на компьютере с основной базой.'); };
     const filePath = id => { if (!/^[a-f0-9]{64}\.[a-z0-9]{1,6}$/.test(id))
@@ -45,15 +45,19 @@ function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir
     } });
     ipcMain.handle('archive-import-source', async (_event, payload) => { try {
         local();
-        const b = Buffer.from(payload.bytes);
+        require('./storage').assertWritable(getDataDir());
+        const actor=getPrincipal?getPrincipal(_event):null;
+        if(!actor||!require('./import-source.cjs').actions(actor).length)throw Error('Нет права сохранять источник импорта');
+        const original=payload?.bytes;if(!(Array.isArray(original)||ArrayBuffer.isView(original))||original.length>25*1024*1024||Array.isArray(original)&&original.some(value=>!Number.isInteger(value)||value<0||value>255))throw Error('Нужны исходные байты размером до 25 МБ');
+        const b = Buffer.from(original);
         if (b.length > 25 * 1024 * 1024)
             throw Error('Исходный файл больше 25 МБ');
         const hash = sha(b), ext = path.extname(String(payload.name || '')).toLowerCase();
         const suffix = /^\.[a-z0-9]{1,6}$/.test(ext) ? ext : '.bin', id = hash + suffix;
         const dest = path.join(getDataDir(), 'import-sources', id);
         fs.mkdirSync(path.dirname(dest), { recursive: true });
-        if (!fs.existsSync(dest))
-            fs.writeFileSync(dest, b, { flag: 'wx' });
+        if (fs.existsSync(dest)){const info=fs.lstatSync(dest);if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1||!fs.readFileSync(dest).equals(b))throw Error('Контрольная сумма сохранённого исходника не совпала');}
+        else fs.writeFileSync(dest, b, { flag:'wx',mode:0o600 });
         return { ok: true, id, sha256: hash, size: b.length, name: path.basename(String(payload.name || 'source')) };
     }
     catch (e) {

@@ -21,8 +21,9 @@ function context(db = fixture()) {
   const ctx = vm.createContext({ console, window: {}, document: { addEventListener() {}, documentElement: { removeAttribute() {} },
     getElementById(id) { return fields.get(id); } }, localStorage: { getItem() {} } });
   vm.runInContext(fs.readFileSync(path.join(root, 'assets/core/decimal-core.js'), 'utf8'), ctx);
+  vm.runInContext(fs.readFileSync(path.join(root, 'assets/core/entity-identity.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(root, 'assets/core/fuel-engine.js'), 'utf8'), ctx, { filename: 'assets/core/fuel-engine.js' });
-  for (const file of ['55-precision-input.js', '01-core.js', '29-fuel-quality.js', '25b-fuel-purchases.js', '25c-fuel-control.js', '25i-gsm-ledger.js', '25l-manual-fuel.js'])
+  for (const file of ['55-precision-input.js', '01-core.js', '29-fuel-quality.js', '11-import.js', '25b-fuel-purchases.js', '25c-fuel-control.js', '25i-gsm-ledger.js', '25l-manual-fuel.js'])
     vm.runInContext(fs.readFileSync(path.join(root, 'assets/js', file), 'utf8'), ctx, { filename: file });
   ctx.input = db; vm.runInContext('data=input', ctx);
   Object.assign(ctx, {
@@ -37,6 +38,7 @@ function context(db = fixture()) {
   const values = { date: '01.09.2026', time: '', qty: p.qty, price: p.price, sum: p.sum, comment: '', card: p.cardNo,
     org: p.sourceOrg, grade: p.grade, vehicle: p.vehicleId, org_reason: '' };
   for (const [key, value] of Object.entries(values)) fields.set('fpe_' + key, { value: String(value ?? '') });
+  fields.get('fpe_vehicle').selectedOptions = [{ dataset: { typedId: JSON.stringify(p.vehicleId) } }];
   fields.set('fpe_correct_org', { checked: false }); fields.set('fpe_save', { disabled: false });
   for (const [id, value] of Object.entries({ fpd_mode: 'remove', fpd_reason: '', fpd_preview: '', fpd_error: '', fpd_commit: '' }))
     fields.set(id, { value, textContent: '', disabled: false });

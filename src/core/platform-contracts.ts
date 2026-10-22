@@ -69,6 +69,9 @@ export type PrintRequest =
   | {mode:'document';source:{section:DocumentSection;id:Identifier};revision:'exact'|'current';templateId:'document'|'fuelWriteoff';templateVersion:1}
   | {mode:'manual';form:'waybill'|'fuelRequest'|'workAct';target:{section:'vehicles';id:Identifier};fields:{date?:string|null;number?:string|null;route?:string|null;qty?:number|null;fuelType?:string|null;description?:string|null;amount?:number|null;org?:string|null;driver?:string|null};templateVersion:1};
 export interface PrintActionInput {request:PrintRequest;reviewFingerprint:string}
+export type ImportProfile='glonass'|'fuel-statement'|'section-data'|'vehicles'|'catalog'|'personnel'|'registry'|'provider-totals';
+export interface ImportDecision {rowId:string;action:'skip'|'create'|'map'|'keep'|'correct'|'fill'|'replace';target?:{section:string;id:Identifier};existing?:{section:string;id:Identifier};basis?:string}
+export interface ImportActionInput {sourceId:string;profile:ImportProfile;sections:string[];decisions:ImportDecision[];reviewFingerprint:string;reason:string}
 export type DocumentActionInput =
   | {action:'saveDraft';section:DocumentSection;draftId?:Identifier;payload:JsonRow;correctionOf?:DocumentReference;reason?:string}
   | {action:'postDraft';section:DocumentSection;draftId:Identifier;reviewFingerprint:string}
@@ -88,7 +91,8 @@ export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelI
   | { type: 'CostAction'; version: 1; input: CostActionInput }
   | { type: 'RepairAction'; version: 1; input: RepairActionInput }
   | { type: 'CalendarAction'; version: 1; input: CalendarActionInput }
-  | { type: 'PrintAction'; version: 1; input: PrintActionInput };
+  | { type: 'PrintAction'; version: 1; input: PrintActionInput }
+  | { type: 'ImportAction'; version: 1; input: ImportActionInput };
 export interface CommandEnvelope { protocolVersion: 1; databaseToken: string; operation: OperationDescriptor; base: Revisions; command: PlatformCommand }
 export interface ContractError extends Error { code: string; field: string; status: number }
 
@@ -260,6 +264,17 @@ export function createPlatformContracts() {
     const row = commandObject(commandJson(value,'command'),'command'); keys(row,['type','version','input'],'command');
     if (row.version !== 1) fail('COMMAND_VERSION', 'command.version', 'Версия команды не поддерживается');
     const input = commandObject(row.input,'command.input'), path = 'command.input.';
+    if(row.type==='ImportAction'){
+      keys(input,['sourceId','profile','sections','decisions','reviewFingerprint','reason'],'command.input');
+      if(typeof input.sourceId!=='string'||!/^[a-f0-9]{64}$/.test(input.sourceId))fail('INVALID_COMMAND',path+'sourceId','Нужен сохранённый исходник импорта');
+      const profiles:readonly string[]=['glonass','fuel-statement','section-data','vehicles','catalog','personnel','registry','provider-totals'];
+      if(typeof input.profile!=='string'||!profiles.includes(input.profile))fail('INVALID_COMMAND',path+'profile','Неизвестный профиль импорта');
+      if(!Array.isArray(input.sections)||!input.sections.length||input.sections.length>41||input.sections.some(name=>typeof name!=='string'||!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name))||new Set(input.sections).size!==input.sections.length)fail('INVALID_COMMAND',path+'sections','Нужны уникальные разделы импорта');
+      if(!Array.isArray(input.decisions)||input.decisions.length>50000)fail('INVALID_COMMAND',path+'decisions','Недопустимое число решений импорта');
+      const decisions:ImportDecision[]=input.decisions.map((value,index)=>{const key=path+'decisions.'+index,decision=commandObject(value,key);keys(decision,['rowId','action','target','existing','basis'],key);const rowId=commandText(decision.rowId,key+'.rowId',true,500);if(!['skip','create','map','keep','correct','fill','replace'].includes(decision.action as string))fail('INVALID_COMMAND',key+'.action','Выберите явное действие со строкой');const result:ImportDecision={rowId,action:decision.action as ImportDecision['action']};for(const field of ['target','existing'] as const)if(decision[field]!==undefined){const reference=commandObject(decision[field],key+'.'+field);keys(reference,['section','id'],key+'.'+field);if(typeof reference.section!=='string'||!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(reference.section))fail('INVALID_COMMAND',key+'.'+field+'.section','Неизвестный вид ссылки');result[field]={section:reference.section,id:commandId(reference.id,key+'.'+field+'.id')};}if(decision.basis!==undefined)result.basis=costText(decision.basis,key+'.basis');return result;});
+      if(new Set(decisions.map(decision=>decision.rowId)).size!==decisions.length)fail('INVALID_COMMAND',path+'decisions','Для строки выбрано несколько решений');
+      return {type:'ImportAction',version:1,input:{sourceId:input.sourceId,profile:input.profile as ImportProfile,sections:input.sections.slice() as string[],decisions,reviewFingerprint:reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint'),reason:costText(input.reason,path+'reason')}};
+    }
     if(row.type==='PrintAction'){
       keys(input,['request','reviewFingerprint'],'command.input');
       return {type:'PrintAction',version:1,input:{request:validatePrintRequest(input.request),reviewFingerprint:reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint')}};

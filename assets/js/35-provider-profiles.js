@@ -42,7 +42,7 @@ function wf1cKnownProviders(db=data) {
   const names=[...(db.fuelCards || []).map(card => card.provider),...(db.fuelPurchases || []).filter(purchase => !purchase.deleted).map(purchase => frcProvider(purchase)),...(db.fuelPeriods || []).flatMap(period => Object.keys(period.recon || {}))].filter(Boolean);
   return [...new Map(names.map(name => [wf1cProviderKey(name),name])).values()].sort((a,b) => a.localeCompare(b,'ru'));
 }
-function wf1cCurrentMonth() {const now=new Date();return now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');}
+function wf1cCurrentMonth() {return BusinessCalendar.resolve(data,new Date().toISOString()).today.slice(0,7);}
 function wfProviderTemplate(kind) {
   const providers=wf1cKnownProviders(), month=wf1cCurrentMonth();
   const examples=(providers.length ? providers : ['Волга-Интер','Газпромнефть']).map(provider => [provider,month,'','','']);
@@ -106,13 +106,13 @@ function wf1cTablePlan(table) {
   if(!entries.length)throw Error('Нет строк итогов для проверки');if(entries.length > 10000)throw Error('Максимум 10000 строк за одну загрузку');return {entries,known,fingerprint:wf1cFingerprint()};
 }
 async function wfProviderImport1c(input) {
-  const file=input.files?.[0];if(!file)return;input.value='';
-  try {
-    const bytes=await file.arrayBuffer();let table;
-    if(/\.csv$/i.test(file.name)){let text=new TextDecoder('utf-8').decode(bytes);if(text.includes('\uFFFD'))text=new TextDecoder('windows-1251').decode(bytes);table=wf1cParseCsv(text);}
-    else {const book=XLSX.read(bytes,{type:'array',cellDates:false});table=XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]],{header:1,defval:'',raw:false});}
-    const plan=wf1cTablePlan(table);wf1cPending={file,bytes,profileId:'1c83-bp',...plan};wfProvider1cPreview();
-  } catch(error) {showToast('Итоги 1С: '+error.message);}
+ const file=input.files?.[0];if(!file)return;input.value='';
+ try{
+  if(typeof reviewedImportOpen!=='function')throw Error('Не загружен проверяемый импорт');
+  const database=data,stamp=syncSessionStamp(),bytes=await file.arrayBuffer();
+  if(database!==data||stamp!==syncSessionStamp())throw Error('База или права изменились после выбора файла');
+  return await reviewedImportOpen({profile:'provider-totals',source:{name:file.name,bytes},sections:['fuelPeriods'],parser:{id:'provider-totals',version:1},onApplied:()=>wfProviderProfiles()});
+ }catch(error){showToast('Итоги 1С: '+error.message);}
 }
 function wfProvider1cPreview() {
   const pending=wf1cPending;if(!pending || wf1cSaving)return;
@@ -130,33 +130,12 @@ function wfProvider1cCapture() {
   wf1cPending.entries.forEach((entry,index) => {entry.include=!!document.querySelector('[data-1c-include="'+index+'"]')?.checked;entry.provider=document.querySelector('[data-1c-provider="'+index+'"]')?.value || '';entry.mode=document.querySelector('[data-1c-mode="'+index+'"]')?.value || 'fill';});
 }
 async function wfProvider1cCommit() {
-  if(!wf1cPending || wf1cSaving)return;const error=document.getElementById('wf1cError');
-  try {
-    wfProvider1cCapture();const pending=wf1cPending, selected=pending.entries.filter(entry => entry.include), keys=new Set();
-    if(!selected.length)throw Error('Выберите строки для записи');
-    selected.forEach(entry => {if(entry.error)throw Error('Строка '+entry.sourceRow+': '+entry.error);if(!pending.known.includes(entry.provider))throw Error('Строка '+entry.sourceRow+': выберите существующего поставщика');const key=JSON.stringify([entry.month,entry.provider]);if(keys.has(key))throw Error('В файле несколько итогов одного поставщика за один месяц: '+entry.provider);keys.add(key);if(!['fill','replace'].includes(entry.mode))throw Error('Неверное действие строки');});
-    if(wf1cFingerprint() !== pending.fingerprint)throw Error('База изменилась. Загрузите файл заново и проверьте актуальные значения.');
-    wf1cSaving=true;document.getElementById('wf1cCommit').disabled=true;
-    if(!window.crypto?.subtle)throw Error('Недоступен SHA256 исходного файла. Перезапустите программу.');
-    const digest=await crypto.subtle.digest('SHA-256',pending.bytes), sha256=Array.from(new Uint8Array(digest),byte => byte.toString(16).padStart(2,'0')).join('');
-    const sourceArchive=await importArchiveSource(pending.file);if(sourceArchive.available && sourceArchive.sha256 && sourceArchive.sha256.toLowerCase() !== sha256)throw Error('Контрольная сумма архива не совпадает с исходником');
-    if(wf1cFingerprint() !== pending.fingerprint)throw Error('База изменилась во время подготовки. Загрузите файл заново.');
-    const next=JSON.parse(JSON.stringify(data)), batchId='1c-import:'+Date.now()+'-'+Math.random().toString(36).slice(2,8),at=new Date().toISOString(), results=[];next.fuelPeriods=next.fuelPeriods || [];
-    selected.forEach(entry => {
-      let period=next.fuelPeriods.find(item => item.month === entry.month);if(period?.closed)throw Error('Месяц '+entry.month+' закрыт');if(!period){period={month:entry.month,history:[]};next.fuelPeriods.push(period);}
-      const recon=period.recon || (period.recon={}), values=recon[entry.provider] || (recon[entry.provider]={}),before={litres:values.litres ?? '',sum:values.sum ?? ''},changed=[];
-      ['litres','sum'].forEach(field => {if(entry[field] == null)return;if(entry.mode === 'replace' || fqValue(values[field]) == null){if(fqValue(values[field]) !== entry[field])changed.push(field);values[field]=entry[field];}});
-      const source={batchId,fileName:pending.file.name,sha256,sourceRow:entry.sourceRow,sourceDocument:entry.sourceDocument,sourceProvider:entry.sourceProvider,profileId:pending.profileId,at};
-      if(changed.length)(values.importHistory || (values.importHistory=[])).push({at,before,changed,source});
-      values.importSource=source;results.push({...entry,before,after:{litres:values.litres ?? '',sum:values.sum ?? ''},changed});
-    });
-    (next.appMeta || (next.appMeta=[])).push({id:batchId,rowType:'1c-provider-totals-import',profileId:pending.profileId,at,fileName:pending.file.name,sha256,size:pending.bytes.byteLength,sourceArchive,rows:results});
-    data=next;if(!await saveData(data,{noMerge:true}))throw Error('Итоги не сохранены. Проверьте соединение и загрузите файл заново.');
-    wf1cPending=null;wfShowDialog('Итоги 1С записаны','<p>Выбранных строк: '+selected.length+'. Изменённых показателей: '+results.reduce((sum,row) => sum+row.changed.length,0)+'.</p><p>SHA256: '+htmlEsc(sha256)+'</p><p>'+htmlEsc(sourceArchive.available ? 'Исходный файл сохранён в локальном архиве.' : sourceArchive.reason)+'</p><p>История и исходные значения доступны в профилях обмена.</p>','<button class="btn btn-primary" onclick="wfProviderOpenRecon('+htmlEsc(JSON.stringify(selected[0].month))+')">Открыть сверку</button>');
-  } catch(failure) {if(error?.isConnected)error.textContent=failure.message;else showToast(failure.message);}
-  finally {wf1cSaving=false;const button=document.getElementById('wf1cCommit');if(button)button.disabled=false;}
+ if(wf1cSaving||!wf1cPending?.file)return;
+ return wfProviderImport1c({files:[wf1cPending.file],value:''});
 }
-function wfProviderImportHistory() {
+function wfProviderImportHistory(onlyLegacy=false) {
   const batches=(data.appMeta || []).filter(row => row.rowType === '1c-provider-totals-import').slice().reverse();
+  const history=(data.fuelPeriods||[]).flatMap(period=>Object.entries(period.recon||{}).flatMap(([provider,entry])=>(Array.isArray(entry?.importHistory)?entry.importHistory:[]).map(item=>({month:period.month,provider,...item})))).reverse();
+  if(history.length&&!onlyLegacy){wfShowDialog('История загрузок итогов 1С',history.map(item=>'<article class="wf-card"><h3>'+htmlEsc(item.provider+' · '+item.month)+'</h3><p>Литры: '+htmlEsc(String(item.before?.litres??'неизвестно')+' → '+String(item.after?.litres??'неизвестно'))+'; сумма: '+htmlEsc(String(item.before?.sum??'неизвестно')+' → '+String(item.after?.sum??'неизвестно'))+'</p><p>'+htmlEsc(item.basis||'')+'</p><p>Источник SHA256: '+htmlEsc(item.source?.sourceArchive?.sha256||'не указан')+'</p><button class="btn btn-ghost" data-provider-import-source="'+htmlEsc(item.source?.sourceId||'')+'">Проверить сохранённый источник</button></article>').join('')+(batches.length?'<p>Прежних загрузок: '+batches.length+'. Их исходные записи сохранены.</p><button class="btn btn-ghost" onclick="wfProviderImportHistory(true)">Показать прежние загрузки</button>':''),'<button class="btn btn-ghost" onclick="wfProviderProfiles()">К профилям</button>');document.querySelectorAll('[data-provider-import-source]').forEach(button=>button.onclick=()=>reviewedImportOpenSource(button.dataset.providerImportSource));return;}
   wfShowDialog('История загрузок итогов 1С',batches.map(batch => '<details><summary>'+htmlEsc(new Date(batch.at).toLocaleString('ru')+' · '+batch.fileName)+' · '+batch.rows.length+' строк</summary><p>SHA256: '+htmlEsc(batch.sha256)+'</p><p>'+htmlEsc(batch.sourceArchive?.available ? 'Исходник в локальном архиве' : batch.sourceArchive?.reason || 'Архив недоступен')+'</p><table class="data-table"><thead><tr><th>Строка</th><th>Поставщик / месяц</th><th>Литры: было → стало</th><th>Сумма: было → стало</th><th>Документ</th></tr></thead><tbody>'+batch.rows.map(row => '<tr><td>'+row.sourceRow+'</td><td>'+htmlEsc(row.provider+' · '+row.month)+'</td><td>'+htmlEsc(String(row.before.litres)+' → '+String(row.after.litres))+'</td><td>'+htmlEsc(String(row.before.sum)+' → '+String(row.after.sum))+'</td><td>'+htmlEsc(row.sourceDocument || '')+'</td></tr>').join('')+'</tbody></table></details>').join('') || '<p>Загрузок пока нет.</p>','<button class="btn btn-ghost" onclick="wfProviderProfiles()">К профилям</button>');
 }

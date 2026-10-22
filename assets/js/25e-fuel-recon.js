@@ -26,8 +26,12 @@ function fgRows(month) {
     const days=[...grouped].map(([date,records]) => {
       const telemetry=records.filter(r => fqValue(r.kmGlonass) != null || fqValue(r.glonassFuel) != null);
       const canonical=telemetry.find(r => r.glonassCanonical) || telemetry.slice().sort((a,b) => (fqValue(b.kmGlonass) || 0)-(fqValue(a.kmGlonass) || 0))[0];
+      const sensorKm=canonical&&!canonical.glonassCoverage?.sensorPairUnknown
+        ?Object.hasOwn(canonical,'glonassFuelKm')?fqValue(canonical.glonassFuelKm)
+          :canonical.glonassCoverage||canonical.glonassProvenance?null:fqValue(canonical.kmGlonass)
+        :null;
       return {date,km:records.reduce((sum,r) => sum+(fqValue(r.km) || 0),0),kmGlonass:canonical ? fqValue(canonical.kmGlonass) : null,
-        glonassFuel:canonical ? fqValue(canonical.glonassFuel) : null,glonassFuelKm:canonical ? fqValue(canonical.glonassFuelKm) : null,
+        glonassFuel:canonical ? fqValue(canonical.glonassFuel) : null,glonassFuelKm:sensorKm,
         driver:[...new Set(records.map(r => r.driver).filter(Boolean))].join(', '),
         ambiguous:!telemetry.some(r => r.glonassCanonical) && telemetry.length > 1 && new Set(telemetry.map(r => JSON.stringify([r.kmGlonass,r.glonassFuel]))).size > 1};
     }).filter(day => day.km > 0 || day.kmGlonass != null || day.glonassFuel != null);
@@ -35,8 +39,8 @@ function fgRows(month) {
     const withKm=days.filter(day => day.km > 0), both=days.filter(day => day.kmGlonass != null);
     const km=both.reduce((sum,day) => sum+day.km,0), gl=both.reduce((sum,day) => sum+day.kmGlonass,0);
     const bad=both.filter(day => {const difference=Math.abs(day.km-day.kmGlonass); return difference >= FG_DIFF_KM && (!day.kmGlonass || difference/day.kmGlonass*100 >= FG_DIFF_PCT);}).sort((a,b) => a.date.localeCompare(b.date));
-    const sensors=days.filter(day => day.glonassFuel != null && (day.glonassFuelKm ?? day.kmGlonass) > 0);
-    const sensL=sensors.reduce((sum,day) => sum+day.glonassFuel,0), sensKm=sensors.reduce((sum,day) => sum+(day.glonassFuelKm ?? day.kmGlonass),0);
+    const sensors=days.filter(day => day.glonassFuel != null && day.glonassFuelKm > 0);
+    const sensL=sensors.reduce((sum,day) => sum+day.glonassFuel,0), sensKm=sensors.reduce((sum,day) => sum+day.glonassFuelKm,0);
     const sens100=sensKm >= 50 ? sensL/sensKm*100 : null, sensDev=sens100 != null && v.norm ? (sens100-v.norm)/v.norm*100 : null;
     return {v,sensL,sensKm,sens100,sensDev,sensDays:sensors.length,days:withKm.length,both:both.length,
       noGl:withKm.filter(day => day.kmGlonass == null).length,km,gl,diff:km-gl,pct:gl ? (km-gl)/gl*100 : null,bad,

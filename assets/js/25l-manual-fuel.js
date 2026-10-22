@@ -312,15 +312,15 @@ function gsmStatementRow(p) {
   const owner = gsmCardAt(data, p.cardNo, p.date), org = p.sourceOrg || owner.org || GSM_UNKNOWN_ORG;
   const closed = fuelMonthClosed(p.date), disabled = closed || gsmStatementSaving ? ' disabled' : '';
   const field = (name, tag, attrs, content) => '<' + tag + ' data-field="' + name + '" aria-label="' + fpEsc({ date: 'Дата операции', grade: 'Топливо операции', qty: 'Литры операции', sum: 'Сумма операции', vehicleId: 'Заправленная машина' }[name]) + '" ' + attrs + disabled +
-    ' on' + (tag === 'select' ? 'change' : 'input') + '="gsmStatementUpdate(' + gsmArg(p.id) + ',' + gsmArg(name) + ',this.value)">' + (tag === 'select' ? content + '</select>' : '');
-  const vehicles = (data.vehicles || []).slice().sort((a, b) => fpVehicleTitle(a).localeCompare(fpVehicleTitle(b), 'ru'));
+    ' on' + (tag === 'select' ? 'change' : 'input') + '="gsmStatementUpdate(' + gsmArg(p.id) + ',' + gsmArg(name) + ',' + (name==='vehicleId'?'fuelImportSelectedVehicle(this)':'this.value') + ')">' + (tag === 'select' ? content + '</select>' : '');
+  const vehicles = (data.vehicles || []).filter(vehicle=>vehicle.id===row.vehicleId||!vehicle.archived&&!vehicle.mergedInto&&!vehicle.deleted).sort((a, b) => fpVehicleTitle(a).localeCompare(fpVehicleTitle(b), 'ru'));
   return '<tr data-purchase-id="' + fpEsc(p.id) + '"' + (gsmStatementDrafts.has(p.id) ? ' class="gsm-statement-dirty"' : '') + '><td>' + field('date', 'input', 'type="date" value="' + fpEsc(row.date) + '"') + '<small>' + fpEsc(p.time || '') + '</small></td>' +
     '<td>' + fpEsc(p.cardNo || 'Без карты') + '<small>' + fpEsc(org) + '</small><small>' + fpEsc(p.sourceProvider || owner.provider || '') + '</small></td>' +
     '<td>' + fpEsc(p.vehicleText || fpVehicleTitle(gsmVehicle(p.cardVehicleId || owner.vehicleId))) + '<small>' + fpEsc(fpPlace(p)) + '</small></td>' +
     '<td>' + field('grade', 'select', '', '<option value="">Выберите</option>' + [...new Set([...FP_GRADES, row.grade].filter(Boolean))].map(g => '<option' + (g === row.grade ? ' selected' : '') + '>' + fpEsc(g) + '</option>').join('')) + '</td>' +
     '<td>' + field('qty', 'input', 'type="number" min="0.001" step="0.001" value="' + fpEsc(row.qty) + '"') + '</td>' +
     '<td>' + field('sum', 'input', 'type="number" min="0" step="0.01" value="' + fpEsc(row.sum ?? '') + '"') + '</td>' +
-    '<td>' + field('vehicleId', 'select', '', '<option value="">Выберите машину</option>' + vehicles.map(v => '<option value="' + fpEsc(v.id) + '"' + (v.id === row.vehicleId ? ' selected' : '') + '>' + fpEsc(fpVehicleTitle(v) + (v.object ? ' · ' + v.object : '')) + '</option>').join('')) + '</td>' +
+    '<td>' + field('vehicleId', 'select', '', '<option value="">Выберите машину</option>' + vehicles.map(v => '<option value="' + fpEsc(v.id) + '" data-typed-id="'+fpEsc(JSON.stringify(v.id))+'"' + (v.id === row.vehicleId ? ' selected' : '') + '>' + fpEsc(fpVehicleTitle(v) + (v.object ? ' · ' + v.object : '')) + '</option>').join('')) + '</td>' +
     '<td><span class="' + (linked ? 'gsm-ok' : 'gsm-error') + '">' + (closed ? 'Месяц закрыт' : linked ? 'В журнале' : 'Не заправлено') + '</span>' +
     '<div class="gsm-statement-actions"><button data-post class="btn btn-primary btn-sm" onclick="gsmStatementReview(' + gsmArg(p.id) + ')"' + disabled + '>Заправить</button>' +
     '<button class="btn btn-ghost btn-sm" onclick="gsmStatementEdit(' + gsmArg(p.id) + ')"' + disabled + '>Изменить</button></div><div data-row-error class="gsm-error" role="alert"></div></td></tr>';
@@ -357,6 +357,13 @@ function gsmStatementReview(id) {
   try {
     const p = fpById(id), draft = gsmStatementDrafts.get(id);
     if (draft && draft.original !== JSON.stringify(p)) throw Error('Строка выписки изменилась. Обновите её перед правкой');
+    if(p&&!p.manual&&!p.manualStatement){
+      if(!reviewedImportPurchaseSource(p))throw Error('У прежней загрузки нет проверенного исходника. Для привязки выберите оригинальную выписку повторно; сохранённые факты и ввод сейчас не меняются.');
+      if(Object.entries(draft?.values||{}).some(([key,value])=>key!=='vehicleId'&&String(value??'')!==String(p[key]??'')))throw Error('При привязке исходные дата, топливо, литры и сумма не переписываются. Сохраните введённые уточнения для отдельной сверки оригинала.');
+      const target=Object.hasOwn(draft?.values||{},'vehicleId')?draft.values.vehicleId:p.vehicleId;
+      if(target===null||target===undefined||target==='')throw Error('Выберите точную машину для проверяемой привязки');
+      return reviewedImportMapPurchase(id,target);
+    }
     const plan = gsmStatementPlan(data, id, { ...p, ...draft?.values }), after = plan.next.fuelPurchases.find(p => p.id === id);
     gsmStatementPending = plan;
     openGenericModal('Заправить машину из выписки', '<div class="gsm-manual-review">' +
@@ -372,6 +379,7 @@ async function gsmStatementCommit() {
   const error = document.getElementById('gsmStatementError');
   let before;
   try {
+    const original=fpById(gsmStatementPending.id);if(original&&!original.manual&&!original.manualStatement)throw Error('Привязка импортированной покупки выполняется только по проверенному исходнику. Откройте её план заново.');
     const next = gsmStatementApply(data, gsmStatementPending); before = data;
     gsmStatementSaving = true; document.getElementById('gsmStatementCommit').disabled = true;
     data = next; rebuildIndex();

@@ -595,6 +595,11 @@ function renderReestrSection() {
   }
   if (reestrRows.length > 0) {
     document.getElementById('reestrOpenWindowBtn').style.display = '';
+    if(reestrImportDraft){
+      document.getElementById('reestrReviewCard').style.display='';
+      document.getElementById('reestrBuildBtnLabel').textContent='Проверить и записать импорт';
+      reestrRenderTable();reestrUpdateTotal();
+    }
   }
 }
 
@@ -609,6 +614,7 @@ function reestrBindEvents() {
   dropzone.addEventListener('drop', e => reestrAddFiles(e.dataTransfer.files));
   document.getElementById('reestrParseBtn').addEventListener('click', reestrParse);
   document.getElementById('reestrOpenWindowBtn').addEventListener('click', async () => {
+    if(reestrImportDraft)return reestrReviewImport();
     if (reestrRows.length > 0) {
       await loadReestrStatyi();
       await loadReestrContracts();
@@ -616,9 +622,10 @@ function reestrBindEvents() {
     }
   });
   document.getElementById('reestrAddRowBtn').addEventListener('click', async () => {
-    reestrRows.push({ sum:0, date:new Date().toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'}), category:'', description:'', razdel:'', naz:'', obj:'', dog:'', osn:'', updLabel:'', 'statья':'', sourceFolder:'вручную' });
-    data.reestrRows = reestrRows;
-    if (!await saveData(data)) return;
+    const added={ sum:reestrImportDraft?null:0, date:reestrImportDraft?'':new Date().toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'}), category:'', description:'', razdel:'', naz:'', obj:'', dog:'', osn:'', updLabel:'', 'statья':'', sourceFolder:'вручную' };
+    reestrRows.push(added);
+    if(reestrImportDraft){const index=reestrImportDraft.nextManual++;reestrImportDraft.originalByRow.set(added,{rowId:'registry-manual:'+index,locator:{entry:'manual',row:index+1},raw:{}});}
+    if(!reestrImportDraft){data.reestrRows=structuredClone(reestrRows);if(!await saveData(data))return;}
     reestrRenderTable();
   });
   document.getElementById('reestrBackBtn').addEventListener('click', () => {
@@ -626,6 +633,7 @@ function reestrBindEvents() {
     document.getElementById('reestrDoneCard').style.display = 'none';
     document.getElementById('reestrLogCard').style.display = 'none';
     reestrRows = [];
+    reestrImportDraft = null;
   });
   document.getElementById('reestrSaveBtn').addEventListener('click', reestrSaveCurrent);
   document.getElementById('reestrBuildBtn').addEventListener('click', reestrBuild);
@@ -666,8 +674,25 @@ function reestrRemoveFile(i) {
   document.getElementById('reestrParseBtn').disabled = reestrFiles.length === 0;
 }
 
+function reestrImportHasPendingEdits(){return !!reestrImportDraft;}
+async function reestrImportFlush(){return !reestrImportDraft;}
+async function reestrReviewImport(){
+  try{
+    const draft=reestrImportDraft;
+    if(!draft||draft.database!==data||draft.stamp!==syncSessionStamp())throw Error('База или права изменились после распознавания. Перечитайте исходные файлы.');
+    if(typeof reviewedImportOpen!=='function')throw Error('Не загружен проверяемый импорт');
+    const rows=reestrRows.map(record=>{const original=draft.originalByRow.get(record);if(!original)throw Error('Потеряно происхождение строки. Перечитайте исходные файлы.');return {...structuredClone(original),section:'reestrRows',normalized:structuredClone(record)};});
+    return await reviewedImportOpen({profile:'registry',source:draft.source,sections:['reestrRows'],parser:{id:'registry',version:1},decoded:{rows},onApplied:async()=>{
+      if(reestrImportDraft!==draft||draft.database!==data)return;
+      reestrImportDraft=null;reestrRows=structuredClone(data.reestrRows||[]);
+      if(document.getElementById('reestrReviewBody')){reestrRenderTable();reestrUpdateTotal();}
+      const label=document.getElementById('reestrBuildBtnLabel');if(label)label.textContent='Сформировать реестр';
+    }});
+  }catch(error){showToast('Импорт реестра: '+error.message);}
+}
 async function reestrParse() {
   if (!reestrFiles.length) return;
+  if(reestrImportDraft){showToast('Сначала проверьте или отмените текущий черновик импорта.');return;}
   const errorEl = document.getElementById('reestrError');
   errorEl.style.display = 'none';
   document.getElementById('reestrLogCard').style.display = 'none';
@@ -701,21 +726,24 @@ async function reestrParse() {
     const zipFiles = reestrFiles.filter(f => f.type === 'zip');
     const pdfFiles = reestrFiles.filter(f => f.type === 'pdf');
     const imgFiles = reestrFiles.filter(f => f.type === 'img');
+    const importDatabase=data,importStamp=syncSessionStamp(),originalFiles=[];
     let allRows = [], allLog = [];
     for (const archive of zipFiles) {
       allLog.push({ type: 'info', text: 'Архив: ' + archive.file.name });
       const ab = await archive.file.arrayBuffer();
+      originalFiles.push({name:archive.file.name,bytes:new Uint8Array(ab)});
       const d = await window.reestrAPI.parseInvoices(ab);
       allRows.push(...(d.rows || [])); allLog.push(...(d.log || []));
     }
     if (pdfFiles.length > 0 || imgFiles.length > 0) {
       const payload = [];
-      for (const pf of pdfFiles) { payload.push({ name: pf.file.name, buffer: await pf.file.arrayBuffer() }); }
-      for (const im of imgFiles) { payload.push({ name: im.file.name, buffer: await im.file.arrayBuffer() }); }
+      for (const pf of pdfFiles) { const buffer=await pf.file.arrayBuffer();payload.push({name:pf.file.name,buffer});originalFiles.push({name:pf.file.name,bytes:new Uint8Array(buffer)}); }
+      for (const im of imgFiles) { const buffer=await im.file.arrayBuffer();payload.push({name:im.file.name,buffer});originalFiles.push({name:im.file.name,bytes:new Uint8Array(buffer)}); }
       const d = await window.reestrAPI.parsePdfs(payload);
       allRows.push(...d.rows); allLog.push(...d.log);
     }
-    // Применяем базу знаний: автозаполнение + поиск дубликатов
+    const rawRows=structuredClone(allRows);
+    // Предложения базы знаний остаются в редактируемом черновике.
     if (window.reestrAPI.applyKnowledge) {
       try {
         const kbResult = await window.reestrAPI.applyKnowledge(allRows);
@@ -730,14 +758,16 @@ async function reestrParse() {
         }
       } catch(e) { allLog.push({type:'warn',text:'База знаний недоступна: '+e.message}); }
     }
-    reestrRows = allRows;
-    data.reestrRows = reestrRows;
-    if(!await saveData(data))return;
+    if(importDatabase!==data||importStamp!==syncSessionStamp())throw Error('База или права изменились во время распознавания');
+    reestrRows=structuredClone(allRows);
+    reestrImportDraft=reestrRows.length?{database:importDatabase,stamp:importStamp,source:{files:originalFiles},nextManual:0,originalByRow:new Map(reestrRows.map((record,index)=>[record,{rowId:'registry-row:'+index,locator:{row:index+1},raw:structuredClone(rawRows[index]??{})}])),log:allLog}:null;
     if (reestrRows.length > 0) {
       await loadReestrStatyi();
       await loadReestrContracts();
       document.getElementById('reestrOpenWindowBtn').style.display = '';
-      await window.electronAPI.openReestrWindow({ rows: reestrRows, log: allLog, statyi: reestrStatyi, contracts: reestrContracts, vehicles: data.vehicles || [] });
+      document.getElementById('reestrReviewCard').style.display='';
+      document.getElementById('reestrBuildBtnLabel').textContent='Проверить и записать импорт';
+      reestrRenderTable();reestrUpdateTotal();reestrRenderLog([...allLog,{type:'info',text:'Распознанные строки ещё не записаны. Сверьте реквизиты с исходными файлами; предложения из истории требуют проверки.'}]);
     } else {
       document.getElementById('reestrOpenWindowBtn').style.display = 'none';
       reestrRenderLog(allLog);
@@ -770,13 +800,13 @@ function reestrRenderLog(entries) {
   const warnCount = entries.filter(l => l.type === 'warn').length;
   document.getElementById('reestrSummaryCount').textContent = okCount + (warnCount ? ' из ' + (okCount + warnCount) : '') + ' счетов распознано';
   const totalSum = DecimalCore.toNumberExact(DecimalCore.sum(reestrRows.map(r=>r.sum??0)));
-  document.getElementById('reestrSummaryAmount').textContent = 'на сумму ' + totalSum.toLocaleString('ru-RU') + ' руб.';
+  document.getElementById('reestrSummaryAmount').textContent = 'Известные суммы: '+totalSum.toLocaleString('ru-RU')+' руб.'+(reestrRows.some(row=>row.sum==null)?' · итог неполный':'');
 }
 
 function reestrUpdateTotal() {
   const total = DecimalCore.toNumberExact(DecimalCore.sum(reestrRows.map(r=>r.sum??0)));
   const el = document.getElementById('reestrReviewTotal');
-  if (el) el.textContent = total.toLocaleString('ru-RU', { minimumFractionDigits: 2 }) + ' руб.';
+  if (el) {const unknown=reestrRows.filter(row=>row.sum==null).length;el.textContent=total.toLocaleString('ru-RU',{minimumFractionDigits:2})+' руб.'+(unknown?' · без суммы: '+unknown+' (итог неполный)':'');}
 }
 
 function reestrBuildStatyaSelect(row, idx) {
@@ -832,9 +862,9 @@ function reestrRenderTable() {
     tr.appendChild(tdN);
 
     const tdS = document.createElement('td'); tdS.style.cssText = 'padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)';
-    const sumInp = document.createElement('input'); sumInp.type = 'text'; sumInp.value = (row.sum || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2 });
+    const sumInp = document.createElement('input'); sumInp.type = 'text'; sumInp.value = row.sum==null?'':Number(row.sum).toLocaleString('ru-RU', { minimumFractionDigits: 2 });
     sumInp.style.cssText = 'width:90px;text-align:right;padding:3px 5px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--bg2);color:var(--text);font-family:inherit;font-weight:700';
-    sumInp.addEventListener('change', () => { try { const v=precisionParse(sumInp.value,{scale:2,blank:'zero'}); reestrRows[i].sum=v; sumInp.value=precisionFormat(v,{minimumScale:2}); reestrUpdateTotal(); } catch(error) { showFieldError(error.message); } });
+    sumInp.addEventListener('change', () => { try { const v=sumInp.value.trim()===''?null:precisionParse(sumInp.value,{scale:2}); reestrRows[i].sum=v; sumInp.value=v==null?'':precisionFormat(v,{minimumScale:2}); reestrUpdateTotal(); } catch(error) { showFieldError(error.message); } });
     tdS.appendChild(sumInp); tr.appendChild(tdS);
 
     const tdD = document.createElement('td'); tdD.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
@@ -873,7 +903,7 @@ function reestrRenderTable() {
       const repBtn = document.createElement('button'); repBtn.title = 'В журнал ремонта';
       repBtn.className = 'reestr-action-btn repair';
       repBtn.innerHTML = '<svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>';
-      repBtn.addEventListener('click', () => reestrToRepair(i));
+      repBtn.addEventListener('click', () => {if(reestrImportDraft){showToast('Сначала подтвердите импорт строки реестра.');return;}reestrToRepair(i);});
       tdRep.appendChild(repBtn);
     }
     tr.appendChild(tdRep);
@@ -881,7 +911,7 @@ function reestrRenderTable() {
     const tdDel = document.createElement('td'); tdDel.style.cssText = 'padding:6px 8px;text-align:center;border-bottom:1px solid var(--border)';
     const delBtn = document.createElement('button'); delBtn.textContent = '✕';
     delBtn.className = 'reestr-action-btn delete';
-    delBtn.addEventListener('click', async () => { reestrRows.splice(i, 1); data.reestrRows = reestrRows; if (await saveData(data)) reestrRenderTable(); });
+    delBtn.addEventListener('click', async () => { reestrRows.splice(i,1);if(reestrImportDraft){reestrRenderTable();reestrUpdateTotal();return;}data.reestrRows=structuredClone(reestrRows);if(await saveData(data))reestrRenderTable(); });
     tdDel.appendChild(delBtn); tr.appendChild(tdDel);
 
     tbody.appendChild(tr);
@@ -890,6 +920,7 @@ function reestrRenderTable() {
 }
 
 function reestrToRepair(idx) {
+  if(reestrImportDraft){showToast('Сначала подтвердите импорт строки реестра.');return;}
   const row = reestrRows[idx];
   if (!row) return;
   editingRepairId = null;
@@ -920,6 +951,8 @@ function reestrToRepair(idx) {
 }
 
 async function reestrBuild() {
+  if(reestrImportDraft)return reestrReviewImport();
+  if(reestrRows.some(row=>row.sum==null)){showToast('У части строк неизвестна сумма. Заполните её по исходным документам перед выгрузкой реестра.');return false;}
   const btn = document.getElementById('reestrBuildBtn');
   btn.disabled = true;
   btn.querySelector('.reestr-spinner').style.display = 'inline-block';
@@ -994,7 +1027,9 @@ function reestrRenderSavedList() {
 }
 
 async function reestrSaveCurrent() {
+  if(reestrImportDraft)return reestrReviewImport();
   if (!reestrRows.length) return;
+  if(reestrRows.some(row=>row.sum==null)){showToast('У части строк неизвестна сумма. Заполните её по исходным документам перед сохранением итогового реестра.');return false;}
   const saved = data.savedReestrs || [];
   const nextNum = saved.length > 0 ? Math.max(...saved.map(r => r.number)) + 1 : 1;
   const totalSum = DecimalCore.toNumberExact(DecimalCore.sum(reestrRows.map(r=>r.sum??0)));
@@ -1013,6 +1048,7 @@ async function reestrSaveCurrent() {
 }
 
 async function reestrOpenSaved(idx) {
+  if(reestrImportDraft){showToast('Сначала проверьте или отмените текущий черновик импорта.');return;}
   const saved = data.savedReestrs || [];
   const entry = saved[idx];
   if (!entry) return;

@@ -171,49 +171,13 @@ async function openLoadedStatement() {
   });
 }
 
-test('loaded statement opens all months and fuels TREKOL and another car from separate original operations', async () => {
-  await openLoadedStatement();
-  assert.equal(await page.getByRole('combobox', { name: 'Месяц', exact: true }).inputValue(), 'all');
-  assert.equal(await page.locator('[data-purchase-id]').count(), 2);
-  const first = page.locator('[data-purchase-id="loaded1"]');
-  await first.getByRole('combobox', { name: 'Заправленная машина', exact: true }).selectOption('trekol');
-  await first.getByRole('button', { name: 'Заправить', exact: true }).click();
-  await page.locator('#gsmStatementCommit').click();
-  await page.waitForFunction(() => data.fuelPurchases[0].vehicleId === 'trekol');
-  const second = page.locator('[data-purchase-id="loaded2"]');
-  await second.getByRole('combobox', { name: 'Заправленная машина', exact: true }).selectOption('diesel');
-  await second.getByRole('spinbutton', { name: 'Литры операции', exact: true }).fill('45');
-  await second.getByRole('button', { name: 'Заправить', exact: true }).click(); await page.locator('#gsmStatementCommit').click();
-  await page.waitForFunction(() => data.fuelPurchases[1].vehicleId === 'diesel');
-  const result = await page.evaluate(() => {
-    const l = gsmBuildLedger(data, gsmMonthRange('2026-09'));
-    return { count: data.fuelPurchases.length, keys: data.fuelPurchases.map(p => p.importKey),
-      rows: l.rows.map(r => ({ car: r.vehicleId, org: r.org, issued: r.issued })),
-      journal: data.records.filter(r => r.date.startsWith('2026-09')).map(r => ({ km: r.km, qty: r.fuelIssued })), disk: JSON.parse(window.__disk).fuelPurchases.length };
-  });
-  assert.equal(result.count, 2); assert.equal(result.disk, 2); assert.deepEqual(result.keys, ['original-key-1', 'original-key-2']);
-  assert.ok(result.rows.some(r => r.car === 'trekol' && r.org === 'A' && r.issued === 58));
-  assert.ok(result.rows.some(r => r.car === 'diesel' && r.issued === 45));
-  assert.deepEqual(result.journal, [{ km: 0, qty: 58 }, { km: 0, qty: 45 }]);
-  assert.match(await first.innerText(), /В журнале/);
-  await first.getByRole('button', { name: 'Заправить', exact: true }).click(); await page.locator('#gsmStatementCommit').click();
-  await page.waitForFunction(() => !document.getElementById('genericModal').classList.contains('open'));
-  assert.equal(await page.evaluate(() => data.records.find(r => r.vehicleId === 'trekol').fuelIssued), 58);
+test('loaded legacy statement exposes all months and retains original operations when a verified source is missing', async () => {
+  await openLoadedStatement();assert.equal(await page.getByRole('combobox',{name:'Месяц',exact:true}).inputValue(),'all');assert.equal(await page.locator('[data-purchase-id]').count(),2);
+  const before=await page.evaluate(()=>JSON.stringify({purchases:data.fuelPurchases,records:data.records})),row=page.locator('[data-purchase-id="loaded1"]');await row.getByRole('combobox',{name:'Заправленная машина',exact:true}).selectOption('trekol');await row.getByRole('button',{name:'Заправить',exact:true}).click();assert.match(await row.locator('[data-row-error]').innerText(),/нет проверенного исходника/);assert.equal(await page.locator('#gsmStatementCommit').count(),0);assert.equal(await row.getByRole('combobox',{name:'Заправленная машина',exact:true}).inputValue(),'trekol');assert.equal(await page.evaluate(()=>JSON.stringify({purchases:data.fuelPurchases,records:data.records})),before);assert.deepEqual(await page.evaluate(()=>data.fuelPurchases.map(row=>row.importKey)),['original-key-1','original-key-2']);
 });
 
-test('loaded statement refuses cross-object assignment and retains input after a failed save', async () => {
-  await openLoadedStatement(); const row = page.locator('[data-purchase-id="loaded1"]');
-  await row.getByRole('combobox', { name: 'Заправленная машина', exact: true }).selectOption('nng');
-  await row.getByRole('button', { name: 'Заправить', exact: true }).click(); assert.match(await row.locator('[data-row-error]').innerText(), /объект/);
-  await row.getByRole('combobox', { name: 'Заправленная машина', exact: true }).selectOption('trekol');
-  await row.getByRole('button', { name: 'Заправить', exact: true }).click();
-  await page.evaluate(() => { window.electronAPI.writeData = async () => false; });
-  await page.locator('#gsmStatementCommit').click(); await page.waitForFunction(() => document.getElementById('gsmStatementError').textContent.includes('Не записано'));
-  assert.equal(await page.evaluate(() => data.fuelPurchases[0].vehicleId), '');
-  assert.equal(await row.getByRole('combobox', { name: 'Заправленная машина', exact: true }).inputValue(), 'trekol');
-  await page.evaluate(() => { window.electronAPI.writeData = async json => { window.__disk = json; return true; }; });
-  await page.locator('#gsmStatementCommit').click(); await page.waitForFunction(() => data.fuelPurchases[0].vehicleId === 'trekol');
-  assert.equal(await page.evaluate(() => data.fuelPurchases.length), 2);
+test('loaded verified statement retains assignment input and source facts after rejected persistence, then retries exactly once', async () => {
+  await openLoadedStatement();await page.evaluate(()=>{data.records=[];data.fuelPurchases=[];data.fuelImports=[];});await require('./helpers/reviewed-import-harness.cjs').install(page);await importSyntheticStatement([{id:'ACTUAL-SOURCE',qty:58}],{recipient:'trekol',fuel:'ДТ'});await page.locator('[data-import-cancel]').click();const original=await page.evaluate(()=>structuredClone(data.fuelPurchases[0]));await page.evaluate(()=>{fpMonth='all';fpView='receipts';gsmOrg='';gsmFuel='';renderFuelPurchases();});const row=page.locator('[data-purchase-id]').first();await row.getByRole('combobox',{name:'Заправленная машина',exact:true}).selectOption('diesel');await row.getByRole('button',{name:'Заправить',exact:true}).click();const f=page.locator('#reviewedImportForm');await f.locator('[name=reason]').fill('Explicit original recipient correction');await f.locator('[data-import-preview]').click();await page.waitForFunction(()=>!reviewedImportSession.pending);await f.locator('[data-import-basis]').fill('Checked correct recipient against original statement');await f.locator('[data-import-preview]').click();await page.waitForFunction(()=>!reviewedImportSession.pending);assert.equal(await f.locator('[data-import-error]').innerText(),'');await f.locator('[name=confirm]').check();await page.evaluate(()=>__rejectImport=true);await f.locator('[data-import-apply]').click();await page.waitForFunction(()=>!reviewedImportSession.pending);assert.match(await f.locator('[data-import-error]').innerText(),/Not persisted/);assert.equal(await page.evaluate(()=>data.fuelPurchases[0].vehicleId),'trekol');assert.equal(await f.locator('[data-import-basis]').inputValue(),'Checked correct recipient against original statement');await page.evaluate(()=>__rejectImport=false);await f.locator('[data-import-apply]').click();await page.waitForFunction(()=>!reviewedImportSession.pending);assert.equal(await f.locator('[data-import-error]').innerText(),'');const after=await page.evaluate(()=>({purchase:data.fuelPurchases[0],records:data.records,envelopes:__controlledRequests.slice(-2)}));assert.equal(after.purchase.vehicleId,'diesel');for(const key of ['date','qty','sum','price','sourceTransaction'])assert.deepEqual(after.purchase[key],original[key]);assert.equal(after.records.find(row=>row.vehicleId==='trekol').fuelIssued,0);assert.equal(after.records.find(row=>row.vehicleId==='diesel').fuelIssued,58);assert.equal(after.envelopes[0],after.envelopes[1]);assert.equal(after.records.some(row=>Object.hasOwn(row,'km')),false);
 });
 
 test('loaded statement keeps row edits while changing organization and exposes invalid-date purchases for correction', async () => {
@@ -229,50 +193,14 @@ test('loaded statement keeps row edits while changing organization and exposes i
   assert.equal(await row.getByRole('combobox', { name: 'Заправленная машина', exact: true }).inputValue(), 'trekol');
 });
 
-test('reimport keeps the allocated statement vehicle, date, litres and an explicitly corrected zero amount', async () => {
-  await page.evaluate(() => {
-    data.records = []; data.fuelPurchases = []; data.fuelImports = [];
-    data.vehicles[0].object = 'УНГКМ';
-    data.vehicles.push({ id: 'recipient', plate: 'А001АА716', make: 'Нива', org: 'A', object: 'УНГКМ', fuel: 'gasoline', fuelGrade: 'АИ-95' });
-    data.fuelCards = [{ number: '111111', org: 'A', assignments: [{ vehicleId: 'v', from: '', to: '' }] }];
-    rebuildIndex(); window.__importReport = null;
-    showFuelImportReport = report => { window.__importReport = report; };
-    window.__repeatStatementImport = async () => {
-      window.__importReport = null;
-      const rows = [['Дата транзакции', 'Тип транзакции', 'Количество', 'Товар', 'Комментарий', 'Номер карты', 'Сумма к оплате', 'Цена клиента'],
-        ['01.09.2026 14:00', 'Покупка', 30, 'АИ-95', 'Х123АА716', '111111', 3000, 100]];
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'Sheet1');
-      importFuelFromXls({ files: [new File([XLSX.write(workbook, { type: 'array', bookType: 'xlsx' })], 'repeat-statement.xlsx')], value: '' });
-      for (let i = 0; i < 100 && !window.__importReport; i++) {
-        document.getElementById('importPlanCommit')?.click();
-        await new Promise(resolve => setTimeout(resolve, 20));
-      }
-      if (!window.__importReport) throw Error('Statement import did not finish');
-    };
-  });
-  await page.evaluate(() => window.__repeatStatementImport());
-  const original = await page.evaluate(() => ({ id: data.fuelPurchases[0].id, source: data.fuelPurchases[0].sourceTransaction, key: data.fuelPurchases[0].importKeyV2 }));
-  assert.equal(original.source.sum, 3000);
-  await page.evaluate(() => fpEdit(data.fuelPurchases[0].id));
-  await page.locator('#fpe_date').fill('03.09.2026');
-  await page.locator('#fpe_vehicle').selectOption('recipient');
-  await page.locator('#fpe_qty').fill('35');
-  await page.locator('#fpe_sum').fill('0');
-  await page.locator('#genericModal').getByRole('button', { name: 'Сохранить', exact: true }).click();
-  await page.waitForFunction(() => data.fuelPurchases[0].vehicleId === 'recipient');
-  await page.evaluate(() => window.__repeatStatementImport());
-  const result = await page.evaluate(() => ({
-    purchases: data.fuelPurchases.length,
-    purchase: { id: data.fuelPurchases[0].id, vehicleId: data.fuelPurchases[0].vehicleId, date: data.fuelPurchases[0].date, qty: data.fuelPurchases[0].qty, sum: data.fuelPurchases[0].sum, price: data.fuelPurchases[0].price,
-      source: data.fuelPurchases[0].sourceTransaction, key: data.fuelPurchases[0].importKeyV2 },
-    issued: data.records.reduce((sum, record) => sum + (+record.fuelIssued || 0), 0),
-    journalMoney: data.records.reduce((sum, record) => sum + (+record.fuelSum || 0), 0)
-  }));
-  assert.equal(result.purchases, 1);
-  assert.deepEqual(result.purchase, { id: original.id, vehicleId: 'recipient', date: '2026-09-03', qty: 35, sum: 0, price: 100, source: original.source, key: original.key });
-  assert.equal(result.issued, 35);
-  assert.equal(result.journalMoney, 0);
+test('reimport keeps an explicitly reviewed recipient and exact source values without replaying journal litres', async () => {
+  await page.evaluate(()=>{data.records=[];data.fuelPurchases=[];data.fuelImports=[];data.vehicles.push({id:'recipient',plate:'REVIEWED RECIPIENT',fuel:'gasoline',fuelGrade:'АИ-95'});});
+  await require('./helpers/reviewed-import-harness.cjs').install(page);
+  await importSyntheticStatement([{id:'REVIEWED',qty:30,sum:0}],{recipient:'recipient'});
+  const original=await page.evaluate(()=>structuredClone({p:data.fuelPurchases[0],records:data.records}));
+  assert.equal(original.p.vehicleId,'recipient');assert.equal(original.p.sum,0);assert.equal(original.p.date,'2026-09-01');
+  const repeated=await importSyntheticStatement([{id:'REVIEWED',qty:30,sum:0}],{recipient:'recipient'});
+  assert.equal(repeated.purchases.length,1);assert.deepEqual(repeated.purchases[0],original.p);assert.deepEqual(repeated.journals,original.records);
 });
 
 test('manual statement links existing issued litres without changing mileage or odometers', async () => {
@@ -284,55 +212,43 @@ test('manual statement links existing issued litres without changing mileage or 
   assert.equal(await page.evaluate(() => data.fuelPurchases[0].recordId), 'r1');
 });
 
-async function importSyntheticStatement(quantities){
-  return page.evaluate(async quantities=>{
-    window.__importReport=null;window.__precisionImportAlerts=[];window.alert=message=>window.__precisionImportAlerts.push(String(message));showFuelImportReport=report=>{window.__importReport=report;};
-    const workbook=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([
+async function importSyntheticStatement(quantities,{recipient='v',apply=true,date='01.09.2026',card='111111',name='synthetic-precision.xlsx',fuel='АИ-95',keepRows=[]}={}){
+  await page.evaluate(async({quantities,date,card,name,fuel})=>{
+    const workbook=XLSX.utils.book_new();XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([
       ['Дата транзакции','Тип транзакции','Количество','Товар','Комментарий','Номер карты','Сумма к оплате','Цена клиента','ID транзакции'],
-      ...quantities.map(value=>{const item=typeof value==='object'?value:{qty:value};return ['01.09.2026 14:00','Покупка',item.qty,'АИ-95','Х123АА716','111111',10,100,item.id||''];})
-    ]),'Sheet1');
-    importFuelFromXls({files:[new File([XLSX.write(workbook,{type:'array',bookType:'xlsx'})],'synthetic-precision.xlsx')],value:''});
-    for(let i=0;i<150&&!window.__importReport;i++){
-      document.getElementById('importPlanCommit')?.click();await new Promise(resolve=>setTimeout(resolve,20));
-    }
-    if(!window.__importReport)throw Error('Synthetic precision import did not finish: '+JSON.stringify({alerts:window.__precisionImportAlerts,platform:platformRuntimeStatus()}));
-    return {purchases:data.fuelPurchases,journals:data.records,batch:data.fuelImports.at(-1)};
-  },quantities);
+      ...quantities.map(value=>{const item=typeof value==='object'?value:{qty:value};return[date+' 14:00','Покупка',item.qty,fuel,'Х123АА716',card,Object.hasOwn(item,'sum')?item.sum:10,100,item.id||''];})
+    ]),'Sheet1');await importFuelFromXls({files:[new File([XLSX.write(workbook,{type:'array',bookType:'xlsx'})],name)],value:''});
+  },{quantities,date,card,name,fuel});
+  const form=page.locator('#reviewedImportForm');await form.locator('[name=reason]').fill('Compared exact original XLSX source');
+  const check=async()=>{await form.locator('[data-import-preview]').click();await page.waitForFunction(()=>!reviewedImportSession.pending);assert.equal(await form.locator('[data-import-error]').innerText(),'',await page.evaluate(()=>JSON.stringify(__controlledLast)));};await check();
+  for(const select of await form.locator('[data-import-target]').all()){
+    const token=await select.evaluate((el,id)=>{const row=reviewedImportSession.source.rows.find(row=>row.rowId===el.dataset.importTarget),vehicles=data.vehicles.filter(row=>!row.archived&&!row.mergedInto&&!row.deleted&&EntityIdentity.identifier(row.id));return'r'+vehicles.findIndex(row=>row.id===id);},recipient);await select.selectOption(token);
+    const rowId=await select.getAttribute('data-import-target');await form.locator('[data-import-basis]').evaluateAll((elements,{rowId})=>{const input=elements.find(el=>el.dataset.importBasis===rowId);input.value='Recipient and independent source checked';input.dispatchEvent(new Event('input',{bubbles:true}));},{rowId});
+  }
+  await check();for(const index of keepRows)await form.locator('[data-import-action]').nth(index).selectOption('keep');if(keepRows.length)await check();if(apply){const choices=await form.locator('[data-import-existing]').all();for(const select of choices){const skipped=await select.evaluate(input=>['keep','skip'].includes(input.closest('tr').querySelector('[data-import-action]').value));if(!skipped&&await select.locator('option').count()>1)await select.selectOption({index:1});}if(choices.length)await check();}const plan=await page.evaluate(()=>structuredClone(reviewedImportSession.review.preview));
+  if(apply){assert.equal(plan.canApply,true,JSON.stringify(plan.blockers));await form.locator('[name=confirm]').check();await form.locator('[data-import-apply]').click();await page.waitForFunction(()=>!reviewedImportSession.pending);assert.equal(await form.locator('[data-import-error]').innerText(),'');}
+  return page.evaluate(plan=>({plan,purchases:data.fuelPurchases,journals:data.records,batch:data.fuelImports.at(-1)}),plan);
 }
+
 test('actual XLSX import and reimport preserve distinct source millilitres and exact journal totals',async()=>{
-  await page.evaluate(()=>{data.records=[];data.fuelPurchases=[];data.fuelImports=[];data.fuelCards=[{number:'111111',org:'A'}];rebuildIndex();});
-  const first=await importSyntheticStatement([2.001,2.004]);
-  assert.equal(first.purchases.length,2);assert.equal(first.journals[0].fuelIssued,4.005);
-  assert.equal(first.purchases[0].importKeyV2,first.purchases[1].importKeyV2);
-  assert.notEqual(first.purchases[0].importKeyV3,first.purchases[1].importKeyV3);
-  const repeat=await importSyntheticStatement([2.001,2.004]);
-  assert.equal(repeat.purchases.length,2);assert.equal(repeat.journals[0].fuelIssued,4.005);
-  const extra=await importSyntheticStatement([2.001,2.004,2.002]);
-  assert.equal(extra.purchases.length,3);assert.equal(extra.journals[0].fuelIssued,6.007);
-  assert.equal(extra.batch.keyVersion,3);
+  await page.evaluate(()=>{data.records=[];data.fuelPurchases=[];data.fuelImports=[];data.fuelCards=[{number:'111111',org:'A'}];rebuildIndex();});await require('./helpers/reviewed-import-harness.cjs').install(page);
+  const first=await importSyntheticStatement([2.001,2.004]);assert.equal(first.plan.aggregates.purchaseQty,4.005);assert.equal(first.purchases.length,2);assert.equal(first.journals[0].fuelIssued,4.005);assert.notDeepEqual(first.purchases[0].importProvenance.normalizedHashes,first.purchases[1].importProvenance.normalizedHashes);
+  const repeat=await importSyntheticStatement([2.001,2.004]);assert.equal(repeat.purchases.length,2);assert.equal(repeat.journals[0].fuelIssued,4.005);
+  const extra=await importSyntheticStatement([2.001,2.004,2.002],{keepRows:[0,1]});assert.equal(extra.plan.aggregates.kept,2);assert.equal(extra.purchases.length,3);assert.equal(extra.journals[0].fuelIssued,6.007);assert.equal(extra.batch.keyVersion,4);
 });
-test('actual XLSX legacy rounded-key ambiguity is previewed for reconciliation without modifying journal litres',async()=>{
-  const before=await page.evaluate(()=>{
-    data.records=[{id:'legacy',vehicleId:'v',date:'2026-09-01',fuelIssued:2,km:100}];
-    const tx={date:'2026-09-01',time:'14:00',qty:2.001,fuel:'АИ-95',comment:'Х123АА716',cardNo:'111111',plate:'Х123АА716'};
-    data.fuelPurchases=[{id:'old',vehicleId:'v',recordId:'legacy',date:tx.date,qty:2,grade:'АИ-95',sum:10,importKeyV2:fuelImportKeyV2(tx)}];
-    data.fuelImports=[];rebuildIndex();return JSON.stringify(data.records);
-  });
-  const result=await importSyntheticStatement([2.001]);
-  assert.equal(JSON.stringify(result.journals),before);assert.equal(result.purchases.length,1);
-  assert.equal(result.batch.quarantined[0].status,'legacy-key-ambiguous');
-  assert.match(result.batch.decisions[0].decision,/точное количество источника не подтверждено/);
+
+test('actual XLSX legacy rounded-key purchase remains unchanged until an explicit separate-source decision',async()=>{
+  const before=await page.evaluate(()=>{data.records=[{id:'legacy',vehicleId:'v',date:'2026-09-01',fuelIssued:2,km:100}];const tx={date:'2026-09-01',time:'14:00',qty:2.001,fuel:'АИ-95',comment:'Х123АА716',cardNo:'111111',plate:'Х123АА716'};data.fuelPurchases=[{id:'old',vehicleId:'v',recordId:'legacy',date:tx.date,qty:2,grade:'АИ-95',sum:10,importKeyV2:fuelImportKeyV2(tx)}];data.fuelImports=[];return JSON.stringify({records:data.records,purchases:data.fuelPurchases});});await require('./helpers/reviewed-import-harness.cjs').install(page);
+  const result=await importSyntheticStatement([2.001],{apply:false});assert.equal(JSON.stringify({records:result.journals,purchases:result.purchases}),before);assert.equal(result.plan.rows[0].before,null);assert.equal(result.purchases[0].qty,2);assert.ok(result.purchases[0].importKeyV2);assert.equal(await page.evaluate(()=>__controlledRequests.length),0);
 });
+
 test('actual XLSX repeated supplier ID cannot add another receipt or silently choose conflicting litres',async()=>{
-  await page.evaluate(()=>{data.records=[];data.fuelPurchases=[];data.fuelImports=[];rebuildIndex();});
+  await page.evaluate(()=>{data.records=[];data.fuelPurchases=[];data.fuelImports=[];rebuildIndex();});await require('./helpers/reviewed-import-harness.cjs').install(page);
   const first=await importSyntheticStatement([{id:'TX-1',qty:2.001}]);assert.equal(first.purchases.length,1);assert.equal(first.journals[0].fuelIssued,2.001);
-  const repeated=await importSyntheticStatement([{id:'TX-1',qty:2.001},{id:'TX-1',qty:2.001}]);
-  assert.equal(repeated.purchases.length,1);assert.equal(repeated.journals[0].fuelIssued,2.001);assert.equal(repeated.batch.quarantined.length,1);
-  const conflict=await importSyntheticStatement([{id:'TX-2',qty:2.001},{id:'TX-2',qty:2.004}]);
-  assert.equal(conflict.purchases.length,1);assert.equal(conflict.journals[0].fuelIssued,2.001);assert.equal(conflict.batch.quarantined.length,2);
-  assert.ok(conflict.batch.decisions.every(row=>/разные исходные данные/.test(row.decision)));
+  const repeated=await importSyntheticStatement([{id:'TX-1',qty:2.001},{id:'TX-1',qty:2.001}]);assert.equal(repeated.purchases.length,1);assert.equal(repeated.journals[0].fuelIssued,2.001);
+  const conflict=await importSyntheticStatement([{id:'TX-2',qty:2.001},{id:'TX-2',qty:2.004}],{apply:false});assert.equal(conflict.plan.canApply,false);assert.equal(conflict.purchases.length,1);assert.equal(conflict.journals[0].fuelIssued,2.001);assert.ok(conflict.plan.blockers.some(issue=>issue.code==='IMPORT_EXTERNAL_GROUP_CONFLICT'));
 });
+
 test('actual vehicle norm autofill shares core millilitre precision and preserves an explicit zero norm',async()=>{
   const result=await page.evaluate(()=>{
     openEditRecord('r1');document.getElementById('rec_km').value='1.234';calcFuelAuto(true);const precise=document.getElementById('rec_fuel_used').value;
@@ -615,18 +531,11 @@ test('a note on a minimal legacy DES record preserves issued litres, actual zero
  assert.deepEqual(await page.evaluate(()=>{const row=data.genRecords[0];return{id:row.id,generatorId:row.generatorId,tankId:row.tankId,issued:row.fuelIssued,actual:row.fuelActual,hours:row.hours,absent:['meterStart','meterEnd','fuelUsed','load','fuelActualSource','modelVersion'].filter(key=>!Object.hasOwn(row,key)),undefinedFields:Object.keys(row).filter(key=>row[key]===undefined),balance:computeTankBalance(0).balance,note:row.note};}),{id:0,generatorId:0,tankId:0,issued:100,actual:0,hours:1,absent:['meterStart','meterEnd','fuelUsed','load','fuelActualSource','modelVersion'],undefinedFields:[],balance:900,note:'Synthetic note without inventing record facts'});
  assert.match(await page.locator('#mainContent').innerText(),/MINIMAL RECORD SOURCE/);
 });
-test('ambiguous manual fuel is reported for review, not mislabeled duplicate or silently changed', async () => {
-  const out = await page.evaluate(async () => {
-    data.records = [{ id: 'r', vehicleId: 'v', date: '2026-10-01', km: 0, fuelIssued: 40, fuelGrade: 'АИ-95', note: 'заправка: 40л' }];
-    data.fuelCards = [{ id: 'fc', number: '123456', org: 'A', status: 'active', assignments: [{ vehicleId: 'v' }] }]; rebuildIndex();
-    window.__report = null; showFuelImportReport = r => { window.__report = r; };
-    const rows = [['Дата транзакции','Тип транзакции','Количество','Товар','Комментарий','Номер карты'], ['01.10.2026 14:00','Покупка',30,'АИ-95','Х123АА716','123456']];
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Sheet1');
-    importFuelFromXls({ files: [new File([XLSX.write(wb, { type: 'array', bookType: 'xlsx' })], 'test.xlsx')], value: '' });
-    for (let i = 0; i < 100 && !window.__report; i++) { document.getElementById('importPlanCommit')?.click(); await new Promise(r => setTimeout(r, 20)); }
-    return { issued: data.records[0].fuelIssued, purchase: data.fuelPurchases[0].qty, action: window.__report.reportRows[0].action, duplicates: window.__report.duplicates };
-  }); assert.deepEqual(out, { issued: 40, purchase: 30, action: 'review', duplicates: 0 });
+test('ambiguous manual fuel remains unchanged while the original source is reviewed without an inferred link', async () => {
+  const before=await page.evaluate(()=>{data.records=[{id:'r',vehicleId:'v',date:'2026-10-01',km:0,fuelIssued:40,fuelGrade:'АИ-95',note:'заправка: 40л'}];data.fuelCards=[{id:'fc',number:'123456',org:'A',status:'active',assignments:[{vehicleId:'v'}]}];return JSON.stringify(data.records);});await require('./helpers/reviewed-import-harness.cjs').install(page);
+  const result=await importSyntheticStatement([30],{date:'01.10.2026',card:'123456',apply:false});assert.equal(JSON.stringify(result.journals),before);assert.equal(result.purchases.length,0);assert.equal(await page.evaluate(()=>__controlledRequests.length),0);assert.equal(result.plan.rows[0].target.id,'v');
 });
+
 test('counterparty table shows actual document count and amount', async () => {
   const out = await page.evaluate(() => {
     data.contragents = [{ id: 'c', name: 'Company' }]; data.payments = [{ id: 'p', sum: 1234, contragent: 'Company' }]; renderContragentsSection();
@@ -634,19 +543,11 @@ test('counterparty table shows actual document count and amount', async () => {
     return [cells[5].textContent,cells[6].textContent].map(value=>value.replace(/\D/g,''));
   }); assert.deepEqual(out, ['1', '1234']);
 });
-test('a distinct equal-volume purchase is added when previous journal litres are already accounted for', async () => {
-  const out = await page.evaluate(async () => {
-    data.records = [{ id: 'r', vehicleId: 'v', date: '2026-10-01', km: 0, fuelIssued: 40, fuelGrade: 'АИ-95', note: 'заправка: 40л' }];
-    data.fuelPurchases = [{ id: 'old', vehicleId: 'v', recordId: 'r', date: '2026-10-01', qty: 40, cardNo: '111111', grade: 'АИ-95', sourceOrg: 'A', importKey: 'old-operation' }];
-    data.fuelCards = [{ id: 'fc', number: '222222', org: 'A', status: 'active', assignments: [{ vehicleId: 'v' }] }]; rebuildIndex();
-    window.__report = null; showFuelImportReport = r => { window.__report = r; };
-    const rows = [['Дата транзакции','Тип транзакции','Количество','Товар','Комментарий','Номер карты'], ['01.10.2026 15:00','Покупка',40,'АИ-95','Х123АА716','222222']];
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Sheet1');
-    importFuelFromXls({ files: [new File([XLSX.write(wb, { type: 'array', bookType: 'xlsx' })], 'new.xlsx')], value: '' });
-    for (let i = 0; i < 100 && !window.__report; i++) { document.getElementById('importPlanCommit')?.click(); await new Promise(r => setTimeout(r, 20)); }
-    return { issued: data.records[0].fuelIssued, purchases: data.fuelPurchases.length, action: window.__report.reportRows[0].action };
-  }); assert.deepEqual(out, { issued: 80, purchases: 2, action: 'updated' });
+test('a distinct equal-volume purchase adds only its explicitly reviewed contribution to the existing journal', async () => {
+  await page.evaluate(()=>{data.records=[{id:'r',vehicleId:'v',date:'2026-10-01',km:0,fuelIssued:40,fuelGrade:'АИ-95',note:'заправка: 40л'}];data.fuelPurchases=[{id:'old',vehicleId:'v',recordId:'r',date:'2026-10-01',qty:40,cardNo:'111111',grade:'АИ-95',sourceOrg:'A',importKey:'old-operation'}];data.fuelCards=[{id:'fc',number:'222222',org:'A',status:'active',assignments:[{vehicleId:'v'}]}];});await require('./helpers/reviewed-import-harness.cjs').install(page);
+  const out=await importSyntheticStatement([40],{date:'01.10.2026',card:'222222'});assert.equal(out.plan.aggregates.purchaseQty,40);assert.equal(out.journals[0].fuelIssued,80);assert.equal(out.purchases.length,2);assert.equal(out.journals[0].km,0);assert.equal(out.purchases[0].importKey,'old-operation');
 });
+
 test('untrusted counterparties and vehicle text stay literal and cannot execute handlers', async () => {
   const out = await page.evaluate(async () => {
     window.__bad = 0; const attack = '<img src="bad" onerror="window.__bad=1">';

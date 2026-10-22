@@ -184,4 +184,4 @@ function publicUser(user) {
 }
 function printActions(principal){const narrowed=principal?.readable,can=name=>authorize(principal,'read',name)&&(!narrowed||narrowed.includes('*')||narrowed.includes(name));return can('appMeta')&&['vehicles','shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords','tankIncomes'].some(can)?['capture']:[];}
 
-module.exports = { ROLES, FINANCIAL_SECTIONS, hashToken, issueToken, normalizeServerUsers, authenticate, authorize, publicUser, validateAssetChanges, fieldPermissions,fuelActions,procurementActions,costActions,repairActions,calendarActions,canCalendarAction,printActions };
+module.exports = { ROLES, FINANCIAL_SECTIONS, hashToken, issueToken, normalizeServerUsers, authenticate, authorize, publicUser, validateAssetChanges, fieldPermissions,fuelActions,procurementActions,costActions,repairActions,calendarActions,canCalendarAction,printActions,importActions:principal=>require('./import-source.cjs').actions(principal) };

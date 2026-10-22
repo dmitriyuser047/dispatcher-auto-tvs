@@ -34,6 +34,7 @@ function execute(dataDir,input,options={}){
   const commands=require('../assets/core/platform-commands.js');
   const envelope=contracts.parseCommandEnvelope(input,schema.sections),command=commands.parseCommand(envelope.command),principal=checkedPrincipal(options.principal);
   const catalogMerge=command.type==='MergeCatalog';
+  if(command.type==='ImportAction'&&!require('./import-source.cjs').actions(principal).includes(command.input.profile))fail('ACCESS_DENIED','Недостаточно прав для выбранного профиля импорта.',403);
   if(catalogMerge&&principal.role!=='admin')fail('ACCESS_DENIED','Объединение справочников доступно администратору.',403);
   const periodAction=command.type==='PeriodAction';
   if(periodAction&&!require('./period-access.cjs').canManage(principal,command.input.scope))fail('ACCESS_DENIED','Недостаточно прав для управления выбранной областью периода.',403);
@@ -54,6 +55,7 @@ function execute(dataDir,input,options={}){
       // changing source objects and newly generated timestamps are consulted.
       const info=platform.operationInfo(snapshot.data,{}, {operation:envelope.operation,principal,databaseToken:token,commandIntent:envelope});
       if(info?.receipt){
+        if(info.receipt.importReadSections)requireAccess(principal,'read',info.receipt.importReadSections);
         const changed=info.receipt.changedSections;
         if(!Array.isArray(changed)||changed.some(name=>!schema.sections.includes(name)))fail('COMMAND_RECEIPT','Повреждена квитанция команды',500);
         requireAccess(principal,'read',changed);
@@ -61,6 +63,7 @@ function execute(dataDir,input,options={}){
       }
       storage.assertWritable(dataDir);
       requireAccess(principal,'write',periodAction?footprint.filter(name=>name!=='fuelPeriods'):costPolicy?footprint.filter(name=>name!==command.input.target.section):command.type==='PrintAction'?[]:footprint);
+      const importSource=command.type==='ImportAction'?require('./import-source.cjs').load(dataDir,command.input.sourceId,principal):null;
       const missing=dependencies.filter(name=>!own(envelope.base,name));
       if(missing.length)fail('COMMAND_BASE_REQUIRED','Для команды нужны версии всех её зависимостей: '+missing.join(', '),428);
       const conflicts=dependencies.filter(name=>envelope.base[name]!==snapshot.revisions[name]);
@@ -70,14 +73,14 @@ function execute(dataDir,input,options={}){
       const actor={id:principal.id,name:principal.name,role:principal.role};
       const clock=require('../assets/core/business-calendar.js').resolve(snapshot.data,now);
       const planned=commands.plan(snapshot.data,command,{id:envelope.operation.id,now,today:clock.today,calendar:clock,actor,
-        readable:schema.sections.filter(name=>permitted(principal,'read',name)),writable:schema.sections.filter(name=>permitted(principal,'write',name))});
+        ...(importSource?{importSource}:{}),readable:schema.sections.filter(name=>permitted(principal,'read',name)),writable:schema.sections.filter(name=>permitted(principal,'write',name))});
       if(!planned||!planned.sections||Object.keys(planned.sections).some(name=>!footprint.includes(name)))fail('COMMAND_DEFINITION','Команда попыталась изменить посторонний раздел',500);
       contracts.validateSections(planned.sections,schema.sections);
       // The shared kernel validates precision with the same trusted intent,
       // after receipt lookup and before backup/commit. Do not prevalidate a
       // correction without its independently reproducible document proof.
       const result=storage.writeSections(dataDir,{databaseToken:token,base:envelope.base,sections:planned.sections,operation:envelope.operation},
-        {principal,now,commandIntent:envelope,beforeCommit:options.beforeCommit});
+        {principal,now,commandIntent:envelope,...(importSource?{importSource}:{}),beforeCommit:options.beforeCommit});
       return filteredResult({...result,command:true},principal);
     };
     // Do not split snapshot, dependency checks and business/audit writes across

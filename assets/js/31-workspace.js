@@ -127,40 +127,16 @@ function wfInventory(){return tankFuelActionOpen('measure');}
 async function wfExport(){const payload={format:'tvs-exchange',version:1,section:wfTab,exportedAt:new Date().toISOString(),rows:(data[wfTab]||[]).filter(wfMatches)};if(window.electronAPI?.exportJson)await window.electronAPI.exportJson(JSON.stringify(payload,null,2),'ТВС-'+wfTab+'-'+wfToday()+'.json');}
 async function wfImportExchange(){
  try{
-  const raw=await window.electronAPI?.importJsonFile?.();
+  if(typeof reviewedImportOpen!=='function')throw Error('Не загружен проверяемый импорт');
+  const database=data,stamp=syncSessionStamp(),raw=await window.electronAPI?.importJsonFile?.();
   if(!raw||raw.canceled||raw.cancelled)return;
-  if(typeof raw==='object'&&raw.ok===false)throw Error(raw.error||'Файл не прочитан');
-  const text=typeof raw==='string'?raw:raw.content||raw.json||raw.data||'';
-  if(typeof text!=='string'||text.length>32*1024*1024)throw Error('Недопустимый размер файла обмена');
-  const p=JSON.parse(text);
-  if(p.format!=='tvs-exchange'||p.version!==1||!['shiftReports','dispatchJobs','assetDocuments','drivers'].includes(p.section)||!Array.isArray(p.rows))throw Error('Неверный формат обмена');
-  if(p.rows.length>10000)throw Error('Пакет больше 10000 строк');
-  wfInitData(data);
-  const ids=new Set(),added=[],same=[],conflicts=[];
-  const validateAdded=()=>{
-   const original=data[p.section];data[p.section]=original.slice();
-   try{for(const r of added){if(data[p.section].some(x=>x.id===r.id))throw Error('ID уже появился в базе: '+r.id);wfValidate(p.section,r,null);data[p.section].push(r);}}
-   finally{data[p.section]=original;}
-  };
-  for(const r of p.rows){
-   if(!r||typeof r.id!=='string'||!r.id)throw Error('У строки отсутствует ID');
-   if(ids.has(r.id))throw Error('В пакете повторяется ID: '+r.id);ids.add(r.id);
-   const old=data[p.section].find(x=>x.id===r.id);
-   if(old)(JSON.stringify(old)===JSON.stringify(r)?same:conflicts).push(r);else added.push(r);
-  }
-  validateAdded();
-  const previewPersisted=_lastPersisted,previewSection=JSON.stringify(data[p.section]);
-  wfShowDialog('Проверка пакета',`<p>Раздел: ${htmlEsc(WF_TABS[p.section])}. Новых: ${added.length}; совпадений: ${same.length}; конфликтов: ${conflicts.length}.</p><p>Совпадающие и конфликтующие ID будут пропущены. Конфликт требует сверки с исходным устройством.</p><div class="wf-timeline">${added.slice(0,100).map(r=>`<p>${htmlEsc(wfLabel(p.section,r))}</p>`).join('')}</div><div id="wfPackageError" role="alert" class="wf-error"></div>`,`<button class="btn btn-primary" id="wfApplyPackage" ${added.length?'':'disabled'}>Записать ${added.length} новых</button>`);
-  document.getElementById('wfApplyPackage').onclick=async event=>{
-   const button=event.currentTarget;button.disabled=true;
-   try{
-    if(_lastPersisted!==previewPersisted||JSON.stringify(data[p.section])!==previewSection)throw Error('База изменилась после просмотра. Загрузите пакет повторно для новой проверки.');
-    validateAdded();data[p.section].push(...added);
-    if(await saveData(data,{noMerge:true})){closeModal('wfModal');wfOpenTab(p.section,{query:'',site:'',org:'',archive:false});}
-    else throw Error('Пакет не записан. Повторите загрузку для новой проверки состояния базы.');
-   }catch(error){const host=document.getElementById('wfPackageError');if(host)host.textContent=error.message;}
-   finally{button.disabled=false;}
-  };
+  if(raw.ok===false)throw Error(raw.error||'Файл не прочитан');
+  if(database!==data||stamp!==syncSessionStamp())throw Error('База или права изменились после выбора файла');
+  const text=raw.content;
+  if(typeof text!=='string'||text.length>25*1024*1024||!raw.source)throw Error('Нужен исходный JSON-файл из совместимой версии программы');
+  const packet=JSON.parse(text);
+  if(packet.format!=='tvs-exchange'||packet.version!==1||!['shiftReports','dispatchJobs','assetDocuments','drivers'].includes(packet.section)||!Array.isArray(packet.rows)||packet.rows.length>10000)throw Error('Неверный формат обмена');
+  return await reviewedImportOpen({profile:'personnel',source:raw.source,sections:[packet.section],parser:{id:'personnel',version:1},onApplied:()=>wfOpenTab(packet.section,{query:'',site:'',org:'',archive:false})});
  }catch(error){showToast('Обмен: '+error.message);}
 }
 async function wfAttachments(section,id){const row=data[section].find(r=>r.id===id);if(!row)return;wfShowDialog('Файлы · '+wfLabel(section,row),`<p class="wf-note">Документы открываются и добавляются на компьютере с основной базой. Между компьютерами передаются сведения о файле; для переноса содержимого используйте резервный пакет.</p><div>${(row.attachments||[]).map((a,i)=>`<p><button class="btn btn-ghost" data-file="${i}">${htmlEsc(a.name)} · ${Math.ceil(a.size/1024)} КБ</button><small> SHA256 ${htmlEsc(a.sha256)}</small></p>`).join('')||'<p>Нет файлов</p>'}</div>`,`<button class="btn btn-primary" id="wfAddFile">Добавить файл</button>`);document.querySelectorAll('#wfModal [data-file]').forEach(b=>b.onclick=async()=>{try{const result=await window.electronAPI?.openAttachment?.(row.attachments[+b.dataset.file].id);if(result?.error)showToast(result.error);}catch(error){showToast(error.message);}});document.getElementById('wfAddFile').onclick=async event=>{const button=event.currentTarget;button.disabled=true;try{const r=await window.electronAPI?.addAttachment?.();if(r?.ok){const current=data[section].find(x=>x.id===id);if(!current)throw Error('Запись уже удалена');if(!(current.attachments||[]).some(a=>a.id===r.file.id))(current.attachments||(current.attachments=[])).push(r.file);if(await saveData(data))wfAttachments(section,id);}else if(r?.error)showToast(r.error);}catch(error){showToast(error.message);}finally{button.disabled=false;}};}

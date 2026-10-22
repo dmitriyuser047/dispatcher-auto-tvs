@@ -104,6 +104,13 @@ function renderArchivedDocumentPdf(snapshot){
   if(!documentPrintRenderer)documentPrintRenderer=require('./document-print-renderer.cjs').createDocumentPrintRenderer({BrowserWindow,session});
   return documentPrintRenderer(snapshot);
 }
+function readImportOriginal(filename){
+  const before=fs.lstatSync(filename);
+  if(!before.isFile()||before.isSymbolicLink()||before.size>25*1024*1024)throw Object.assign(Error('Нужен обычный исходный файл не больше 25 МБ'),{code:'IMPORT_SOURCE_FILE'});
+  const bytes=fs.readFileSync(filename),after=fs.lstatSync(filename);
+  if(after.ino!==before.ino||after.dev!==before.dev||after.size!==bytes.length||after.mtimeMs!==before.mtimeMs)throw Object.assign(Error('Исходный файл изменился во время чтения'),{code:'IMPORT_SOURCE_CHANGED'});
+  return {name:path.basename(filename),bytes};
+}
 function capturedOperationContext(event,binding=assertDataBinding(event)){
   const client=settings.networkMode==='client',principal=client?binding.notificationAccess?.user:{id:'local-profile',name:getActiveUser().name||'Локальный пользователь',role:'admin'};
   const identity=settingsIdentity(),scope=require('node:crypto').createHash('sha256').update(JSON.stringify([
@@ -314,7 +321,7 @@ app.whenReady().then(() => {
     if(!pending||payload?.nonce!==pending.nonce||typeof payload.ready!=='boolean')return false;
     finishSaveBarrier(event.sender.id,payload.ready);return true;
   });
-  require('./artifacts').register({ipcMain,getDataDir,isClientMode,getSettings:()=>settings,knowledgeDir:()=>path.join(getDataDir(),'reestr-knowledge')});
+  require('./artifacts').register({ipcMain,getDataDir,isClientMode,getSettings:()=>settings,knowledgeDir:()=>path.join(getDataDir(),'reestr-knowledge'),getPrincipal:event=>capturedOperationContext(event).principal});
   if (settings.networkMode !== 'client') ensureDirs();
 
   // Экспорт сводок/актов (XLSX) идёт через обычную загрузку браузера —
@@ -554,6 +561,22 @@ app.whenReady().then(() => {
       return {ok:true,saved:true,archiveId:payload.archiveId,format,size:bytes.length,sha256:result.sha256,path:choice.filePath,...archiveAck};
     }catch(error){return {ok:false,code:error.code||'PRINT_FAILED',error:error.message,...archiveAck};}
   });
+  ipcMain.handle('import-source',async(event,payload)=>{
+    try{
+      const context=await verifiedOperationContext(event);
+      if(dataBindings.get(context.senderId)?.platform?.controlledImports!==1)return {ok:false,unsupported:true,code:'UNSUPPORTED_CONTROLLED_IMPORTS',error:'Подключение не поддерживает проверяемый импорт.'};
+      if(!payload||typeof payload!=='object'||Array.isArray(payload)||!['stage','preview','read'].includes(payload.action))throw Object.assign(Error('Неизвестное действие источника импорта'),{code:'IMPORT_SOURCE_ACTION'});
+      const request=structuredClone(payload);
+      if(request.databaseToken!==undefined&&request.databaseToken!==context.databaseToken)throw Object.assign(Error('База изменилась после выбора файла'),{code:'DATABASE_CHANGED'});
+      request.databaseToken=context.databaseToken;
+      const encode=source=>{if(!source||typeof source!=='object')return source;if(source.bytes!==undefined){if(source.base64!==undefined)throw Error('Источник задан дважды');const raw=source.bytes;let bytes;if(raw instanceof ArrayBuffer)bytes=Buffer.from(raw);else if(ArrayBuffer.isView(raw))bytes=Buffer.from(raw.buffer,raw.byteOffset,raw.byteLength);else if(Array.isArray(raw)&&raw.every(value=>Number.isInteger(value)&&value>=0&&value<=255))bytes=Buffer.from(raw);else throw Error('Некорректные байты источника');if(bytes.length>25*1024*1024)throw Error('Исходный файл больше 25 МБ');source.base64=bytes.toString('base64');delete source.bytes;}return source;};
+      if(request.source){if(Array.isArray(request.source.files))request.source.files=request.source.files.map(encode);else request.source=encode(request.source);}
+      const result=context.client?await server.postImportSource(context.host,context.port,JSON.stringify(request)):await require('./import-source.cjs').handle(context.directory,request,{principal:context.principal});
+      assertOperationContext(context);
+      if(result?.ok===true&&result.databaseToken!==context.databaseToken)throw Object.assign(Error('Ответ импорта относится к другой базе'),{code:'DATABASE_CHANGED'});
+      return result;
+    }catch(error){return {ok:false,code:error.code||'IMPORT_SOURCE_FAILED',error:error.message,...(Array.isArray(error.issues)?{issues:error.issues}:{})};}
+  });
   ipcMain.handle('execute-command',async(event,json)=>{
     try{
       const contracts=require('../assets/core/platform-contracts.js');
@@ -726,7 +749,7 @@ app.whenReady().then(() => {
     };
 
     try {
-      const buf = fs.readFileSync(filePaths[0]);
+      const source=readImportOriginal(filePaths[0]),buf=source.bytes;
       const ab  = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
       const extractor = await createExtractorFromData({ data: ab });
       const headers = [...extractor.getFileList().fileHeaders];
@@ -768,7 +791,7 @@ app.whenReady().then(() => {
         backupExtra[k] = extra;
       });
 
-      return { ok: true, fileName: path.basename(filePaths[0]), backupCount: backupObjs.length, main, backupExtra };
+      return { ok: true, fileName: path.basename(filePaths[0]), source, backupCount: backupObjs.length, main, backupExtra };
     } catch (e) {
       return { ok: false, error: e.message };
     }
@@ -798,7 +821,8 @@ app.whenReady().then(() => {
     });
     if (canceled || !filePaths || !filePaths[0]) return { ok: false, canceled: true };
     try {
-      return { ok: true, fileName: path.basename(filePaths[0]), content: fs.readFileSync(filePaths[0], 'utf8') };
+      const source=readImportOriginal(filePaths[0]);
+      return { ok: true, fileName: source.name, source, content:source.bytes.toString('utf8') };
     } catch (e) {
       return { ok: false, error: e.message };
     }
@@ -1031,7 +1055,7 @@ app.whenReady().then(() => {
     if (canceled || !filePaths || !filePaths[0]) return { ok: false };
     let loadingTask;
     try {
-      const pdfData = new Uint8Array(fs.readFileSync(filePaths[0]));
+      const source=readImportOriginal(filePaths[0]),pdfData=new Uint8Array(source.bytes);
       const pdfjsPkg = await require('./pdfjs-runtime.cjs').loadPdfJs();
       const { getDocument } = pdfjsPkg;
       loadingTask = getDocument({ ...require('./pdfjs-runtime.cjs').pdfDocumentOptions(), data:pdfData });
@@ -1052,7 +1076,7 @@ app.whenReady().then(() => {
           });
         }
       }
-      return { ok: true, items: allItems, fileName: path.basename(filePaths[0]) };
+      return { ok: true, items: allItems, source, fileName: path.basename(filePaths[0]) };
     } catch (e) {
       return { ok: false, error: e.message };
     } finally { if (loadingTask) await loadingTask.destroy().catch(() => {}); }
@@ -1070,11 +1094,12 @@ app.whenReady().then(() => {
     const file = filePaths[0];
     let loadingTask;
     try {
+      const source=readImportOriginal(file);
       if (!/\.pdf$/i.test(file)) {
-        return { ok: true, kind: 'xlsx', base64: fs.readFileSync(file).toString('base64'), fileName: path.basename(file) };
+        return { ok: true, kind: 'xlsx', base64:source.bytes.toString('base64'), source, fileName:path.basename(file) };
       }
       const { getDocument } = await require('./pdfjs-runtime.cjs').loadPdfJs();
-      loadingTask = getDocument({ ...require('./pdfjs-runtime.cjs').pdfDocumentOptions(), data:new Uint8Array(fs.readFileSync(file)) });
+      loadingTask = getDocument({ ...require('./pdfjs-runtime.cjs').pdfDocumentOptions(), data:new Uint8Array(source.bytes) });
       const doc = await loadingTask.promise;
       const items = [];
       for (let i = 1; i <= doc.numPages; i++) {
@@ -1085,7 +1110,7 @@ app.whenReady().then(() => {
           items.push({ str: it.str, x: Math.round(it.transform[4] * 10) / 10, y: Math.round(it.transform[5] * 10) / 10, page: i });
         }
       }
-      return { ok: true, kind: 'pdf', items, fileName: path.basename(file) };
+      return { ok: true, kind: 'pdf', items, source, fileName: path.basename(file) };
     } catch (e) {
       return { ok: false, error: e.message };
     } finally { if (loadingTask) await loadingTask.destroy().catch(() => {}); }

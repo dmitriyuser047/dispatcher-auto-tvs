@@ -8,7 +8,7 @@ function platformPrepareBackgroundStatus(){return {active:_platformPrepareActive
 function platformPrepareAccessStamp(context){
   const list=value=>value==null?null:[...new Set(value)].sort();
   const procurement=context.procurementActions==null?null:{tank:list(context.procurementActions.tank),part:list(context.procurementActions.part)};
-  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fuelActions:list(context.fuelActions),procurementActions:procurement,costActions:list(context.costActions),repairActions:list(context.repairActions),calendarActions:list(context.calendarActions),printActions:list(context.printActions),calendar:context.calendar||null,fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
+  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fuelActions:list(context.fuelActions),procurementActions:procurement,costActions:list(context.costActions),repairActions:list(context.repairActions),calendarActions:list(context.calendarActions),printActions:list(context.printActions),importActions:list(context.importActions),calendar:context.calendar||null,fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
 }
 function platformPrepareError(code,message){return Object.assign(Error(message),{name:'PlatformKernelError',code});}
 function platformPrepareGuard(job){
@@ -75,6 +75,7 @@ function platformSessionContext() {
     repairActions:access&&Array.isArray(access.repairActions)?access.repairActions.slice():undefined,
     calendarActions:access&&Array.isArray(access.calendarActions)?access.calendarActions.slice():undefined,
     ...(Array.isArray(access?.printActions)?{printActions:access.printActions.slice()}:{}),
+    ...(Array.isArray(access?.importActions)?{importActions:access.importActions.slice()}:{}),
     calendar:calendar?{version:calendar.version,mode:calendar.mode,timeZone:calendar.timeZone,stamp:calendar.stamp}:undefined,
     fieldPermissions:access?.fieldPermissions || null,
     actor:user ? { id:user.id, name:user.name || user.id, role:user.role } : { id:'local', name:'Локальный пользователь', role:'admin' },
@@ -263,6 +264,8 @@ function platformExecuteCommand(value,options={}){
           throw platformPrepareError('UNSUPPORTED_CALENDAR','Подключение не поддерживает учётный календарь. Загрузите данные из совместимой версии программы.');
         if(command.type==='PrintAction'&&_sync.platform?.documentPrint!==1)
           throw platformPrepareError('UNSUPPORTED_DOCUMENT_PRINT','Подключение не поддерживает сохранённые печатные редакции. Загрузите данные из совместимой версии программы.');
+        if(command.type==='ImportAction'&&_sync.platform?.controlledImports!==1)
+          throw platformPrepareError('UNSUPPORTED_CONTROLLED_IMPORTS','Подключение не поддерживает проверяемый импорт. Загрузите данные из совместимой версии программы.');
         if(platformCommandNeedsPersonnelPlanning(command,source)&&_sync.platform?.personnelPlanning!==1)
           throw platformPrepareError('UNSUPPORTED_PERSONNEL_PLANNING','Подключение не поддерживает планирование сотрудников. Загрузите данные из совместимой версии программы.');
         if(names.some(name=>captured[name]!==(_sync.synced[name]||'[]')))
@@ -319,6 +322,8 @@ async function platformFlushForClose(){
   let ready=typeof frcFlush==='function'?await frcFlush():true;
   if(typeof personnelPlanningFlush==='function'&&!await personnelPlanningFlush())ready=false;
   if(typeof documentPrintFlush==='function'&&!await documentPrintFlush())ready=false;
+  if(typeof reviewedImportFlush==='function'&&!await reviewedImportFlush())ready=false;
+  if(typeof reestrImportFlush==='function'&&!await reestrImportFlush())ready=false;
   if(ready)document.activeElement?.blur();
   while(typeof _pendingSaveOperations!=='undefined'&&_pendingSaveOperations.size){
     const results=await Promise.allSettled([..._pendingSaveOperations]);
@@ -327,6 +332,8 @@ async function platformFlushForClose(){
   if(typeof frcHasPendingEdits==='function'&&frcHasPendingEdits())ready=false;
   if(typeof personnelPlanningHasPendingEdits==='function'&&personnelPlanningHasPendingEdits())ready=false;
   if(typeof documentPrintHasPendingEdits==='function'&&documentPrintHasPendingEdits())ready=false;
+  if(typeof reviewedImportHasPendingEdits==='function'&&reviewedImportHasPendingEdits())ready=false;
+  if(typeof reestrImportHasPendingEdits==='function'&&reestrImportHasPendingEdits())ready=false;
   return ready;
 }
 if(window.electronAPI?.onPrepareClose)window.electronAPI.onPrepareClose(async nonce=>{

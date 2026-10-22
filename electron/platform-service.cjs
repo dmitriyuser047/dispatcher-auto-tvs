@@ -19,6 +19,7 @@ function principalOf(principal) {
 function visibleAudit(rows, principal) {
   return (rows || []).filter(row => row && typeof row.section === 'string' && require('./document-access.cjs').permitted(principal, 'read', row.section) &&
     (!(row.printCapture||row.printArtifact)||Array.isArray(row.archiveReadSections)&&row.archiveReadSections.every(name=>require('./document-access.cjs').permitted(principal,'read',name)))&&
+    (!row.importReadSections||row.importReadSections.every(name=>require('./document-access.cjs').permitted(principal,'read',name)))&&
     (row.type !== 'transaction' || Array.isArray(row.changedSections) && row.changedSections.every(name => require('./document-access.cjs').permitted(principal, 'read', name)))&&require('./document-access.cjs').auditAccess(principal,row)&&require('./period-access.cjs').auditAccess(principal,row)).map(row=>require('./period-access.cjs').visibleAuditRow(row,principal));
 }
 function visibleRows(name,rows,principal){return name==='auditLog'?visibleAudit(rows,principal):name==='fuelPeriods'?require('./period-access.cjs').visibleRows(rows,principal):require('./document-access.cjs').visibleRows(name,rows,principal);}
@@ -26,7 +27,7 @@ function filteredResult(result,principal){if(!principal)return result;const out=
 function findReceipt(rows,query,principal,token){
   const operation=contracts().validateOperation(query),actor=principalOf(principal);
   const receipt=(rows||[]).find(row=>row?.source==='platform'&&row.type==='transaction'&&row.operationId===operation.id&&
-    row.actorId===actor.id&&row.actorRole===actor.role&&row.databaseToken===token&&row.requestDigest===operation.digest&&
+    (!row.importReadSections||row.importReadSections.every(name=>require('./document-access.cjs').permitted(principal||actor,'read',name)))&&row.actorId===actor.id&&row.actorRole===actor.role&&row.databaseToken===token&&row.requestDigest===operation.digest&&
     (!(row.printCapture||row.printArtifact)||Array.isArray(row.archiveReadSections)&&row.archiveReadSections.every(name=>require('./document-access.cjs').permitted(principal||actor,'read',name)))&&
     Array.isArray(row.changedSections)&&row.changedSections.every(name=>require('./document-access.cjs').permitted(principal||actor,'read',name))&&require('./document-access.cjs').auditAccess(principal||actor,row)&&require('./period-access.cjs').auditAccess(principal||actor,row));
   return receipt ? {id:operation.id,digest:receipt.requestDigest,status:'committed',at:receipt.at} : null;
@@ -47,6 +48,7 @@ function operationInfo(previous, sections, options = {}) {
 }
 function replayResult(previous, revisions, token, info, names) {
   if (!info?.receipt) return null;
+  if(info.receipt.importReadSections?.some(name=>!require('./document-access.cjs').permitted(info.principal||info.actor,'read',name)))fail('ACCESS_DENIED','Нет доступа ко всему исходному файлу импорта',403);
   const canonicalSections = {};
   for (const name of new Set([...names, 'auditLog'])) {
     if (!access.authorize(info.actor, 'read', name)) continue;
@@ -119,9 +121,10 @@ function prepareTransaction(previous, supplied, options = {}) {
   if (!Number.isFinite(Date.parse(at))) fail('INVALID_CLOCK', 'Некорректное время операции');
   const id = info?.id || 'backend:' + crypto.randomUUID();
   const calendar=require('../assets/core/business-calendar.js'),clock=calendar.resolve(previous,at);
-  const commandProof=['MergeCatalog','AcceptShift','DocumentAction','PeriodAction','FuelAction','ProcurementAction','CostAction','RepairAction','CalendarAction'].includes(options.commandIntent?.command?.type)
+  const commandProof=['MergeCatalog','AcceptShift','DocumentAction','PeriodAction','FuelAction','ProcurementAction','CostAction','RepairAction','CalendarAction','ImportAction'].includes(options.commandIntent?.command?.type)
     ? {commandIntent:contracts().parseCommandEnvelope(options.commandIntent,registry)} : {};
-  const temporalContext={id,now:at,today:clock.today,calendar:clock,actor,...commandProof};
+  const importProof=commandProof.commandIntent?.command?.type==='ImportAction'&&options.importSource?{importSource:options.importSource}:{};
+  const temporalContext={id,now:at,today:clock.today,calendar:clock,actor,...commandProof,...importProof};
   calendar.assertSuppliedMetadata(previous,sections,temporalContext);
   const calendarInput=commandProof.commandIntent?.command?.type==='CalendarAction'?commandProof.commandIntent.command.input:null;
   sections=calendar.canonicalizeIntervals(previous,sections,temporalContext,calendarInput?.action==='confirmInterval'?{confirm:calendarInput.target,reason:calendarInput.reason}:{});
@@ -131,7 +134,7 @@ function prepareTransaction(previous, supplied, options = {}) {
   // This proof is derived from the semantic execution option, never a section
   // request field. Raw/full writes cannot authorize their own catalog aliases.
   const plan = kernel().prepare(previous, sections, { id, identity:options.databaseToken || 'local-storage', actor,
-    revisions:options.revisions || {}, now:at,today:clock.today,calendar:clock,...commandProof,
+    revisions:options.revisions || {}, now:at,today:clock.today,calendar:clock,...commandProof,...importProof,
     readable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'read', name)),
     writable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'write', name)||name==='fuelPeriods'&&periodCommand||name===costTarget&&costCommand) });
   const changes = (plan.rowChanges || []).filter(row => row.section !== 'auditLog');
@@ -142,12 +145,13 @@ function prepareTransaction(previous, supplied, options = {}) {
   const digest = info?.digest || kernel().requestDigest({ base:options.base || {}, sections:supplied });
   const entries = changes.map(row => ({ id:'audit_' + crypto.randomUUID(), at, actor:actor.name, actorId:actor.id, actorRole:actor.role,
     source:'platform', operationId:id, section:row.section, recordId:String(row.recordId ?? row.key), action:row.action,
-    fields:row.fields, before:row.before, after:row.after }));
+    fields:row.fields, before:row.before, after:row.after,...(importProof.importSource?{importReadSections:importProof.importSource.sourceScopes||importProof.importSource.sections}:{} ) }));
   const revisions = {};
   for (const name of [...changed, 'auditLog']) revisions[name] = (options.revisions?.[name] || 0) + 1;
   const receipt = { id:'operation:' + id, type:'transaction', action:'transaction', source:'platform', section:'auditLog', recordId:id,
     operationId:id, requestDigest:digest, databaseToken:options.databaseToken, at,
     actor:actor.name, actorId:actor.id, actorRole:actor.role, changedSections:changed, revisions };
+  if(importProof.importSource)receipt.importReadSections=importProof.importSource.sourceScopes||importProof.importSource.sections;
   if(changed.includes('documentDrafts'))receipt.changedDocumentSections=require('./document-access.cjs').changedOrigins(previous.documentDrafts,result.documentDrafts);
   if(changed.includes('fuelPeriods'))receipt.changedPeriodScopes=require('./period-access.cjs').changedScopes(previous.fuelPeriods,result.fuelPeriods);
   result.auditLog = [...(previous.auditLog || []), ...entries, receipt];

@@ -156,7 +156,7 @@ function references(data, files) {
         return; for (const [key, child] of Object.entries(value)) {
         if (key === 'attachments' && Array.isArray(child))
             child.forEach(row => check('attachments', row));
-        if (['sourceArchive', 'lastImportArchive'].includes(key) && plain(child) && (child.available === true || child.id != null))
+        if (['sourceArchive', 'lastImportArchive','sourceManifest'].includes(key) && plain(child) && (child.available === true || child.id != null))
             check('import-sources', child);
         if (key === 'sourceArchives' && Array.isArray(child))
             child.forEach(row => { if (plain(row) && (row.available === true || row.id != null))
@@ -241,7 +241,7 @@ function readPackage(archivePath) {
         fail('BACKUP_MANIFEST', 'Неизвестный исходный формат базы');
     const checked = { files, data, settings: settings ? jsonObject(json(settings.bytes, 'settings.json'), 'settings.json') : null, revisions: revisions(manifest.revisions), sourceFormat: manifest.sourceFormat === 'sqlite' ? 'sqlite' : 'json', sourceFingerprint: typeof manifest.sourceFingerprint === 'string' && /^[a-f0-9]{64}$/.test(manifest.sourceFingerprint) ? manifest.sourceFingerprint : null, archiveSha256: sha(archive) };
     checked.referencedFileCount = references(data, files);
-    require('./document-archive.cjs').validateManaged(data,name=>files.find(entry=>entry.name===name)?.bytes);
+    require('./document-archive.cjs').validateManaged(data,name=>files.find(entry=>entry.name===name)?.bytes);require('./import-source.cjs').validateManaged(data,name=>files.find(entry=>entry.name===name)?.bytes);
     return checked;
 }
 function verifyPackage({ archivePath }) { return report(readPackage(archivePath)); }
@@ -287,7 +287,7 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir,all
             add(entry.name, bytes);
         }
         references(snapshot.data, files);
-        require('./document-archive.cjs').validateManaged(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null);
+        require('./document-archive.cjs').validateManaged(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null);require('./import-source.cjs').validateManaged(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null);
         const sourceFingerprint = sha(JSON.stringify(before));
         zip.addFile('manifest.json', Buffer.from(JSON.stringify({ format: 'tvs-backup', version: 1, createdAt: new Date().toISOString(), files, revisions: snapshot.revisions, sourceFormat: snapshot.sourceFormat, sourceFingerprint })));
         stage = path.join(parent, '.tvs-backup-package-' + crypto.randomUUID() + '.zip');

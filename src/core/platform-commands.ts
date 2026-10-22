@@ -1,7 +1,7 @@
-import type { AssetTarget, CalendarActionInput, CostActionInput, DocumentActionInput, FuelActionInput, Identifier, JsonRow, JsonValue, MergeCatalogInput, PeriodActionInput, PlatformCommand, ProcurementActionInput, RepairActionInput, SectionRows, createPlatformContracts } from './platform-contracts';
+import type { AssetTarget, CalendarActionInput, CostActionInput, DocumentActionInput, FuelActionInput, Identifier, ImportActionInput, JsonRow, JsonValue, MergeCatalogInput, PeriodActionInput, PlatformCommand, ProcurementActionInput, RepairActionInput, SectionRows, createPlatformContracts } from './platform-contracts';
 
 export interface CommandActor { id: string; name: string; role: string }
-export interface CommandContext { id: string; now: string; today: string; actor: CommandActor; readable?:string[]; writable?:string[]; calendar?:{version:1;mode:'compatibility'|'configured';timeZone:string;stamp:string} }
+export interface CommandContext { id: string; now: string; today: string; actor: CommandActor; readable?:string[]; writable?:string[]; calendar?:{version:1;mode:'compatibility'|'configured';timeZone:string;stamp:string};importSource?:JsonRow }
 export interface CommandPlan { sections: SectionRows; readSections: string[]; writeSections: string[]; entityIds: Record<string, Identifier> }
 interface PersonnelRules { apiVersion: number; validateChanges(previous: unknown, next: unknown, context?: unknown): unknown }
 interface FuelRules { apiVersion: number; validateChanges(previous: unknown, next: unknown): unknown }
@@ -18,11 +18,12 @@ interface CalendarActions {apiVersion:number;dependencies(input:CalendarActionIn
 interface BusinessCalendar {apiVersion:number;context(database:unknown,context:CommandContext):unknown;canonicalizeIntervals(previous:unknown,sections:SectionRows,context:CommandContext,options?:unknown):SectionRows}
 interface PersonnelPlanning {apiVersion:number;dependencies():string[];captureShiftContext(database:unknown,shift:JsonRow,context:CommandContext):{snapshot:JsonRow}}
 interface DocumentPrint {apiVersion:number;dependencies(request:unknown):string[];prepare(database:unknown,request:unknown,context:unknown):{canCapture:boolean;sourceFingerprint:string;blockers:unknown[]};capture(database:unknown,request:unknown,context:unknown):unknown}
+interface ImportEngine {apiVersion:number;dependencies(input:ImportActionInput):string[];footprint(input:ImportActionInput):string[];plan(database:unknown,input:ImportActionInput,context:CommandContext):CommandPlan}
 type Contracts = ReturnType<typeof createPlatformContracts>;
 interface CommandError extends Error { code: string; status: number; field?: string }
 
 /** Pure semantic actions. Storage still owns ACL, CAS, audit and atomic commit. */
-export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, fuel: FuelRules, fuelEngine: FuelEngine,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions,calendarActions?:CalendarActions,calendar?:BusinessCalendar,planning?:PersonnelPlanning,getPrinting?:()=>DocumentPrint) {
+export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, fuel: FuelRules, fuelEngine: FuelEngine,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions,calendarActions?:CalendarActions,calendar?:BusinessCalendar,planning?:PersonnelPlanning,getPrinting?:()=>DocumentPrint,getImports?:()=>ImportEngine) {
   if (!contracts || contracts.apiVersion !== 1 || !personnel || personnel.apiVersion !== 1 || !fuel || fuel.apiVersion !== 1 || typeof fuelEngine?.parseFuelGrade !== 'function')
     throw new Error('Не загружены общие правила команд платформы');
   function fail(code: string,message: string,field?: string): never {
@@ -47,8 +48,10 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   function repairOperations():RepairActions {if(!repairActions||repairActions.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены общие правила ремонтного процесса');return repairActions;}
   function calendarOperations():CalendarActions {if(!calendarActions||calendarActions.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила учётного календаря');return calendarActions;}
   function printModule():DocumentPrint {const printing=getPrinting?.();if(!printing||printing.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены печатные модели документов');return printing;}
+  function importModule():ImportEngine {const imports=getImports?.();if(!imports||imports.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила подтверждённого импорта');return imports;}
   function footprint(value: unknown): string[] {
     const command=parseCommand(value);
+    if(command.type==='ImportAction')return importModule().footprint(command.input);
     if(command.type==='PrintAction')return ['appMeta'];
     if(command.type==='DocumentAction')return documentModule().footprint(command.input);
     if(command.type==='PeriodAction')return periodModule().footprint(command.input);
@@ -67,6 +70,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   }
   function commandDependencies(value: unknown): string[] {
     const command=parseCommand(value);
+    if(command.type==='ImportAction')return importModule().dependencies(command.input);
     if(command.type==='PrintAction')return printModule().dependencies(command.input.request);
     if(command.type==='DocumentAction')return documentModule().dependencies(command.input);
     if(command.type==='PeriodAction')return periodModule().dependencies(command.input);
@@ -128,6 +132,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
       fail('INVALID_COMMAND_CONTEXT','Нужны время, дата и автор команды');
     for(const field of ['id','name','role'])if(typeof actor[field]!=='string'||!(actor[field] as string).trim())fail('INVALID_COMMAND_CONTEXT','Некорректный автор команды');
     const result:CommandContext={id,now:checked.now,today:checked.today,actor:{id:actor.id as string,name:actor.name as string,role:actor.role as string}};
+    if(checked.importSource!==undefined){if(checked.importSource===null||typeof checked.importSource!=='object'||Array.isArray(checked.importSource))fail('INVALID_COMMAND_CONTEXT','Некорректный проверенный исходник импорта','importSource');result.importSource=copy(checked.importSource) as JsonRow;}
     if(checked.calendar!==undefined){
       const value=checked.calendar;
       if(value===null||typeof value!=='object'||Array.isArray(value)||value.version!==1||(value.mode!=='compatibility'&&value.mode!=='configured')||typeof value.timeZone!=='string'||typeof value.stamp!=='string')fail('INVALID_COMMAND_CONTEXT','Некорректный учётный календарь','calendar');
@@ -222,7 +227,8 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     const command=parseCommand(value),ctx=context(metadata),db=database(source,dependencies(command));
     calendar?.context(db,ctx);
     let result:CommandPlan;
-    if(command.type==='PrintAction'){
+    if(command.type==='ImportAction')result=importModule().plan(db,command.input,ctx);
+    else if(command.type==='PrintAction'){
       const prepared=printModule().prepare(db,command.input.request,{...ctx,timing:command.input.request.mode==='manual'?'manual':'late'});
       if(!prepared.canCapture)fail('PRINT_SOURCE_UNAVAILABLE','Печатная модель недоступна; проверьте исходный документ');
       if(prepared.sourceFingerprint!==command.input.reviewFingerprint)fail('STALE_REVIEW','Источники печати изменились после проверки');

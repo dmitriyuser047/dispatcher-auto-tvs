@@ -9,7 +9,7 @@ const access = require('./access-control');
 
 let _server = null, _dataDir = null, _backupFn = null, _writeLock = false;
 let _clientKey = '', _transport = { protocol:'http:', ca:null }, _accessSettings = {};
-const MAX_BODY = 32 * 1024 * 1024, MAX_RESPONSE = 64 * 1024 * 1024;
+const MAX_BODY = 32 * 1024 * 1024, MAX_IMPORT_BODY = 40 * 1024 * 1024, MAX_RESPONSE = 64 * 1024 * 1024;
 function configureKey(key) { _clientKey = String(key || ''); }
 function configureAccess(settings) { _accessSettings = settings || {}; }
 function configureTransport(options = {}) {
@@ -33,10 +33,10 @@ function filteredRevisions(revisions, principal) {
   return Object.fromEntries(storage.SECTIONS.map(name => [name, readable(principal, name) ? revisions[name] || 0 : 0]));
 }
 function publicAccess(principal) {
-  return { user:{ id:principal.id, name:principal.name, role:principal.role, legacy:!!principal.legacy }, readable:storage.SECTIONS.filter(n => readable(principal,n)), writable:storage.SECTIONS.filter(n => access.authorize(principal,'write',n)), fieldPermissions:access.fieldPermissions(principal),periodActions:require('./period-access.cjs').actions(principal),fuelActions:access.fuelActions(principal),procurementActions:access.procurementActions(principal),costActions:access.costActions(principal),repairActions:access.repairActions(principal),calendarActions:access.calendarActions(principal),printActions:access.printActions(principal) };
+  return { user:{ id:principal.id, name:principal.name, role:principal.role, legacy:!!principal.legacy }, readable:storage.SECTIONS.filter(n => readable(principal,n)), writable:storage.SECTIONS.filter(n => access.authorize(principal,'write',n)), fieldPermissions:access.fieldPermissions(principal),periodActions:require('./period-access.cjs').actions(principal),fuelActions:access.fuelActions(principal),procurementActions:access.procurementActions(principal),costActions:access.costActions(principal),repairActions:access.repairActions(principal),calendarActions:access.calendarActions(principal),printActions:access.printActions(principal),importActions:access.importActions(principal) };
 }
 
-function readBody(req) {
+function readBody(req,limit=MAX_BODY) {
   return new Promise((resolve,reject) => {
     const chunks = []; let size = 0, finished = false;
     const cleanup = () => { clearTimeout(timer); req.removeListener('data',chunk); req.removeListener('end',end); req.removeListener('aborted',abort); req.removeListener('error',fail); req.removeListener('close',close); };
@@ -45,7 +45,7 @@ function readBody(req) {
     const close = () => { if (!req.complete) abort(); };
     const chunk = value => {
       size += value.length;
-      if (size > MAX_BODY) { fail(new Error('Слишком большой запрос')); req.resume(); }
+      if (size > limit) { fail(new Error('Слишком большой запрос')); req.resume(); }
       else chunks.push(value);
     };
     const end = () => { if (finished) return; finished = true; cleanup(); try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { reject(new Error('Некорректный JSON запроса')); } };
@@ -140,6 +140,9 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls,renderPd
     if(req.method==='POST'&&req.url==='/api/commands'){
       void commandRequest(req,res,authenticateRequest);return;
     }
+    if(req.method==='POST'&&req.url==='/api/import-source'){
+      void (async()=>{try{const payload=await readBody(req,MAX_IMPORT_BODY);const result=await require('./import-source.cjs').handle(dataDir,payload,{principal,getPrincipal:authenticateRequest});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'IMPORT_SOURCE_FAILED',error:error.message});}})();return;
+    }
     if(req.method==='POST'&&req.url==='/api/document-print'){
       void (async()=>{try{const payload=await readBody(req);const result=await require('./document-archive.cjs').handle(dataDir,payload,{principal,renderPdf,getPrincipal:authenticateRequest});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'DOCUMENT_PRINT_FAILED',error:error.message});}})();return;
     }
@@ -221,7 +224,7 @@ async function request(host,port,apiPath,body,timeout=15000) {
   const options = await endpointOptions(host,port,apiPath);
   options.timeout = timeout; options.method = body == null ? 'GET' : 'POST';
   if (body != null) {
-    if (typeof body !== 'string' || Buffer.byteLength(body) > MAX_BODY) throw new Error('Слишком большой или неверный запрос');
+    if (typeof body !== 'string' || Buffer.byteLength(body) > (apiPath==='/api/import-source'?MAX_IMPORT_BODY:MAX_BODY)) throw new Error('Слишком большой или неверный запрос');
     options.headers = {...options.headers,'Content-Type':'application/json; charset=utf-8','Content-Length':Buffer.byteLength(body)};
   }
   return await new Promise((resolve,reject) => {
@@ -265,7 +268,8 @@ async function postCommands(host,port,jsonStr) {
   if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_COMMANDS'};
   return parseResponse(response,true);
 }
+async function postImportSource(host,port,jsonStr){const response=await request(host,port,'/api/import-source',jsonStr,45000);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_IMPORT_SOURCE'};return parseResponse(response,true);}
 async function postDocumentPrint(host,port,jsonStr){const response=await request(host,port,'/api/document-print',jsonStr,45000);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_DOCUMENT_PRINT'};return parseResponse(response,true);}
 async function ping(host,port) { try { return parseResponse(await request(host,port,'/api/ping',null,5000)); } catch { return null; } }
 
-module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,postCommands,postDocumentPrint,configureKey,configureTransport,configureAccess};
+module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,postCommands,postDocumentPrint,postImportSource,configureKey,configureTransport,configureAccess};

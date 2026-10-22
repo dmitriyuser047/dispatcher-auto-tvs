@@ -272,7 +272,7 @@ function fpStats() {
 
 // Состояние покупки относительно журнала: ok | missing | diff
 function fpJournalState(p, byRecord) {
-  if (!p.vehicleId) return { state: 'none' };
+  if (p.vehicleId==null||p.vehicleId==='') return { state: 'none' };
   const rec = fpLinkedRecord(p);
   if (!rec) return { state: 'missing' };
   const j = +rec.fuelIssued || 0, s = byRecord.get(rec.id) || 0;
@@ -434,9 +434,9 @@ function fpRenderVehicle() {
     const st = fpJournalState(p, byRecord);
     if (st.state === 'ok') return '<span style="color:var(--green)" title="В журнале совпадает">✓</span>';
     if (st.state === 'missing') return `<span style="color:var(--red)">нет в журнале</span>
-      <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="fpReturnToJournal(${fpJs(p.id)})">Вернуть</button>`;
+      <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="fpReturnToJournal(${fpJs(p.id)})">Проверить связь</button>`;
     return `<span style="color:#d97706" title="Запись журнала поправлена вручную">журнал ${fpNum(st.journal, 2)} л,<br>по выпискам ${fpNum(st.statement, 2)} л</span>
-      <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="fpSyncRecord(${fpJs(st.rec.id)})" title="Поставить в журнал литры и сумму по выпискам">Как в выписке</button>`;
+      <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="fpSyncRecord(${fpJs(st.rec.id)})" title="Поставить в журнал литры и сумму по выпискам">Сверить источник</button>`;
   };
 
   const rows = list.map(p => `
@@ -550,11 +550,11 @@ function fpHistoryHtml() {
       <td>${fpEsc(new Date(i.at).toLocaleString('ru'))}</td>
       <td>${fpEsc(i.fileName)}${i.keyVersion ? '<div><button class="btn btn-ghost btn-sm" onclick="fuelImportOpenBatch(' + fpEsc(JSON.stringify(i.id)) + ')">Исходник и решения · корректировок: ' + (i.corrections || []).filter(row => row.status === 'needs-reconciliation').length + ' · товаров на проверку: ' + (i.quarantined || []).length + '</button></div>' : ''}</td>
       <td style="text-align:right">${i.rows}</td>
-      <td style="text-align:right">${fpNum(i.litres, 1)}</td>
-      <td style="text-align:right">${i.sum ? fpNum(i.sum) : '—'}</td>
-      <td style="text-align:right">${i.added}</td>
-      <td style="text-align:right">${i.duplicates}</td>
-      <td style="text-align:right;${i.skipped ? 'color:var(--red)' : ''}">${i.skipped}</td>
+      <td style="text-align:right">${i.litres==null?'—':fpNum(i.litres, 3)}</td>
+      <td style="text-align:right">${i.sum==null?'—':fpNum(i.sum)}</td>
+      <td style="text-align:right">${i.added??i.importBatch?.rowIds?.length??'—'}</td>
+      <td style="text-align:right">${i.duplicates??'—'}</td>
+      <td style="text-align:right;${i.skipped ? 'color:var(--red)' : ''}">${i.skipped??'—'}</td>
     </tr>`).join('')}</tbody></table></div>`;
 }
 
@@ -662,7 +662,7 @@ async function fpEditSave(id) {
   let sourceChanges;
   try { sourceChanges = fpSourceOrgEdit(p, { date, cardNo, sourceOrg: document.getElementById('fpe_org').value.trim(), sourceOrgOverride, sourceOrgReason }, data); }
   catch (e) { showFieldError(e.message, sourceOrgOverride && !sourceOrgReason ? 'fpe_org_reason' : 'fpe_org'); return; }
-  const grade = document.getElementById('fpe_grade').value, vehicleId = document.getElementById('fpe_vehicle').value || null;
+  const grade = document.getElementById('fpe_grade').value;let vehicleId;try{vehicleId=fuelImportSelectedVehicle(document.getElementById('fpe_vehicle'));}catch(error){showFieldError(error.message,'fpe_vehicle');return;}if(vehicleId!==p.vehicleId&&!p.manual&&!p.manualStatement){showFieldError('Получателя импортной покупки меняют через исходную выписку с проверяемым планом. Сохранённая покупка не изменена.','fpe_vehicle');return;}
   if (p.manualStatement || p.statementReviewed) {
     const problem = gsmManualRecipientError(data, vehicleId, cardNo, date, grade);
     if (problem) { showFieldError(problem, 'fpe_vehicle'); return; }
@@ -778,43 +778,9 @@ async function fpDeleteCommit() {
   } finally { fpDeleteSaving = false; if (button) button.disabled = false; }
 }
 
-async function fpAssign(id) {
-  const p = fpById(id);
-  const vid = document.getElementById('fpAssign_' + id)?.value;
-  if (!p || !vid) { alert('Выберите машину'); return; }
-  if (!fuelEditAllowed(p.date)) return;
-  const v = (data.vehicles || []).find(x => x.id === vid);
-  fpUpdate(p, { vehicleId: vid, grade: parseFuelGrade(p.product) || p.grade || vehicleFuelGrade(v) });
-  fpSaveAndRender();
-}
-
-async function fpReturnToJournal(id) {
-  const p = fpById(id);
-  if (!p || !fuelEditAllowed(p.date)) return;
-  const existing = fpLinkedRecord(p);
-  if (existing) {
-    if (p.recordId === existing.id) { alert('Покупка уже связана с журналом. Проверьте расхождение литров.'); return; }
-    if (!confirm('Связать покупку с найденной строкой журнала без повторного добавления литров?')) return;
-    p.recordId = existing.id;
-    fpSaveAndRender(); return;
-  }
-  fpApply(p, +1);
-  fpSaveAndRender();
-}
-
-// Запись журнала поправили руками — вернуть литры и сумму как в выписках
-async function fpSyncRecord(recordId) {
-  const rec = (data.records || []).find(r => r.id === recordId);
-  if (!rec || !fuelEditAllowed(rec.date)) return;
-  const list = fpLive().filter(p => fpLinkedRecord(p)?.id === recordId);
-  const qty=DecimalCore.toNumberExact(DecimalCore.sum(list.map(p=>p.qty??0)));
-  const sum=DecimalCore.toNumberExact(DecimalCore.sum(list.map(p=>p.sum??0)));
-  if (!confirm(`Поставить в журнал за ${fmtDate(rec.date)}: ${fpNum(qty)} л вместо ${fpNum(rec.fuelIssued)} л?`)) return;
-  list.forEach(p => { p.recordId = recordId; });
-  rec.fuelIssued = qty || null;
-  if (list.some(p=>p.sum!=null)) rec.fuelSum=sum;
-  fpSaveAndRender();
-}
+async function fpAssign(id){try{const target=fuelImportSelectedVehicle(document.getElementById('fpAssign_'+id));if(target==null)throw Error('Выберите точную машину');return reviewedImportMapPurchase(id,target);}catch(error){showToast(error.message);return null;}}
+async function fpReturnToJournal(id){const purchase=fpById(id);if(!purchase||purchase.vehicleId==null||purchase.vehicleId===''){showToast('Сначала выберите получателя в проверяемом плане источника');return null;}return reviewedImportMapPurchase(id,purchase.vehicleId);}
+async function fpSyncRecord(recordId){const rows=fpLive().filter(p=>fpLinkedRecord(p)?.id===recordId),sources=[...new Set(rows.map(p=>reviewedImportPurchaseSource(p)?.sourceId).filter(Boolean))];if(sources.length===1)return reviewedImportOpenSource(sources[0]);if(!sources.length){showToast('У старых покупок нет проверенного исходника. Выберите оригинальную выписку повторно; ручные литры журнала сейчас не изменяются.');return null;}wfShowDialog('Сверка источников журнала','<div class="wf-form"><p class="wf-wide wf-note">Литры и суммы журнала не заменяются автоматически. Откройте нужный проверенный источник и сравните решения.</p>'+sources.map((id,index)=>'<button type="button" class="btn btn-ghost wf-wide" onclick="reviewedImportOpenSource('+fpJs(id)+')">Проверенный источник '+(index+1)+'</button>').join('')+'</div>');return null;}
 
 // ─── Сдвоенные заправки ───────────────────────────────────
 // Дни, когда машина заправлялась два раза и больше. Офисные машины (объект

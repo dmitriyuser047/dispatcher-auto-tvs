@@ -38,7 +38,7 @@ test('storage uses the same authoritative section registry as the platform kerne
 
 test('native snapshots explicitly advertise transactional operation acknowledgement support', t => {
   const dir = fixture(t);
-  assert.deepEqual(storage.readSnapshot(dir).platform, { apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:2,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,needsSchemaUpgrade:false });
+  assert.deepEqual(storage.readSnapshot(dir).platform, { apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:2,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false });
 });
 
 test('operational roles do not receive financial row history or mixed transaction metadata', () => {

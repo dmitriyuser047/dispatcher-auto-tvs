@@ -6,6 +6,7 @@
 // ═══════════════════════════════════════════════════════════════
 let reestrFiles = [];
 let reestrRows = [];
+let reestrImportDraft = null;
 let reestrStatyi = [];
 let reestrContracts = [];
 let reestrLastResult = null;

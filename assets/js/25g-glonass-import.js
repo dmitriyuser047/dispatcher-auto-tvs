@@ -5,12 +5,10 @@
 //
 // В отчёте по каждой машине за каждый выезд: начало и конец, пробег,
 // одометр на начало и конец, моточасы, холостой ход и расход топлива
-// по датчику уровня. Выезды за день складываются:
-//  • в запись журнала за этот день пишутся «Пробег по Глонассу», расход по
-//    датчику, моточасы и холостой ход; то, что внёс водитель, не трогается;
-//  • если записи за день нет, а машина ездила — создаётся запись с пробегом
-//    и одометром из ГЛОНАСС и расходом по норме.
-// Закрытые месяцы пропускаются.
+// по датчику уровня. Оригинал и явные решения поступают в единый проверяемый
+// план ядра. Фактический пробег, расход по норме и водительские значения
+// из показаний ГЛОНАСС не создаются. Пересекающиеся суточные итоги требуют
+// отдельного решения; закрытые периоды показываются как препятствия плана.
 
 // Колонки отчёта: по началу склеенного заголовка
 const FG_COLS = [
@@ -108,7 +106,7 @@ function fgTrips(table) {
   FG_COLS.forEach(([k, re]) => { idx[k] = table.header.findIndex(h => re.test(h)); });
   if (idx.object < 0 || (idx.start < 0 && idx.date < 0) || (idx.km < 0 && idx.total < 0 && idx.path < 0)) return null;
   const val = (r, k) => idx[k] >= 0 ? r[idx[k]] : '';
-  return table.rows.map(r => ({
+  return table.rows.map((r,index) => ({sourceRow:index+1,
     object: String(val(r, 'object')).trim(),
     start: String(val(r, 'start')).trim(), end: String(val(r, 'end')).trim(),
     kind: idx.start >= 0 && /\d{1,2}:\d{2}/.test(String(val(r, 'start'))) ? 'trip' : 'day',
@@ -193,121 +191,20 @@ function fgPlanTrips(db, trips, overrides) {
   });
   return {entries,unknown,invalid,fingerprint:fgFingerprint(db)};
 }
-async function importGlonassTrips() {
-  if (!window.electronAPI || !window.electronAPI.importGlonassFile) { alert('Загрузка ГЛОНАСС доступна в программе для компьютера'); return; }
-  const res = await window.electronAPI.importGlonassFile();
-  if (!res || !res.ok) { if (res && res.error) alert('Не удалось прочитать файл: ' + res.error); return; }
-  try {
-    const table = res.kind === 'pdf' ? fgTableFromPdf(res.items) : fgTableFromXlsx(res.base64), trips = table && fgTrips(table);
-    if (!trips || !trips.length) { alert('Не найдена таблица с объектом, датой и пробегом.'); return; }
-    fgStartPreview(trips,{fileName:res.fileName,kind:res.kind,contentFingerprint:fgContentKey(JSON.stringify(trips))});
-  } catch (error) { alert('Не удалось подготовить ГЛОНАСС: ' + error.message); }
-}
-function fgStartPreview(trips,meta,overrides) {
-  _fgPending = {trips,meta,overrides:overrides || {},modes:{},plan:null}; fgPreview();
-}
-function fgPreview() {
-  if (!_fgPending || _fgSaving) return;
-  const pending = _fgPending, plan = fgPlanTrips(data,pending.trips,pending.overrides); pending.plan = plan;
-  const rows = plan.entries.map((entry,index) => {
-    const allowed = entry.closed ? [['keep','Пропустить: месяц закрыт']] : entry.legacy || entry.mixed ? [['keep','Сохранить прежний день'],['replace','Заменить день этим отчётом (прежнее в истории)']] : [['merge','Объединить исходные рейсы / уточнить совпавшие'],['replace','Заменить день этим отчётом'],['keep','Пропустить этот день']];
-    entry.mode = allowed.some(([id]) => id === pending.modes[entry.key]) ? pending.modes[entry.key] : entry.mode;
-    const previous = entry.existing.length ? fgAggregateTrips(entry.existing,entry.vehicle,entry.date).km : (data.records || []).filter(r => r.vehicleId === entry.vehicle.id && r.date === entry.date).reduce((sum,r) => sum + (fqValue(r.kmGlonass) || 0),0);
-    return '<tr><td>'+fmtDate(entry.date)+'</td><td>'+fpEsc(fpVehicleTitle(entry.vehicle))+'</td><td>'+fpNum(previous,2)+'</td><td>'+fpNum(entry.incoming.km,2)+'</td><td>'+entry.trips.length+'</td><td>'+fpEsc(entry.reason)+'</td><td><select aria-label="Обработка дня" onchange="_fgPending.modes['+fpEsc(JSON.stringify(entry.key))+']=this.value">'+allowed.map(([id,label]) => '<option value="'+id+'"'+(entry.mode === id ? ' selected' : '')+'>'+label+'</option>').join('')+'</select></td></tr>';
-  }).join('');
-  const unknown = [...plan.unknown].map(([object,item],index) => { const suggested = fgSuggest(object); return '<div style="margin:6px 0"><b>'+fpEsc(object)+'</b> · '+item.trips+' строк, '+fpNum(item.km,1)+' км <select id="fgPreviewVehicle_'+index+'">'+fuelImportVehicleOptions(suggested && suggested.id || '',true)+'</select><button class="btn btn-ghost" onclick="fgPreviewAssign('+index+')">Сопоставить</button></div>'; }).join('');
-  openGenericModal('Проверка ГЛОНАСС: '+pending.meta.fileName,
-    '<div class="gsm-status">Строк: '+pending.trips.length+' · машино-дней: '+plan.entries.length+' · не сопоставлено объектов: '+plan.unknown.size+'. Проверьте обработку пересекающихся дней до сохранения.</div>'+
-    (plan.invalid.length ? '<div class="gsm-status gsm-error">Некорректных строк: '+plan.invalid.length+'. Они будут пропущены; исходные значения останутся в истории загрузки.</div>' : '')+
-    (unknown ? '<details open><summary>Машины для сопоставления</summary>'+unknown+'</details>' : '')+
-    '<div class="table-scroll" style="max-height:50vh"><table class="data-table"><thead><tr><th>Дата</th><th>Машина</th><th>Было, км</th><th>В файле, км</th><th>Строк</th><th>Проверка</th><th>Действие</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
-    '<div id="fgPreviewError" class="gsm-status gsm-error" role="alert"></div><div style="display:flex;justify-content:end;gap:8px"><button class="btn btn-ghost" onclick="closeModal(\'genericModal\')">Отмена</button><button class="btn btn-ghost" onclick="fgPreview()">Повторить проверку</button><button id="fgCommitButton" class="btn btn-primary" onclick="fgCommitImport()">Сохранить проверенные дни</button></div>',1150);
-}
-function fgPreviewAssign(index) {
-  const object = [..._fgPending.plan.unknown.keys()][index], vehicleId = document.getElementById('fgPreviewVehicle_'+index)?.value;
-  if (!object || !vehicleId) { alert('Выберите машину'); return; }
-  _fgPending.overrides[object] = vehicleId; fgPreview();
-}
-function fgApplyTrips(trips,options) {
-  options = options || {};
-  const db = options.db || data, plan = options.plan || fgPlanTrips(db,trips,options.overrides), next = JSON.parse(JSON.stringify(db));
-  if (plan.fingerprint !== fgFingerprint(db)) throw Error('Данные изменились. Проверьте импорт заново.');
-  next.glonassTrips = next.glonassTrips || []; next.glonassImports = next.glonassImports || []; next.records = next.records || [];
-  const importId = 'gi_'+Date.now()+'_'+Math.random().toString(36).slice(2,8), at = new Date().toISOString(), report = [];
-  Object.entries(options.overrides || {}).forEach(([object,vehicleId]) => {
-    const vehicle = next.vehicles.find(v => v.id === vehicleId), alias = plateKey(object);
-    next.vehicles.filter(previous => previous.id !== vehicleId && (previous.glonassAliases || []).includes(alias)).forEach(previous => {
-      (previous.glonassAliasHistory || (previous.glonassAliasHistory=[])).push({alias,at,importId,reassignedTo:vehicleId});
-      previous.glonassAliases=previous.glonassAliases.filter(value => value !== alias);
-    });
-    if (vehicle && !(vehicle.glonassAliases || []).includes(alias)) (vehicle.glonassAliases || (vehicle.glonassAliases=[])).push(alias);
-  });
-  plan.entries.forEach(entry => {
-    const mode = entry.closed ? 'keep' : options.modes && options.modes[entry.key] || entry.mode;
-    if (!['keep','merge','replace'].includes(mode) || mode === 'merge' && (entry.legacy || entry.mixed)) throw Error('Для пересекающегося дня выберите сохранить или заменить.');
-    if (mode === 'keep') { report.push({d:entry.incoming,action:entry.closed ? 'closed' : 'kept'}); return; }
-    if (mode === 'replace') next.glonassTrips.filter(t => t.vehicleId === entry.vehicle.id && t.date === entry.date && !t.supersededBy).forEach(t => { t.supersededBy=importId; });
-    entry.trips.forEach((trip,index) => {
-      const key = fgTripKey(trip,entry.vehicle.id);
-      let row = next.glonassTrips.find(t => t.key === key && !t.supersededBy);
-      if (row) {
-        const changed = ['km','fuel','fuelIdle','engine','idle','odoStart','odoEnd'].some(field => fqValue(trip[field]) != null && fqValue(row[field]) !== fqValue(trip[field]));
-        if (changed) (row.history || (row.history=[])).push({at,importId:row.importId,values:Object.fromEntries(['km','fuel','fuelIdle','engine','idle','odoStart','odoEnd'].map(field => [field,row[field] ?? null]))});
-        ['km','fuel','fuelIdle','engine','idle','odoStart','odoEnd'].forEach(field => { if (fqValue(trip[field]) != null) row[field]=Number(trip[field]); });
-        row.importId=importId; row.updatedAt=at; (row.importIds || (row.importIds=[])).push(importId);
-      } else {
-        row={...trip,id:'gt_'+importId+'_'+index+'_'+fgContentKey(key),key,vehicleId:entry.vehicle.id,importId,importIds:[importId],createdAt:at}; next.glonassTrips.push(row);
-      }
-    });
-    const active = next.glonassTrips.filter(t => t.vehicleId === entry.vehicle.id && t.date === entry.date && !t.supersededBy), d = fgAggregateTrips(active,entry.vehicle,entry.date);
-    const recs = next.records.filter(r => r.vehicleId === entry.vehicle.id && r.date === entry.date);
-    let record = recs.find(r => r.glonassCanonical) || recs.slice().sort((a,b) => (+b.km || 0)-(+a.km || 0))[0], action='updated';
-    if (!record && !(d.km > 0 || d.engine > 0 || d.idle > 0 || d.fuel > 0)) { report.push({d,action:'stored'}); return; }
-    if (!record) {
-      record={id:'r_'+importId+'_'+fgContentKey(entry.key),vehicleId:entry.vehicle.id,date:entry.date,km:Math.round(d.km*100)/100,odoStart:d.odoStart,odoEnd:d.odoEnd,fuelUsed:entry.vehicle.norm ? Math.round(d.km*entry.vehicle.norm)/100 : null,fuelGrade:vehicleFuelGrade(entry.vehicle),note:'пробег из ГЛОНАСС'};
-      next.records.push(record); action='created';
-    }
-    const fields=['kmGlonass','glonassFuel','glonassFuelIdle','glonassEngineH','glonassIdleH','glonassFuelKm'], before=Object.fromEntries(fields.map(field => [field,record[field] ?? null]));
-    const round=value => Math.round(value*100)/100;
-    const values={kmGlonass:round(d.km),glonassFuel:d.sensor ? round(d.fuel) : null,glonassFuelIdle:d.hasFuelIdle ? round(d.fuelIdle) : null,glonassEngineH:d.hasEngine ? round(d.engine) : null,glonassIdleH:d.hasIdle ? round(d.idle) : null,glonassFuelKm:d.sensor ? round(d.sensorKm) : null};
-    // An absent sensor column does not erase an earlier measurement on merge.
-    if (mode === 'merge') fields.slice(1).forEach(field => { if (values[field] == null && before[field] != null) values[field]=before[field]; });
-    if (JSON.stringify(before) !== JSON.stringify(values)) (record.glonassHistory || (record.glonassHistory=[])).push({at,importId,values:before,reason:mode});
-    else if (action !== 'created') action='same';
-    Object.assign(record,values,{glonassCanonical:true,glonassProvenance:{importId,rawIds:active.map(t => t.id),at,mode}});
-    report.push({d,action,rec:record});
-  });
-  const meta=options.meta || {};
-  next.glonassImports.push({id:importId,at,fileName:meta.fileName || 'Ручное сопоставление',kind:meta.kind || '',contentFingerprint:meta.contentFingerprint || fgContentKey(JSON.stringify(trips)),trips,overrides:options.overrides || {},unknownObjects:[...plan.unknown.keys()],invalidRows:plan.invalid.length,decisions:plan.entries.map(entry => ({vehicleId:entry.vehicle.id,date:entry.date,mode:options.modes && options.modes[entry.key] || entry.mode})),counts:report.reduce((result,row) => { result[row.action]=(result[row.action] || 0)+1; return result; },{})});
-  return {next,report,unknown:plan.unknown,importId};
-}
-async function fgCommitImport() {
-  if (!_fgPending || _fgSaving) return;
-  const error=document.getElementById('fgPreviewError');
-  try {
-    const pending=_fgPending;
-    const result=fgApplyTrips(pending.trips,{plan:pending.plan,modes:pending.modes,meta:pending.meta,overrides:pending.overrides});
-    _fgSaving=true; document.getElementById('fgCommitButton').disabled=true;
-    data=result.next; rebuildIndex();
-    if (!await saveData(data,{noMerge:true})) { error.textContent='Изменения не сохранены. Проверьте соединение и нажмите «Повторить проверку».'; return; }
-    _fgLast={fileName:pending.meta.fileName,trips:pending.trips,report:result.report,unknown:result.unknown,importId:result.importId}; _fgPending=null;
-    closeModal('genericModal'); if (activeSection === 'fuelPurchases') renderFuelPurchases(); fgShowImportReport();
-  } catch (failure) { if (error) error.textContent=failure.message; }
-  finally { _fgSaving=false; const button=document.getElementById('fgCommitButton'); if(button) button.disabled=false; }
-}
-async function fgAssign(idx) {
-  if (!_fgLast) return;
-  const object=[..._fgLast.unknown.keys()][idx], vehicleId=document.getElementById('fgAssign_'+idx)?.value;
-  if (!object || !vehicleId) { alert('Выберите машину'); return; }
-  fgStartPreview(_fgLast.trips.filter(trip => trip.object === object),{fileName:_fgLast.fileName,kind:'assignment'},{[object]:vehicleId});
-}
+async function importGlonassTrips(){try{reviewedImportReady();if(!window.electronAPI?.importGlonassFile)throw Error('Загрузка ГЛОНАСС доступна только в установленной программе');const database=data,context=reviewedImportStamp(),result=await window.electronAPI.importGlonassFile();if(!result||result.canceled)return null;if(database!==data||context!==reviewedImportStamp())throw Error('База или права изменились во время чтения источника');if(!result.ok)throw Error(result.error||'Не удалось прочитать ГЛОНАСС');let decoded;if(result.kind==='pdf'&&result.items){const table=fgTableFromPdf(result.items),trips=table&&fgTrips(table);if(trips)decoded={rows:trips.map(trip=>{const{sourceRow,...normalized}=trip;return{rowId:'glonass-'+sourceRow,section:'glonassTrips',locator:{entry:result.fileName,row:sourceRow},raw:{header:table.header,cells:table.rows[sourceRow-1]},normalized};})};}return reviewedImportNative('glonass',result,['glonassTrips'],{parser:{id:'glonass',version:1},...(decoded?{decoded}:{})});}catch(error){showToast(error.message);return null;}}
+function fgStartPreview(trips,meta,overrides){if(meta?.sourceId)return reviewedImportOpenSource(meta.sourceId);showToast('Для нового плана нужен проверенный оригинал отчёта. Выберите исходный файл ГЛОНАСС; старые распознанные строки не применяются напрямую.');return null;}
+function fgPreview(){if(reviewedImportSession)return reviewedImportPreview(reviewedImportSession);showToast('Откройте источник в проверяемом импорте');}
+function fgApplyTrips(){throw Error('Прямое применение ГЛОНАСС отключено. Используйте единый план проверяемого импорта.');}
+function fgCommitImport(){return reviewedImportSession?reviewedImportCommit(reviewedImportSession):Promise.resolve({ok:false,error:'Нет проверенного плана'});}
+function fgPreviewAssign(){showToast('Сопоставление выполняется в строке единого плана импорта');}
+async function fgAssign(){showToast('Выберите исходный файл ГЛОНАСС повторно и сопоставьте строку в едином плане');}
 function fgHistoryDialog() {
   const imports=(data.glonassImports || []).slice().reverse();
   openGenericModal('История загрузок ГЛОНАСС','<div class="gsm-status">Исходные строки и предыдущие версии показаний сохраняются. Повторное открытие загрузки выполняет проверку сопоставления и пересечений заново.</div><div class="table-scroll" style="max-height:65vh"><table class="data-table"><thead><tr><th>Загрузка</th><th>Файл</th><th>Строк</th><th></th></tr></thead><tbody>'+imports.map(batch => '<tr><td>'+fpEsc(new Date(batch.at).toLocaleString('ru'))+'</td><td>'+fpEsc(batch.fileName)+'</td><td>'+(batch.trips || []).length+'</td><td><button class="btn btn-ghost" onclick="fgOpenImport('+fpEsc(JSON.stringify(batch.id))+')">Открыть исходные строки</button></td></tr>').join('')+'</tbody></table></div>',900);
 }
 function fgOpenImport(id) {
   const batch=(data.glonassImports || []).find(item => item.id === id);
-  if (batch) fgStartPreview(batch.trips || [],{fileName:batch.fileName,kind:batch.kind,contentFingerprint:batch.contentFingerprint},batch.overrides || {});
+  if(batch?.importBatch?.sourceId)return reviewedImportOpenSource(batch.importBatch.sourceId);if(batch?.importProvenance?.sourceId)return reviewedImportOpenSource(batch.importProvenance.sourceId);if(batch?.sourceId)return reviewedImportOpenSource(batch.sourceId);showToast('У старой загрузки нет проверенного оригинала. Выберите исходный файл повторно; прежние факты сохраняются.');
 }
 function fgShowImportReport() {
   if (!_fgLast) return;
