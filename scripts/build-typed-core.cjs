@@ -4,6 +4,7 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
 const ROOT=path.resolve(__dirname,'..');
 const COMPILER_VERSION='5.9.3';
 const ENTRIES=Object.freeze([
+  Object.freeze({source:'src/core/entity-identity.ts',output:'assets/core/entity-identity.js',global:'EntityIdentity',factory:'createEntityIdentity'}),
   Object.freeze({source:'src/core/decimal-core.ts',output:'assets/core/decimal-core.js',global:'DecimalCore',factory:'createDecimalCore'}),
   Object.freeze({source:'src/core/effective-periods.ts',output:'assets/core/effective-periods.js',global:'EffectivePeriods',factory:'createEffectivePeriods',dependencies:[{path:'./decimal-core.js',global:'DecimalCore'}]}),
   Object.freeze({source:'src/core/financial-recognition.ts',output:'assets/core/financial-recognition.js',global:'DomainSources',factory:'createDomainSources',dependencies:[{path:'./accounting-boundary.js',global:'AccountingBoundary'}]}),
@@ -12,6 +13,7 @@ const ENTRIES=Object.freeze([
   Object.freeze({source:'src/core/platform-commands.ts',output:'assets/core/platform-commands.js',global:'PlatformCommands',factory:'createPlatformCommands',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./personnel-engine.js',global:'TvsPersonnelEngine'},
     {path:'./fuel-movement-policy.js',global:'FuelMovementPolicy'}, {path:'./fuel-engine.js',global:'TvsFuelEngine'},
+    {path:'./catalog-merge.js',global:'MergeCatalog'}, {path:'./platform-schema.js',global:'PlatformSchema'},
   ]}),
 ]);
 const normalize=text=>text.replace(/\r\n?/g,'\n');

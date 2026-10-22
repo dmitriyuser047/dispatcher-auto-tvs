@@ -1608,7 +1608,7 @@ function showImportPreview(res) {
 
   // Сколько новых / уже существующих элементов относительно текущей базы
   const curIds = {};
-  RAR_KEYS.forEach(k => curIds[k] = new Set((data[k] || []).map(x => x && x.id).filter(Boolean)));
+  RAR_KEYS.forEach(k => curIds[k] = new Set((data[k] || []).filter(x=>x&&x.id!=null&&x.id!=='').map(x => x.id)));
   const countSplit = (src) => {
     const n = {}, e = {};
     RAR_KEYS.forEach(k => {
@@ -1652,19 +1652,19 @@ async function doRarMerge() {
   if (!_rarImport) return;
   const includeBackups = document.getElementById('rarIncludeBackups').checked;
   RAR_KEYS.forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
-  const byId = {};
-  RAR_KEYS.forEach(k => { byId[k] = {}; data[k].forEach(x => { if (x && x.id) byId[k][x.id] = x; }); });
+  const byId = Object.create(null);
+  RAR_KEYS.forEach(k => { byId[k] = new Map(); data[k].forEach(x => { if (x && x.id!=null && x.id!=='') byId[k].set(x.id,x); }); });
   const added = {}, updated = {};
   RAR_KEYS.forEach(k => { added[k] = 0; updated[k] = 0; });
   const mergeSrc = (src) => {
     RAR_KEYS.forEach(k => {
       (src[k] || []).forEach(item => {
         const id = item && item.id;
-        if (!id) return;
-        const existing = byId[k][id];
+        if (id==null||id==='') return;
+        const existing = byId[k].get(id);
         if (existing) return;
         data[k].push(item);
-        byId[k][id] = item;
+        byId[k].set(id,item);
         added[k]++;
       });
     });

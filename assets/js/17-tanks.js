@@ -219,10 +219,10 @@ function populateTankObjectList() {
 function populateGenTankSelect(selected) {
   const sel = document.getElementById('gm_tank');
   if (!sel) return;
-  const tanks = tanksAll().filter(t => !t.archived || t.id === selected);
+  const tanks = tanksAll().filter(t => !t.archived&&!t.mergedInto || t.id === selected);
   sel.innerHTML = '<option value="">— не привязана —</option>' +
-    tanks.map(t => `<option value="${htmlEsc(t.id)}"${t.id === selected ? ' selected' : ''}>${(t.name||'').replace(/</g,'&lt;')}${t.location ? ' ('+ htmlEsc(t.location)+')' : ''}</option>`).join('');
-  sel.value = selected || '';
+    tanks.map(t => `<option value="${htmlEsc(t.id)}" data-typed-id="${htmlEsc(JSON.stringify(t.id))}"${t.id === selected ? ' selected' : ''}>${(t.name||'').replace(/</g,'&lt;')}${t.location ? ' ('+ htmlEsc(t.location)+')' : ''}</option>`).join('');
+  if(selected!=null&&selected!==''&&!tanks.some(t=>t.id===selected)){const option=new Option('Прежняя ёмкость · карточка недоступна',String(selected),false,true);option.dataset.typedId=JSON.stringify(selected);sel.add(option);}
 }
 
 // ─── TANK CRUD ───────────────────────────────────────────
@@ -273,7 +273,7 @@ async function saveTank() {
     owner:       document.getElementById('tk_owner').value.trim(),
     note:        document.getElementById('tk_note').value.trim(),
   };
-  if (editingTankId) {
+  if (editingTankId!=null&&editingTankId!=='') {
     Object.assign(data.tanks.find(x => x.id === editingTankId), obj);
   } else {
     obj.id = 't_' + Date.now();
@@ -357,7 +357,7 @@ async function saveTankIncome() {
     note:   document.getElementById('ti_note').value.trim(),
     sum,
   };
-  if (editingTankIncomeId) {
+  if (editingTankIncomeId!=null&&editingTankIncomeId!=='') {
     Object.assign(data.tankIncomes.find(x => x.id === editingTankIncomeId), obj);
   } else {
     obj.id = 'ti_' + Date.now();

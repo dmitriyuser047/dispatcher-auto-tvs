@@ -107,10 +107,10 @@ function gsmManualApply(db, plan, confirmedDuplicates) {
   return next;
 }
 function gsmManualCards(row) {
-  const list = (data.fuelCards || []).filter(c => gsmOrgKey(gsmCardAt(data, c.number, row.date || gsmManual.month + '-01').org) === gsmOrgKey(gsmManual.org));
+  const selected=gsmCardKey(row.cardNo),list = (data.fuelCards || []).filter(c => selected&&gsmCardKey(c.number)===selected||!c.archived&&!c.mergedInto&&c.status!=='blocked'&&gsmOrgKey(gsmCardAt(data, c.number, row.date || gsmManual.month + '-01').org) === gsmOrgKey(gsmManual.org));
   if (row.cardNo && !list.some(c => gsmCardKey(c.number) === gsmCardKey(row.cardNo))) list.push({ number: row.cardNo, provider: 'Проверьте организацию' });
   return '<option value="">Без карты</option>' + list.map(c => '<option value="' + fpEsc(c.number) + '"' + (gsmCardKey(row.cardNo) === gsmCardKey(c.number) ? ' selected' : '') + '>' +
-    fpEsc(fcFormat(c.number) + (c.provider ? ' · ' + c.provider : '') + (c.status === 'blocked' ? ' · заблокирована' : '')) + '</option>').join('');
+    fpEsc(fcFormat(c.number) + (c.provider ? ' · ' + c.provider : '') + (c.status === 'blocked' ? ' · заблокирована' : '')+(c.mergedInto?' · архивная ссылка':c.archived?' · архив':'')) + '</option>').join('');
 }
 function gsmManualRowHtml(row, index) {
   const disabled = !gsmManual.org || gsmManualSaving ? ' disabled' : '';

@@ -205,7 +205,11 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
         _sync.synced[n] = cur[n];
         if (res.revisions && n in res.revisions) _sync.revs[n] = res.revisions[n];
       });
-      Object.entries(res.canonicalSections||{}).forEach(([name,rows])=>{d[name]=rows;_sync.synced[name]=JSON.stringify(rows);if(res.revisions&&name in res.revisions)_sync.revs[name]=res.revisions[name];});
+      // IPC structured cloning can retain shared objects between a source row
+      // and audit.after. Each live section must own its JSON tree: editing the
+      // next document must never mutate its earlier historical snapshot.
+      const canonical=Object.fromEntries(Object.entries(res.canonicalSections||{}).map(([name,rows])=>[name,JSON.parse(JSON.stringify(rows))]));
+      Object.entries(canonical).forEach(([name,rows])=>{d[name]=rows;_sync.synced[name]=JSON.stringify(rows);if(res.revisions&&name in res.revisions)_sync.revs[name]=res.revisions[name];});
       _sync.lastResult=res;
       if (mergedNames.size) {
         rebuildIndex();

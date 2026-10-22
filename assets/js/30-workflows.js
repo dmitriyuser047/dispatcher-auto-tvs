@@ -10,7 +10,7 @@ function wfInitData(d) {
   WF_SECTIONS.forEach(n=>{if(!Array.isArray(d[n])) d[n]=[];});
   // Детерминированные ключи нужны старым строкам реестра для совместной работы.
   for(const section of ['reestrRows','budget',...WF_SECTIONS]) {
-    const seen=new Map(); (d[section]||[]).forEach(r=>{ if(!r || typeof r!=='object' || r.id) return; const h=wfHash(JSON.stringify(r)); const n=seen.get(h)||0; seen.set(h,n+1); r.id='legacy_'+section+'_'+h+'_'+n; });
+    const seen=new Map(); (d[section]||[]).forEach(r=>{ if(!r || typeof r!=='object' || r.id!==undefined&&r.id!==null&&r.id!=='') return; const h=wfHash(JSON.stringify(r)); const n=seen.get(h)||0; seen.set(h,n+1); r.id='legacy_'+section+'_'+h+'_'+n; });
   }
 }
 function wfAppendAudit(d, previous) {
@@ -28,9 +28,16 @@ function wfAppendAudit(d, previous) {
   });
   d.auditLog.push(...entries);
 }
-function wfAssets() { return [...(data.vehicles||[]).map(v=>({ref:'v:'+v.id,label:[v.plate,v.make].filter(Boolean).join(' · '),row:v})),...(data.generators||[]).map(g=>({ref:'g:'+g.id,label:'ДЭС '+g.name,row:g})),...(data.tanks||[]).map(t=>({ref:'t:'+t.id,label:'Ёмкость '+t.name,row:t}))]; }
-function wfAsset(ref) { return wfAssets().find(x=>x.ref===ref); }
-function wfContext(ref,date=wfToday()) { const a=wfAsset(ref); const changes=(data.assetAssignments||[]).filter(x=>!x.archived && x.assetRef===ref && x.from<=date && (!x.to||x.to>=date)).sort((a,b)=>String(b.from).localeCompare(a.from)); return Object.assign({},a?.row||{},changes[0]||{}); }
+function wfAssetDescriptor(ref,resolved){
+  const row=resolved.row,label=resolved.section==='vehicles'?[row.plate,row.make].filter(Boolean).join(' · '):resolved.section==='generators'?'ДЭС '+row.name:'Ёмкость '+row.name;
+  return {ref,label,row,section:resolved.section,id:resolved.id};
+}
+function wfAsset(ref) { const resolved=EntityIdentity.resolveAsset(data,ref);return resolved.status==='known'?wfAssetDescriptor(ref,resolved):null; }
+function wfAssets() {
+  const groups=new Map();for(const section of ['vehicles','generators','tanks'])for(const row of data[section]||[]){if(!EntityIdentity.identifier(row.id))continue;const ref=(section==='vehicles'?'v:':section==='generators'?'g:':'t:')+String(row.id);if(!groups.has(ref))groups.set(ref,[]);groups.get(ref).push({section,id:row.id,row});}
+  return [...groups].filter(([,matches])=>matches.length===1).map(([ref,matches])=>wfAssetDescriptor(ref,matches[0]));
+}
+function wfContext(ref,date=wfToday()) { const a=wfAsset(ref);if(!a)return {}; const changes=(data.assetAssignments||[]).filter(x=>!x.archived && x.assetRef===ref && x.from<=date && (!x.to||x.to>=date)).sort((a,b)=>String(b.from).localeCompare(a.from)); return Object.assign({},a.row,changes[0]||{}); }
 function wfOverlap(a,b) { return a.start<b.end && b.start<a.end; }
 function wfPersonnelKind(assetRef){return typeof TvsPersonnelEngine!=='undefined'?TvsPersonnelEngine.kindForAsset(assetRef):String(assetRef||'').startsWith('g:')?'operator':String(assetRef||'').startsWith('v:')?'driver':null;}
 function wfPersonnelFieldLabel(assetRef){const kind=wfPersonnelKind(assetRef);return kind==='operator'?'Оператор ДЭС':kind==='driver'?'Водитель':'Сотрудник';}
@@ -46,14 +53,13 @@ function wfDispatchProblems(job,old) {
     if(asset && /ремонт|списан|дтп|продан/i.test(wfContext(job.assetRef,job.start?.slice(0,10)).status||''))issues.push('Статус техники не позволяет назначение');
     for(const r of data.dispatchJobs||[]) if(!r.archived && r.id!==job.id && !['cancelled','done','confirmed'].includes(r.status) && wfOverlap(job,r)) {
       if(job.assetRef&&job.assetRef===r.assetRef)issues.push('Техника занята: '+r.title);
-      if(job.driverId&&job.driverId===r.driverId)issues.push('Сотрудник занят: '+r.title);
+      if(EntityIdentity.presentId(job.driverId)&&job.driverId===r.driverId)issues.push('Сотрудник занят: '+r.title);
     }
     if((data.workOrders||[]).some(r=>r.assetRef===job.assetRef&&['approved','repairing'].includes(r.status)&&r.downtimeFrom&&r.downtimeFrom<job.end&&(!r.downtimeTo||r.downtimeTo>job.start)))issues.push('Задание пересекается с простоем по ремонту');
     if((data.assetDocuments||[]).some(r=>!r.archived&&r.mandatory&&r.expires&&r.expires<job.end.slice(0,10)&&(r.assetRef===job.assetRef||r.driverId===job.driverId)))issues.push('Обязательный документ истёк к дате задания');
     const skills=new Set(String(driver?.skills||'').toLowerCase().split(',').map(s=>s.trim()).filter(Boolean));
     if(driver && job.requirements && !job.requirements.toLowerCase().split(',').map(s=>s.trim()).filter(Boolean).every(s=>skills.has(s)))issues.push('Не подтверждены все требуемые допуски сотрудника');
-    const vid=job.assetRef?.startsWith('v:')?job.assetRef.slice(2):null,gid=job.assetRef?.startsWith('g:')?job.assetRef.slice(2):null;
-    if([...(data.vehicleTo||[]).filter(r=>vid&&r.vehicleId===vid),...(data.toRecords||[]).filter(r=>gid&&r.generatorId===gid)].some(r=>r.planned&&!r.completedAt&&r.date>=job.start.slice(0,10)&&r.date<=job.end.slice(0,10)))issues.push('В интервале задания запланировано ТО');
+    if([...(data.vehicleTo||[]).filter(r=>asset?.section==='vehicles'&&r.vehicleId===asset.id),...(data.toRecords||[]).filter(r=>asset?.section==='generators'&&r.generatorId===asset.id)].some(r=>r.planned&&!r.completedAt&&r.date>=job.start.slice(0,10)&&r.date<=job.end.slice(0,10)))issues.push('В интервале задания запланировано ТО');
   }
   if(job.status==='confirmed'&&(!job.confirmedBy||!job.result))issues.push('Для подтверждения укажите принявшего и результат');
   return [...new Set(issues)];
@@ -95,7 +101,7 @@ function wfValidate(section,row,old,options={}) {
         if(!wfPersonnelMatches(ref,wfPersonnelKind(row.assetRef)))throw Error('Для выбранной техники требуется '+wfPersonnelFieldLabel(row.assetRef).toLowerCase());
       }
     }
-    if(!['number','checkbox','driver','tank'].includes(type)&&typeof value!=='string')throw Error('Поле «'+label+'» должно быть текстом');
+    if(!['number','checkbox','driver','tank','part'].includes(type)&&typeof value!=='string')throw Error('Поле «'+label+'» должно быть текстом');
   }
   const transitions=WF_TRANSITIONS[section];
   if(transitions&&old&&old.status!==row.status&&transitions[old.status]&&!transitions[old.status].includes(row.status))throw Error('Недопустимый переход: '+(WF_STATUS[old.status]||old.status)+' → '+(WF_STATUS[row.status]||row.status));
@@ -106,18 +112,19 @@ function wfValidate(section,row,old,options={}) {
   }
   if(section==='fuelMovements') {
     if(!(row.qty>0))throw Error('Количество должно быть больше нуля');
-    if(!row.fromTankId&&!row.toTankId)throw Error('Выберите ёмкость');
+    const hasFrom=EntityIdentity.presentId(row.fromTankId),hasTo=EntityIdentity.presentId(row.toTankId);
+    if(!hasFrom&&!hasTo)throw Error('Выберите ёмкость');
     if(row.fromTankId===row.toTankId)throw Error('Источник и получатель должны различаться');
-    if(['transfer'].includes(row.kind)&&(!row.fromTankId||!row.toTankId))throw Error('Для перемещения нужны две ёмкости');
-    if((['receipt','return'].includes(row.kind)&&(!row.toTankId||row.fromTankId))||(row.kind==='issue'&&(!row.fromTankId||row.toTankId))||(row.kind==='adjustment'&&!!row.fromTankId===!!row.toTankId))throw Error('Проверьте направление движения');
+    if(['transfer'].includes(row.kind)&&(!hasFrom||!hasTo))throw Error('Для перемещения нужны две ёмкости');
+    if((['receipt','return'].includes(row.kind)&&(!hasTo||hasFrom))||(row.kind==='issue'&&(!hasFrom||hasTo))||(row.kind==='adjustment'&&hasFrom===hasTo))throw Error('Проверьте направление движения');
     const from=(data.tanks||[]).find(t=>t.id===row.fromTankId),to=(data.tanks||[]).find(t=>t.id===row.toTankId);
     if(from&&to&&(from.fuel||'diesel')!==(to.fuel||'diesel'))throw Error('Виды топлива ёмкостей не совпадают');
     if(row.kind==='return'&&row.assetRef)throw Error('Возврат из бака техники пока не поддерживается. Для внешнего возврата очистите поле техники.');
     if(row.kind==='issue'&&row.assetRef?.startsWith('t:'))throw Error('Для выдачи в ёмкость используйте перемещение');
-    if(row.kind==='issue'&&row.assetRef?.startsWith('g:')&&!row.legacyOverlapConfirmed&&(data.genRecords||[]).some(r=>r.generatorId===row.assetRef.slice(2)&&r.date===row.date&&genRecordTankId(r)===row.fromTankId&&+r.fuelIssued>0))throw Error('В этот день уже есть выдача в журнале ДЭС. Если это отдельная дополнительная выдача, подтвердите её в форме; повторно существующую выдачу не вводите.');
+    if(row.kind==='issue'&&row.assetRef?.startsWith('g:')&&!row.legacyOverlapConfirmed&&(data.genRecords||[]).some(r=>r.generatorId===wfAsset(row.assetRef)?.id&&r.date===row.date&&genRecordTankId(r)===row.fromTankId&&+r.fuelIssued>0))throw Error('В этот день уже есть выдача в журнале ДЭС. Если это отдельная дополнительная выдача, подтвердите её в форме; повторно существующую выдачу не вводите.');
     if(!row.reason)throw Error('Укажите основание движения');
     if(old)throw Error('Проведённые движения неизменяемы. Создайте обратное движение с основанием.');
-    if(row.fromTankId&&wfTankBalanceAt(row.fromTankId,row.date)<row.qty)throw Error('На дату движения недостаточно расчётного топлива');
+    if(hasFrom&&wfTankBalanceAt(row.fromTankId,row.date)<row.qty)throw Error('На дату движения недостаточно расчётного топлива');
     if((data.fuelPeriods||[]).some(p=>p.month===row.date.slice(0,7)&&p.closed))throw Error('Топливный месяц закрыт');
   }
   if(section==='partMovements') {
@@ -136,7 +143,7 @@ function wfValidate(section,row,old,options={}) {
     if(old?.status==='accepted')throw Error('Принятая форма неизменяема. Создайте корректировку.');
     if(row.status==='rejected'&&!row.rejectionReason)throw Error('Укажите причину отклонения сменной формы');
   }
-  if(section==='assetDocuments'&&!row.assetRef&&!row.driverId)throw Error('Свяжите документ с техникой или сотрудником');
+  if(section==='assetDocuments'&&!row.assetRef&&!EntityIdentity.presentId(row.driverId))throw Error('Свяжите документ с техникой или сотрудником');
   if(section==='assetDocuments'&&row.date&&row.expires&&row.expires<row.date)throw Error('Документ истекает раньше даты выдачи');
   if(section==='connectors'&&row.kind==='api'&&row.endpoint){let url;try{url=new URL(row.endpoint);}catch{throw Error('Проверьте адрес API');}if(url.protocol!=='https:'||url.username||url.password)throw Error('API адрес должен использовать HTTPS без пароля в адресе');}
 }
@@ -156,10 +163,9 @@ function wfAssertCommandState(state){
   if(state.section&&JSON.stringify((data[state.section]||[]).find(row=>row.id===state.id)||null)!==state.original)throw Error('Исходная запись уже изменена. Откройте актуальную форму; введённые значения остаются в полях.');
 }
 function wfCommandTarget(assetRef){
-  const section=typeof assetRef==='string'?(assetRef.startsWith('v:')?'vehicles':assetRef.startsWith('g:')?'generators':null):null;
-  const matches=section?(data[section]||[]).filter(row=>String(row.id)===assetRef.slice(2)):[];
-  if(matches.length!==1)throw Error(matches.length?'Нельзя однозначно определить технику. Проверьте её ID.':'Выберите машину или ДЭС');
-  return {section,id:matches[0].id};
+  const resolved=EntityIdentity.resolveAsset(data,assetRef,{v:'vehicles',g:'generators'});
+  if(resolved.status!=='known')throw Error(resolved.status==='ambiguous'?'Нельзя однозначно определить технику. Проверьте её ID.':'Выберите машину или ДЭС');
+  return {section:resolved.section,id:resolved.id};
 }
 function wfCommandReference(section,value,label,fromSelect=false){
   const exact=(data[section]||[]).filter(row=>row.id===value);if(!fromSelect&&exact.length===1)return exact[0].id;
@@ -220,32 +226,32 @@ async function wfSave(section,row,state,options={}) {
 function wfReversalCheck(id) {
   const original=(data.fuelMovements||[]).find(r=>r.id===id);
   if(!original||original.deleted||original.cancelled)throw Error('Исходное движение не найдено или уже отменено');
-  if(original.reversedBy||original.originalMovementId||(data.fuelMovements||[]).some(r=>r.originalMovementId===id))throw Error('Повторное сторно не допускается');
-  for(const tankId of [original.fromTankId,original.toTankId].filter(Boolean))if(!(data.tanks||[]).some(t=>t.id===tankId))throw Error('Ёмкость исходного движения не найдена. Сначала восстановите её из истории.');
+  if(EntityIdentity.presentId(original.reversedBy)||EntityIdentity.presentId(original.originalMovementId)||(data.fuelMovements||[]).some(r=>r.originalMovementId===id))throw Error('Повторное сторно не допускается');
+  for(const tankId of [original.fromTankId,original.toTankId].filter(EntityIdentity.presentId))if(!(data.tanks||[]).some(t=>t.id===tankId))throw Error('Ёмкость исходного движения не найдена. Сначала восстановите её из истории.');
   if(!wfValidDate(original.date)||!Number.isFinite(original.qty)||original.qty<=0)throw Error('У исходного движения некорректны дата или количество');
   if(typeof fuelMonthClosed==='function'?fuelMonthClosed(original.date.slice(0,7)):(data.fuelPeriods||[]).some(p=>p.month===original.date.slice(0,7)&&p.closed))throw Error('Исходный месяц закрыт. Сначала откройте месяц с указанием причины.');
-  if(original.toTankId&&Math.min(wfTankBalanceAt(original.toTankId,original.date),wfTankBalanceAt(original.toTankId)) + 0.005 < original.qty)throw Error('В ёмкости-получателе недостаточно топлива для обратного движения на исходную дату или сегодня');
+  if(EntityIdentity.presentId(original.toTankId)&&Math.min(wfTankBalanceAt(original.toTankId,original.date),wfTankBalanceAt(original.toTankId)) + 0.005 < original.qty)throw Error('В ёмкости-получателе недостаточно топлива для обратного движения на исходную дату или сегодня');
   let linked=null;
   if(original.kind==='issue'&&original.assetRef){
-    const vehicle=original.assetRef.startsWith('v:'),id=original.assetRef.slice(2),records=vehicle?data.records:data.genRecords;
+    const asset=wfAsset(original.assetRef);if(!asset||!['vehicles','generators'].includes(asset.section))throw Error('Техника выдачи не найдена или ссылка неоднозначна');
+    const vehicle=asset.section==='vehicles',id=asset.id,records=vehicle?data.records:data.genRecords;
     const matches=(records||[]).filter(r=>r.id===original.recordId||r.fuelMovementId===original.id);
     if(matches.length!==1)throw Error('Не найдена единственная связанная запись журнала. Нужна проверка истории выдачи.');
     linked=matches[0];
-    if(linked.reversalId||Number(linked.fuelIssued)!==original.qty)throw Error('Связанная запись уже изменена или сторнирована');
+    if(EntityIdentity.presentId(linked.reversalId)||Number(linked.fuelIssued)!==original.qty||(vehicle?linked.vehicleId:linked.generatorId)!==id)throw Error('Связанная запись уже изменена или сторнирована');
     const all=(records||[]).filter(r=>(vehicle?r.vehicleId:r.generatorId)===id&&r.date<=wfToday()).slice().sort((a,b)=>cmpDateAsc(a.date,b.date));
-    const last=all[all.length-1],asset=wfAsset(original.assetRef)?.row;
-    if(!asset)throw Error('Техника выдачи не найдена');
+    const last=all[all.length-1];
     const balances=vehicle?computeFuelBalances(id,null,wfToday()):computeGenFuelBalances(id);
     const onSource=all.filter(r=>r.date<=original.date).pop();
-    const current=last?balances[last.id]:Number(asset.fuelBalance)||0,atSource=onSource?balances[onSource.id]:Number(asset.fuelBalance)||0;
-    if(Math.min(current,atSource)+0.005<original.qty)throw Error('В расчётном остатке техники недостаточно топлива для отмены этой выдачи. Проверьте последующий расход и замеры.');
+    const current=last?balances[last.id]:Number(asset.row.fuelBalance)||0,atSource=onSource?balances[onSource.id]:Number(asset.row.fuelBalance)||0;
+    if(!Number.isFinite(current)||!Number.isFinite(atSource)||Math.min(current,atSource)+0.005<original.qty)throw Error('В расчётном остатке техники недостаточно топлива для отмены этой выдачи. Проверьте последующий расход и замеры.');
   }
   return {original,linked};
 }
 async function wfReverseFuelMovement(id,reason) {
   reason=String(reason||'').trim();if(!reason)throw Error('Укажите причину сторно');
   const {original,linked}=wfReversalCheck(id);
-  const reversal={id:wfId('fuel-reversal'),date:original.date,kind:'adjustment',fromTankId:original.toTankId||'',toTankId:original.fromTankId||'',qty:original.qty,reason,originalMovementId:original.id,assetRef:original.assetRef||'',createdAt:new Date().toISOString(),sourceSnapshot:original.sourceSnapshot||null};
+  const reversal={id:wfId('fuel-reversal'),date:original.date,kind:'adjustment',fromTankId:original.toTankId??'',toTankId:original.fromTankId??'',qty:original.qty,reason,originalMovementId:original.id,assetRef:original.assetRef||'',createdAt:new Date().toISOString(),sourceSnapshot:original.sourceSnapshot||null};
   original.reversedBy=reversal.id;original.reversedAt=reversal.createdAt;
   if(linked){linked.originalFuelIssued=linked.fuelIssued;linked.fuelIssued=0;linked.reversalId=reversal.id;linked.reversedAt=reversal.createdAt;}
   data.fuelMovements.push(reversal);
@@ -253,25 +259,25 @@ async function wfReverseFuelMovement(id,reason) {
   closeModal('wfModal');wfTab='fuelMovements';renderWorkflows();showToast('Проведение исходного движения отменено. Оригинал сохранён в истории.');
 }
 function wfCanRestoreDeleted(event) {
-  return event?.action==='delete'&&typeof SYNC_SECTIONS!=='undefined'&&SYNC_SECTIONS.includes(event.section)&&event.section!=='auditLog'&&event.before&&typeof event.before==='object'&&!Array.isArray(event.before)&&typeof event.before.id==='string'&&!(data[event.section]||[]).some(r=>r.id===event.before.id);
+  return event?.action==='delete'&&typeof SYNC_SECTIONS!=='undefined'&&SYNC_SECTIONS.includes(event.section)&&event.section!=='auditLog'&&event.before&&typeof event.before==='object'&&!Array.isArray(event.before)&&EntityIdentity.identifier(event.before.id)&&!(data[event.section]||[]).some(r=>r.id===event.before.id);
 }
 function wfRestoreReferences(section,row) {
-  const requireRef=(name,id,label)=>{if(id&&!(data[name]||[]).some(r=>r.id===id))throw Error('Сначала восстановите '+label+' («'+id+'»). Запись без связи не будет создана.');};
-  if(['records','vehicleTo','repairs'].includes(section)&&!row.vehicleId)throw Error('В истории отсутствует связь с машиной');
-  if(['genRecords','toRecords'].includes(section)&&!row.generatorId)throw Error('В истории отсутствует связь с ДЭС');
+  const requireRef=(name,id,label)=>{if(EntityIdentity.presentId(id)&&!(data[name]||[]).some(r=>r.id===id))throw Error('Сначала восстановите '+label+' («'+id+'»). Запись без связи не будет создана.');};
+  if(['records','vehicleTo','repairs'].includes(section)&&!EntityIdentity.presentId(row.vehicleId))throw Error('В истории отсутствует связь с машиной');
+  if(['genRecords','toRecords'].includes(section)&&!EntityIdentity.presentId(row.generatorId))throw Error('В истории отсутствует связь с ДЭС');
   requireRef('vehicles',row.vehicleId,'машину');requireRef('generators',row.generatorId,'ДЭС');
   for(const key of ['tankId','fromTankId','toTankId','counterTankId'])requireRef('tanks',row[key],'ёмкость');
   requireRef('drivers',row.driverId,'сотрудника');requireRef('parts',row.partId,'номенклатуру');requireRef('workOrders',row.workOrderId,'ремонтный заказ');requireRef('dispatchJobs',row.jobId,'заявку');requireRef('contragents',row.contragentId,'контрагента');
   if(row.assetRef&&!wfAsset(row.assetRef))throw Error('Сначала восстановите технику, указанную в записи');
-  if(row.recordId){const list=section==='fuelMovements'&&row.assetRef?.startsWith('g:')?'genRecords':'records';requireRef(list,row.recordId,'связанную запись журнала');}
-  if(row.fuelMovementId)requireRef('fuelMovements',row.fuelMovementId,'исходное движение топлива');
-  if(row.originalMovementId)requireRef('fuelMovements',row.originalMovementId,'исходное движение сторно');
-  if(row.reversedBy)requireRef('fuelMovements',row.reversedBy,'движение сторно');
-  if(row.fuelMovementId){const movement=(data.fuelMovements||[]).find(r=>r.id===row.fuelMovementId);if(movement?.reversedBy&&(row.reversalId!==movement.reversedBy||Number(row.fuelIssued)!==0))throw Error('Выдача уже сторнирована. Нельзя восстановить её прежний положительный приход.');}
+  if(EntityIdentity.presentId(row.recordId)){const list=section==='fuelMovements'&&row.assetRef?.startsWith('g:')?'genRecords':'records';requireRef(list,row.recordId,'связанную запись журнала');}
+  requireRef('fuelMovements',row.fuelMovementId,'исходное движение топлива');
+  requireRef('fuelMovements',row.originalMovementId,'исходное движение сторно');
+  requireRef('fuelMovements',row.reversedBy,'движение сторно');
+  if(EntityIdentity.presentId(row.fuelMovementId)){const movement=(data.fuelMovements||[]).find(r=>r.id===row.fuelMovementId);if(EntityIdentity.presentId(movement?.reversedBy)&&(row.reversalId!==movement.reversedBy||Number(row.fuelIssued)!==0))throw Error('Выдача уже сторнирована. Нельзя восстановить её прежний положительный приход.');}
   if(row.fuelCardNum&&!(data.fuelCards||[]).some(c=>typeof fcNorm==='function'?fcNorm(c.number)===fcNorm(row.fuelCardNum):String(c.number)===String(row.fuelCardNum)))throw Error('Топливная карта с этим номером не найдена. Сначала восстановите карту.');
   if(section==='vehicles'&&row.plate&&(data.vehicles||[]).some(v=>typeof plateKey==='function'?plateKey(v.plate)===plateKey(row.plate):v.plate===row.plate))throw Error('Машина с таким госномером уже существует');
   if(section==='fuelCards'&&row.number&&(data.fuelCards||[]).some(c=>typeof fcNorm==='function'?fcNorm(c.number)===fcNorm(row.number):c.number===row.number))throw Error('Карта с таким номером уже существует');
-  const legacyParty=!row.contragentId&&(row.contragent||(section==='budget'?row.company:''));
+  const legacyParty=!EntityIdentity.presentId(row.contragentId)&&(row.contragent||(section==='budget'?row.company:''));
   if(legacyParty&&!(data.contragents||[]).some(c=>String(c.name||'').trim().toLowerCase()===String(legacyParty).trim().toLowerCase()))throw Error('Контрагент «'+legacyParty+'» не найден. Сначала восстановите контрагента.');
 }
 async function wfRestoreDeleted(auditId) {
@@ -282,7 +288,7 @@ async function wfRestoreDeleted(auditId) {
     const row=JSON.parse(JSON.stringify(event.before));wfRestoreReferences(event.section,row);
     const date=row.date||row.month;if(date&&typeof fuelMonthClosed==='function'&&['records','genRecords','tankIncomes','fuelPurchases','monthlyFuel','fuelMovements'].includes(event.section)&&fuelMonthClosed(date.slice(0,7)))throw Error('Месяц записи закрыт. Сначала откройте его с указанием причины.');
     if(WF_SECTIONS.includes(event.section)&&!['fuelMovements','partMovements'].includes(event.section))wfValidate(event.section,row,null);
-    if(event.section==='fuelMovements'&&row.kind==='issue'&&row.assetRef&&!row.recordId)throw Error('В истории нет связанного прихода в журнал. Автоматическое восстановление этой выдачи заблокировано.');
+    if(event.section==='fuelMovements'&&row.kind==='issue'&&row.assetRef&&!EntityIdentity.presentId(row.recordId))throw Error('В истории нет связанного прихода в журнал. Автоматическое восстановление этой выдачи заблокировано.');
     data[event.section].push(row);
     if(!await saveData(data,{noMerge:true}))throw Error('Восстановление не записано. Обновите базу и повторите проверку.');
     renderWorkflows();showToast('Запись восстановлена; событие удаления сохранено в истории');
@@ -290,9 +296,9 @@ async function wfRestoreDeleted(auditId) {
 }
 function wfAuditLabel(r) {return `${r.at?.slice(0,19).replace('T',' ')} · ${r.actor} · ${SYNC_NAMES[r.section]||r.section} · ${r.action==='create'?'добавление':r.action==='delete'?'удаление':'изменение'} · ${r.recordId}`;}
 function wfTimeline(ref) {
-  const a=wfAsset(ref); const rows=[]; const add=(arr,label,predicate,date='date')=>(arr||[]).filter(predicate).forEach(r=>rows.push({at:r[date]||r.createdAt||'',label,text:r.title||r.description||r.note||r.type||r.result||'',id:r.id}));
+  const a=wfAsset(ref);if(!a){showToast('Техника не найдена или ссылка неоднозначна. Проверьте ID карточек.');return;} const rows=[]; const add=(arr,label,predicate,date='date')=>(arr||[]).filter(predicate).forEach(r=>rows.push({at:r[date]||r.createdAt||'',label,text:r.title||r.description||r.note||r.type||r.result||'',id:r.id}));
   add(data.assetAssignments,'Назначение',r=>r.assetRef===ref,'from');add(data.dispatchJobs,'Задание',r=>r.assetRef===ref,'start');add(data.workOrders,'Ремонт',r=>r.assetRef===ref,'downtimeFrom');add(data.assetDocuments,'Документ',r=>r.assetRef===ref);add(data.fuelMovements,'Топливо',r=>r.assetRef===ref);add(data.shiftReports,'Смена',r=>r.assetRef===ref);
-  const id=ref.slice(2),isV=ref.startsWith('v:');add(isV?data.records:data.genRecords,'Журнал',r=>isV?r.vehicleId===id:r.generatorId===id);add(isV?data.vehicleTo:data.toRecords,'ТО',r=>isV?r.vehicleId===id:r.generatorId===id);add(data.repairs,'Ремонт · журнал',r=>r.vehicleId===id&&isV);
+  const id=a.id,isV=a.section==='vehicles';if(a.section==='vehicles'||a.section==='generators'){add(isV?data.records:data.genRecords,'Журнал',r=>isV?r.vehicleId===id:r.generatorId===id);add(isV?data.vehicleTo:data.toRecords,'ТО',r=>isV?r.vehicleId===id:r.generatorId===id);add(data.repairs,'Ремонт · журнал',r=>r.vehicleId===id&&isV);}else add(data.tankIncomes,'Ёмкость · приход',r=>r.tankId===id);
   wfShowDialog('История · '+(a?.label||ref),`<div class="wf-timeline">${rows.sort((a,b)=>b.at.localeCompare(a.at)).map(r=>`<article><strong>${htmlEsc(r.at)} · ${r.label}</strong><p>${htmlEsc(r.text||r.id)}</p></article>`).join('')||'Нет событий'}</div>`);
 }
 function wfShowDialog(title,body,footer='') {document.getElementById('wfModal')?.remove();const el=document.createElement('div');el.id='wfModal';el.className='modal-overlay open';el.innerHTML=`<div class="modal wf-modal" role="dialog" aria-modal="true" aria-label="${htmlEsc(title)}"><div class="modal-header"><div class="modal-title">${htmlEsc(title)}</div><button class="icon-btn" onclick="closeModal('wfModal')" aria-label="Закрыть">×</button></div><div class="modal-body">${body}</div>${footer?`<div class="modal-footer">${footer}</div>`:''}</div>`;document.body.append(el);precisionRemember(el);el.querySelector('input,select,textarea,button')?.focus();}

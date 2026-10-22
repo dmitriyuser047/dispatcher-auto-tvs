@@ -130,6 +130,8 @@
       ...db.generators.map(row => ({ assetRef:'g:' + row.id, label:'ДЭС ' + (row.name || row.id), kind:'generator', row }))];
     const knownAssetRefs = new Set(allAssets.map(asset => asset.assetRef));
     const assets = allAssets.filter(asset => (!options.assetRef || asset.assetRef === options.assetRef) && (!options.kind || asset.kind === options.kind));
+    const identities=new Map();for(const asset of allAssets)identities.set(asset.assetRef,(identities.get(asset.assetRef)||0)+1);
+    if(assets.some(asset=>identities.get(asset.assetRef)!==1))throw Object.assign(Error('Ссылка на технику неоднозначна. Проверьте совпадающие ID карточек перед расчётом стоимости.'),{code:'AMBIGUOUS_ASSET'});
     const rows = assets.map(asset => ({ ...asset, unit:asset.kind === 'vehicle' ? 'км' : 'ч', entries:[], estimates:[], exclusions:[], issues:[], quantityRows:[], unknownQuantityRows:0 }));
     const rowMap = new Map(rows.map(row => [row.assetRef, row]));
     const refInScope = ref => {

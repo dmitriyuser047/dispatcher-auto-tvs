@@ -61,3 +61,11 @@ test('ordinary legacy saves retain their established full-write fallback', async
   assert.equal(await sandbox.save(data, { noMerge:true }), true);
   assert.equal(writes.legacy, 1); assert.equal(sandbox.state.enabled, false);
 });
+
+test('canonical IPC acknowledgement cannot share a mutable live document with an earlier audit snapshot or the response', async () => {
+  const row={id:'canonical-act',status:'posted',snapshot:{liters:923.537}},audit={id:'audit',section:'fuelWriteoffs',action:'create',after:row};
+  const {sandbox,data}=await context(()=>({ok:true,databaseToken:'test-database',revisions:{fuelWriteoffs:5,auditLog:1},canonicalSections:{fuelWriteoffs:[row],auditLog:[audit]}}));
+  assert.equal(await sandbox.save(data,required),true);assert.notEqual(data.fuelWriteoffs[0],data.auditLog[0].after);assert.notEqual(data.fuelWriteoffs[0],row);
+  data.fuelWriteoffs[0].snapshot.liters=1;assert.equal(data.auditLog[0].after.snapshot.liters,923.537);assert.equal(row.snapshot.liters,923.537);
+  data.auditLog[0].after.snapshot.liters=2;assert.equal(audit.after.snapshot.liters,923.537);assert.match(sandbox.state.synced.auditLog,/923\.537/);
+});

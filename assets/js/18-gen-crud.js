@@ -2,8 +2,10 @@
 // Выделено из index.html
 
 // ─── GENERATOR CRUD ──────────────────────────────────────
+function genCardSourceFields(){return JSON.stringify(Object.fromEntries(['gm_serial','gm_power','gm_location','gm_responsible','gm_fuel','gm_norm','gm_norm100','gm_norm50','gm_norm_idle','gm_hours_init','gm_fuel_balance','gm_cost','gm_status'].map(id=>[id,document.getElementById(id).value]).concat([['tankId',document.getElementById('gm_tank').selectedOptions[0]?.dataset.typedId??null]])));}
 function openAddGenerator() {
   editingGeneratorId = null;
+  document.getElementById('generatorModal')._generatorEditState=null;
   document.getElementById('generatorModalTitle').textContent = 'Добавить дизельный генератор';
   ['gm_name','gm_serial','gm_location','gm_responsible','gm_status','gm_note'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('gm_fuel').value = 'diesel';
@@ -33,7 +35,8 @@ function openEditGenerator(id) {
   document.getElementById('gm_cost').value         = g.cost        ?? '';
   document.getElementById('gm_status').value       = g.status      || '';
   document.getElementById('gm_note').value         = g.note        || '';
-  populateGenTankSelect(g.tankId || '');
+  populateGenTankSelect(g.tankId ?? '');
+  document.getElementById('generatorModal')._generatorEditState={id,fields:genCardSourceFields()};
   if(typeof effectiveParametersLegacyForm==='function')effectiveParametersLegacyForm('generators',editingGeneratorId==null?null:(data.generators||[]).find(row=>row.id===editingGeneratorId),'generatorModal');
   openModal('generatorModal');
 }
@@ -47,18 +50,24 @@ async function saveGenerator() {
   if(typeof effectiveParametersScalarGuard==='function'&&!effectiveParametersScalarGuard('generators',data.generators.find(row=>row.id===editingGeneratorId),{power:'gm_power',norm:'gm_norm',norm100:'gm_norm100',norm50:'gm_norm50',normIdle:'gm_norm_idle'}))return;
   const numeric=precisionRead({power:['gm_power',3],norm:['gm_norm',6],norm100:['gm_norm100',6],norm50:['gm_norm50',6],normIdle:['gm_norm_idle',6],hoursInit:['gm_hours_init',3,'zero'],fuelBalance:['gm_fuel_balance',3,'zero'],cost:['gm_cost',2]},editingGeneratorId==null?null:data.generators.find(x=>x.id===editingGeneratorId));
   if(!numeric)return;
-  const obj = {
+  let tankId=null;const tankOption=document.getElementById('gm_tank').selectedOptions[0];
+  if(tankOption?.value!==''){try{tankId=JSON.parse(tankOption?.dataset.typedId);}catch{showFieldError('Выберите ёмкость с подтверждённым ID','gm_tank');return;}
+    const previous=data.generators.find(row=>row.id===editingGeneratorId);
+    if(!EntityIdentity.identifier(tankId)||!tanksAll().some(row=>row.id===tankId)&&previous?.tankId!==tankId){showFieldError('Ёмкость не найдена. Откройте карточку заново.','gm_tank');return;}}
+  let obj = {
     name, location, ...numeric,
     serial:      document.getElementById('gm_serial').value.trim(),
     responsible: document.getElementById('gm_responsible').value.trim(),
     fuel:        document.getElementById('gm_fuel').value,
     status:      document.getElementById('gm_status').value.trim(),
     note:        document.getElementById('gm_note').value.trim(),
-    tankId:      document.getElementById('gm_tank').value || null,
+    tankId,
   };
-  if (editingGeneratorId) {
+  if (editingGeneratorId!=null&&editingGeneratorId!=='') {
     const g = data.generators.find(x => x.id === editingGeneratorId);
     if (!g) return;
+    const editState=document.getElementById('generatorModal')._generatorEditState;
+    if(editState?.id===editingGeneratorId&&editState.fields===genCardSourceFields())obj={...g,name,note:document.getElementById('gm_note').value.trim()};
     if (g.tankId !== obj.tankId) genPreserveTankHistory(g);
     Object.assign(g, obj);
   } else {
@@ -140,7 +149,7 @@ function openAddGenRecord() {
 function openEditGenRecord(id) {
   const r = (data.genRecords || []).find(x => x.id === id);
   if (!r) return;
-  if (r.fuelMovementId) { showToast('Это выдача из раздела «Движения топлива». Связанная запись не изменяется; оформите отдельное движение с основанием.'); return; }
+  if (EntityIdentity.presentId(r.fuelMovementId)) { showToast('Это выдача из раздела «Движения топлива». Связанная запись не изменяется; оформите отдельное движение с основанием.'); return; }
   editingGenRecordId = id;
   document.getElementById('genRecordModalTitle').textContent = 'Редактировать запись';
   document.getElementById('gen_rec_date').value         = fmtDate(r.date);
@@ -157,7 +166,7 @@ function openEditGenRecord(id) {
 }
 
 async function saveGenRecord() {
-  if (editingGenRecordId && (data.genRecords || []).find(r => r.id === editingGenRecordId)?.fuelMovementId) { showToast('Связанная выдача из движения топлива не редактируется в журнале'); return; }
+  if (editingGenRecordId!=null&&editingGenRecordId!==''&&EntityIdentity.presentId((data.genRecords || []).find(r => r.id === editingGenRecordId)?.fuelMovementId)) { showToast('Связанная выдача из движения топлива не редактируется в журнале'); return; }
   const generator = (data.generators || []).find(g => g.id === selectedGeneratorId);
   if (!generator || generator.archived) { showToast('Для новой записи восстановите ДЭС из архива'); return; }
   const dateRaw = document.getElementById('gen_rec_date').value.trim();
@@ -180,17 +189,18 @@ async function saveGenRecord() {
     note:        document.getElementById('gen_rec_note').value.trim(),
   };
   const actualSource = document.getElementById('gen_rec_fuel_actual').dataset.source;
-  if (actualSource === 'estimate' || actualSource === 'manual' || !editingGenRecordId && obj.fuelActual != null) {
+  if (actualSource === 'estimate' || actualSource === 'manual' || (editingGenRecordId==null||editingGenRecordId==='') && obj.fuelActual != null) {
     obj.fuelActualSource = actualSource || 'manual';
     obj.modelVersion = obj.fuelActualSource === 'estimate' ? 'gen-load-curve-v1' : null;
   }
-  if (editingGenRecordId) {
+  if (editingGenRecordId!=null&&editingGenRecordId!=='') {
     const old = data.genRecords.find(x => x.id === editingGenRecordId);
     if (!old) return;
     obj.tankId = genRecordTankId(old);
     Object.assign(old, obj);
   } else {
-    obj.tankId = ((data.generators || []).find(g => g.id === selectedGeneratorId) || {}).tankId || null;
+    const tankId=((data.generators||[]).find(g=>g.id===selectedGeneratorId)||{}).tankId;
+    obj.tankId = tankId!=null&&tankId!==''?tankId:null;
     obj.id = 'gr_' + Date.now();
     data.genRecords.push(obj);
   }
@@ -204,7 +214,7 @@ async function saveGenRecord() {
 }
 
 async function deleteGenRecord(id) {
-  if ((data.genRecords || []).find(r => r.id === id)?.fuelMovementId) { showToast('Связанная выдача топлива сохраняется в истории. Удаление нарушит остатки.'); return; }
+  if (EntityIdentity.presentId((data.genRecords || []).find(r => r.id === id)?.fuelMovementId)) { showToast('Связанная выдача топлива сохраняется в истории. Удаление нарушит остатки.'); return; }
   if (!await confirmAction('Удалить эту запись?')) return;
   data.genRecords = (data.genRecords || []).filter(r => r.id !== id);
   if (!await saveData(data)) return;

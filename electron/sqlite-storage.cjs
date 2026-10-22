@@ -102,6 +102,11 @@ function readRows(dataDir,name){
   if(!schema.sections.includes(name))fail('SQLITE_SECTION','Неизвестный раздел SQLite: '+name);
   return transaction(dataDir,()=>connection(dataDir).prepare('SELECT row_json FROM section_rows WHERE section=? ORDER BY position').all(name).map(row=>JSON.parse(row.row_json)),{readOnly:true});
 }
+function countLegacyAssetReferences(dataDir,section,text){
+  if(!['vehicles','generators','tanks'].includes(section)||typeof text!=='string')fail('QUERY_INVALID','Неверная проверка ссылки на технику');
+  const number=Number(text),numeric=Number.isFinite(number)&&String(number)===text;
+  return transaction(dataDir,()=>connection(dataDir).prepare("SELECT count(*) AS count FROM section_rows WHERE section=? AND ((id_type='string' AND id_value=?) OR (id_type='number' AND id_value=?) OR (id_type='legacy' AND json_type(row_json,'$.id')='text' AND json_extract(row_json,'$.id')=?))").get(section,JSON.stringify(text),numeric?JSON.stringify(number):'',text).count,{readOnly:true});
+}
 function queryRows(dataDir,input){
   const spec=require('./data-query.cjs');
   if(!plain(input)||Object.keys(input).some(key=>!['section','limit','from','to','assetRef','search','afterPosition'].includes(key)))fail('QUERY_INVALID','Неверные параметры выборки SQLite');
@@ -277,4 +282,4 @@ function inspect(dataDir){return transaction(dataDir,()=>{
     sections,rowCount:sections.reduce((total,row)=>total+row.count,0),linkCount:db.prepare('SELECT count(*) AS count FROM row_links').get().count,
     legacyIssues:db.prepare('SELECT issue_json FROM reference_issues ORDER BY id').all().map(row=>JSON.parse(row.issue_json)),integrity:integrityCheck,foreignKeyErrors};
 },{readOnly:true});}
-module.exports={exists,filename,readAll,readRows,queryRows,readRevisions,readIdentity,commitSections,create,inspect,transaction};
+module.exports={exists,filename,readAll,readRows,queryRows,countLegacyAssetReferences,readRevisions,readIdentity,commitSections,create,inspect,transaction};

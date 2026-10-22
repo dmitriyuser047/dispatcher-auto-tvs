@@ -298,7 +298,7 @@ function openAddToRecord(gid) {
     document.getElementById('to_hours').value = curH > 0 ? curH.toFixed(1) : '';
     if (last && last.nextHours) document.getElementById('to_next_hours').value = last.nextHours;
   }
-  document.getElementById('toModal').dataset.gid = gid;
+  document.getElementById('toModal').dataset.gid = JSON.stringify(gid);
   openModal('toModal');
 }
 
@@ -315,23 +315,25 @@ function openEditToRecord(id) {
   document.getElementById('to_cost').value       = r.cost        ?? '';
   document.getElementById('to_performer').value  = r.performer   || '';
   document.getElementById('to_note').value       = r.note        || '';
-  document.getElementById('toModal').dataset.gid = r.generatorId;
+  document.getElementById('toModal').dataset.gid = JSON.stringify(r.generatorId);
   openModal('toModal');
 }
 
 async function saveToRecord() {
+  let generatorId;try{generatorId=JSON.parse(document.getElementById('toModal').dataset.gid);}catch{showToast('Не удалось определить ДЭС в форме ТО. Откройте запись заново.');return;}
+  if(!EntityIdentity.identifier(generatorId)||(data.generators||[]).filter(row=>row.id===generatorId).length!==1){showToast('ДЭС в форме ТО не найдена или ID неоднозначен');return;}
   const dateIso = parseDate(document.getElementById('to_date').value.trim());
   const type    = document.getElementById('to_type').value.trim();
   if (!dateIso) { showFieldError('Укажите дату проведения ТО', 'to_date'); return; }
   if (!type)    { showFieldError('Укажите вид ТО', 'to_type'); return; }
-  const previous=editingToId?(data.toRecords || []).find(row=>row.id===editingToId):undefined;
+  const previous=editingToId!=null&&editingToId!==''?(data.toRecords || []).find(row=>row.id===editingToId):undefined;
   const numbers=precisionRead({hours:['to_hours',3,'null'],nextHours:['to_next_hours',3,'null'],cost:['to_cost',2,'null']},previous);
   if(!numbers)return;
   const {nextHours,hours}=numbers;
   const nextDate    = parseDate(document.getElementById('to_next_date').value.trim()) || null;
   const nextHoursAbs = hours != null && nextHours != null ? DecimalCore.toNumberExact(DecimalCore.add(hours,nextHours)) : null;
   const obj = {
-    generatorId:  document.getElementById('toModal').dataset.gid,
+    generatorId,
     date:         dateIso,
     type,
     hours:        hours != null ? +hours : null,
@@ -343,7 +345,7 @@ async function saveToRecord() {
     note:         document.getElementById('to_note').value.trim(),
   };
   if (!data.toRecords) data.toRecords = [];
-  if (editingToId) {
+  if (editingToId!=null&&editingToId!=='') {
     Object.assign(data.toRecords.find(x => x.id === editingToId), obj);
   } else {
     obj.id = 'to_' + Date.now();

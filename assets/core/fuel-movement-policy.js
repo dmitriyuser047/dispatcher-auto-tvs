@@ -23,7 +23,7 @@
     return api.resolve(section,row);
   }
   function accountingState(section,row){try{return accounting(section,row);}catch(error){return {mode:'invalid',error};}}
-  function asset(db,ref){const match=typeof ref==='string'&&ref.match(/^([vg]):(.+)$/);return match?rows(db,match[1]==='v'?'vehicles':'generators').find(row=>String(row.id)===match[2]):null;}
+  function asset(db,ref){const match=typeof ref==='string'&&ref.match(/^([vg]):(.+)$/);if(!match)return null;const matches=rows(db,match[1]==='v'?'vehicles':'generators').filter(row=>String(row.id)===match[2]);return matches.length===1?matches[0]:null;}
   function family(row){
     if(!row)return null;
     const fuel=getFuel(),grade=typeof fuel?.parseFuelGrade==='function'?fuel.parseFuelGrade(row.fuelGrade):'';

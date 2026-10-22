@@ -41,8 +41,8 @@ function recordFormFields() {
 async function saveRecord() {
   const dateRaw = document.getElementById('rec_date').value.trim();
   const date = parseDate(dateRaw);
-  const _old = editingRecordId && data.records.find(x => x.id === editingRecordId);
-  if(_old?.fuelMovementId){showToast('Связанная выдача изменяется отдельной корректировкой движения топлива');return;}
+  const _old = editingRecordId!=null&&editingRecordId!==''&&data.records.find(x => x.id === editingRecordId);
+  if(EntityIdentity.presentId(_old?.fuelMovementId)){showToast('Связанная выдача изменяется отдельной корректировкой движения топлива');return;}
   if (!date) { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'rec_date'); return; }
   const numeric=precisionRead({km:['rec_km',3,'error'],kmGlonass:['rec_km_glonass',3],odoStart:['rec_odo_start',3],odoEnd:['rec_odo_end',3],fuelIssued:['rec_fuel_issued',3],fuelSum:['rec_fuel_sum',2],fuelUsed:['rec_fuel_used',3],fuelActual:['rec_fuel_actual',3],fuelIdle:['rec_fuel_idle',3],tankMeasured:['rec_tank_measured',3]},_old);
   if(!numeric)return;
@@ -78,7 +78,7 @@ async function saveRecord() {
     obj.fuelProvider = owner.provider || '';
   }
   const before = JSON.stringify(data);
-  if (editingRecordId) {
+  if (editingRecordId!=null&&editingRecordId!=='') {
     const r = data.records.find(x => x.id === editingRecordId);
     if (!r) { showToast('Запись уже удалена. Откройте журнал заново.'); return; }
     Object.assign(r, obj);
@@ -98,7 +98,7 @@ async function saveRecord() {
 }
 
 async function deleteRecord(id) {
-  if(data.records.find(r=>r.id===id)?.fuelMovementId){showToast('Связанную выдачу нельзя удалить. Оформите корректировку движения топлива.');return;}
+  if(EntityIdentity.presentId(data.records.find(r=>r.id===id)?.fuelMovementId)){showToast('Связанную выдачу нельзя удалить. Оформите корректировку движения топлива.');return;}
   const _r = data.records.find(x => x.id === id);
   if (_r && typeof fuelEditAllowed === 'function' && !fuelEditAllowed(_r.date)) return;
   if (!await confirmAction('Удалить эту запись?')) return;

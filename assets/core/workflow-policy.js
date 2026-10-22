@@ -54,7 +54,8 @@
       const startDay = job.start.slice(0,10), endDay = job.end.slice(0,10);
       const section = assetSection(job.assetRef);
       const assetVisible = section && canRead(context,section);
-      const equipment = assetVisible ? rows(db,section).find(row => String(row.id) === job.assetRef.slice(2)) : null;
+      const matchingEquipment=assetVisible?rows(db,section).filter(row=>String(row.id)===job.assetRef.slice(2)):[];
+      const equipment = matchingEquipment.length===1?matchingEquipment[0]:null;
       const baseRisk = [job.assetRef,job.driverId,job.start,job.end,job.requirements || ''];
       if (section) {
         const visibleAssetStatus = equipment?.status;

@@ -33,8 +33,10 @@ function filteredResult(result,principal){
 function execute(dataDir,input,options={}){
   const commands=require('../assets/core/platform-commands.js');
   const envelope=contracts.parseCommandEnvelope(input,schema.sections),command=commands.parseCommand(envelope.command),principal=checkedPrincipal(options.principal);
+  const catalogMerge=command.type==='MergeCatalog';
+  if(catalogMerge&&principal.role!=='admin')fail('ACCESS_DENIED','Объединение справочников доступно администратору.',403);
   const dependencies=commands.dependencies(command),footprint=commands.footprint(command);
-  if(!Array.isArray(dependencies)||!Array.isArray(footprint)||dependencies.some(name=>!schema.sections.includes(name)||name==='auditLog')||footprint.some(name=>!dependencies.includes(name)))fail('COMMAND_DEFINITION','Некорректно определены зависимости команды',500);
+  if(!Array.isArray(dependencies)||!Array.isArray(footprint)||dependencies.some(name=>!schema.sections.includes(name)||name==='auditLog'&&!catalogMerge)||footprint.some(name=>name==='auditLog'||!dependencies.includes(name)))fail('COMMAND_DEFINITION','Некорректно определены зависимости команды',500);
   requireAccess(principal,'read',dependencies);
   return storage.withDatabaseLock(dataDir,()=>{
     const action=()=>{

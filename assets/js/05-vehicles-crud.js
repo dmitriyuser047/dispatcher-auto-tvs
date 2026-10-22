@@ -81,7 +81,7 @@ async function saveVehicle() {
   const twin = data.vehicles.find(x => x.id !== editingVehicleId && plateKey(x.plate) === plateKey(plate));
   if (twin && !confirm('Госномер «' + plate + '» уже есть у машины ' + (twin.make || '') + (twin.org ? ' (' + twin.org + ')' : '') +
       '.\nОдинаковые номера путают загрузку заправок. Всё равно сохранить?')) return;
-  if (editingVehicleId) {
+  if (editingVehicleId!=null&&editingVehicleId!=='') {
     const v = data.vehicles.find(x => x.id === editingVehicleId);
     if (typeof gsmPreserveVehicleHistory === 'function' && v.org !== obj.org) gsmPreserveVehicleHistory(data, v);
     Object.assign(v, obj);
@@ -112,7 +112,7 @@ async function deleteVehicle(id) {
 // ─── RECORD CRUD ─────────────────────────────────────────
 function recFillCardSelect(selectedNum, useDefault) {
   const sel = document.getElementById('rec_fuel_card');
-  const cards = (typeof fcList === 'function' ? fcList() : []).filter(c => c.status !== 'blocked' || fcNorm(c.number) === fcNorm(selectedNum));
+  const cards = (typeof fcList === 'function' ? fcList() : []).filter(c => !c.archived&&!c.mergedInto&&c.status!=='blocked'||!!selectedNum&&fcNorm(c.number)===fcNorm(selectedNum));
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   const vCardNum = v ? (typeof fcNorm === 'function' ? fcNorm(v.fuelcard) : '') : '';
   let html = '<option value="">— не указана —</option>';
@@ -156,7 +156,7 @@ function openAddRecord() {
 function openEditRecord(id) {
   const r = data.records.find(x => x.id === id);
   if (!r) return;
-  if(r.fuelMovementId){showToast('Выдача связана с движением топлива. Корректировка выполняется отдельным движением.');return;}
+  if(EntityIdentity.presentId(r.fuelMovementId)){showToast('Выдача связана с движением топлива. Корректировка выполняется отдельным движением.');return;}
   editingRecordId = id;
   document.getElementById('recordModalTitle').textContent = 'Редактировать запись';
   document.getElementById('rec_date').value = fmtDate(r.date);

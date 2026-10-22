@@ -70,19 +70,20 @@ async function populateRepairCategorySelect(presetValue) {
   if (presetValue) sel.value = presetValue;
 }
 
-function populateRepairVehicleSelect(selEl, presetVid) {
-  selEl.innerHTML = data.vehicles.slice().sort((a,b) => (a.plate||'').localeCompare(b.plate||'', 'ru'))
-    .map(v => `<option value="${htmlEsc(v.id)}">${htmlEsc(v.plate)} — ${htmlEsc(v.make)}${v.driver ? ' · ' + htmlEsc(v.driver) : ''}</option>`).join('');
-  if (presetVid) selEl.value = presetVid;
+function populateRepairVehicleSelect(selEl, presetVid, keepHistorical=false) {
+  selEl.innerHTML = data.vehicles.filter(v=>!v.archived&&!v.mergedInto||keepHistorical&&v.id===presetVid).sort((a,b) => (a.plate||'').localeCompare(b.plate||'', 'ru'))
+    .map(v => `<option value="${htmlEsc(v.id)}" data-typed-id="${htmlEsc(JSON.stringify(v.id))}" ${v.id===presetVid?'selected':''}>${htmlEsc(v.plate)} — ${htmlEsc(v.make)}${v.driver ? ' · ' + htmlEsc(v.driver) : ''}</option>`).join('');
 }
 
 function openAddRepair(vid) {
+  const selected=vid!=null&&vid!==''?vid:selectedVehicleId,vehicle=data.vehicles.find(row=>row.id===selected);
+  if(vehicle&&(vehicle.archived||vehicle.mergedInto)){showToast('Для нового ремонта выберите действующую основную карточку техники');return;}
   editingRepairId = null;
   document.getElementById('repairModalTitle').textContent = 'Добавить ремонт';
   document.getElementById('repairDeleteBtn').style.display = 'none';
   const sel = document.getElementById('rp_vehicle');
-  populateRepairVehicleSelect(sel, vid || selectedVehicleId);
-  document.getElementById('rp_vehicle_wrap').style.display = vid ? 'none' : '';
+  populateRepairVehicleSelect(sel, vid!=null&&vid!==''?vid:selectedVehicleId);
+  document.getElementById('rp_vehicle_wrap').style.display = vid!=null&&vid!=='' ? 'none' : '';
   const now = new Date();
   document.getElementById('rp_invoice_date').value = fmtDate(now.toISOString().split('T')[0]);
   ['rp_invoice_no','rp_description','rp_note'].forEach(id => document.getElementById(id).value = '');
@@ -90,8 +91,8 @@ function openAddRepair(vid) {
   document.getElementById('rp_paid').checked = false;
   populateRepairCategorySelect('');
   // предзаполнить пробег из последней записи по ТС, если известен
-  const presetVid = vid || selectedVehicleId;
-  const v = presetVid && data.vehicles.find(x => x.id === presetVid);
+  const presetVid = vid!=null&&vid!==''?vid:selectedVehicleId;
+  const v = presetVid!=null&&presetVid!==''&&data.vehicles.find(x => x.id === presetVid);
   if (v) {
     const totalKm = recsFor(v.id).reduce((s, r) => s + (r.km || 0), 0);
     const curOdo = (v.odometer || 0) + totalKm;
@@ -107,7 +108,7 @@ function openEditRepair(id) {
   document.getElementById('repairModalTitle').textContent = 'Редактировать ремонт';
   document.getElementById('repairDeleteBtn').style.display = '';
   const sel = document.getElementById('rp_vehicle');
-  populateRepairVehicleSelect(sel, r.vehicleId);
+  populateRepairVehicleSelect(sel, r.vehicleId, true);
   document.getElementById('rp_vehicle_wrap').style.display = '';
   document.getElementById('rp_invoice_no').value   = r.invoiceNo || '';
   document.getElementById('rp_invoice_date').value = fmtDate(r.invoiceDate);
@@ -121,11 +122,11 @@ function openEditRepair(id) {
 }
 
 async function saveRepair() {
-  const vehicleId   = document.getElementById('rp_vehicle').value;
+  let vehicleId;try{vehicleId=JSON.parse(document.getElementById('rp_vehicle').selectedOptions[0]?.dataset.typedId);}catch{showFieldError('Выберите технику с подтверждённым ID','rp_vehicle');return;}
   const invoiceDate = parseDate(document.getElementById('rp_invoice_date').value.trim());
   const cost        = parseFloat(document.getElementById('rp_cost').value);
   const description = document.getElementById('rp_description').value.trim();
-  if (!vehicleId)     { showFieldError('Выберите транспортное средство', 'rp_vehicle'); return; }
+  if (!EntityIdentity.identifier(vehicleId)||(data.vehicles||[]).filter(row=>row.id===vehicleId).length!==1) { showFieldError('Выберите транспортное средство с однозначным ID', 'rp_vehicle'); return; }
   if (!invoiceDate)   { showFieldError('Укажите дату счёта в формате ДД.ММ.ГГГГ', 'rp_invoice_date'); return; }
   if (isNaN(cost))    { showFieldError('Укажите сумму ремонта', 'rp_cost'); return; }
   if (!description)   { showFieldError('Укажите описание ремонта', 'rp_description'); return; }
@@ -141,7 +142,7 @@ async function saveRepair() {
     category:    document.getElementById('rp_category').value,
   };
   if (!data.repairs) data.repairs = [];
-  if (editingRepairId) {
+  if (editingRepairId!=null&&editingRepairId!=='') {
     Object.assign(data.repairs.find(x => x.id === editingRepairId), obj);
   } else {
     obj.id = 'rp_' + Date.now();

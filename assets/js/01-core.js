@@ -97,7 +97,7 @@ function validNonnegativeFields(ids) {
 function htmlEsc(value) {
   return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 }
-function htmlJs(value) { return htmlEsc(JSON.stringify(String(value ?? ''))); }
+function htmlJs(value) { return htmlEsc(JSON.stringify(typeof value==='number'&&Number.isFinite(value)?value:String(value??''))); }
 // Автоматически ставит точки при вводе даты
 function autoDateSep(el) {
   let v = el.value.replace(/[^\d]/g, '');
@@ -259,40 +259,25 @@ async function persistData(d = data, options) {
 }
 
 let data = { vehicles: [], records: [], generators: [], genRecords: [] };
-let recsByVid = {};
-let genRecsByGid = {};
-let vehicleToByVid = {};
-let repairsByVid = {};
+let recsByVid = new Map();
+let genRecsByGid = new Map();
+let vehicleToByVid = new Map();
+let repairsByVid = new Map();
 // Кеш остатков ДЭС. Расчёты транспорта кешируются общим ядром.
 let _genBalCache = {};
 function rebuildIndex() {
   if (typeof dispatcherInvalidate === 'function') dispatcherInvalidate();
-  recsByVid = {};
-  data.records.forEach(r => {
-    if (!recsByVid[r.vehicleId]) recsByVid[r.vehicleId] = [];
-    recsByVid[r.vehicleId].push(r);
-  });
-  genRecsByGid = {};
-  (data.genRecords || []).forEach(r => {
-    if (!genRecsByGid[r.generatorId]) genRecsByGid[r.generatorId] = [];
-    genRecsByGid[r.generatorId].push(r);
-  });
-  vehicleToByVid = {};
-  (data.vehicleTo || []).forEach(r => {
-    if (!vehicleToByVid[r.vehicleId]) vehicleToByVid[r.vehicleId] = [];
-    vehicleToByVid[r.vehicleId].push(r);
-  });
-  repairsByVid = {};
-  (data.repairs || []).forEach(r => {
-    if (!repairsByVid[r.vehicleId]) repairsByVid[r.vehicleId] = [];
-    repairsByVid[r.vehicleId].push(r);
-  });
+  const index=(rows,field)=>{const grouped=new Map();for(const row of rows||[]){if(!row||typeof row!=='object')continue;const id=row[field];if(!grouped.has(id))grouped.set(id,[]);grouped.get(id).push(row);}return grouped;};
+  recsByVid = index(data.records,'vehicleId');
+  genRecsByGid = index(data.genRecords,'generatorId');
+  vehicleToByVid = index(data.vehicleTo,'vehicleId');
+  repairsByVid = index(data.repairs,'vehicleId');
   _genBalCache = {};
 }
-function recsFor(vid) { return recsByVid[vid] || []; }
-function genRecsFor(gid) { return genRecsByGid[gid] || []; }
-function vehicleToFor(vid) { return vehicleToByVid[vid] || []; }
-function repairsFor(vid) { return repairsByVid[vid] || []; }
+function recsFor(vid) { return recsByVid.get(vid) || []; }
+function genRecsFor(gid) { return genRecsByGid.get(gid) || []; }
+function vehicleToFor(vid) { return vehicleToByVid.get(vid) || []; }
+function repairsFor(vid) { return repairsByVid.get(vid) || []; }
 
 // Debounce для поиска — не перерисовываем список на каждый символ
 function debounce(fn, ms) {

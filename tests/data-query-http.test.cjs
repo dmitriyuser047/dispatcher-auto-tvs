@@ -26,10 +26,11 @@ async function fixture(t,format){
 function safeError(result,status,code){assert.equal(result.status,status,result.text);assert.equal(result.body.ok,false);if(code)assert.equal(result.body.code,code);for(const key of ['rows','total','databaseToken','revision','nextCursor'])assert.equal(Object.hasOwn(result.body,key),false,key);assert.doesNotMatch(result.text,/FINANCIAL-SECRET|9988776655/);}
 
 for(const format of ['json','sqlite']){
- test('HTTP '+format+' query returns bounded Unicode/date/asset pages and preserves stored facts',async t=>{
+ test('HTTP '+format+' query returns bounded Unicode/date pages, refuses ambiguous asset filters and preserves stored facts',async t=>{
   const h=await fixture(t,format),before=storage.readSnapshot(h.dir);
-  const first=await h.query({section:'records',limit:1,from:'2026-09',to:'2026-09',assetRef:'v:7'});assert.equal(first.status,200);assert.equal(first.body.ok,true);assert.equal(first.body.rows.length,1);assert.equal(first.body.rows[0].id,7);assert.equal(first.body.rows[0].km,1.125);assert.equal(first.body.total,3);assert.equal(first.body.backend,format);assert.ok(first.body.nextCursor);
-  const second=await h.query({section:'records',limit:1,from:'2026-09',to:'2026-09',assetRef:'v:7',cursor:first.body.nextCursor});assert.equal(second.status,200);assert.equal(second.body.rows[0].id,'7');
+  const first=await h.query({section:'records',limit:1,from:'2026-09',to:'2026-09'});assert.equal(first.status,200);assert.equal(first.body.ok,true);assert.equal(first.body.rows.length,1);assert.equal(first.body.rows[0].id,7);assert.equal(first.body.rows[0].km,1.125);assert.equal(first.body.total,3);assert.equal(first.body.backend,format);assert.ok(first.body.nextCursor);
+  const second=await h.query({section:'records',limit:1,from:'2026-09',to:'2026-09',cursor:first.body.nextCursor});assert.equal(second.status,200);assert.equal(second.body.rows[0].id,'7');
+  safeError(await h.query({section:'records',assetRef:'v:7'}),400,'QUERY_ASSET_AMBIGUOUS');
   const searched=await h.query({section:'records',search:'КАМАЗ'});assert.equal(searched.status,200);assert.equal(searched.body.total,1);assert.equal(searched.body.rows[0].id,7);
   assert.deepEqual(storage.readSnapshot(h.dir),before);
  });

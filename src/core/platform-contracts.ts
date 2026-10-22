@@ -18,9 +18,15 @@ export interface AssignPersonInput {
   assignmentId?: Identifier; driverId: Identifier; target: AssetTarget; from: string; to?: string; site: string; org?: string;
   status?: string; reason: string; replacesAssignmentId?: Identifier;
 }
+export type CatalogSection = 'vehicles' | 'generators' | 'tanks' | 'drivers' | 'parts' | 'contragents' | 'fuelCards';
+export interface MergeCatalogInput {
+  section: CatalogSection; sourceId: Identifier; targetId: Identifier; reason: string;
+  mutableRefs: { relationId: string; rowId: Identifier; path: string }[]; reviewFingerprint: string;
+}
 export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelInput }
   | { type: 'AcceptShift'; version: 1; input: { shiftId: Identifier; changes: AcceptShiftChanges } }
-  | { type: 'AssignPerson'; version: 1; input: AssignPersonInput };
+  | { type: 'AssignPerson'; version: 1; input: AssignPersonInput }
+  | { type: 'MergeCatalog'; version: 1; input: MergeCatalogInput };
 export interface CommandEnvelope { protocolVersion: 1; databaseToken: string; operation: OperationDescriptor; base: Revisions; command: PlatformCommand }
 export interface ContractError extends Error { code: string; field: string; status: number }
 
@@ -188,6 +194,24 @@ export function createPlatformContracts() {
       for (const field of ['org','status'] as const) if (input[field] !== undefined) result[field]=commandText(input[field],path+field,false,200);
       if (result.to && result.to < result.from) fail('INVALID_COMMAND',path+'to','Дата окончания раньше начала');
       return {type:'AssignPerson',version:1,input:result};
+    }
+    if (row.type === 'MergeCatalog') {
+      keys(input,['section','sourceId','targetId','reason','mutableRefs','reviewFingerprint'],'command.input');
+      const catalogs = ['vehicles','generators','tanks','drivers','parts','contragents','fuelCards'];
+      if (typeof input.section !== 'string' || !catalogs.includes(input.section)) fail('INVALID_COMMAND',path+'section','Выберите поддерживаемый справочник');
+      if (!Array.isArray(input.mutableRefs) || input.mutableRefs.length > 1000) fail('INVALID_COMMAND',path+'mutableRefs','Проверьте выбранные связи: не более 1000 за одну операцию');
+      const mutableRefs: MergeCatalogInput['mutableRefs'] = [], seen = new Set<string>();
+      input.mutableRefs.forEach((value,index) => {
+        const field=path+'mutableRefs.'+index,ref=commandObject(value,field);keys(ref,['relationId','rowId','path'],field);
+        const entry={relationId:commandText(ref.relationId,field+'.relationId',true,200),rowId:commandId(ref.rowId,field+'.rowId'),path:commandText(ref.path,field+'.path',true,500)};
+        if(!/^[a-zA-Z][a-zA-Z0-9]*(?:\[\d+\])?(?:\.[a-zA-Z][a-zA-Z0-9]*(?:\[\d+\])?)*$/.test(entry.path))fail('INVALID_COMMAND',field+'.path','Некорректное поле связи');
+        const key=JSON.stringify([entry.relationId,typeof entry.rowId,entry.rowId,entry.path]);
+        if(seen.has(key))fail('INVALID_COMMAND',field,'Связь выбрана повторно');seen.add(key);mutableRefs.push(entry);
+      });
+      if(typeof input.reviewFingerprint!=='string'||!/^sha256:[a-f0-9]{64}$/.test(input.reviewFingerprint))fail('INVALID_COMMAND',path+'reviewFingerprint','Проверьте отпечаток просмотренного плана');
+      const result:MergeCatalogInput={section:input.section as CatalogSection,sourceId:commandId(input.sourceId,path+'sourceId'),targetId:commandId(input.targetId,path+'targetId'),reason:commandText(input.reason,path+'reason',true),mutableRefs,reviewFingerprint:input.reviewFingerprint};
+      if(result.sourceId===result.targetId)fail('INVALID_COMMAND',path+'targetId','Нельзя объединить карточку с самой собой');
+      return {type:'MergeCatalog',version:1,input:result};
     }
     return fail('UNKNOWN_COMMAND','command.type','Неизвестная команда платформы');
   }

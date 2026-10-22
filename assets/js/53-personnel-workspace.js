@@ -32,8 +32,10 @@ function personnelAsset(ref) {
   if (typeof ref !== 'string') return null;
   const section = ref.startsWith('v:') ? 'vehicles' : ref.startsWith('g:') ? 'generators' : null;
   if (!section || !personnelCanRead(section)) return null;
-  const row = (data[section] || []).find(item => String(item.id) === ref.slice(2));
-  if (!row) return null;
+  if(typeof EntityIdentity==='undefined'||typeof EntityIdentity.resolveAsset!=='function')return null;
+  const resolved=EntityIdentity.resolveAsset(data,ref);
+  if(resolved.status!=='known'||resolved.section!==section)return null;
+  const row=resolved.row;
   return { ref, row, label:section === 'vehicles' ? [row.plate,row.make].filter(Boolean).join(' · ') : [row.name || row.code || row.number || 'ДЭС',row.model].filter(Boolean).join(' · ') };
 }
 function personnelAssignments(id) {
@@ -91,7 +93,8 @@ function personnelCard(row) {
     <dl class="personnel-facts"><div><dt>Организация / объект</dt><dd>${htmlEsc([row.org,row.site].filter(Boolean).join(' · ') || 'Не указаны')}</dd></div><div><dt>Телефон</dt><dd>${htmlEsc(row.phone || 'Не указан')}</dd></div><div><dt>Категории / допуски</dt><dd>${htmlEsc(row.skills || 'Не указаны')}</dd></div><div><dt>Закреплённая техника</dt><dd>${htmlEsc(current.map(assignment => personnelAsset(assignment.assetRef)?.label || 'Техника недоступна').join('; ') || 'Нет текущего назначения')}</dd></div></dl>
     ${warnings.length ? `<p class="personnel-warning">${warnings.some(item => item.expired) ? 'Есть истёкшие документы' : 'Срок документа истекает в ближайшие 30 дней'} · ${warnings.length}</p>` : ''}
     ${personnelLinkWarnings(row).length ? '<p class="personnel-warning">Проверьте назначения и доступность сотрудника</p>' : ''}
-    <div class="personnel-actions">${personnelButton('open','Карточка',row.id)}${!row.archived && personnelCanWrite('assetAssignments') ? personnelButton('assign','Закрепить технику',row.id) : ''}</div>
+    ${typeof catalogMergeAliasHtml==='function'?catalogMergeAliasHtml('drivers',row):''}
+    <div class="personnel-actions">${personnelButton('open','Карточка',row.id)}${!row.archived && personnelCanWrite('assetAssignments') ? personnelButton('assign','Закрепить технику',row.id) : ''}${!row.mergedInto&&personnelCanWrite()&&typeof catalogMergeOpen==='function'&&catalogMergeReadable()&&catalogMergeWritable(['drivers'])?personnelButton('merge','Объединить дубль',row.id):''}</div>
   </article>`;
 }
 function renderPersonnelSection() {
@@ -129,7 +132,8 @@ function personnelRenderDetail(person) {
   const detail = (label,value) => `<div><dt>${htmlEsc(label)}</dt><dd>${htmlEsc(value || 'Не указано')}</dd></div>`;
   document.getElementById('mainContent').innerHTML = `<div class="personnel-workspace">
     <div class="personnel-back">${personnelButton('list',personnelKind() === 'operator' ? '← Все операторы ДЭС' : '← Все водители')}</div>
-    <header class="personnel-heading"><div><p class="personnel-eyebrow">${htmlEsc(personnelRoleLabel(person))}</p><h2>${htmlEsc(person.name || 'Без имени')}</h2><p>${htmlEsc(person.archived ? 'Карточка в архиве' : PERSONNEL_STATUS[person.employmentStatus || 'active'])}</p></div><div class="personnel-actions">${personnelCanWrite() ? personnelButton('edit','Изменить карточку',person.id)+personnelButton('archive',person.archived ? 'Восстановить' : 'В архив',person.id) : ''}${!person.archived && personnelCanWrite('assetAssignments') ? personnelButton('assign','Закрепить технику',person.id) : ''}</div></header>
+    <header class="personnel-heading"><div><p class="personnel-eyebrow">${htmlEsc(personnelRoleLabel(person))}</p><h2>${htmlEsc(person.name || 'Без имени')}</h2><p>${htmlEsc(person.archived ? 'Карточка в архиве' : PERSONNEL_STATUS[person.employmentStatus || 'active'])}</p></div><div class="personnel-actions">${!person.mergedInto&&personnelCanWrite() ? personnelButton('edit','Изменить карточку',person.id)+personnelButton('archive',person.archived ? 'Восстановить' : 'В архив',person.id) : ''}${!person.archived && personnelCanWrite('assetAssignments') ? personnelButton('assign','Закрепить технику',person.id) : ''}${!person.mergedInto&&personnelCanWrite()&&typeof catalogMergeOpen==='function'&&catalogMergeReadable()&&catalogMergeWritable(['drivers'])?personnelButton('merge','Объединить дубль',person.id):''}</div></header>
+    ${typeof catalogMergeAliasHtml==='function'?catalogMergeAliasHtml('drivers',person):''}
     ${warnings.length ? `<div class="personnel-notice"><strong>Проверьте сроки документов</strong><ul>${warnings.map(item => `<li>${htmlEsc(item.label)} · ${personnelDate(item.date)} · ${item.expired ? 'срок истёк' : 'скоро истекает'}</li>`).join('')}</ul></div>` : ''}
     ${linkWarnings.length ? `<div class="personnel-notice"><strong>Проверьте назначения сотрудника</strong><ul>${linkWarnings.map(message => `<li>${htmlEsc(message)}</li>`).join('')}</ul></div>` : ''}
     <div class="personnel-detail-grid"><section class="personnel-panel"><h3>Карточка сотрудника</h3><dl class="personnel-facts">${detail('Телефон',person.phone)}${detail('Организация',person.org)}${detail('Объект',person.site)}${detail('Категории / допуски',person.skills)}${TvsPersonnelEngine.matchesRole(person,'driver') ? detail('Водительское удостоверение',person.driverLicenseNumber)+detail('Действует до',personnelDate(person.driverLicenseExpires)) : ''}${TvsPersonnelEngine.matchesRole(person,'operator') ? detail('Удостоверение оператора',person.certificateNumber)+detail('Действует до',personnelDate(person.certificateExpires)) : ''}${detail('Медосмотр до',personnelDate(person.medicalExpires))}${detail('Инструктаж до',personnelDate(person.briefingExpires))}</dl>${person.note ? `<p class="personnel-note">${htmlEsc(person.note)}</p>` : ''}</section>
@@ -144,6 +148,7 @@ function personnelBindActions(host) {
     const id = button.dataset.personnelKey ? JSON.parse(button.dataset.personnelKey) : undefined;
     switch (button.dataset.personnelAction) {
       case 'new': personnelEditPerson(); break;
+      case 'merge': catalogMergeOpen('drivers',id); break;
       case 'open': personnelOpenPerson(id); break;
       case 'list': personnelView().selected = null; renderPersonnelSection(); break;
       case 'edit': personnelEditPerson(id); break;
@@ -203,6 +208,7 @@ function personnelInput(label,name,type,value,extra='') {
 function personnelEditPerson(id) {
   if (!personnelCanWrite()) { showToast('Справочник доступен только для просмотра'); return; }
   const person = id === undefined ? null : personnelFind(id);
+  if(person?.mergedInto){showToast('Архивная ссылка объединения доступна только для просмотра. История остаётся у исходной карточки.');return;}
   if (id !== undefined && !person) { showToast('Сотрудник недоступен'); return; }
   const original = person ? JSON.parse(JSON.stringify(person)) : null, identity = personnelIdentity();
   const row = person || {id:wfId('person'),personnelRoles:[personnelKind()],employmentStatus:'active'};
@@ -239,6 +245,7 @@ function personnelEditPerson(id) {
 async function personnelArchive(id) {
   const person = personnelFind(id);
   if (!person || !personnelCanWrite()) return;
+  if(person.mergedInto){showToast('Архивная ссылка объединения сохраняет историю и не восстанавливается отдельно');return;}
   if (personnelOpenLinks(id).length && !person.archived) { showToast('Сначала завершите или переназначьте действующие и будущие назначения, задания и смены. История закрепления сохранится.'); return; }
   const original = JSON.parse(JSON.stringify(person)), identity = personnelIdentity();
   if (!await confirmAction(person.archived ? 'Восстановить карточку сотрудника?' : 'Переместить сотрудника в архив? Документы и история сохранятся.')) return;

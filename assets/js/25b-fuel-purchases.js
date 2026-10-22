@@ -1212,19 +1212,31 @@ function fpExportNegative() {
 // ─── Вкладка «Итого за месяц» ───────────────────────────
 
 function mfCardOptions(vid, selectedNum) {
-  const cards = (typeof fcList === 'function' ? fcList() : []).filter(c => c.status !== 'blocked');
-  const v = (data.vehicles || []).find(x => x.id === vid);
-  const vNum = v && typeof fcNorm === 'function' ? fcNorm(v.fuelcard) : '';
+  const selectedKey=fcNorm(selectedNum),seen=new Set();
+  const cards = (typeof fcList === 'function' ? fcList() : []).filter(c => (!c.archived&&!c.mergedInto&&c.status!=='blocked')||selectedKey&&fcNorm(c.number)===selectedKey);
   let html = '<option value="">— без карты —</option>';
   cards.forEach(c => {
+    const key=fcNorm(c.number);if(seen.has(key))return;seen.add(key);
     const fmt = typeof fcFormat === 'function' ? fcFormat(c.number) : c.number;
     const prov = c.provider ? ' (' + c.provider + ')' : '';
     const org = c.org ? ' · ' + c.org : '';
-    const sel = c.number === selectedNum ? ' selected' : '';
-    html += '<option value="' + c.number + '"' + sel + '>' + fmt + prov + org + '</option>';
+    const selected=!!selectedKey&&key===selectedKey,sel = selected ? ' selected' : '',value=selected?selectedNum:c.number;
+    html += '<option value="' + fpEsc(value) + '"' + sel + '>' + fpEsc(fmt + prov + org+(c.mergedInto?' · архивная ссылка':c.archived?' · архив':'')) + '</option>';
   });
+  if(selectedKey&&!seen.has(selectedKey))html+='<option value="'+fpEsc(selectedNum)+'" selected>'+fpEsc(selectedNum+' · ранее выбрана, проверьте карту')+'</option>';
   return html;
 }
+
+function mfHasId(value){return typeof value==='number'&&Number.isFinite(value)||typeof value==='string'&&value!=='';}
+function mfIdentityAttrs(vid,mf){
+  const id=mf?.id??'';return 'data-vid="'+fpEsc(vid)+'" data-vid-key="'+fpEsc(JSON.stringify(vid))+'" data-mfid="'+fpEsc(id)+'" data-mfid-key="'+fpEsc(JSON.stringify(id))+'"'+(mf&&!mfHasId(id)?' data-mf-legacy-key="'+fpEsc(PlatformIntegrity.rowIdentity('monthlyFuel',mf,0))+'"':'');
+}
+function mfElementId(el,name,section){
+  const encoded=el.dataset[name+'Key'];if(encoded!==undefined){const value=JSON.parse(encoded);if(value===''||mfHasId(value))return value;throw Error('Некорректный идентификатор строки');}
+  const value=el.dataset[name]??'';if(value==='')return'';const matches=(data[section]||[]).filter(row=>String(row.id)===value);
+  if(matches.length!==1)throw Error('Идентификатор неоднозначен или строка изменилась. Обновите месячную таблицу.');return matches[0].id;
+}
+function mfStampRow(tr,rec){if(!tr)return;tr.querySelectorAll('[data-mfid]').forEach(el=>{el.dataset.mfid=String(rec.id??'');el.dataset.mfidKey=JSON.stringify(rec.id??'');if(!mfHasId(rec.id))el.dataset.mfLegacyKey=PlatformIntegrity.rowIdentity('monthlyFuel',rec,0);else delete el.dataset.mfLegacyKey;});}
 
 function fpMonthlyHtml() {
   const mSet = new Set(fpMonthsList());
@@ -1239,15 +1251,17 @@ function fpMonthlyHtml() {
     return ft === 'diesel' || ft === 'gasoline';
   }).sort((a, b) => (a.plate || '').localeCompare(b.plate || '', 'ru'));
 
-  const allCards = typeof fcList === 'function' ? fcList().filter(c => c.status !== 'blocked') : [];
   let tKm = 0, tNorm = 0, tIss = 0, tMf = 0, tMfSum = 0;
+  let normComplete=true,hasDatedNorm=false;const normValues=[];
   const inputStyle = 'width:90px;padding:4px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);text-align:right;font-family:inherit';
   const selStyle = 'width:170px;padding:4px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:inherit';
 
   const rowsHtml = vehicles.map((v, i) => {
     const recs = recsFor(v.id).filter(r => (r.date || '').startsWith(selMonth));
     const km = recs.reduce((s, r) => s + (r.km || 0), 0);
-    const normL = v.norm ? km * v.norm / 100 : 0;
+    const datedNorm=Object.hasOwn(v,'fuelNorms'),normParts=datedNorm?recs.map(record=>fqRecord(record,v).norm):[];
+    const normL = datedNorm?(normParts.some(value=>value==null)?null:DecimalCore.toNumberExact(DecimalCore.sum(normParts))):(v.norm ? km * v.norm / 100 : 0);
+    hasDatedNorm||=datedNorm;if(normL==null)normComplete=false;else normValues.push(normL);
     const issFromRecs = recs.reduce((s, r) => s + (r.fuelIssued || 0), 0);
     const vPurchases = fpLive().filter(p => p.vehicleId === v.id && (p.date || '').startsWith(selMonth));
     const stmtLitersTotal = vPurchases.reduce((s, p) => s + (+p.qty || 0), 0);
@@ -1259,15 +1273,15 @@ function fpMonthlyHtml() {
     const totalMfL = mfRecs.reduce((s, m) => s + (m.liters || 0), 0);
     const totalMfS = mfRecs.reduce((s, m) => s + (m.sum || 0), 0);
     const received = totalMfL > 0 ? totalMfL : stmtLitersTotal || issFromRecs;
-    const eco = received - normL;
-    tKm += km; tNorm += normL; tIss += stmtLitersTotal || issFromRecs;
+    const eco = normL==null?null:datedNorm?DecimalCore.toNumberExact(DecimalCore.sub(received,normL)):received - normL;
+    tKm += km; if(normL!=null)tNorm += normL; tIss += stmtLitersTotal || issFromRecs;
     tMf += totalMfL; tMfSum += totalMfS;
 
     const bg = i % 2 === 0 ? '' : 'background:var(--bg2)';
     const ecoColor = eco > 0.05 ? 'var(--green)' : eco < -0.05 ? 'var(--red)' : 'var(--text3)';
 
     return cardRows.map((mf, ci) => {
-      const mfId = mf ? mf.id : '';
+      const mfId = mf?.id??'',identityAttrs=mfIdentityAttrs(v.id,mf);
       const cardNum = mf ? (mf.cardNumber || '') : (ci === 0 ? vCardNum : '');
       const mfVal = mf ? mf.liters : null;
       const mfSumVal = mf ? mf.sum : null;
@@ -1277,39 +1291,40 @@ function fpMonthlyHtml() {
         ? vPurchases.filter(p => fcNorm(p.cardNo) === cardNum).reduce((s, p) => s + (+p.qty || 0), 0)
         : (isFirst ? stmtLitersTotal : 0);
 
-      return `<tr style="${bg}" data-vid="${fpEsc(v.id)}">
-        <td style="text-align:center;padding:0;width:28px">${mfId ? '<input type="checkbox" class="mf-check" data-mfid="' + mfId + '" onchange="mfUpdateToolbar()">' : ''}</td>
+      return `<tr style="${bg}" data-vid="${fpEsc(v.id)}" data-vid-key="${fpEsc(JSON.stringify(v.id))}">
+        <td style="text-align:center;padding:0;width:28px">${mfHasId(mfId) ? '<input type="checkbox" class="mf-check" '+identityAttrs+' onchange="mfUpdateToolbar()">' : ''}</td>
         <td>${isFirst ? fpEsc(v.plate) : ''}</td>
         <td>${isFirst ? fpEsc(v.make || '—') : ''}</td>
         <td>${isFirst ? fpEsc(v.org || '—') : ''}</td>
         <td style="text-align:right">${isFirst ? (km ? km.toLocaleString('ru', {maximumFractionDigits:1}) : '—') : ''}</td>
-        <td style="text-align:right">${isFirst ? (v.norm || '—') : ''}</td>
-        <td style="text-align:right">${isFirst ? (normL ? normL.toLocaleString('ru', {maximumFractionDigits:1}) : '—') : ''}</td>
+        <td style="text-align:right">${isFirst ? (datedNorm?'По датам':v.norm || '—') : ''}</td>
+        <td style="text-align:right">${isFirst ? (normL==null?'—':datedNorm?fpNum(normL,3):normL ? normL.toLocaleString('ru', {maximumFractionDigits:1}) : '—') : ''}</td>
         <td style="padding:2px 4px">
-          <select data-vid="${fpEsc(v.id)}" data-month="${fpEsc(selMonth)}" data-mfid="${fpEsc(mfId)}" style="${selStyle}"
+          <select ${identityAttrs} data-month="${fpEsc(selMonth)}" style="${selStyle}"
             onchange="mfSaveCard(this)">${mfCardOptions(v.id, cardNum)}</select>
         </td>
         <td style="text-align:right;font-size:12px;color:var(--text3)">${cardStmt ? cardStmt.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
         <td style="text-align:right;padding:0">
           <input type="number" value="${mfVal != null ? mfVal : ''}" placeholder="${cardStmt ? cardStmt.toLocaleString('ru', {maximumFractionDigits:1}) : '0'}"
-            data-vid="${fpEsc(v.id)}" data-month="${fpEsc(selMonth)}" data-mfid="${fpEsc(mfId)}" min="0" step="0.1"
+            ${identityAttrs} data-month="${fpEsc(selMonth)}" min="0" step="0.001"
             style="${inputStyle}" onchange="mfSaveRow(this)">
         </td>
         <td style="text-align:right;padding:0">
           <input type="number" value="${mfSumVal != null ? mfSumVal : ''}" placeholder="0"
-            data-vid="${fpEsc(v.id)}" data-month="${fpEsc(selMonth)}" data-mfid="${fpEsc(mfId)}" data-field="sum" min="0" step="0.01"
+            ${identityAttrs} data-month="${fpEsc(selMonth)}" data-field="sum" min="0" step="0.01"
             style="${inputStyle}" onchange="mfSaveRow(this)">
         </td>
-        <td style="text-align:right;font-weight:600;color:${ecoColor}">${isFirst ? ((eco > 0 ? '+' : '') + eco.toLocaleString('ru', {maximumFractionDigits:1})) : ''}</td>
+        <td style="text-align:right;font-weight:600;color:${ecoColor}">${isFirst ? (eco==null?'—':(eco > 0 ? '+' : '') + (datedNorm?fpNum(eco,3):eco.toLocaleString('ru', {maximumFractionDigits:1}))) : ''}</td>
         <td style="text-align:center;padding:0">${isFirst
           ? '<button onclick="mfAddCardRow(' + fpJs(v.id) + ',' + fpJs(selMonth) + ')" title="Добавить карту" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--accent);padding:2px 6px">+</button>'
-          : (mfId ? '<button onclick="mfRemoveRow(\'' + mfId + '\')" title="Удалить строку" style="background:none;border:none;cursor:pointer;font-size:15px;color:var(--red);padding:2px 6px">✕</button>' : '')
+          : (mfHasId(mfId) ? '<button onclick="mfRemoveRow(' + fpJs(mfId) + ')" title="Удалить строку" style="background:none;border:none;cursor:pointer;font-size:15px;color:var(--red);padding:2px 6px">✕</button>' : '')
         }</td>
       </tr>`;
     }).join('');
   }).join('');
 
-  const totalEco = tMf > 0 ? tMf - tNorm : (tIss - tNorm);
+  if(hasDatedNorm&&normComplete)tNorm=DecimalCore.toNumberExact(DecimalCore.sum(normValues));
+  const totalEco = !normComplete?null:hasDatedNorm?DecimalCore.toNumberExact(DecimalCore.sub(tMf>0?tMf:tIss,tNorm)):tMf > 0 ? tMf - tNorm : (tIss - tNorm);
   const monthSel = `<select class="fsel" onchange="fpMonth=this.value;renderFuelPurchases()" style="margin-bottom:12px">
     ${months.map(m => `<option value="${m}"${m === selMonth ? ' selected' : ''}>${fpMonthLabel(m)}</option>`).join('')}
   </select>`;
@@ -1335,23 +1350,28 @@ function fpMonthlyHtml() {
         <tfoot><tr style="font-weight:700;background:var(--bg2)">
           <td colspan="4">ИТОГО</td>
           <td style="text-align:right">${tKm.toLocaleString('ru', {maximumFractionDigits:0})}</td><td></td>
-          <td style="text-align:right">${tNorm.toLocaleString('ru', {maximumFractionDigits:1})}</td>
+          <td style="text-align:right">${!normComplete?'—':hasDatedNorm?fpNum(tNorm,3):tNorm.toLocaleString('ru', {maximumFractionDigits:1})}</td>
           <td></td>
           <td style="text-align:right">${tIss.toLocaleString('ru', {maximumFractionDigits:1})}</td>
           <td style="text-align:right">${tMf > 0 ? tMf.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
           <td style="text-align:right">${tMfSum > 0 ? tMfSum.toLocaleString('ru', {maximumFractionDigits:2}) : '—'}</td>
-          <td style="text-align:right;color:${totalEco >= 0 ? 'var(--green)' : 'var(--red)'}">${(totalEco > 0 ? '+' : '') + totalEco.toLocaleString('ru', {maximumFractionDigits:1})}</td>
+          <td style="text-align:right;color:${totalEco==null?'var(--text3)':totalEco >= 0 ? 'var(--green)' : 'var(--red)'}">${totalEco==null?'—':(totalEco > 0 ? '+' : '') + (hasDatedNorm?fpNum(totalEco,3):totalEco.toLocaleString('ru', {maximumFractionDigits:1}))}</td>
           <td></td>
         </tr></tfoot>
       </table>
     </div></div>`;
 }
 
-function mfFindOrCreate(vid, month, mfId) {
+function mfFindOrCreate(vid, month, mfId,el) {
   if (!data.monthlyFuel) data.monthlyFuel = [];
-  if (mfId) {
-    const existing = data.monthlyFuel.find(m => m.id === mfId);
-    if (existing) return existing;
+  if (mfHasId(mfId)) {
+    const matches = data.monthlyFuel.filter(m => m.id === mfId);
+    if(matches.length!==1||matches[0].vehicleId!==vid||matches[0].month!==month)throw Error('Месячная строка изменилась или неоднозначна. Обновите таблицу.');
+    return matches[0];
+  }
+  if(el?.dataset.mfLegacyKey){
+    const matches=data.monthlyFuel.filter((row,index)=>PlatformIntegrity.rowIdentity('monthlyFuel',row,index)===el.dataset.mfLegacyKey);
+    if(matches.length!==1||matches[0].vehicleId!==vid||matches[0].month!==month)throw Error('Старая месячная строка неоднозначна. Проверьте записи перед изменением.');return matches[0];
   }
   const rec = { id: 'mf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), vehicleId: vid, month };
   data.monthlyFuel.push(rec);
@@ -1359,20 +1379,16 @@ function mfFindOrCreate(vid, month, mfId) {
 }
 
 async function mfSaveRow(el) {
-  const vid = el.dataset.vid;
+  let vid,mfId;try{vid=mfElementId(el,'vid','vehicles');mfId=mfElementId(el,'mfid','monthlyFuel');}catch(error){showToast(error.message);return;}
   const month = el.dataset.month;
   if (!fuelEditAllowed(month)) return;
-  const mfId = el.dataset.mfid;
   const isSum = el.dataset.field === 'sum';
   let val;try { val=precisionInput(el,{scale:isSum?2:3,blank:'null',...((data.monthlyFuel||[]).some(row=>row.id===mfId)?{previous:(data.monthlyFuel||[]).find(row=>row.id===mfId)[isSum?'sum':'liters']}:{})}); } catch(error) {showFieldError(error.message,el.id);return;}
-  if (!mfId && val == null) return;
-  const rec = mfFindOrCreate(vid, month, mfId);
-  if (!mfId) el.dataset.mfid = rec.id;
+  if (!mfHasId(mfId) && !el.dataset.mfLegacyKey && val == null) return;
+  let rec;try{rec=mfFindOrCreate(vid, month, mfId,el);}catch(error){showToast(error.message);return;}
   if (isSum) rec.sum = val; else rec.liters = val;
   const tr = el.closest('tr');
-  if (tr) {
-    tr.querySelectorAll('[data-mfid]').forEach(inp => { inp.dataset.mfid = rec.id; });
-  }
+  mfStampRow(tr,rec);
   if (rec.liters == null && rec.sum == null && !rec.cardNumber) {
     data.monthlyFuel = data.monthlyFuel.filter(m => m !== rec);
   }
@@ -1380,19 +1396,15 @@ async function mfSaveRow(el) {
 }
 
 async function mfSaveCard(sel) {
-  const vid = sel.dataset.vid;
+  let vid,mfId;try{vid=mfElementId(sel,'vid','vehicles');mfId=mfElementId(sel,'mfid','monthlyFuel');}catch(error){showToast(error.message);return;}
   const month = sel.dataset.month;
   if (!fuelEditAllowed(month)) return;
-  const mfId = sel.dataset.mfid;
   const cardNumber = sel.value || null;
-  if (!mfId && !cardNumber) return;
-  const rec = mfFindOrCreate(vid, month, mfId);
-  if (!mfId) sel.dataset.mfid = rec.id;
+  if (!mfHasId(mfId) && !sel.dataset.mfLegacyKey && !cardNumber) return;
+  let rec;try{rec=mfFindOrCreate(vid, month, mfId,sel);}catch(error){showToast(error.message);return;}
   rec.cardNumber = cardNumber;
   const tr = sel.closest('tr');
-  if (tr) {
-    tr.querySelectorAll('[data-mfid]').forEach(inp => { inp.dataset.mfid = rec.id; });
-  }
+  mfStampRow(tr,rec);
   if (rec.liters == null && rec.sum == null && !rec.cardNumber) {
     data.monthlyFuel = data.monthlyFuel.filter(m => m !== rec);
   }
@@ -1437,7 +1449,7 @@ function mfUpdateToolbar() {
 }
 
 async function mfDeleteSelected() {
-  const ids = [...document.querySelectorAll('.mf-check:checked')].map(cb => cb.dataset.mfid);
+  let ids;try{ids = [...document.querySelectorAll('.mf-check:checked')].map(cb => mfElementId(cb,'mfid','monthlyFuel'));}catch(error){showToast(error.message);return;}
   if (!ids.length) return;
   if (!fuelEditAllowed(...(data.monthlyFuel || []).filter(m => ids.includes(m.id)).map(m => m.month))) return;
   if (!await confirmAction('Удалить выбранные записи (' + ids.length + ')?')) return;

@@ -35,10 +35,16 @@ test('JSON and SQLite pages preserve typed IDs, decimals, legacy duplicate and m
 
 test('date, month and asset filters have identical inclusive results on both backends',t=>{
  const f=fixture(t);
- const requests=[{section:'records',limit:2,from:'2026-09-01',to:'2026-09-30',assetRef:'v:7'},{section:'records',limit:1,from:'2026-09',to:'2026-09'},{section:'monthlyFuel',limit:1,from:'2026-09',to:'2026-09'},{section:'genRecords',limit:1,assetRef:'g:g'}];
+ const requests=[{section:'records',limit:2,from:'2026-09-01',to:'2026-09-30'},{section:'records',limit:1,from:'2026-09',to:'2026-09'},{section:'monthlyFuel',limit:1,from:'2026-09',to:'2026-09'},{section:'genRecords',limit:1,assetRef:'g:g'}];
  for(const request of requests)assert.deepEqual(readAllPages(f.sql,request),readAllPages(f.json,request));
  assert.deepEqual(readAllPages(f.sql,requests[0]).rows.map(row=>row.id),[7,'7','last-day']);
  assert.equal(rows(f.sql,{section:'records',from:'2026-09-30',to:'2026-09-30'}).total,1);
+ for(const dir of [f.json,f.sql])assert.throws(()=>rows(dir,{section:'records',assetRef:'v:7'}),{code:'QUERY_ASSET_AMBIGUOUS'});
+});
+
+test('legacy asset query ambiguity is rejected equally for zero, fractional numeric and invalid old textual identities',t=>{
+ const data=sample();data.vehicles=[{id:0},{id:'0'},{id:1.5},{id:'1.5'},{id:'__proto__'},{id:'__proto__'}];const f=fixture(t,data);
+ for(const dir of [f.json,f.sql])for(const ref of ['v:0','v:1.5','v:__proto__'])assert.throws(()=>rows(dir,{section:'records',assetRef:ref}),{code:'QUERY_ASSET_AMBIGUOUS'});
 });
 
 test('Unicode case-insensitive search uses only fixed bounded scalar text with JSON/SQLite parity',t=>{
@@ -149,7 +155,7 @@ test('invalid dates, ranges, page bounds and unsupported query shapes reject con
 });
 
 test('SQLite query reads only one limited page and counts; it never materialises complete sections or database',t=>{
- const input=sample();input.records=Array.from({length:410},(_,index)=>({id:'r'+index,vehicleId:7,date:'2026-09-01',note:'КамАЗ '+index}));const f=fixture(t,input);
+ const input=sample();input.vehicles=input.vehicles.filter(row=>row.id!=='7');input.records=Array.from({length:410},(_,index)=>({id:'r'+index,vehicleId:7,date:'2026-09-01',note:'КамАЗ '+index}));const f=fixture(t,input);
  const originals={readAll:sqlite.readAll,readRows:sqlite.readRows,storageAll:storage.readAll,storageSnapshot:storage.readSnapshot,prepare:DatabaseSync.prototype.prepare},sql=[];
  try{
   sqlite.readAll=sqlite.readRows=storage.readAll=storage.readSnapshot=()=>{throw Error('A full read was attempted');};

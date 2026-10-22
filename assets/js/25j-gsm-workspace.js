@@ -285,7 +285,7 @@ function gsmEditRecord(id) {
 function gsmAddReceipt() {
   openGenericModal('Новая заправка', '<div class="form-row"><div class="form-group"><label>Дата</label><input id="gsm_new_date" type="date" value="' + new Date().toISOString().slice(0, 10) + '"></div>' +
     '<div class="form-group"><label>Машина</label><select id="gsm_new_vehicle">' + fuelImportVehicleOptions('', true) + '</select></div></div>' +
-    '<div class="form-row"><div class="form-group"><label>Карта</label><select id="gsm_new_card"><option value="">Без карты</option>' + fcList().filter(c => c.status !== 'blocked').map(c => '<option value="' + fpEsc(c.number) + '">' + fpEsc(fcFormat(c.number) + ' / ' + (c.org || 'по закреплению')) + '</option>').join('') + '</select></div>' +
+    '<div class="form-row"><div class="form-group"><label>Карта</label><select id="gsm_new_card"><option value="">Без карты</option>' + fcList().filter(c => c.status !== 'blocked'&&!c.archived&&!c.mergedInto).map(c => '<option value="' + fpEsc(c.number) + '">' + fpEsc(fcFormat(c.number) + ' / ' + (c.org || 'по закреплению')) + '</option>').join('') + '</select></div>' +
     '<div class="form-group"><label>Организация (если без карты)</label><input id="gsm_new_org" value="' + fpEsc(gsmOrg) + '"></div></div>' +
     '<div class="form-row"><div class="form-group"><label>Топливо</label><select id="gsm_new_grade">' + FP_GRADES.map(g => '<option>' + g + '</option>').join('') + '</select></div>' +
     '<div class="form-group"><label>Литры</label><input id="gsm_new_qty" type="number" min="0.001" step="0.001"></div></div>' +

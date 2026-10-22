@@ -25,14 +25,18 @@ function finOverdue(payment) { return finDebt(payment) > 0.005 && /^\d{4}-\d{2}-
 function finNameKey(value) { return String(value || '').trim().toLocaleLowerCase('ru').replace(/ё/g, 'е').replace(/[«»"']/g, '').replace(/\s+/g, ' '); }
 function finResolveContragent(payment) {
   const list = data.contragents || [];
-  if (payment.contragentId) return list.find(c => c.id === payment.contragentId) || null;
+  if (payment.contragentId!=null&&payment.contragentId!=='') { const matches=list.filter(c=>c.id===payment.contragentId);return matches.length===1?matches[0]:null; }
   const key = finNameKey(payment.contragent || payment.company);
   const matches = key ? list.filter(c => finNameKey(c.name) === key) : [];
   return matches.length === 1 ? matches[0] : null;
 }
 function finContragentName(payment) { return finResolveContragent(payment)?.name || payment.contragent || payment.company || ''; }
-function finPartyKey(payment) { const party = finResolveContragent(payment); return party ? 'id:' + party.id : payment.contragentId ? 'id:' + payment.contragentId : 'name:' + finNameKey(payment.contragent || payment.company); }
-function finPaymentContext(payment) { return typeof wfContext === 'function' && payment.vehicleId ? wfContext('v:' + payment.vehicleId, payment.date || finToday()) : (data.vehicles || []).find(v => v.id === payment.vehicleId) || {}; }
+function finPartyKey(payment) { const party = finResolveContragent(payment),id=party?party.id:payment.contragentId;return typeof id==='string'&&id.trim()||typeof id==='number'&&Number.isFinite(id)?'id:'+JSON.stringify([typeof id,id]):'name:'+finNameKey(payment.contragent||payment.company); }
+function finPaymentContext(payment) {
+  const matches=(data.vehicles||[]).filter(row=>row.id===payment.vehicleId);if(matches.length!==1)return {};
+  const vehicle=matches[0],stringMatches=(data.vehicles||[]).filter(row=>String(row.id)===String(vehicle.id));
+  return typeof wfContext==='function'&&stringMatches.length===1?wfContext('v:'+vehicle.id,payment.date||finToday()):vehicle;
+}
 function finPaymentOrg(payment) { return typeof payment.org === 'string' ? payment.org : payment.organization || finPaymentContext(payment).org || ''; }
 function finPaymentObject(payment) { return typeof payment.object === 'string' ? payment.object : finPaymentContext(payment).object || ''; }
 
@@ -89,8 +93,7 @@ function renderFinancesSection() {
     `<option value="${v}" ${finPaidFilter===v?'selected':''}>${l}</option>`
   ).join('');
 
-  const vMap = Object.create(null);
-  (data.vehicles||[]).forEach(v => vMap[v.id] = v.plate);
+  const vMap = new Map((data.vehicles||[]).map(v=>[v.id,v.plate]));
   const parties = new Map(payments.map(p => [finPartyKey(p), finContragentName(p) || 'Без контрагента']));
   const partyOptions = '<option value="">Все контрагенты</option>' + [...parties].sort((a,b) => a[1].localeCompare(b[1], 'ru')).map(([key,label]) => `<option value="${htmlEsc(key)}" ${finPartyFilter === key ? 'selected' : ''}>${htmlEsc(label)}</option>`).join('');
 
@@ -102,7 +105,7 @@ function renderFinancesSection() {
   } else {
     const rows = filtered.map(p => {
       const dateStr = p.date ? new Date(p.date).toLocaleDateString('ru') : '—';
-      const vPlate = p.vehicleId ? (vMap[p.vehicleId]||'—') : '—';
+      const vPlate = p.vehicleId!=null&&p.vehicleId!=='' ? (vMap.get(p.vehicleId)||'—') : '—';
       const reestrLabel = p.reestrNo ? ('Реестр №'+p.reestrNo) : '—';
       const statusBadge = finDebt(p) <= 0.005
         ? '<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:10px;font-size:12px">Оплачено</span>'
@@ -177,8 +180,7 @@ function renderFinancesSection() {
 function renderFinancesAnalyticsHtml(allPayments) {
   const payments = allPayments || data.payments || [];
   const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-  const vMap = Object.create(null);
-  (data.vehicles||[]).forEach(v => vMap[v.id] = v.plate);
+  const vMap = new Map((data.vehicles||[]).map(v=>[v.id,v.plate]));
 
   const byMonth = Object.create(null), byCat = Object.create(null), byVehicle = Object.create(null);
   let grandTotal = 0;
@@ -198,7 +200,7 @@ function renderFinancesAnalyticsHtml(allPayments) {
     if (!byCat[cat]) byCat[cat] = {total:0,count:0};
     byCat[cat].total=finAdd(byCat[cat].total,sum); byCat[cat].count++;
     if (p.vehicleId) {
-      const plate = vMap[p.vehicleId] || p.vehicleId;
+      const plate = vMap.get(p.vehicleId) || p.vehicleId;
       if (!byVehicle[plate]) byVehicle[plate] = {total:0,count:0};
       byVehicle[plate].total=finAdd(byVehicle[plate].total,sum); byVehicle[plate].count++;
     }
@@ -366,6 +368,16 @@ function exportBudgetToXlsx() {
   [['Бюджет',annualRows],['План-факт',comparisonRows],['Строки плана',detailRows],['Условия',scopeRows]].forEach(([name,rows])=>{const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=rows[0].map((_,i)=>({wch:i===0?35:20}));XLSX.utils.book_append_sheet(wb,ws,name);});
   XLSX.writeFile(wb,'Бюджет_'+budgetYear+'.xlsx');
 }
+function finPaymentSelectedId(select){
+  const option=select?.selectedOptions?.[0];if(!option||option.value==='')return null;
+  let id;try{id=JSON.parse(option.dataset.typedId);}catch{throw Error('Выберите связь со справочником с подтверждённым ID');}
+  if(!EntityIdentity.identifier(id))throw Error('Некорректный ID связи со справочником');return id;
+}
+function finPaymentSourceFields(){
+  const fields=Object.fromEntries(['pay_date','pay_sum','pay_category','pay_contragent','pay_invoice','pay_org','pay_object','pay_reestr','pay_due_date','pay_paid_amount','pay_paid_date'].map(id=>[id,document.getElementById(id)?.value??'']));
+  fields.vehicleId=finPaymentSelectedId(document.getElementById('pay_vehicle'));fields.contragentId=finPaymentSelectedId(document.getElementById('pay_contragent_id'));fields.paid=document.getElementById('pay_paid').checked;
+  return JSON.stringify(fields);
+}
 function finEnsurePaymentFields(payment = {}) {
   const name = document.getElementById('pay_contragent');
   let select = document.getElementById('pay_contragent_id');
@@ -373,17 +385,18 @@ function finEnsurePaymentFields(payment = {}) {
     const label = document.createElement('label'); label.textContent = 'Связь со справочником контрагентов';
     select = document.createElement('select'); select.id = 'pay_contragent_id';
     name.parentElement.insertBefore(label, name); name.parentElement.insertBefore(select, name);
-    select.addEventListener('change', () => { const party = (data.contragents || []).find(c => c.id === select.value); if (party) name.value = party.name; });
+    select.addEventListener('change', () => { select._catalogChanged=true;try{const id=finPaymentSelectedId(select),party=(data.contragents||[]).find(c=>c.id===id);if(party)name.value=party.name;}catch(error){showFieldError(error.message,'pay_contragent_id');} });
   }
   select.replaceChildren();
   const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'Без привязки / ввести название вручную'; select.append(empty);
-  (data.contragents || []).slice().sort((a,b) => (a.name || '').localeCompare(b.name || '', 'ru')).forEach(c => {
-    const option = document.createElement('option'); option.value = c.id; option.textContent = c.name + (c.inn ? ' · ИНН ' + c.inn : '') + (c.archived ? ' · архив' : ''); select.append(option);
+  const selectedId=payment.contragentId!=null&&payment.contragentId!==''?payment.contragentId:finResolveContragent(payment)?.id;
+  (data.contragents || []).filter(c=>!c.archived&&!c.mergedInto||c.id===selectedId).sort((a,b) => (a.name || '').localeCompare(b.name || '', 'ru')).forEach(c => {
+    const option = document.createElement('option'); option.value = c.id; option.dataset.typedId=JSON.stringify(c.id);option.selected=c.id===selectedId;option.textContent = c.name + (c.inn ? ' · ИНН ' + c.inn : '') + (c.archived ? ' · архив' : ''); select.append(option);
   });
-  if (payment.contragentId && !(data.contragents || []).some(c => c.id === payment.contragentId)) {
-    const missing = document.createElement('option'); missing.value = payment.contragentId; missing.textContent = (payment.contragent || 'Контрагент') + ' · удалён из справочника'; select.append(missing);
+  if (payment.contragentId!=null&&payment.contragentId!=='' && !(data.contragents || []).some(c => c.id === payment.contragentId)) {
+    const missing = document.createElement('option'); missing.value = payment.contragentId;missing.dataset.typedId=JSON.stringify(payment.contragentId);missing.selected=true;missing.textContent = (payment.contragent || 'Контрагент') + ' · удалён из справочника'; select.append(missing);
   }
-  select.value = payment.contragentId || finResolveContragent(payment)?.id || '';
+  select._catalogInitialId=selectedId??null;select._catalogChanged=false;
   if (!document.getElementById('pay_due_date')) {
     const fields = document.createElement('div'); fields.className = 'form-row';
     fields.innerHTML = '<div class="form-group"><label for="pay_due_date">Срок оплаты</label><input type="date" id="pay_due_date"></div><div class="form-group"><label for="pay_paid_amount">Оплачено, ₽</label><input type="number" id="pay_paid_amount" min="0" step="0.01"></div><div class="form-group"><label for="pay_paid_date">Дата оплаты</label><input type="date" id="pay_paid_date"></div>';
@@ -402,7 +415,7 @@ function finEnsurePaymentFields(payment = {}) {
     fields.innerHTML = '<div class="form-group"><label for="pay_org">Организация расхода</label><input id="pay_org" list="pay_org_list"><datalist id="pay_org_list"></datalist></div><div class="form-group"><label for="pay_object">Объект расхода</label><input id="pay_object" list="pay_object_list"><datalist id="pay_object_list"></datalist></div>';
     name.parentElement.insertAdjacentElement('afterend', fields);
     document.getElementById('pay_vehicle').addEventListener('change', event => {
-      const vehicle = (data.vehicles || []).find(v => v.id === event.target.value);
+      let vehicle;try{const id=finPaymentSelectedId(event.target);vehicle=(data.vehicles||[]).find(v=>v.id===id);}catch(error){showFieldError(error.message,'pay_vehicle');return;}
       const org = document.getElementById('pay_org'), object = document.getElementById('pay_object');
       if (!org.value) org.value = vehicle?.org || '';
       if (!object.value) object.value = vehicle?.object || '';
@@ -416,6 +429,7 @@ function finEnsurePaymentFields(payment = {}) {
 
 async function openAddPayment() {
   editingPaymentId = null;
+  document.getElementById('paymentModal')._paymentEditState=null;
   document.getElementById('paymentModalTitle').textContent = 'Добавить платёж';
   document.getElementById('paymentDeleteBtn').style.display = 'none';
   document.getElementById('pay_date').value = '';
@@ -447,23 +461,24 @@ async function openEditPayment(id) {
   document.getElementById('pay_invoice').value = p.invoiceNo || '';
   document.getElementById('pay_paid').checked = finDebt(p) <= 0.005;
   document.getElementById('pay_note').value = p.note || '';
-  await populatePaymentSelects();
+  await populatePaymentSelects(p);
   selectPayCategory(p.category || '');
-  document.getElementById('pay_vehicle').value = p.vehicleId || '';
   document.getElementById('pay_reestr').value = p.reestrNo || '';
   finEnsurePaymentFields(p);
+  document.getElementById('paymentModal')._paymentEditState={id,fields:finPaymentSourceFields()};
   openModal('paymentModal');
 }
 
 let payStatyiItems = [];
 
-async function populatePaymentSelects() {
+async function populatePaymentSelects(payment={}) {
   await loadReestrStatyi();
   payStatyiItems = reestrStatyi.map(s => s.label);
   filterPayCategory();
   const vSel = document.getElementById('pay_vehicle');
   vSel.innerHTML = '<option value="">— не привязано —</option>' +
-    (data.vehicles||[]).map(v => `<option value="${htmlEsc(v.id)}">${htmlEsc(v.plate)}</option>`).join('');
+    (data.vehicles||[]).filter(v=>!v.archived&&!v.mergedInto||v.id===payment.vehicleId).map(v => `<option value="${htmlEsc(v.id)}" data-typed-id="${htmlEsc(JSON.stringify(v.id))}" ${v.id===payment.vehicleId?'selected':''}>${htmlEsc(v.plate)}</option>`).join('');
+  if(payment.vehicleId!=null&&payment.vehicleId!==''&&!(data.vehicles||[]).some(v=>v.id===payment.vehicleId)){const option=new Option('Прежняя техника · карточка недоступна',String(payment.vehicleId),false,true);option.dataset.typedId=JSON.stringify(payment.vehicleId);vSel.add(option);}
   const rSel = document.getElementById('pay_reestr');
   rSel.innerHTML = '<option value="">— не указан —</option>' +
     (data.savedReestrs||[]).map(r => `<option value="${htmlEsc(r.number)}">Реестр №${htmlEsc(r.number)}</option>`).join('');
@@ -544,23 +559,24 @@ async function savePayment() {
   if (!Number.isFinite(paidAmount) || paidAmount < 0) { showFieldError('Укажите сумму оплаты не меньше нуля', 'pay_paid_amount'); return; }
   const dueDate = document.getElementById('pay_due_date')?.value || null;
   const paidDate = document.getElementById('pay_paid_date')?.value || null;
-  const partyId = document.getElementById('pay_contragent_id')?.value || '';
+  let partyId,vehicleId;try{partyId=finPaymentSelectedId(document.getElementById('pay_contragent_id'));vehicleId=finPaymentSelectedId(document.getElementById('pay_vehicle'));}catch(error){showToast(error.message);return;}
   const party = (data.contragents || []).find(c => c.id === partyId);
   const partyText = document.getElementById('pay_contragent').value.trim();
-  const resolved = party || (!partyId ? finResolveContragent({ contragent: partyText }) : null);
+  const partySelect=document.getElementById('pay_contragent_id'),partyUnchanged=!!existing&&partyId===partySelect._catalogInitialId&&!partySelect._catalogChanged&&partyText===document.getElementById('pay_contragent')._precisionInitial;
+  const matched=party||(partyId==null?finResolveContragent({contragent:partyText}):null),resolved=matched&&(!matched.archived&&!matched.mergedInto||partyUnchanged)?matched:null;
 
-  const obj = {
+  let obj = {
     ...(existing || {}),
-    id: editingPaymentId || ('pay_' + (globalThis.crypto?.randomUUID?.() || Date.now())),
+    id: editingPaymentId!=null&&editingPaymentId!==''?editingPaymentId:('pay_' + (globalThis.crypto?.randomUUID?.() || Date.now())),
     date: isoDate,
     sum: sum,
     category: category,
     description: description,
-    vehicleId: document.getElementById('pay_vehicle').value || null,
+    vehicleId,
     org: document.getElementById('pay_org')?.value.trim() || '',
     object: document.getElementById('pay_object')?.value.trim() || '',
     contragent: resolved?.name || partyText,
-    contragentId: partyId || resolved?.id || null,
+    contragentId: partyId ?? resolved?.id ?? null,
     contragentAtIssue: existing?.contragentAtIssue || existing?.contragent || partyText || resolved?.name || '',
     reestrNo: document.getElementById('pay_reestr').value ? parseInt(document.getElementById('pay_reestr').value) : null,
     invoiceNo: document.getElementById('pay_invoice').value.trim(),
@@ -574,8 +590,11 @@ async function savePayment() {
     sourceId: null
   };
 
+  if(partyUnchanged)for(const key of ['contragent','contragentId','contragentAtIssue']){if(Object.hasOwn(existing,key))obj[key]=existing[key];else delete obj[key];}
   if(paidUnchanged&&sum===existing.sum){if(Object.hasOwn(existing,'paidAmount'))obj.paidAmount=existing.paidAmount;else delete obj.paidAmount;}
-  if (editingPaymentId) {
+  const editState=document.getElementById('paymentModal')._paymentEditState;
+  if(existing&&editState?.id===editingPaymentId&&editState.fields===finPaymentSourceFields())obj={...existing,description,note:document.getElementById('pay_note').value.trim()};
+  if (editingPaymentId!=null&&editingPaymentId!=='') {
     const existing = data.payments.find(p => p.id === editingPaymentId);
     if (existing) {
       obj.source = existing.source;

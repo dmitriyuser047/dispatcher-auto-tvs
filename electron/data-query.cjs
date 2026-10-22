@@ -9,6 +9,7 @@ const sqlite=require('./sqlite-storage.cjs');
 const access=require('./access-control');
 const schema=require('../assets/core/platform-schema.js');
 const kernel=require('../assets/core/platform-kernel.js');
+const identity=require('../assets/core/entity-identity.js');
 const SEARCH_FIELDS=Object.freeze(['id','plate','make','model','name','title','number','driver','status','note','description','date','month','assetRef','vehicleId','generatorId','tankId','org','type','kind','unit','category']);
 const SEARCH_FIELD_LIMIT=500;
 const plain=value=>value!==null&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value));
@@ -82,6 +83,10 @@ function queryRows(dataDir,input,principal){
       if(sql){revision=sqlite.readRevisions(dataDir)[query.section];databaseToken=storage.databaseToken(dataDir);}
       else{const section=storage.readSection(dataDir,query.section);revision=section.rev;databaseToken=section.databaseToken;jsonRows=section.rows;}
       const binding={databaseToken,section:query.section,revision,filter:filterHash(query),scope},afterPosition=cursorPosition(query.cursor,binding);
+      if(query.assetRef){
+        const section={v:'vehicles',g:'generators',t:'tanks'}[query.assetRef[0]],ambiguous=sql?sqlite.countLegacyAssetReferences(dataDir,section,query.assetRef.slice(2))>1:identity.resolveAsset({[section]:storage.readSection(dataDir,section).rows},query.assetRef).status==='ambiguous';
+        if(ambiguous)fail('QUERY_ASSET_AMBIGUOUS','Ссылка на технику неоднозначна. Проверьте ID карточек.');
+      }
       let rows,positions,total,hasMore;
       if(sql){
         const page=sqlite.queryRows(dataDir,{section:query.section,limit:query.limit,from:query.from,to:query.to,assetRef:query.assetRef,search:query.search,afterPosition});

@@ -123,7 +123,7 @@ function openAddVehicleTo(vid) {
     const last = vehicleToFor(vid).filter(r => !r.planned).slice().sort((a,b) => cmpDateAsc(a.date, b.date)).pop();
     if (last && last.nextKm) document.getElementById('vto_next_km').value = last.nextKm;
   }
-  document.getElementById('vehicleToModal').dataset.vid = vid;
+  document.getElementById('vehicleToModal').dataset.vid = JSON.stringify(vid);
   openModal('vehicleToModal');
 }
 
@@ -142,11 +142,13 @@ function openEditVehicleTo(id) {
   document.getElementById('vto_cost').value       = r.cost        ?? '';
   document.getElementById('vto_performer').value  = r.performer   || '';
   document.getElementById('vto_note').value       = r.note        || '';
-  document.getElementById('vehicleToModal').dataset.vid = r.vehicleId;
+  document.getElementById('vehicleToModal').dataset.vid = JSON.stringify(r.vehicleId);
   openModal('vehicleToModal');
 }
 
 async function saveVehicleTo() {
+  let vehicleId;try{vehicleId=JSON.parse(document.getElementById('vehicleToModal').dataset.vid);}catch{showToast('Не удалось определить технику в форме ТО. Откройте запись заново.');return;}
+  if(!EntityIdentity.identifier(vehicleId)||(data.vehicles||[]).filter(row=>row.id===vehicleId).length!==1){showToast('Техника в форме ТО не найдена или ID неоднозначен');return;}
   const dateIso = parseDate(document.getElementById('vto_date').value.trim());
   const type    = document.getElementById('vto_type').value.trim();
   if (!dateIso) { showFieldError('Укажите дату проведения ТО', 'vto_date'); return; }
@@ -161,7 +163,7 @@ async function saveVehicleTo() {
   if (rawNextDate && !nextDate) { showFieldError('Проверьте дату следующего ТО', 'vto_next_date'); return; }
   const nextOdometerAbs = previous && previous.odometer===odometer && previous.nextKm===nextKm ? previous.nextOdometerAbs : hasOdometer && hasNextKm ? DecimalCore.toNumberExact(DecimalCore.add(odometer,nextKm)) : null;
   const obj = {
-    vehicleId:  document.getElementById('vehicleToModal').dataset.vid,
+    vehicleId,
     date:       dateIso,
     type,
     odometer:   hasOdometer ? odometer : null,
@@ -173,7 +175,7 @@ async function saveVehicleTo() {
     note:       document.getElementById('vto_note').value.trim(),
   };
   if (!data.vehicleTo) data.vehicleTo = [];
-  if (editingVehicleToId) {
+  if (editingVehicleToId!=null&&editingVehicleToId!=='') {
     Object.assign(data.vehicleTo.find(x => x.id === editingVehicleToId), obj);
   } else {
     obj.id = 'vto_' + Date.now();

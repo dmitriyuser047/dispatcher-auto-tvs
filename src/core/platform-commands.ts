@@ -1,4 +1,4 @@
-import type { AssetTarget, Identifier, JsonRow, JsonValue, PlatformCommand, SectionRows, createPlatformContracts } from './platform-contracts';
+import type { AssetTarget, Identifier, JsonRow, JsonValue, MergeCatalogInput, PlatformCommand, SectionRows, createPlatformContracts } from './platform-contracts';
 
 export interface CommandActor { id: string; name: string; role: string }
 export interface CommandContext { id: string; now: string; today: string; actor: CommandActor }
@@ -6,11 +6,13 @@ export interface CommandPlan { sections: SectionRows; readSections: string[]; wr
 interface PersonnelRules { apiVersion: number; validateChanges(previous: unknown, next: unknown, context?: unknown): unknown }
 interface FuelRules { apiVersion: number; validateChanges(previous: unknown, next: unknown): unknown }
 interface FuelEngine { parseFuelGrade(value: unknown): string }
+interface CatalogMerge { apiVersion: number; footprint(input: MergeCatalogInput): string[]; plan(database: unknown,input: MergeCatalogInput,context: CommandContext): CommandPlan }
+interface SectionRegistry { sections: readonly string[] }
 type Contracts = ReturnType<typeof createPlatformContracts>;
 interface CommandError extends Error { code: string; status: number; field?: string }
 
 /** Pure semantic actions. Storage still owns ACL, CAS, audit and atomic commit. */
-export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, fuel: FuelRules, fuelEngine: FuelEngine) {
+export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, fuel: FuelRules, fuelEngine: FuelEngine,catalog?: CatalogMerge,registry?: SectionRegistry) {
   if (!contracts || contracts.apiVersion !== 1 || !personnel || personnel.apiVersion !== 1 || !fuel || fuel.apiVersion !== 1 || typeof fuelEngine?.parseFuelGrade !== 'function')
     throw new Error('Не загружены общие правила команд платформы');
   function fail(code: string,message: string,field?: string): never {
@@ -23,13 +25,23 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     const result:JsonRow={};for(const key of Object.keys(value))result[key]=copy(value[key] as JsonValue);return result;
   }
   function parseCommand(value: unknown): PlatformCommand {return contracts.validateCommand(value);}
+  function mergeModule(): CatalogMerge {
+    if(!catalog||catalog.apiVersion!==1||!registry)fail('MODULE_UNAVAILABLE','Не загружены правила управляемого объединения');
+    return catalog;
+  }
   function footprint(value: unknown): string[] {
     const command=parseCommand(value);
+    if(command.type==='MergeCatalog'){
+      const names=mergeModule().footprint(command.input);
+      if(names.includes('auditLog'))fail('INVALID_COMMAND','Исторические ссылки аудита нельзя выбирать для переноса','mutableRefs');
+      return names;
+    }
     if(command.type==='IssueFuel')return ['fuelMovements',command.input.target.section==='vehicles'?'records':'genRecords'].sort();
     return [command.type==='AcceptShift'?'shiftReports':'assetAssignments'];
   }
   function dependencies(value: unknown,_database?: unknown): string[] {
     const command=parseCommand(value);
+    if(command.type==='MergeCatalog'){mergeModule();return [...(registry as SectionRegistry).sections].sort();}
     if(command.type==='IssueFuel')return ['tanks','tankIncomes','genRecords','generators','fuelMovements','records','vehicles','assetAssignments','fuelPeriods','fuelWriteoffs','fuelPurchases','monthlyFuel'].sort();
     if(command.type==='AcceptShift')return ['shiftReports','vehicles','generators','drivers','dispatchJobs'].sort();
     return ['assetAssignments','drivers','vehicles','generators'].sort();
@@ -165,6 +177,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   }
   function plan(source:unknown,value:unknown,metadata:unknown):CommandPlan {
     const command=parseCommand(value),ctx=context(metadata),db=database(source,dependencies(command));
+    if(command.type==='MergeCatalog')return mergeModule().plan(db,command.input,ctx);
     if(command.type==='IssueFuel')return issueFuel(db,command,ctx);
     if(command.type==='AcceptShift')return acceptShift(db,command,ctx);
     return assignPerson(db,command,ctx);

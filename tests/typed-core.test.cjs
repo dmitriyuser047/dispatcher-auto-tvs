@@ -43,7 +43,7 @@ test('strict TypeScript is the real source of each UMD artifact with only explic
     const required=[...entry.artifact.matchAll(/\brequire\('([^']+)'\)/g)].map(match=>match[1]);
     assert.deepEqual(required,(entry.dependencies||[]).map(dependency=>dependency.path));
     const source=fs.readFileSync(path.join(ROOT,entry.source),'utf8');
-    assert.match(source,/export function create/);assert.match(source,/: unknown/);
+    assert.match(source,/export function create/);assert.match(source,/:\s*unknown/);
   }
 });
 

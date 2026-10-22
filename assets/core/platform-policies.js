@@ -1,9 +1,9 @@
 /* Shared dispatch, acceptance and inventory rules from the existing workflows. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'));
-  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy);
-})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'),()=>require('./catalog-policy.js'),()=>require('./entity-identity.js'));
+  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy,()=>root.CatalogPolicy,()=>root.EntityIdentity);
+})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal,getCatalog,getIdentity) {
   'use strict';
   const rows = (db, section) => Array.isArray(db?.[section]) ? db[section] : [];
   const present = value => value != null && String(value).trim() !== '';
@@ -15,8 +15,13 @@
       (!time || +value.slice(11,13) < 24 && +value.slice(14,16) < 60 && (!value.slice(17,19) || +value.slice(17,19) < 60) && Number.isFinite(Date.parse(value)));
   }
   function asset(db, ref) {
+    let identity;try{identity=getIdentity();}catch{}
+    if(identity?.apiVersion===1){const resolved=identity.resolveAsset(db,ref);return resolved.status==='known'?resolved.row:null;}
     if (typeof ref !== 'string' || !/^[vgt]:/.test(ref)) return null;
-    return rows(db, { v:'vehicles',g:'generators',t:'tanks' }[ref[0]]).find(row => String(row.id) === ref.slice(2));
+    const matches=rows(db, { v:'vehicles',g:'generators',t:'tanks' }[ref[0]]).filter(row => String(row.id) === ref.slice(2));return matches.length===1?matches[0]:null;
+  }
+  function catalogModule(previous,next){let api;try{api=getCatalog();}catch{}if(api?.apiVersion===1)return api;
+    if([previous,next].some(db=>['vehicles','generators','tanks','drivers','parts','contragents','fuelCards'].some(section=>rows(db,section).some(row=>Object.hasOwn(row,'mergedInto'))))){const error=new Error('Не загружены правила объединения справочников');error.code='MODULE_UNAVAILABLE';throw error;}return null;
   }
   function dispatchOverlapPeers(jobs) {
     const peers=jobs.map(()=>new Set()),groups=new Map();
@@ -131,6 +136,7 @@
     const personnel = getPersonnel();
     if (personnel && personnel.apiVersion === 1) issues.push(...personnel.inspect(db,context).issues);
     for (const module of [getFuelMovements(),getDocuments(),getWorkflow(),getTemporal()]) if (module && module.apiVersion === 1) issues.push(...module.inspect(db,context).issues);
+    const catalog=catalogModule(db);if(catalog)issues.push(...catalog.inspect(db,context).issues);
     return { issues,counts:{ error:issues.filter(issue=>issue.severity==='error').length,warning:issues.filter(issue=>issue.severity==='warning').length,total:issues.length } };
   }
   function validateChanges(previous,next,context) {
@@ -140,7 +146,7 @@
     const blocking = current.filter(issue => {
       // Personnel uses field/assignment delta semantics below. Its read-only
       // report may show legacy rows and active links that need manual review.
-      if (/^(PERSONNEL_|FUEL_|DOCUMENT_|WORKFLOW_|TEMPORAL_)/.test(issue.code)) return false;
+      if (/^(PERSONNEL_|FUEL_|DOCUMENT_|WORKFLOW_|TEMPORAL_|CATALOG_)/.test(issue.code)) return false;
       const before = prior.get(key(issue));
       if (!before) return true;
       if (issue.code === 'PART_STOCK_DEFICIT') return issue.deficit > before.deficit + 1e-9;
@@ -161,6 +167,7 @@
       }
       module.validateChanges(previous,next,context);
     }
+    const catalog=catalogModule(previous,next);if(catalog)catalog.validateChanges(previous,next,context);
     return true;
   }
   return Object.freeze({ apiVersion:1,inspect,validateChanges });

@@ -2,15 +2,16 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{createRequire}=require('node:module');
 const storage=require('../electron/storage'),sqlite=require('../electron/sqlite-storage.cjs');
+const catalogMerge=require('../assets/core/catalog-merge.js'),kernel=require('../assets/core/platform-kernel.js');
 const root=path.resolve(__dirname,'..');let pw;
 try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
-test('hidden Electron executes all three semantic commands through real preload, durable queue and JSON/SQLite storage',{timeout:180000},async t=>{
+test('hidden Electron executes semantic commands, dated norms and catalog merge through real preload and JSON/SQLite storage',{timeout:180000},async t=>{
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-native-commands-')),profile=path.join(directory,'profile');let app;
   t.after(async()=>{if(app){await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(win=>win.destroy())).catch(()=>{});await app.close().catch(()=>{});}const target=path.resolve(directory);assert.equal(path.dirname(target),path.resolve(os.tmpdir()));assert.ok(path.basename(target).startsWith('tvs-native-commands-'));fs.rmSync(target,{recursive:true,force:true});});
   fs.mkdirSync(profile);
   const fixture=()=>({...Object.fromEntries(storage.SECTIONS.map(name=>[name,[]])),vehicles:[{id:7,plate:'SYNTHETIC NATIVE',fuelGrade:'ДТ',fuel:'diesel',org:'Test',norm:10,fuelBalance:500}],
     tanks:[{id:5,name:'Synthetic native tank',fuel:'diesel',fuelGrade:'ДТ',org:'Test',balanceInit:100}],
-    drivers:[{id:3,name:'Synthetic old driver',personnelRoles:['driver'],employmentStatus:'active'},{id:4,name:'Synthetic new driver',personnelRoles:['driver'],employmentStatus:'active'}],
+    drivers:[{id:3,name:'Synthetic old driver',personnelRoles:['driver'],employmentStatus:'active'},{id:4,name:'Synthetic new driver',personnelRoles:['driver'],employmentStatus:'active'},{id:0,name:'Synthetic duplicate driver',personnelRoles:['driver'],employmentStatus:'active'},{id:'0',name:'Synthetic main driver',personnelRoles:['driver'],employmentStatus:'active'}],
     records:[{id:'august-measurement',vehicleId:7,date:'2026-08-31',km:50,fuelIssued:5000,fuelActual:1,tankMeasured:923.537},{id:'original',vehicleId:7,date:'2026-09-01',km:100,fuelIssued:10,fuelActual:20}],
     assetAssignments:[{id:'old-assignment',assetRef:'v:7',driverId:3,from:'2026-09-01',to:'',site:'Synthetic site',org:'Test',reason:'Synthetic initial assignment'}],
     shiftReports:[{id:'sent-shift',title:'Synthetic sent shift',date:'2026-09-02',assetRef:'v:7',driverId:3,status:'sent',odoStart:100,odoEnd:200,hours:1,result:'Recorded actual work'}],
@@ -59,6 +60,12 @@ test('hidden Electron executes all three semantic commands through real preload,
     assert.deepEqual(result.source.fuelMovements,actual.fuelMovements);assert.deepEqual(result.persisted.assetAssignments,actual.assetAssignments);
     for(const id of ['native-issue-','native-accept-','native-assignment-'])assert.equal(result.queue.operations.find(row=>row.id===id+index).status,'committed');
     assert.equal(actual.auditLog.filter(row=>row.type==='transaction'&&row.operationId==='native-issue-'+index).length,1);
+    await page.evaluate(()=>{catalogMergeOpen('drivers',0);window.__nativeMergeState=catalogMergeSession;});
+    const merge=page.locator('#catalogMergeForm'),targetToken=await page.evaluate(()=>catalogMergeSession.choices.find(choice=>choice.id==='0').token);await merge.locator('[name="target"]').selectOption(targetToken);await merge.locator('[name="reason"]').fill('Synthetic confirmed duplicate without factual history');await merge.locator('[data-cm-preview]').click();assert.equal(await page.evaluate(()=>catalogMergeSession.preview?.canMerge),true,await merge.innerText());
+    const review=await page.evaluate(()=>({data:structuredClone(data),input:catalogMergeInput(catalogMergeSession),today:catalogMergeSession.today,fingerprint:catalogMergeSession.preview.fingerprint}));assert.equal(catalogMerge.preview(review.data,review.input,{today:review.today}).fingerprint,review.fingerprint,'native renderer and Node must compute the same reviewed graph');const storedBeforeMerge=storage.readAll(dir),different=storage.SECTIONS.filter(name=>kernel.stableSerialize(storedBeforeMerge[name]||[])!==kernel.stableSerialize(review.data[name]||[]));assert.deepEqual(different,[]);assert.equal(catalogMerge.preview(storedBeforeMerge,review.input,{today:review.today}).fingerprint,review.fingerprint,'persisted and renderer snapshots must have the same reviewed graph');
+    await merge.locator('[name="confirm"]').check();await merge.locator('[data-cm-save]').click();await page.waitForFunction(()=>!document.querySelector('#wfModal.open')||!!document.querySelector('[data-cm-error]')?.textContent.trim());assert.equal(await page.evaluate(()=>document.querySelector('#wfModal.open [data-cm-error]')?.textContent||''),'');
+    const merged=storage.readAll(dir),alias=merged.drivers.find(row=>row.id===0);assert.equal(alias.archived,true);assert.equal(alias.mergedInto.id,'0');assert.equal(alias.mergedInto.actor.id,'local-profile');assert.equal(alias.mergedInto.section,'drivers');assert.deepEqual(merged.records,actual.records);assert.deepEqual(merged.assetAssignments,actual.assetAssignments);assert.deepEqual(merged.drivers.find(row=>row.id==='0'),actual.drivers.find(row=>row.id==='0'));
+    const mergeReplay=await page.evaluate(async()=>window.electronAPI.executeCommand(JSON.stringify(_platformCommandIntents.get(window.__nativeMergeState.operationId).envelope)));assert.equal(mergeReplay.operationReceipt.status,'replayed');assert.equal(storage.readAll(dir).auditLog.filter(row=>row.type==='transaction'&&row.operationId===alias.mergedInto.operationId).length,1);
   }
   assert.deepEqual(errors,[]);
 });

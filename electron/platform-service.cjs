@@ -54,7 +54,10 @@ function replayResult(previous, revisions, token, info, names) {
 function assertAuditPrefix(previous, sections, actor) {
   if (!Object.hasOwn(sections, 'auditLog')) return;
   const prefix = visibleAudit(previous.auditLog, actor), received = sections.auditLog;
-  const unchanged = rows => received.length >= rows.length && rows.every((row, index) => JSON.stringify(row) === JSON.stringify(received[index]));
+  // JSON object key order may change during a portable kernel plan. Immutable
+  // values, typed IDs and array order are checked canonically; stored originals
+  // remain the prefix that is appended to below.
+  const unchanged = rows => received.length >= rows.length && rows.every((row, index) => kernel().stableSerialize(row) === kernel().stableSerialize(received[index]));
   // Native snapshots include unchanged historical rows with obsolete section
   // names; HTTP snapshots contain only the principal's visible history.
   if (!Array.isArray(received) || !unchanged(previous.auditLog || []) && !unchanged(prefix))
@@ -100,8 +103,12 @@ function prepareTransaction(previous, supplied, options = {}) {
   sections=require('../assets/core/temporal-policy.js').canonicalizeOrigins(previous,sections);
   if (options.prepareSections) sections = options.prepareSections(sections);
   const id = info?.id || 'backend:' + crypto.randomUUID();
+  // This proof is derived from the semantic execution option, never a section
+  // request field. Raw/full writes cannot authorize their own catalog aliases.
+  const commandProof=options.commandIntent?.command?.type==='MergeCatalog'
+    ? {commandIntent:contracts().parseCommandEnvelope(options.commandIntent,registry)} : {};
   const plan = kernel().prepare(previous, sections, { id, identity:options.databaseToken || 'local-storage', actor,
-    revisions:options.revisions || {}, now:at,
+    revisions:options.revisions || {}, now:at,...commandProof,
     readable:registry.filter(name => access.authorize(actor, 'read', name)),
     writable:registry.filter(name => access.authorize(actor, 'write', name)) });
   const changes = (plan.rowChanges || []).filter(row => row.section !== 'auditLog');
