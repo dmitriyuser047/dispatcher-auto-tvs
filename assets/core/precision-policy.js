@@ -1,5 +1,5 @@
 /* Precision is checked on changed facts, never by rewriting source snapshots. */
-(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(require('./platform-schema.js'),()=>require('./decimal-core.js'));else root.PrecisionPolicy=factory(root.PlatformSchema,()=>root.DecimalCore);})(typeof globalThis==='object'?globalThis:this,function(schema,getDecimal){
+(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(require('./platform-schema.js'),()=>require('./decimal-core.js'),()=>require('./document-engine.js'));else root.PrecisionPolicy=factory(root.PlatformSchema,()=>root.DecimalCore,()=>root.DocumentEngine);})(typeof globalThis==='object'?globalThis:this,function(schema,getDecimal,getDocuments){
   'use strict';
   const maximum='1000000000000', own=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
   const specs={};
@@ -18,7 +18,7 @@
   add('fuelPurchases',3,'qty');add('fuelPurchases',2,'sum');add('fuelPurchases',6,'price');add('monthlyFuel',3,'liters');add('monthlyFuel',2,'sum');
   add('fuelCards',3,'limit');
   add('dispatchJobs',3,'plannedKm actualKm plannedHours actualHours partRequirements[].qty');add('dispatchJobs',2,'cost');add('workOrders',2,'cost actualCost');
-  add('fuelMovements',3,'qty');add('partMovements',3,'qty meter');add('parts',3,'minStock');add('shiftReports',3,'odoStart odoEnd hours fuelIssued tankMeasured');
+  add('fuelMovements',3,'qty measurement.observedQty');add('partMovements',3,'qty meter');add('parts',3,'minStock');add('shiftReports',3,'odoStart odoEnd hours fuelIssued tankMeasured');
   add('glonassTrips',3,'km fuel fuelIdle engine idle odoStart odoEnd');add('costEntries',2,'amount');add('costProfiles',6,'salaryRate depreciationRate fuelRate fuelPrice');
   add('costProfiles',6,'ratePeriods.periods[].parameters.salaryRate ratePeriods.periods[].parameters.depreciationRate ratePeriods.periods[].parameters.fuelRate ratePeriods.periods[].parameters.fuelPrice');
   add('procurementOrders',3,'quantity receivedQty stockPostedQty');add('procurementRules',3,'reserveQty expectedDaily');
@@ -79,20 +79,43 @@
     // An explicit VAT amount outranks its rate; no statutory rate is inferred.
     return api.compare(api.add(net,vat),gross)===0?[]:[{field:'grossSum',code:'NUMERIC_TAX_TOTAL',message:'Итог документа должен точно равняться сумме без НДС и явно указанному НДС; исходные суммы не изменены'}];
   }
+  function inheritedReceiptFacts(previous,next,context){
+    const result=new Map(),intent=context?.commandIntent?.command||context?.commandIntent;
+    if(!previous||intent?.type!=='DocumentAction'||intent.input?.action!=='postDraft'||intent.input.section!=='tankIncomes')return result;
+    const drafts=rows(previous,'documentDrafts').filter(row=>row.id===intent.input.draftId),draft=drafts.length===1?drafts[0]:null;
+    if(draft?.section!=='tankIncomes'||draft.correctionOf?.section!=='tankIncomes')return result;
+    const documents=getDocuments?.();
+    if(documents?.apiVersion!==1)throw Object.assign(Error('Не загружены правила исправления приходных документов'),{code:'MODULE_UNAVAILABLE'});
+    const resolved=documents.resolveDocument(previous,draft.correctionOf);
+    if(resolved.current.id!==draft.correctionOf.id)return result;
+    // This is a proof of one immutable inherited fact, not a client exemption.
+    // Replanning does not call the kernel or precision validation recursively.
+    const plan=documents.plan(previous,intent.input,context);
+    for(const name of schema.sections)if(name!=='auditLog'&&stable(rows(next,name))!==stable(plan.sections[name]??rows(previous,name)))return result;
+    const children=rows(next,'tankIncomes').filter(row=>row.id===context.id&&row.lifecycle?.correctionOf?.section==='tankIncomes'&&row.lifecycle.correctionOf.id===resolved.current.id);
+    if(children.length!==1)return result;
+    const source=resolved.current,child=children[0],fields=new Set();
+    for(const field of ['amount','sum','vatAmount','grossSum','vatRate'])if(own(source,field)&&stable(source[field])===stable(child[field])){
+      try{const value=decimal().parse(source[field]);decimal().toNumberExact(value);fields.add(field);}catch{}
+    }
+    if(fields.size)result.set(rowKey('tankIncomes',child,0),{source,fields});
+    return result;
+  }
   function collect(db,context={},previous){
-    const issues=[],readable=Array.isArray(context.readable)&&!context.readable.includes('*')?new Set(context.readable):null;
+    const issues=[],readable=Array.isArray(context.readable)&&!context.readable.includes('*')?new Set(context.readable):null,inherited=inheritedReceiptFacts(previous,db,context);
     for(const [section,fields]of Object.entries(specs)){
       if(readable&&!readable.has(section))continue;
       if(previous&&previous[section]===db[section])continue;
       const current=rows(db,section),old=previous===undefined?null:previousRows(section,rows(previous,section),current);
       current.forEach((row,rowIndex)=>{if(!row||typeof row!=='object'||Array.isArray(row))return;const before=old?.get(rowIndex);
-        const recordId=typeof row.id==='string'||typeof row.id==='number'&&Number.isFinite(row.id)?row.id:'';
+        const recordId=typeof row.id==='string'||typeof row.id==='number'&&Number.isFinite(row.id)?row.id:'',receipt=section==='tankIncomes'&&!before?inherited.get(rowKey(section,row,rowIndex)):null;
         for(const spec of fields)for(const entry of values(row,spec.field)){
           if(before&&stable(at(before,entry.path))===stable(entry.value))continue;
+          if(receipt?.fields.has(entry.path)&&stable(receipt.source[entry.path])===stable(entry.value))continue;
           const error=check(entry.value,spec);if(error)issues.push({severity:'error',section,recordId,rowIndex,field:entry.path,...error});
         }
         for(const error of allocationIssues(section,row,before,previous===undefined))issues.push({severity:'error',section,recordId,rowIndex,...error});
-        for(const error of taxIssues(section,row,before,previous===undefined))issues.push({severity:'error',section,recordId,rowIndex,...error});
+        for(const error of taxIssues(section,row,before||receipt?.source,previous===undefined))issues.push({severity:'error',section,recordId,rowIndex,...error});
       });
     }
     return {issues,counts:{error:issues.length,warning:0,total:issues.length}};

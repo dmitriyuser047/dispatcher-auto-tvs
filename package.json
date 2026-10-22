@@ -13,10 +13,10 @@
     "benchmark:platform": "node --expose-gc scripts/benchmark-platform.cjs",
     "test:sqlite": "node --test tests/sqlite-adapter.test.cjs tests/sqlite-migration.test.cjs tests/sqlite-platform.test.cjs",
     "db:migrate:copy": "node scripts/migrate-sqlite.cjs",
-    "test:ui": "node --test --test-concurrency=2 tests/ui-regression.cjs tests/unified-ui.cjs tests/cost-accounting-ui.cjs tests/procurement-ui.cjs tests/engine-integration-ui.cjs tests/writeoff-workflow-ui.cjs tests/platform-ui.cjs tests/personnel-ui.cjs tests/fuel-recovery-ui.cjs tests/recovery-ui.cjs tests/background-calculations-ui.cjs tests/fuel-background-ui.cjs tests/transaction-background-ui.cjs tests/semantic-workflow-ui.cjs tests/semantic-command-ui.cjs tests/fuel-accounting-ui.cjs tests/precision-ui.cjs tests/effective-parameters-ui.cjs tests/dated-card-ui.cjs tests/catalog-merge-ui.cjs tests/catalog-zero-crud-ui.cjs tests/monthly-identity-ui.cjs tests/document-lifecycle-ui.cjs tests/period-control-ui.cjs",
+    "test:ui": "node --test --test-concurrency=2 tests/ui-regression.cjs tests/unified-ui.cjs tests/cost-accounting-ui.cjs tests/procurement-ui.cjs tests/engine-integration-ui.cjs tests/writeoff-workflow-ui.cjs tests/platform-ui.cjs tests/personnel-ui.cjs tests/fuel-recovery-ui.cjs tests/recovery-ui.cjs tests/background-calculations-ui.cjs tests/fuel-background-ui.cjs tests/transaction-background-ui.cjs tests/semantic-workflow-ui.cjs tests/semantic-command-ui.cjs tests/fuel-accounting-ui.cjs tests/precision-ui.cjs tests/effective-parameters-ui.cjs tests/dated-card-ui.cjs tests/catalog-merge-ui.cjs tests/catalog-zero-crud-ui.cjs tests/monthly-identity-ui.cjs tests/document-lifecycle-ui.cjs tests/period-control-ui.cjs tests/tank-stock-ui.cjs",
     "test:engine": "node --test tests/dispatcher-core.test.cjs tests/fuel-engine.test.cjs tests/fuel-records-query.test.cjs tests/writeoff-engine.test.cjs tests/platform-kernel.test.cjs tests/platform-integrity.test.cjs tests/platform-policies.test.cjs tests/personnel-engine.test.cjs",
     "engine:demo": "node scripts/engine-demo.cjs",
-    "test:electron": "node --test tests/unified-electron.cjs tests/semantic-command-electron.cjs tests/document-lifecycle-electron.cjs tests/period-control-electron.cjs",
+    "test:electron": "node --test tests/unified-electron.cjs tests/semantic-command-electron.cjs tests/document-lifecycle-electron.cjs tests/period-control-electron.cjs tests/tank-stock-electron.cjs",
     "start": "electron .",
     "build": "node scripts/build-installer.cjs"
   },

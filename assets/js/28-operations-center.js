@@ -30,13 +30,22 @@ function opsMakeIssue(id, level, filter, label, title, body, source, action, run
 }
 
 function opsCollectIssues(today = new Date()) {
+  const collect=()=>opsCollectIssuesFromSnapshot(today);
+  return typeof tankStockWithSnapshot==='function'?tankStockWithSnapshot(collect):collect();
+}
+function opsCollectIssuesFromSnapshot(today) {
   const month = opsMonthKey(today), issues = [];
   const vehicles = (data.vehicles || []).filter(r=>!r.archived), generators = (data.generators || []).filter(r=>!r.archived);
 
   (data.tanks || []).filter(t=>!t.archived).forEach(tank => {
     const balance = computeTankBalance(tank.id);
     const reserve = Number(tank.reserveLevel);
-    if (balance.balance < 0) {
+    if (balance.balance==null||!Number.isFinite(balance.balance)) {
+      issues.push(opsMakeIssue(`tank-unknown:${typeof tank.id}:${tank.id}`, 'warning', 'check', 'ОСТАТОК НЕ ОПРЕДЕЛЁН',
+        `Нельзя достоверно рассчитать остаток ёмкости «${tank.name}»`,
+        balance.status==='outside-accounting'?'На выбранную дату учёт ещё не начат.':(balance.diagnostics||[]).map(issue=>issue.message).join('; ')||'Проверьте начальный остаток, даты, количества и источники движений.',
+        `Ёмкости · ${tank.object || tank.location || tank.name}`, 'Проверить источники', () => opsOpenTank(tank.id)));
+    } else if (balance.balance < 0) {
       issues.push(opsMakeIssue(`tank-negative:${tank.id}`, 'critical', 'critical', 'ОТРИЦАТЕЛЬНЫЙ ОСТАТОК',
         `Расчётный остаток ёмкости «${tank.name}» ушёл в минус`,
         `Баланс ${balance.balance.toLocaleString('ru', { maximumFractionDigits: 1 })} л. Проверьте приход и выдачи, привязанные к ёмкости.`,

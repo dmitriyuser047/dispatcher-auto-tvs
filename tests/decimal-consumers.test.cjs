@@ -8,6 +8,7 @@ function app(){
     window:{},document:{addEventListener(){}},plateKey:value=>String(value||'').toUpperCase(),
     fuelGradeFromTransactions:()=> 'ДТ',recordFuelGrade:()=> 'ДТ'});
   for(const file of ['11-import.js','16-generators.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/js',file),'utf8'),ctx,{filename:file});
+ require('./tank-stock-vm.cjs')(ctx);
   return ctx;
 }
 const tx=qty=>({date:'2026-09-01',time:'12:30',cardNo:'111111',fuel:'ДТ',plate:'A001AA',comment:'Source row',qty});

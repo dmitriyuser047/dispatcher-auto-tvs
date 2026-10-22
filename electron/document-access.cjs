@@ -2,7 +2,7 @@
 // A mixed draft section never grants access to its financial payloads merely
 // because another document adapter is available to the same role.
 const access=require('./access-control');
-const sections=Object.freeze(['shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords']);
+const sections=Object.freeze(['shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords','tankIncomes']);
 const kernel=()=>require('../assets/core/platform-kernel.js');
 const own=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
 function permitted(principal,action,section){

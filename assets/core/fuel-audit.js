@@ -37,6 +37,8 @@ function gsmAuditModel(input, options) {
   const array = value => Array.isArray(value) ? value.filter(row => row && typeof row === 'object') : [];
   const db = { ...input, vehicles: array(input.vehicles), records: array(input.records), fuelPurchases: array(input.fuelPurchases),
     fuelCards: array(input.fuelCards), monthlyFuel: array(input.monthlyFuel) };
+  const corrected=fuel.calculationVersion>=4,live=row=>!row.deleted&&!row.cancelled&&row.status!=='cancelled',idOr=value=>corrected?(value??''):(value||'');
+  if(corrected)for(const section of ['records','fuelPurchases','monthlyFuel'])db[section]=db[section].filter(live);
   const boundaries=new Map(db.vehicles.map(vehicle=>{
     if(!Object.prototype.hasOwnProperty.call(vehicle,'fuelAccounting'))return [vehicle.id,{mode:'legacy'}];
     const api=getAccounting();if(api?.apiVersion!==1)throw Object.assign(Error('Не загружены правила начала учёта ГСМ'),{code:'MODULE_UNAVAILABLE'});
@@ -53,15 +55,15 @@ function gsmAuditModel(input, options) {
   const items = [], seen = new Set();
   const present = value => value != null && String(value).trim() !== '';
   const inPeriod = date => !gsmValidDate(date) || gsmInPeriod(date, from, to);
-  const uniqueRefs = refs => [...new Map(refs.filter(Boolean).map(ref => [JSON.stringify([ref.type, ref.id || '', ref.vehicleId || '', ref.month || '']), ref])).values()];
-  const ref = (type, id, label, extra) => ({ type, id: id || '', label, ...extra });
+  const uniqueRefs = refs => [...new Map(refs.filter(Boolean).map(ref => [JSON.stringify([ref.type,idOr(ref.id),idOr(ref.vehicleId),ref.month||'']), ref])).values()];
+  const ref = (type, id, label, extra) => ({ type, id: idOr(id), label, ...extra });
   const sourceScope = (row, type) => {
     if (!row) return { org: '', orgs: [], grade: '' };
     const v = vehicles.get(row.vehicleId), number = type === 'purchase' ? row.cardNo : row.fuelCardNum;
     const card = number && db.fuelCards.find(c => gsmCardKey(c.number) === gsmCardKey(number));
     const explicit = type === 'purchase' ? row.sourceOrg : row.fuelOrg;
     let org = explicit || '', orgs = [];
-    if (!org && gsmValidDate(row.date)) org = gsmCardAt(db, number, row.date).org ||
+    if (!org && !(corrected&&type==='record'&&Object.prototype.hasOwnProperty.call(row,'fuelOrg'))&&gsmValidDate(row.date)) org = gsmCardAt(db, number, row.date).org ||
       (type === 'record' && !number || row.manual ? gsmVehicleOrgAt(v, row.date) : '') || '';
     if (!org && !gsmValidDate(row.date)) {
       const source = card || (type === 'record' && !number || row.manual ? v : null);
@@ -72,7 +74,7 @@ function gsmAuditModel(input, options) {
     return { org, orgs, grade: gsmGrade(rawGrade, rawGrade ? 'Не указано' : v ? gsmVehicleGrade(v) : '') };
   };
   const refsFor = row => {
-    const out = [], p = row.purchaseId && purchases.get(row.purchaseId), r = row.recordId && records.get(row.recordId);
+    const out = [], p = (corrected?present(row.purchaseId):row.purchaseId)&&purchases.get(row.purchaseId), r = (corrected?present(row.recordId):row.recordId)&&records.get(row.recordId);
     if (p) out.push(ref('purchase', p.id, 'Покупка', { date: p.date, vehicleId: p.vehicleId }));
     if (r) out.push(ref(vehicles.has(r.vehicleId) ? 'record' : 'orphan-record', r.id,
       vehicles.has(r.vehicleId) ? 'Журнал' : 'Восстановить связь с ТС', { date: r.date, vehicleId: r.vehicleId }));
@@ -163,8 +165,8 @@ function gsmAuditModel(input, options) {
       shortageGroups.get(key).push(issue); return;
     }
     const rule = GSM_AUDIT_RULES[issue.code] || ['evidence', 'Нужно сверить источник', 'Сверьте исходную запись с документом.'];
-    const vehicleId = issue.vehicleId || issue.purchaseId && purchases.get(issue.purchaseId)?.vehicleId || '';
-    const sourceScopeValue = issue.purchaseId ? sourceScope(purchases.get(issue.purchaseId), 'purchase') : sourceScope(records.get(issue.recordId), 'record');
+    const vehicleId = corrected?(issue.vehicleId??purchases.get(issue.purchaseId)?.vehicleId??''):issue.vehicleId || issue.purchaseId && purchases.get(issue.purchaseId)?.vehicleId || '';
+    const sourceScopeValue = (corrected?present(issue.purchaseId):issue.purchaseId) ? sourceScope(purchases.get(issue.purchaseId), 'purchase') : sourceScope(records.get(issue.recordId), 'record');
     const sourceRefs = refsFor(issue);
     if (issue.code === 'journal-difference' || issue.code === 'journal-ambiguous')
       linkedPurchasesFor(issue.recordId).forEach(p => sourceRefs.push(...refsFor({ purchaseId: p.id })));

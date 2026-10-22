@@ -31,6 +31,11 @@ test('planner works in both restored themes without horizontal overflow',async()
   assert.equal(await page.locator('#pcLead').inputValue(),'2');await page.locator('#pcRuleCancel').click();
  }
 });
+test('conflicting tank receipts show unknown stock and disable generated purchase quantities without altering journals',async()=>{
+ await page.evaluate(()=>{data.tankIncomes=[{id:'conflicting-source',tankId:'t',date:wfToday(),amount:10,liters:20}];renderProcurementSection();});
+ const card=page.locator('.pc-plan-grid .pc-card').filter({hasText:'Тестовая ёмкость'});assert.match(await card.innerText(),/Нет данных/);assert.match(await card.innerText(),/Нет достоверного остатка/);assert.match(await card.innerText(),/Расчёт недоступен/);assert.equal(await card.locator('[data-pc-action="suggest"]').isDisabled(),true);
+ assert.equal(await page.evaluate(()=>data.tankIncomes[0].amount),10);assert.equal(await page.evaluate(()=>data.tankIncomes[0].liters),20);assert.equal(await page.evaluate(()=>window.__writes+window.__commands),0);
+});
 
 test('partial receipt tracks quantities without posting any fuel or parts movement',async()=>{
  const before=await page.evaluate(()=>({stock:wfTankBalanceAt('t'),fuel:data.fuelMovements.length,incomes:data.tankIncomes.length,parts:data.partMovements.length}));

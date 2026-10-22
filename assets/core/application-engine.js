@@ -34,19 +34,19 @@
       maxCacheCharacters: options.maxCacheCharacters,
       fingerprint:writeoff.sha256,
       modules: {
-        fuel: { version:'3', sections:sections.fuel,
+        fuel: { version:'4', sections:sections.fuel,
           calculate:(db, query) => fuel.buildLedger(db, query) },
-        fuelRecords: { version:'3', sections:sections.fuelRecords,
+        fuelRecords: { version:'4', sections:sections.fuelRecords,
           calculate:(db, query) => fuel.recordBalances(db, query.vehicleId, { from:query.from, to:query.to }) },
-        fuelAudit: { version:'3', sections:sections.fuelAudit,
+        fuelAudit: { version:'4', sections:sections.fuelAudit,
           calculate:(db, query) => audit.buildModel(db, query) },
-        writeoff: { version:'3', sections:sections.writeoff,
+        writeoff: { version:'4', sections:sections.writeoff,
           calculate:(db, query) => writeoff.prepare(db, query) },
-        writeoffPost: { version:'3', sections:sections.writeoffPost,
+        writeoffPost: { version:'4', sections:sections.writeoffPost,
           calculate:(db, query) => writeoff.post(db, query.request, query.metadata) },
         costs: { version:'3', sections:sections.costs,
           calculate:(db, query) => costs.buildReport(db, query) },
-        procurement: { version:'2', sections:sections.procurement,
+        procurement: { version:'3', sections:sections.procurement,
           calculate:(db, query) => {
             if (!query.date) throw Error('Укажите дату расчёта закупок');
             return procurement.plan(db, query);

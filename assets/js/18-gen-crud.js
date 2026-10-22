@@ -55,7 +55,7 @@ async function saveGenerator() {
     const previous=data.generators.find(row=>row.id===editingGeneratorId);
     if(!EntityIdentity.identifier(tankId)||!tanksAll().some(row=>row.id===tankId)&&previous?.tankId!==tankId){showFieldError('Ёмкость не найдена. Откройте карточку заново.','gm_tank');return;}}
   let obj = {
-    name, location, ...numeric,
+    name, location, ...Object.fromEntries(Object.entries(numeric).filter(([,value])=>value!==undefined)),
     serial:      document.getElementById('gm_serial').value.trim(),
     responsible: document.getElementById('gm_responsible').value.trim(),
     fuel:        document.getElementById('gm_fuel').value,
@@ -185,7 +185,7 @@ async function saveGenRecord() {
   }
   if (!data.genRecords) data.genRecords = [];
   const obj = {
-    generatorId: selectedGeneratorId, date, ...numeric,
+    generatorId: selectedGeneratorId, date, ...Object.fromEntries(Object.entries(numeric).filter(([,value])=>value!==undefined)),
     note:        document.getElementById('gen_rec_note').value.trim(),
   };
   const actualSource = document.getElementById('gen_rec_fuel_actual').dataset.source;
@@ -275,7 +275,8 @@ function calcGenHoursFromMeter() {
 }
 
 // ─── GENERATOR SIDEBAR SUMMARY ───────────────────────────
-function renderGenSidebarSummary() {
+function renderGenSidebarSummary(){return tankStockDisplaySnapshot(()=>renderGenSidebarSummaryProjected());}
+function renderGenSidebarSummaryProjected() {
   document.getElementById('sidebarSummary').innerHTML = '';
   const list = document.getElementById('generatorList');
   const gens = data.generators || [];
@@ -287,7 +288,7 @@ function renderGenSidebarSummary() {
   // ─── Агрегированная сводка (по подобию транспорта) ───
   let totalHours = 0;
   let issued = 0, used = 0, byNorm = 0, balance = 0;
-  let trackedFuel=0,unstartedFuel=0,unknownBalance=0;
+  let trackedFuel=0,unstartedFuel=0,unknownBalance=0,unknownTank=0;
   const countedTanks = new Set();
   gens.forEach(g => {
     const gRecs = genRecsFor(g.id).slice().sort((a, b) => cmpDateAsc(a.date, b.date));
@@ -300,7 +301,7 @@ function renderGenSidebarSummary() {
     });
     if(fuelAccountingFor('generators',g).mode==='explicit'&&fuelAccountingOpening('generators',g,dispatcherLocalDate())===null){unstartedFuel++;return;}
     if (g.tankId!=null&&g.tankId!=='') {
-      if (!countedTanks.has(g.tankId)) { countedTanks.add(g.tankId); const value=computeTankBalance(g.tankId).balance;if(value===null)unstartedFuel++;else{balance=fuelReportAdd(balance,value);trackedFuel++;} }
+      if (!countedTanks.has(g.tankId)) { countedTanks.add(g.tankId); const source=computeTankBalance(g.tankId),value=source.balance;if(value===null){if(source.status==='outside-accounting')unstartedFuel++;else unknownTank++;}else{balance=fuelReportAdd(balance,value);trackedFuel++;} }
     } else {
       const balMap  = computeGenFuelBalances(g.id);
       const value=fuelAccountingCurrentBalance('generators',g,gRecs,balMap);
@@ -308,7 +309,7 @@ function renderGenSidebarSummary() {
       else{balance=fuelReportAdd(balance,value);trackedFuel++;}
     }
   });
-  const balColor = unknownBalance?'var(--text3)':balance < 0 ? 'var(--red)' : balance === 0 ? 'var(--text3)' : 'var(--green)';
+  const balColor = unknownBalance||unknownTank?'var(--text3)':balance < 0 ? 'var(--red)' : balance === 0 ? 'var(--text3)' : 'var(--green)';
   // Отклонение факта от нормы: перерасход красный, экономия зелёная
   const dev = used==null||byNorm==null?null:DecimalCore.toNumberExact(DecimalCore.sub(used,byNorm));
   const devPct = dev!=null&&byNorm ? Math.round(dev / byNorm * 1000) / 10 : null;
@@ -355,7 +356,7 @@ function renderGenSidebarSummary() {
       <div class="ss-row"><span class="ss-label">Расход по факту</span><span class="ss-value">${used==null?'Неизвестно: нет нормы':precisionFormat(used)+' л'}</span></div>
       <div class="ss-row"><span class="ss-label">Отклонение</span><span class="ss-value" style="color:${devColor}" title="Факт минус норма. Плюс — перерасход, минус — экономия.">${dev==null?'Нет данных':(dev>0?'+':'')+precisionFormat(dev)+' л'+(devPct!==null?' · '+(dev>0?'+':'')+devPct+'%':'')}</span></div>
       <div class="ss-divider"></div>
-      <div class="ss-row"><span class="ss-label">Остаток</span><span class="ss-value" style="color:${balColor}">${unknownBalance?'Неизвестно: нет нормы':trackedFuel?precisionFormat(balance)+' л':'Учёт ещё не начат'}</span></div>
+      <div class="ss-row"><span class="ss-label">Остаток</span><span class="ss-value" style="color:${balColor}">${unknownTank?'Остаток ёмкости не определён':unknownBalance?'Неизвестно: нет нормы':trackedFuel?precisionFormat(balance)+' л':'Учёт ещё не начат'}</span></div>
       ${unstartedFuel?'<small>Учёт ещё не начат: '+unstartedFuel+'</small>':''}
     </div>
   </div>`;

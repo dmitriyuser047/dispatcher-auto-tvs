@@ -46,10 +46,11 @@
         error.details={issues:error.issues};error.code='POLICY_VIOLATION';throw error;
       }
     }
-    else if(['workOrders','dispatchJobs','payments','repairs','vehicleTo','toRecords','documentDrafts'].some(section=>stable(rows(previous,section))!==stable(rows(next,section)))){
+    else if(['workOrders','dispatchJobs','payments','repairs','vehicleTo','toRecords','tankIncomes','documentDrafts'].some(section=>stable(rows(previous,section))!==stable(rows(next,section)))){
       const error=new Error('Не загружены общие правила документов');error.code='MODULE_UNAVAILABLE';throw error;
     }
     const proven=intent?.type==='DocumentAction'&&engine?.apiVersion===1;
+    if(intent?.type==='FuelAction'&&engine?.apiVersion===1)return true;
     const issues=[],add=(section,row,code,field,message)=>issues.push({severity:'error',section,recordId:row.id??'',code,field,message});
     for(const section of ['fuelMovements','partMovements','shiftReports']) {
       const beforeRows=rows(previous,section),afterRows=rows(next,section);

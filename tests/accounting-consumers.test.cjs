@@ -33,6 +33,7 @@ function harness(database=fixture(),date='2026-09-30'){
   });
   vm.runInContext('function recsFor(id){return data.records.filter(row=>row.vehicleId===id);}function genRecsFor(id){return data.genRecords.filter(row=>row.generatorId===id);}',context);
   for(const file of ['assets/js/55-precision-input.js','assets/js/29-fuel-quality.js','assets/js/07-summary.js','assets/js/16-generators.js','assets/js/17-tanks.js','assets/js/15-cards.js','assets/js/18-gen-crud.js'])vm.runInContext(read(file),context,{filename:file});
+ require('./tank-stock-vm.cjs')(context);
   return {context,calls,elements,export(from='2026-09-01',to='2026-09-30'){return context.exportGenWriteOffAct(from,to,{actDate:to||'2026-09-30',loc:'__ALL__'});}};
 }
 const near=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-9,actual+' != '+expected);

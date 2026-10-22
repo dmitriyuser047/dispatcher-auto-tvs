@@ -1,0 +1,259 @@
+{
+  "capturedBeforeStep13": true,
+  "cases": [
+    {
+      "name": "normal",
+      "db": {
+        "vehicles": [
+          {
+            "id": "v",
+            "org": "A",
+            "fuel": "gasoline",
+            "fuelGrade": "АИ-95",
+            "fuelBalance": 923.537,
+            "norm": 10
+          }
+        ],
+        "records": [
+          {
+            "id": "r",
+            "vehicleId": "v",
+            "date": "2026-09-05",
+            "fuelGrade": "АИ-95",
+            "fuelIssued": 40.001,
+            "fuelActual": 20.0055,
+            "fuelIdle": 2.0005,
+            "km": 100.123
+          }
+        ],
+        "fuelPurchases": [
+          {
+            "id": "p",
+            "vehicleId": "v",
+            "recordId": "r",
+            "date": "2026-09-05",
+            "grade": "АИ-95",
+            "qty": 40.001,
+            "manual": true,
+            "sourceOrg": "A"
+          }
+        ],
+        "fuelCards": [],
+        "monthlyFuel": [],
+        "fuelWriteoffs": []
+      },
+      "range": {
+        "from": "2026-09-01",
+        "to": "2026-09-30"
+      },
+      "request": {
+        "month": "2026-09",
+        "org": "A",
+        "grade": "АИ-95",
+        "date": "2026-09-30"
+      },
+      "metadata": {
+        "id": "golden",
+        "number": "Synthetic pre-step13",
+        "postedAt": "2026-10-22T12:00:00.000Z",
+        "postedBy": {
+          "id": "synthetic",
+          "name": "Synthetic",
+          "role": "admin"
+        }
+      },
+      "expected": {
+        "1": {
+          "ledger": "6481b0bc2c9013984ca6056cd97ca3ccec84f61351cf6c9140b534c215e0bb15",
+          "balances": "19589d16355aa7bde829ccd8c5db33280ffdb2dce0fa0ea7a4801ea17717d873",
+          "preview": "1e1166f37674cea0fe709acb33b529187b7631c486a81b0b360b7e547feff39f",
+          "sourceFingerprint": "sha256:a09616216643dfe2ab461ccea2854bbae3d0a5d29f51df3f9effed778e0283e7",
+          "post": "bde51b7c25f95a14b41cbba2f378793e577d20740b1efa15c741679044d2313b"
+        },
+        "2": {
+          "ledger": "316643e0b8e2f9a4d55bb9adff39c0ac8e3898e2d73359e857a499608df60021",
+          "balances": "17aae3437ec6fe0216b24e36eadeca245944fcd3ccf36350fb202e1510b367e9",
+          "preview": "a8966773861c0b9d45811de2dcbf9321a1f4f2fcfbf31fbe353921e01875b55c",
+          "sourceFingerprint": "sha256:9f4ba0e579ca65b87f9ef7ba267f71be57e7da89a91615b283666ec7b5f406ad",
+          "post": "b63c6f88e928e6b6fbf74647cdbfbb7e19a53ae0b71a34573085888027fb9e44"
+        },
+        "3": {
+          "ledger": "316643e0b8e2f9a4d55bb9adff39c0ac8e3898e2d73359e857a499608df60021",
+          "balances": "17aae3437ec6fe0216b24e36eadeca245944fcd3ccf36350fb202e1510b367e9",
+          "preview": "4c53f9f793885d8f45f1c46d07bbc06fa58153af1072c88c486f877b1662ddb0",
+          "sourceFingerprint": "sha256:0f28f40ba3197335a8459e69bba1a1f52bc2b1d8aecccd9163a6b195a2e5616b",
+          "post": "8af22fd59a4def4e1e28a0f61a4fe07d2c92989d8300fa0c00d2cf67ae18e0b6"
+        }
+      }
+    },
+    {
+      "name": "zero",
+      "db": {
+        "vehicles": [
+          {
+            "id": 0,
+            "org": "A",
+            "fuel": "gasoline",
+            "fuelGrade": "АИ-95",
+            "fuelBalance": 923.537,
+            "norm": 10
+          }
+        ],
+        "records": [
+          {
+            "id": 0,
+            "vehicleId": 0,
+            "date": "2026-09-05",
+            "fuelGrade": "АИ-95",
+            "fuelIssued": 40.001,
+            "fuelActual": 20.0055,
+            "fuelIdle": 2.0005,
+            "km": 100.123
+          }
+        ],
+        "fuelPurchases": [
+          {
+            "id": 0,
+            "vehicleId": 0,
+            "recordId": 0,
+            "date": "2026-09-05",
+            "grade": "АИ-95",
+            "qty": 40.001,
+            "manual": true,
+            "sourceOrg": "A"
+          }
+        ],
+        "fuelCards": [],
+        "monthlyFuel": [],
+        "fuelWriteoffs": []
+      },
+      "range": {
+        "from": "2026-09-01",
+        "to": "2026-09-30"
+      },
+      "request": {
+        "month": "2026-09",
+        "org": "A",
+        "grade": "АИ-95",
+        "date": "2026-09-30"
+      },
+      "metadata": {
+        "id": "golden",
+        "number": "Synthetic pre-step13",
+        "postedAt": "2026-10-22T12:00:00.000Z",
+        "postedBy": {
+          "id": "synthetic",
+          "name": "Synthetic",
+          "role": "admin"
+        }
+      },
+      "expected": {
+        "1": {
+          "ledger": "0337df8a549f73b842b2100ceb5e8f9b3519f8d26cbafdb3fe90f8e67ff8c28d",
+          "balances": "30a7a0ff96f701ac07e66c457c166999b7741d61b5e5d31d80f8099dd6b7f2f6",
+          "preview": "a9c05706290add98195d81bba44386bf2e7faf11592a64393d618af9647c6110",
+          "sourceFingerprint": "sha256:146eb6593d8671d1597e6f2ed9ef3e1e03824ed623fe195ed07a4513d6646d5d"
+        },
+        "2": {
+          "ledger": "6ebf35e515eba9feafa992834dd81f498186f7fc3c4673dc5090683ea4e4fbd9",
+          "balances": "dca3b18e2983f91c85d090730efea7954f6800e8c9b8665a0781fca592ce31de",
+          "preview": "bd0abd0288340bf1b11e7dfea789499fa52231c6db7a1de1631a5d912194b324",
+          "sourceFingerprint": "sha256:77a9097c171ad5fd76381775cc489984bca3ae3a728a9a6d3dfc03ab715cc266"
+        },
+        "3": {
+          "ledger": "6ebf35e515eba9feafa992834dd81f498186f7fc3c4673dc5090683ea4e4fbd9",
+          "balances": "dca3b18e2983f91c85d090730efea7954f6800e8c9b8665a0781fca592ce31de",
+          "preview": "f92886a20ae4611de7e1d42dc0900c97da0f82dd0607e6544bd56c682df76ede",
+          "sourceFingerprint": "sha256:babcc5bf73040298451509fe79e9f77ed1946784445b6c32392bf374cdffb247"
+        }
+      }
+    },
+    {
+      "name": "inactive",
+      "db": {
+        "vehicles": [
+          {
+            "id": "v",
+            "org": "A",
+            "fuel": "gasoline",
+            "fuelGrade": "АИ-95",
+            "fuelBalance": 923.537,
+            "norm": 10
+          }
+        ],
+        "records": [
+          {
+            "id": "r",
+            "vehicleId": "v",
+            "date": "2026-09-05",
+            "fuelGrade": "АИ-95",
+            "fuelIssued": 40.001,
+            "fuelActual": 20.0055,
+            "fuelIdle": 2.0005,
+            "km": 100.123,
+            "cancelled": true
+          }
+        ],
+        "fuelPurchases": [
+          {
+            "id": "p",
+            "vehicleId": "v",
+            "recordId": "r",
+            "date": "2026-09-05",
+            "grade": "АИ-95",
+            "qty": 40.001,
+            "manual": true,
+            "sourceOrg": "A",
+            "cancelled": true
+          }
+        ],
+        "fuelCards": [],
+        "monthlyFuel": [],
+        "fuelWriteoffs": []
+      },
+      "range": {
+        "from": "2026-09-01",
+        "to": "2026-09-30"
+      },
+      "request": {
+        "month": "2026-09",
+        "org": "A",
+        "grade": "АИ-95",
+        "date": "2026-09-30"
+      },
+      "metadata": {
+        "id": "golden",
+        "number": "Synthetic pre-step13",
+        "postedAt": "2026-10-22T12:00:00.000Z",
+        "postedBy": {
+          "id": "synthetic",
+          "name": "Synthetic",
+          "role": "admin"
+        }
+      },
+      "expected": {
+        "1": {
+          "ledger": "6481b0bc2c9013984ca6056cd97ca3ccec84f61351cf6c9140b534c215e0bb15",
+          "balances": "19589d16355aa7bde829ccd8c5db33280ffdb2dce0fa0ea7a4801ea17717d873",
+          "preview": "67ece3e9a5adc5aa5bb735b57fc7066cfafe11ec0e013c411a4d1d53abc7459d",
+          "sourceFingerprint": "sha256:250e7ce6643dfe138de78dcb2b8e7b2d71b4e49d54b182d47e5b233b7fbc2b44",
+          "post": "9df98f4bc7944559a66ad2ce517070753523a7f2d20b9c8bc1c4840fc9bc2ebf"
+        },
+        "2": {
+          "ledger": "316643e0b8e2f9a4d55bb9adff39c0ac8e3898e2d73359e857a499608df60021",
+          "balances": "17aae3437ec6fe0216b24e36eadeca245944fcd3ccf36350fb202e1510b367e9",
+          "preview": "be31134b6cdb9dc7584d96558afdde82255d6611f9c147e0d6105a4a4d0b5369",
+          "sourceFingerprint": "sha256:22843fcea5a0711f1d7c6f488bedabffd13d0be22a314ed11af18aa5b14810c6",
+          "post": "10751fe4095d4e8bc913efd8858fe832dc1e8427e366e330a936650c84d5c455"
+        },
+        "3": {
+          "ledger": "316643e0b8e2f9a4d55bb9adff39c0ac8e3898e2d73359e857a499608df60021",
+          "balances": "17aae3437ec6fe0216b24e36eadeca245944fcd3ccf36350fb202e1510b367e9",
+          "preview": "abe0b3e1737c2cdaa1a0fe96377b798019fe631c7f54b3d1e783de8a6e14d15d",
+          "sourceFingerprint": "sha256:ef34b9fa27e25a147b98894f91d9574ec7f13f11025d3179ef6aad2f39ca38d7",
+          "post": "0f9e5181aa3b9a0373c698b584f7003fdce63b26fa3e353f5ee9375f6c38b359"
+        }
+      }
+    }
+  ]
+}

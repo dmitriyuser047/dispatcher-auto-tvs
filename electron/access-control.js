@@ -97,7 +97,7 @@ function authorize(principal, action, section) {
   if (action === 'ping') return true;
   if (action === 'admin' || action === 'replace') return role === 'admin';
   if (typeof section !== 'string' || !/^[a-zA-Z]+$/.test(section)) return false;
-  if(section==='documentDrafts'&&['read','write'].includes(action))return ['shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords'].some(name=>authorize(principal,action,name));
+  if(section==='documentDrafts'&&['read','write'].includes(action))return ['shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords','tankIncomes'].some(name=>authorize(principal,action,name));
   if (action === 'read') return !FINANCIAL_SECTIONS.includes(section) || ['admin','accountant','viewer'].includes(role);
   // The HTTP handler MUST enforce append-only history, ignoring client authors.
   if ((action === 'append' || action === 'write') && section === 'auditLog') return true;
@@ -142,10 +142,15 @@ function validateAssetChanges(principal, section, previous, next) {
 function fieldPermissions(principal) {
   return principal?.role === 'mechanic' ? MECHANIC_ASSET_FIELDS : {};
 }
+function fuelActions(principal) {
+  const narrowed=principal?.writable;
+  return authorize(principal,'write','fuelMovements')&&(!narrowed||narrowed.includes('*')||narrowed.includes('fuelMovements'))
+    ? ['measure','applyDifference','voidMeasurement','reverseLegacyTransfer'] : [];
+}
 
 function publicUser(user) {
   return { id:user.id, name:user.name, role:user.role, enabled:user.enabled !== false,
     createdAt:user.createdAt || null, rotatedAt:user.rotatedAt || null, expiresAt:user.expiresAt || null };
 }
 
-module.exports = { ROLES, FINANCIAL_SECTIONS, hashToken, issueToken, normalizeServerUsers, authenticate, authorize, publicUser, validateAssetChanges, fieldPermissions };
+module.exports = { ROLES, FINANCIAL_SECTIONS, hashToken, issueToken, normalizeServerUsers, authenticate, authorize, publicUser, validateAssetChanges, fieldPermissions,fuelActions };

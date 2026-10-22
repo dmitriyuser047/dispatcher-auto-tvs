@@ -17,7 +17,7 @@ test('lack of usage remains unknown while configured reserve can still produce a
 });
 test('30 calendar day history excludes old, future, cancelled, reversed and duplicate linked generation issues',()=>{
  const db=fixture();db.genRecords=[{id:'legacy',generatorId:'g',date:DATE,fuelIssued:30},{id:'linked',generatorId:'g',tankId:null,date:DATE,fuelIssued:60}];
- db.fuelMovements=[{kind:'issue',date:DATE,fromTankId:'t',qty:60},{kind:'issue',date:'2026-09-18',fromTankId:'t',qty:900},{kind:'issue',date:'2026-10-19',fromTankId:'t',qty:900},{kind:'issue',date:DATE,fromTankId:'t',qty:900,cancelled:true},{kind:'issue',date:DATE,fromTankId:'t',qty:900,reversedBy:'rev'}];
+ db.fuelMovements=[{id:'normal',kind:'issue',date:DATE,fromTankId:'t',qty:60},{id:'old',kind:'issue',date:'2026-09-18',fromTankId:'t',qty:900},{id:'future',kind:'issue',date:'2026-10-19',fromTankId:'t',qty:900},{id:'cancelled',kind:'issue',date:DATE,fromTankId:'t',qty:900,cancelled:true},{id:'reversed',kind:'issue',date:DATE,fromTankId:'t',qty:900,reversedBy:'rev'},{id:'rev',kind:'adjustment',date:DATE,toTankId:'t',qty:900,originalMovementId:'reversed'}];
  const recent=engine.usage(db,'tank','t',DATE);assert.equal(recent.total,90);assert.equal(recent.daily,3);assert.equal(recent.count,2);
 });
 test('history follows explicit tank snapshots after generator changes its current tank',()=>{
@@ -93,4 +93,27 @@ test('receipt status quantities and cancellation must be consistent',()=>{
 test('rules require bounded whole-day lead times, finite quantities and one active rule per item',()=>{
  const db=fixture();for(const patch of [{leadDays:-1},{leadDays:1.5},{leadDays:366},{coverDays:0},{coverDays:366},{reserveQty:Infinity},{expectedDaily:-1}])assert.throws(()=>engine.validateSection('procurementRules',[rule(patch)],db));
  assert.throws(()=>engine.validateSection('procurementRules',[rule(),rule({id:'duplicate'})],db),/уже есть/);assert.throws(()=>engine.validateSection('procurementOrders',[order(),order()],db),/повторный/);
+});
+
+test('fuel planning refuses conflicting legacy litre aliases instead of recommending a fabricated zero balance',()=>{
+ const db=fixture();db.tankIncomes=[{id:'conflict',tankId:'t',date:DATE,amount:10,liters:20}];db.procurementRules=[rule()];
+ const before=JSON.stringify(db),p=tank(db);assert.equal(p.stock,null);assert.equal(p.suggestedQty,null);assert.equal(p.stockoutDate,null);assert.match(p.warnings.join(' '),/достоверного остатка/);assert.equal(JSON.stringify(db),before);
+});
+test('physical archived receipts remain stock while cancelled receipts and future facts are excluded',()=>{
+ const db=fixture();db.tankIncomes=[{id:'archived',tankId:'t',date:DATE,amount:.0004,archived:true},{id:'cancelled',tankId:'t',date:DATE,amount:100,cancelled:true},{id:'future',tankId:'t',date:'2026-10-19',amount:200}];
+ assert.equal(tank(db).stock,100.0004);assert.equal(engine.usage(db,'tank','t',DATE).total,0);
+});
+test('a reversal marker without a matching inverse does not erase an actual issue from consumption history',()=>{
+ const db=fixture();db.fuelMovements=[{id:'issue',kind:'issue',fromTankId:'t',date:DATE,qty:30,reversedBy:'missing'}];
+ assert.equal(engine.usage(db,'tank','t',DATE).total,30);assert.equal(tank(db).stock,70);
+});
+test('fuel forecasts preserve numeric zero separately from textual zero and ignore neutral measurements',()=>{
+ const db=fixture();db.tanks=[{id:0,name:'Numeric',balanceInit:10},{id:'0',name:'Textual',balanceInit:20}];db.generators=[];
+ db.fuelMovements=[{id:'measure',kind:'measurement',date:DATE,qty:0,measurement:{version:1,target:{section:'tanks',id:0},observedQty:0}}];
+ const rows=engine.plan(db,{date:DATE}).filter(row=>row.kind==='tank');assert.equal(rows.find(row=>row.itemId===0).stock,10);assert.equal(rows.find(row=>row.itemId==='0').stock,20);assert.equal(rows.find(row=>row.itemId===0).recent.total,0);
+});
+test('one fuel planning run shares one owned stock projection across all tanks',()=>{
+ const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),actual=require('../assets/core/fuel-stock.js');let projects=0;
+ const sandbox=vm.createContext({AccountingBoundary:require('../assets/core/accounting-boundary.js'),DecimalCore:require('../assets/core/decimal-core.js'),FuelStock:{...actual,project(...args){projects++;return actual.project(...args);}}});vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/js/47-procurement-engine.js'),'utf8'),sandbox);
+ const db=fixture();for(let i=0;i<4;i++)db.tanks.push({id:'other-'+i,name:'Other '+i,balanceInit:10});assert.equal(sandbox.ProcurementEngine.plan(db,{date:DATE}).filter(row=>row.kind==='tank').length,5);assert.equal(projects,1);
 });

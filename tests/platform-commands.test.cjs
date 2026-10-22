@@ -97,6 +97,11 @@ test('fuel source uses the effective assignment organisation and explicit source
   const result=fullPlan(source,issue());assert.equal(result.sections.records[1].fuelGrade,'АИ-95');
   assert.equal(result.sections.fuelMovements[0].sourceSnapshot.assetOrg,'Assignment org');assert.equal(result.sections.fuelMovements[0].sourceSnapshot.fuel,'gasoline');
 });
+test('a new issue retains unknown fuel ownership instead of assigning the recipient organisation or tank owner',()=>{
+ for(const value of [undefined,'']){const source=db();if(value===undefined)delete source.tanks[0].org;else source.tanks[0].org=value;source.tanks[0].owner='Separate tank owner';const before=JSON.stringify(source),result=fullPlan(source,issue()),movement=result.sections.fuelMovements[0],record=result.sections.records.at(-1);
+  assert.equal(movement.sourceSnapshot.assetOrg,'Asset org');assert.equal(movement.sourceSnapshot.tankOrg,'');assert.equal(record.fuelOrg,'');assert.equal(JSON.stringify(source),before);
+ }
+});
 
 test('fuel planners reuse shared conservation rules for insufficient stock now and at later dates, grade mismatch and closed months',()=>{
   for(const transform of [source=>{source.tanks[0].balanceInit=99;},source=>{source.tankIncomes=[{id:'later-transfer',tankId:5,date:'2026-10-23',kind:'out',amount:-900}];},
@@ -197,7 +202,7 @@ test('pure plan clock, metadata and source boundaries do not execute getters or 
 });
 
 test('browser UMD dependencies execute the same planners as CommonJS without I/O, application state or clock reads',()=>{
-  const browser=vm.createContext({});const files=['platform-contracts','personnel-engine','fuel-engine','fuel-movement-policy','platform-commands'];
+  const browser=vm.createContext({});const files=['platform-contracts','entity-identity','decimal-core','accounting-boundary','fuel-stock','personnel-engine','fuel-engine','fuel-movement-policy','platform-commands'];
   for(const name of files){const file=path.join(__dirname,'../assets/core',name+'.js');vm.runInContext(fs.readFileSync(file,'utf8'),browser,{filename:file});}
   assert.ok(Object.isFrozen(browser.PlatformCommands));assert.deepEqual(Object.keys(browser.PlatformCommands),Object.keys(commands));
   for(const command of [issue(),issue('generators',9),accept(),assign()])assert.deepEqual(copy(browser.PlatformCommands.plan(db(),command,ctx())),commands.plan(db(),command,ctx()));

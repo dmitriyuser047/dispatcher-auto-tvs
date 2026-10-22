@@ -8,8 +8,8 @@ const order=(extra={})=>({id:0,status:'accepted',title:'Ремонт',assetRef:'
 function save(db,section,payload,correctionOf,id='draft'){return {...db,...engine.plan(db,{action:'saveDraft',section,payload,...(correctionOf?{correctionOf:{section,id:correctionOf.id},reason:'Исправление фактической ошибки'}:{})},ctx(id)).sections};}
 function execute(db,action,id='op'){const review=engine.preview(db,action,{today:'2026-10-22'});assert.equal(review.canPost,true,JSON.stringify(review.issues));const input={...action,reviewFingerprint:review.fingerprint},plan=engine.plan(db,input,ctx(id));return {db:{...db,...plan.sections},plan,input,review};}
 
-test('ten adapters preserve unpaid actual obligations and old actual/planned semantics',()=>{
- assert.equal(engine.describe().length,10);assert.equal(engine.state('payments',{id:0,sum:100,paid:false}),'legacy-live');
+test('eleven adapters preserve unpaid actual obligations and old actual/planned semantics',()=>{
+ assert.equal(engine.describe().length,11);assert.ok(engine.describe().some(row=>row.section==='tankIncomes'));assert.equal(engine.state('payments',{id:0,sum:100,paid:false}),'legacy-live');
  assert.equal(engine.state('payments',{id:0,sum:100,paidAmount:1}),'posted');assert.equal(engine.state('workOrders',order()),'posted');assert.equal(engine.state('repairs',{id:0,cost:100}),'legacy-live');
  const db=fixture({payments:[{id:0,sum:100,paid:false}],vehicleTo:[{id:'plan',planned:true,cost:100}]});assert.equal(engine.activeRows(db,'payments')[0].sum,100);assert.equal(engine.activeRows(db,'vehicleTo')[0].planned,true);
  assert.equal(engine.validateChanges(db,{...db,payments:[{...db.payments[0],sum:120}]}),true);
@@ -142,7 +142,7 @@ test('writeoff adapter delegates frozen algorithms and voids v1 v2 v3 without re
   const api=writeoff.forVersion(version),ready=api.prepare(base,request),doc=api.post(base,request,{id:'act',number:'Тест',postedAt:'2026-10-21T10:00:00.000Z',postedBy:actor,expectedFingerprint:ready.sourceFingerprint}),db={...base,fuelWriteoffs:[doc]},before=JSON.stringify(doc),done=execute(db,{action:'void',section:'fuelWriteoffs',id:'act',reason:'Аннулирован для исправления'},'void-'+version);
   assert.equal(JSON.stringify(db.fuelWriteoffs[0]),before);assert.deepEqual(done.db.fuelWriteoffs[0],api.voidDocument(doc,{voidedAt:ctx().now,voidedBy:actor,reason:'Аннулирован для исправления'}));assert.deepEqual(done.db.fuelWriteoffs[0].snapshot,doc.snapshot);assert.equal(done.db.fuelWriteoffs[0].sourceFingerprint,doc.sourceFingerprint);assert.equal(Object.hasOwn(done.db.fuelWriteoffs[0],'lifecycle'),false);
  }
- const draft=save(base,'fuelWriteoffs',{request,number:'Новый акт'}),done=execute(draft,{action:'postDraft',section:'fuelWriteoffs',draftId:'draft'},'act-new');assert.equal(done.db.fuelWriteoffs[0].calculationVersion,3);assert.equal(Object.hasOwn(done.db.fuelWriteoffs[0],'lifecycle'),false);
+ const draft=save(base,'fuelWriteoffs',{request,number:'Новый акт'}),done=execute(draft,{action:'postDraft',section:'fuelWriteoffs',draftId:'draft'},'act-new');assert.equal(done.db.fuelWriteoffs[0].calculationVersion,4);assert.equal(Object.hasOwn(done.db.fuelWriteoffs[0],'lifecycle'),false);
 });
 
 test('explicit fork diagnostics stop active totals instead of showing partial zero',()=>{

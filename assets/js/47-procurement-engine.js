@@ -1,5 +1,5 @@
 /* Procurement forecasts are estimates. Orders never mutate inventory or fuel journals. */
-(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('../core/accounting-boundary.js'),require('../core/decimal-core.js'));else root.ProcurementEngine=factory(root.AccountingBoundary,root.DecimalCore);})(typeof globalThis!=='undefined'?globalThis:this,function(accounting,decimal){
+(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('../core/accounting-boundary.js'),require('../core/decimal-core.js'),()=>require('../core/fuel-stock.js'));else root.ProcurementEngine=factory(root.AccountingBoundary,root.DecimalCore,()=>root.FuelStock);})(typeof globalThis!=='undefined'?globalThis:this,function(accounting,decimal,getFuelStock){
  'use strict';
  const DAY=86400000,STATUSES=['draft','ordered','partial','received','cancelled'];
  const rows=(db,name)=>Array.isArray(db?.[name])?db[name]:[];
@@ -18,25 +18,19 @@
  function today(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
  function itemKey(kind,id){return kind+':'+id;}
  function item(db,kind,id){return rows(db,kind==='tank'?'tanks':'parts').find(r=>r.id===id);}
- function recordTank(db,r){return Object.hasOwn(r,'tankId')?r.tankId:rows(db,'generators').find(g=>g.id===r.generatorId)?.tankId;}
+ function stockEngine(){const engine=getFuelStock?.();if(engine?.apiVersion!==1)throw Error('Не загружено общее ядро топливного запаса');return engine;}
+ function stockRow(db,id,date,snapshot){const engine=stockEngine();return engine.at(snapshot||engine.project(db,{tankIds:[id],to:date}),{section:'tanks',id},date);}
  function tankAccounting(obj){if(accounting)return accounting.resolve('tanks',obj==null?{}:obj);if(obj&&Object.hasOwn(obj,'fuelAccounting'))throw Error('Не загружен модуль начала топливного учёта');return {mode:'legacy'};}
- function balance(db,kind,id,date){
+ function balance(db,kind,id,date,snapshot){
+  if(kind==='tank')return stockRow(db,id,date,snapshot).balance;
   let value=0;
   const boundary=kind==='tank'?tankAccounting(item(db,kind,id)):{mode:'legacy'};
   if(boundary.mode==='explicit'&&date<boundary.from)return null;
   const at=r=>live(r)&&validDate(r.date)&&r.date<=date&&(boundary.mode!=='explicit'||r.date>=boundary.from);
   if(kind==='part')rows(db,'partMovements').filter(r=>at(r)&&r.partId===id).forEach(r=>{value=add(value,(['receipt','return'].includes(r.kind)?1:-1)*nonnegative(r.qty));});
-  else{
-   value=boundary.mode==='explicit'?boundary.opening:number(item(db,kind,id)?.balanceInit)||0;
-   // Legacy tank transfers are two linked income rows with signed amounts.
-   // Clamp invalid values, but preserve the negative outgoing half.
-   rows(db,'tankIncomes').filter(r=>at(r)&&r.tankId===id).forEach(r=>{value=add(value,number(r.liters??r.litres??r.amount??r.qty)||0);});
-   rows(db,'genRecords').filter(r=>at(r)&&recordTank(db,r)===id).forEach(r=>{value=sub(value,nonnegative(r.fuelIssued));});
-   rows(db,'fuelMovements').filter(at).forEach(r=>{const qty=nonnegative(r.qty);if(r.toTankId===id)value=add(value,qty);if(r.fromTankId===id)value=sub(value,qty);});
-  }
   return value;
  }
- function usage(db,kind,id,date){
+ function usage(db,kind,id,date,snapshot,movementIndex,stockIndex){
   const boundary=kind==='tank'?tankAccounting(item(db,kind,id)):{mode:'legacy'};
   if(boundary.mode==='explicit'&&date<boundary.from)return {total:null,daily:null,count:0,from:null,to:date,observedDays:0,status:'outside-accounting'};
   const from=boundary.mode==='explicit'&&boundary.from>shift(date,-29)?boundary.from:shift(date,-29),within=r=>live(r)&&validDate(r.date)&&r.date>=from&&r.date<=date;
@@ -44,8 +38,16 @@
   const include=qty=>{const n=nonnegative(qty);if(n>0){total=add(total,n);count++;}};
   if(kind==='part')rows(db,'partMovements').filter(r=>within(r)&&r.partId===id&&['issue','writeoff'].includes(r.kind)).forEach(r=>include(r.qty));
   else{
-   rows(db,'genRecords').filter(r=>within(r)&&recordTank(db,r)===id).forEach(r=>include(r.fuelIssued));
-   rows(db,'fuelMovements').filter(r=>within(r)&&r.fromTankId===id&&r.kind==='issue'&&!r.reversedBy).forEach(r=>include(r.qty));
+   const projection=snapshot||stockEngine().project(db,{tankIds:[id],to:date}),projected=stockRow(db,id,date,projection),physical=stockIndex?.get(id)||projection.rows.find(row=>row.target.id===id);
+   if(projected.status!=='known')return {total:null,daily:null,count:0,from,to:date,observedDays:0,status:projected.status,diagnostics:projected.diagnostics};
+   const movements=movementIndex||new Map(rows(db,'fuelMovements').map(row=>[row.id,row]));
+   for(const event of physical.events){
+    if(event.date<from||event.date>date||!event.stockAffects||exact().compare(event.deltaDecimal,0)>=0||!['generator-issue','issue'].includes(event.kind))continue;
+    const original=event.source.section==='fuelMovements'?rows(db,'fuelMovements')[event.source.rowIndex]:null,inverse=original?movements.get(original.reversedBy):null;
+    // A marker alone does not undo a physical issue. Only its actual inverse does.
+    if(original&&original.reversedBy!==undefined&&original.reversedBy!==null&&original.reversedBy!==''&&inverse&&live(inverse)&&inverse.originalMovementId===original.id&&inverse.date===original.date&&inverse.toTankId===id&&(inverse.fromTankId??'')===(original.toTankId??'')&&exact().compare(inverse.qty,original.qty)===0)continue;
+    include(result(exact().sub(0,event.deltaDecimal)));
+   }
   }
   const days=boundary.mode==='explicit'?Math.min(30,Math.floor((new Date(date+'T12:00:00Z')-new Date(from+'T12:00:00Z'))/DAY)+1):30;
   return {total,daily:divide(total,days),count,from,to:date,...(boundary.mode==='explicit'?{observedDays:days}:{})};
@@ -86,20 +88,24 @@
  }
  function plan(db,options={}){
   const date=options.date||today();if(!validDate(date))throw Error('Некорректная дата расчёта');
-  const result=[];
+  const result=[],fuelSnapshot=rows(db,'tanks').some(live)?stockEngine().project(db,{to:date}):null,movementIndex=new Map(rows(db,'fuelMovements').map(row=>[row.id,row])),stockIndex=new Map((fuelSnapshot?.rows||[]).map(row=>[row.target.id,row]));
   for(const kind of ['tank','part'])for(const obj of rows(db,kind==='tank'?'tanks':'parts').filter(live)){
    if(kind==='tank'){const boundary=tankAccounting(obj);if(boundary.mode==='explicit'&&date<boundary.from)continue;}
    const rule=rows(db,'procurementRules').find(r=>!r.archived&&r.kind===kind&&r.itemId===obj.id);
    const leadDays=Number.isInteger(rule?.leadDays)&&rule.leadDays>=0&&rule.leadDays<=365?rule.leadDays:7;
    const coverDays=Number.isInteger(rule?.coverDays)&&rule.coverDays>=1&&rule.coverDays<=365?rule.coverDays:14;
    const reserve=rule&&number(rule.reserveQty)!==null?nonnegative(rule.reserveQty):nonnegative(kind==='tank'?obj.reserveLevel:obj.minStock);
-   const recent=usage(db,kind,obj.id,date),manual=rule&&number(rule.expectedDaily)!==null;
+   const recent=usage(db,kind,obj.id,date,fuelSnapshot,movementIndex,stockIndex),manual=rule&&number(rule.expectedDaily)!==null;
    const daily=manual?nonnegative(rule.expectedDaily):recent.daily;
-   const stock=balance(db,kind,obj.id,date),orders=rows(db,'procurementOrders').filter(r=>r.kind===kind&&r.itemId===obj.id);
+   const stock=balance(db,kind,obj.id,date,fuelSnapshot),orders=rows(db,'procurementOrders').filter(r=>r.kind===kind&&r.itemId===obj.id);
    const open=orders.map(order=>({order,...orderState(order)})).filter(r=>r.coverage>0);
    const undelivered=open.reduce((s,r)=>add(s,r.undelivered),0),pendingPosting=open.reduce((s,r)=>add(s,r.pendingPosting),0);
    const drafts=open.reduce((s,r)=>add(s,r.draft),0),coverage=add(undelivered,pendingPosting);
    const horizon=leadDays+coverDays,scheduledJobs=scheduled(db,kind,obj.id,date,Math.max(365,horizon));
+   if(stock===null||daily===null){
+    const state=kind==='tank'?stockRow(db,obj.id,date,fuelSnapshot):null;
+    result.push({key:itemKey(kind,obj.id),kind,itemId:obj.id,name:obj.name||obj.id,unit:kind==='tank'?'л':obj.unit||'ед.',site:obj.site||obj.org||'',stock,reserve,leadDays,coverDays,daily,dailySource:manual?'manual':'missing',recent,knownJobs:scheduledJobs.knownJobs,unknownJobs:scheduledJobs.unknownJobs,demand:null,undelivered,pendingPosting,drafts,coverage,suggestedQty:null,reorderDate:null,crossingDate:null,stockoutDate:null,nextDelivery:null,gapDelivery:null,lateCoverage:false,shortageBeforeDelivery:false,status:state?.status||'unknown',diagnostics:state?.diagnostics||[],warnings:['Нет достоверного остатка: исправьте указанные источники перед расчётом потребности.',...(state?.diagnostics||[]).map(issue=>issue.message)],ruleId:rule?.id??null});continue;
+   }
    // Planned demand replaces the routine estimate on its day if larger. Adding both
    // would count the same normal assignment twice.
    const demandAt=d=>Math.max(daily,scheduledJobs.demand.get(d)||0);

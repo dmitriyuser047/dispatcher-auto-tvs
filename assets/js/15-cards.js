@@ -117,7 +117,8 @@ function renderVehicleCards() {
 
 // ─── GENERATOR CARDS (tile view like vehicles) ──────────
 let genSearchQuery = '';
-function renderGeneratorCards() {
+function renderGeneratorCards(){return tankStockDisplaySnapshot(()=>renderGeneratorCardsProjected());}
+function renderGeneratorCardsProjected() {
   const q = genSearchQuery.toLowerCase().trim();
   const gens = (data.generators || []);
   const fuelLabels = { diesel: 'Дизель', gasoline: 'Бензин', gas: 'Газ' };
@@ -132,11 +133,11 @@ function renderGeneratorCards() {
   const cards = filtered.map(g => {
     const gRecs = genRecsFor(g.id);
     const totalHours = gRecs.reduce((s, r) => s + (r.hours || 0), 0);
-    let fuelBal;
+    let fuelBal,sourceFuelLabel=null;
     if(fuelAccountingFor('generators',g).mode==='explicit'&&fuelAccountingOpening('generators',g,dispatcherLocalDate())===null){
       fuelBal=null;
     } else if (g.tankId!=null&&g.tankId!=='') {
-      fuelBal = computeTankBalance(g.tankId).balance;
+      const source=computeTankBalance(g.tankId);fuelBal=source.balance;if(fuelBal===null)sourceFuelLabel=source.status==='outside-accounting'?'Учёт ещё не начат':'Остаток ёмкости не определён';
     } else {
       const balMap = computeGenFuelBalances(g.id);
       const sorted = gRecs.slice().sort((a,b) => cmpDateAsc(a.date, b.date));
@@ -157,7 +158,7 @@ function renderGeneratorCards() {
       <div class="vc-meta">
         ${g.power != null ? '<span title="'+(g.fuelNorms!=null?'Действующие параметры — в разделе «Нормы по датам»':'Мощность')+'"><svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> ' + g.power + ' кВт'+(g.fuelNorms!=null?' (исходная)':'')+'</span>' : ''}
         <span style="font-variant-numeric:tabular-nums">${totalHours.toLocaleString('ru',{maximumFractionDigits:1})} мтч</span>
-        <span style="color:${balColor};font-variant-numeric:tabular-nums">${fuelBal===null?((g.tankId!=null&&g.tankId!=='')||fuelReportBalanceLabel('generators',g)==='Учёт не начат'?'Учёт ещё не начат':fuelReportBalanceLabel('generators',g)):fuelBal.toLocaleString('ru',{maximumFractionDigits:3})+' л'}</span>
+        <span style="color:${balColor};font-variant-numeric:tabular-nums">${fuelBal===null?(sourceFuelLabel||((g.tankId!=null&&g.tankId!=='')||fuelReportBalanceLabel('generators',g)==='Учёт не начат'?'Учёт ещё не начат':fuelReportBalanceLabel('generators',g))):fuelBal.toLocaleString('ru',{maximumFractionDigits:3})+' л'}</span>
         ${g.fuel ? '<span>' + htmlEsc(fuelLabels[g.fuel] || g.fuel) + '</span>' : ''}
       </div>
     </div>`;
@@ -217,7 +218,8 @@ function openGeneratorDetail(id) {
 }
 
 // ─── GENERATOR LIST ──────────────────────────────────────
-function renderGeneratorList() {
+function renderGeneratorList(){return tankStockDisplaySnapshot(()=>renderGeneratorListProjected());}
+function renderGeneratorListProjected() {
   const q    = (document.getElementById('searchGenInput')?.value || '').toLowerCase().trim();
   const list = document.getElementById('generatorList');
   const gens = data.generators || [];
@@ -265,11 +267,11 @@ function renderGeneratorList() {
     }
     const gRecs      = genRecsFor(g.id);
     const totalHours = gRecs.reduce((s, r) => s + (r.hours || 0), 0);
-    let fuelBal;
+    let fuelBal,sourceFuelLabel=null;
     if(fuelAccountingFor('generators',g).mode==='explicit'&&fuelAccountingOpening('generators',g,dispatcherLocalDate())===null){
       fuelBal=null;
     } else if (g.tankId!=null&&g.tankId!=='') {
-      fuelBal = computeTankBalance(g.tankId).balance;
+      const source=computeTankBalance(g.tankId);fuelBal=source.balance;if(fuelBal===null)sourceFuelLabel=source.status==='outside-accounting'?'Учёт ещё не начат':'Остаток ёмкости не определён';
     } else {
       const balMap  = computeGenFuelBalances(g.id);
       const sorted  = gRecs.slice().sort((a,b) => cmpDateAsc(a.date, b.date));
@@ -290,7 +292,7 @@ function renderGeneratorList() {
       </div>
       <div class="gen-card-badges">
         <div class="gen-badge">${totalHours.toLocaleString('ru',{maximumFractionDigits:1})} мтч</div>
-        <div class="gen-badge" style="color:${balColor};border-color:${balColor}4d;background:${balColor}1a">${fuelBal===null?((g.tankId!=null&&g.tankId!=='')||fuelReportBalanceLabel('generators',g)==='Учёт не начат'?'Учёт ещё не начат':fuelReportBalanceLabel('generators',g)):fuelBal.toLocaleString('ru',{maximumFractionDigits:3})+' л'}</div>
+        <div class="gen-badge" style="color:${balColor};border-color:${balColor}4d;background:${balColor}1a">${fuelBal===null?(sourceFuelLabel||((g.tankId!=null&&g.tankId!=='')||fuelReportBalanceLabel('generators',g)==='Учёт не начат'?'Учёт ещё не начат':fuelReportBalanceLabel('generators',g))):fuelBal.toLocaleString('ru',{maximumFractionDigits:3})+' л'}</div>
         ${g.status ? `<div class="gen-badge" style="color:${stColor};border-color:${stColor}4d;background:${stColor}1a">${htmlEsc(g.status)}</div>` : ''}
         ${fb ? `<span class="fuel-tag ${fb.cls}" style="font-size:10px;padding:1px 6px">${fb.label}</span>` : ''}
       </div>

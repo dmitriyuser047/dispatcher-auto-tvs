@@ -6,7 +6,7 @@
 })(typeof globalThis === 'object' ? globalThis : this, function (fuelRoot,getAccounting,getDecimal,getPeriods,getTemporal) {
   'use strict';
   function makeEngine(calculationVersion){
-  const fuel=fuelRoot.forVersion(calculationVersion),modern=calculationVersion>=2,temporal=calculationVersion>=3;
+  const fuel=fuelRoot.forVersion(calculationVersion),modern=calculationVersion>=2,temporal=calculationVersion>=3,corrected=calculationVersion>=4;
   if (!fuel || fuel.apiVersion !== 1) throw Error('Не загружено ядро расчёта ГСМ');
   const sumValues=values=>modern?getDecimal().toNumberExact(getDecimal().sum(values)):values.reduce((sum,value)=>sum+value,0);
   const sourceSections = Object.freeze(['vehicles', 'records', 'fuelPurchases', 'fuelCards', 'monthlyFuel']);
@@ -15,6 +15,8 @@
   const vehicleFields = ['id','plate','make','org','fuel','fuelGrade','fuelBalance','fuelBalanceSources','norm','normCity','normHighway','normIdle','tankVolume','fuelcard','orgHistory','object','driver','supplier'];
   const tag = value => Object.prototype.toString.call(value);
   const present = value => value != null && !(typeof value === 'string' && !value.trim());
+  const idOr=(value,fallback='')=>corrected?(value??fallback):(value||fallback);
+  const live=value=>!value.deleted&&!value.cancelled&&value.status!=='cancelled';
   const plain = value => value != null && tag(value) === '[object Object]';
   const rounded = fuel.gsmRound;
   const orgKey = fuel.gsmOrgKey;
@@ -135,7 +137,7 @@
   const visible = (row, scope) => (!scope.org || orgKey(row.org) === orgKey(scope.org)) && (!scope.grade || row.grade === scope.grade);
   function issueVisible(issue, scope, ids) {
     if (issue.grade === 'Газ') return false;
-    if (issue.vehicleId && ids.has(issue.vehicleId) && !issue.org && !(issue.orgs || []).length && !issue.grade) return true;
+    if ((corrected?present(issue.vehicleId):issue.vehicleId) && ids.has(issue.vehicleId) && !issue.org && !(issue.orgs || []).length && !issue.grade) return true;
     const unknownOrg = !issue.org || orgKey(issue.org) === orgKey('Организация не определена');
     return (!scope.grade || !issue.grade || issue.grade === scope.grade) && (!scope.org || unknownOrg && !(issue.orgs || []).length ||
       orgKey(issue.org) === orgKey(scope.org) || (issue.orgs || []).some(org => orgKey(org) === orgKey(scope.org)));
@@ -170,9 +172,9 @@
       const explicit = purchase ? row.sourceOrg : row.fuelOrg;
       return (!scope.org || !explicit || orgKey(explicit) === orgKey(scope.org)) && (!scope.grade || grade === 'Не указано' || grade === scope.grade);
     };
-    const purchases = db.fuelPurchases.filter(row => until(row.date) && currentSource(vehicles.get(row.vehicleId),row.date) && (ids.has(row.vehicleId) || potentialPurchase(row) || orphanRelevant(row, true)));
+    const purchases = db.fuelPurchases.filter(row => (!corrected||live(row))&&until(row.date) && currentSource(vehicles.get(row.vehicleId),row.date) && (ids.has(row.vehicleId) || potentialPurchase(row) || orphanRelevant(row, true)));
     const dependencyIds = new Set([...ids,...purchases.map(row=>row.vehicleId)]);
-    const records = db.records.filter(row => until(row.date) && currentSource(vehicles.get(row.vehicleId),row.date) && (dependencyIds.has(row.vehicleId) || orphanRelevant(row, false)));
+    const records = db.records.filter(row => (!corrected||live(row))&&until(row.date) && currentSource(vehicles.get(row.vehicleId),row.date) && (dependencyIds.has(row.vehicleId) || orphanRelevant(row, false)));
     const cardKeys = new Set([...records.map(row => row.fuelCardNum), ...purchases.map(row => row.cardNo), ...db.vehicles.filter(row => ids.has(row.id)).map(row => row.fuelcard)].filter(Boolean).map(fuel.gsmCardKey));
     const historicalHistory = entries => entries.filter(item=>!fuel.gsmValidDate(item.from)||item.from<=scope.to).map(item=>{
       const value = {...item};
@@ -214,7 +216,7 @@
       return result;
     });
     return { vehicles:projectedVehicles, records, fuelPurchases:purchases, fuelCards:cards,
-      monthlyFuel:db.monthlyFuel.filter(row => ids.has(row.vehicleId) && (typeof row.month !== 'string' || row.month <= scope.month) && currentSource(vehicles.get(row.vehicleId),typeof row.month==='string'&&/^\d{4}-(?:0[1-9]|1[0-2])$/.test(row.month)?fuel.gsmMonthRange(row.month).to:'')) };
+      monthlyFuel:db.monthlyFuel.filter(row => (!corrected||live(row))&&ids.has(row.vehicleId) && (typeof row.month !== 'string' || row.month <= scope.month) && currentSource(vehicles.get(row.vehicleId),typeof row.month==='string'&&/^\d{4}-(?:0[1-9]|1[0-2])$/.test(row.month)?fuel.gsmMonthRange(row.month).to:'')) };
   }
   function projectionFingerprint(source, scope) { return 'sha256:' + sha256(stableSerialize({ schemaVersion:1,...(modern?{calculationVersion}:{}), scope:{month:scope.month,org:orgKey(scope.org),grade:scope.grade}, source })); }
   function fingerprint(input, request) {
@@ -266,8 +268,8 @@
         const measurement = appliedMeasurement(candidate), value = measurement && measurement.tankMeasured;
         return measurement && present(value) && ['number','string'].includes(typeof value) && Number.isFinite(Number(value)) && Number(value) >= 0;
       });
-      if (!anchored) add({code:'opening-source-invalid',field,section,sourceId:row.id || '',vehicleId:row.vehicleId || '',
-        recordId:section === 'records' ? row.id || '' : '',purchaseId:section === 'fuelPurchases' ? row.id || '' : '',
+      if (!anchored) add({code:'opening-source-invalid',field,section,sourceId:idOr(row.id),vehicleId:idOr(row.vehicleId),
+        recordId:section === 'records' ? idOr(row.id) : '',purchaseId:section === 'fuelPurchases' ? idOr(row.id) : '',
         date:scope.from,earliestCauseDate:row.date,message:'Входящий остаток опирается на некорректный исторический источник без последующего замера: ' + message});
     }
     const fieldLabels = { fuelActual:'фактический расход',fuelUsed:'расход по норме',fuelIssued:'получено по журналу',fuelIdle:'холостой ход',
@@ -280,7 +282,7 @@
         if (!present(value)) continue;
         if (!['number','string'].includes(typeof value) || !Number.isFinite(Number(value)) || Number(value) < 0) {
           add({ code:'invalid-number', severity:historical?'warning':'error', field, message:(historical?'Исторический источник переноса: ':'')+'Укажите корректное неотрицательное число — ' + (fieldLabels[field] || field),
-            vehicleId:row.vehicleId || (section === 'vehicles' ? row.id : ''), recordId:section === 'records' ? row.id : '', purchaseId:section === 'fuelPurchases' ? row.id : '', date:row.date || '', section, sourceId:row.id || '' });
+            vehicleId:idOr(row.vehicleId,(section === 'vehicles' ? row.id : '')), recordId:section === 'records' ? row.id : '', purchaseId:section === 'fuelPurchases' ? row.id : '', date:row.date || '', section, sourceId:idOr(row.id) });
           if (section === 'records' && ['km','fuelIssued','fuelActual','fuelUsed','fuelIdle','tankMeasured'].includes(field) || section === 'fuelPurchases' && field === 'qty') historicalOpeningUncertain(row,section,field,fieldLabels[field] || field);
         }
       }
@@ -290,7 +292,7 @@
       for (const row of projection[section]) {
         const severity = fuel.gsmValidDate(row.date) && row.date < scope.from ? 'warning' : 'error';
         if (!['monthlyFuel','fuelCards'].includes(section) && !(typeof row.id==='string'&&row.id.trim()||typeof row.id==='number'&&Number.isFinite(row.id))) add({code:'source-id-missing',severity,section,sourceId:row.id ?? '',message:'У источника отсутствует устойчивый ID'});
-        if (row.id && ids.has(row.id)) add({code:'source-id-duplicate',severity,section,sourceId:row.id,message:'Повторяется ID источника: ' + row.id});
+        if ((corrected?present(row.id):row.id) && ids.has(row.id)) add({code:'source-id-duplicate',severity,section,sourceId:row.id,message:'Повторяется ID источника: ' + row.id});
         ids.add(row.id);
       }
     }
@@ -309,7 +311,7 @@
     for (const [section,purchase] of [['records',false],['fuelPurchases',true]]) for (const row of projection[section]) {
       if (purchase && row.deleted) continue;
       const historical = fuel.gsmValidDate(row.date) && row.date < scope.from;
-      const details = { severity:historical?'warning':'error',vehicleId:row.vehicleId || '', recordId:purchase ? '' : row.id || '', purchaseId:purchase ? row.id || '' : '', date:row.date || '' };
+      const details = { severity:historical?'warning':'error',vehicleId:idOr(row.vehicleId), recordId:purchase ? '' : idOr(row.id), purchaseId:purchase ? idOr(row.id) : '', date:row.date || '' };
       if (!fuel.gsmValidDate(row.date)) add({...details,code:'source-date-invalid',message:'Некорректная дата источника'});
       if (!vehicles.has(row.vehicleId)) add({...details,code:'source-vehicle-missing',message:'Источник не связан с существующей машиной'});
       checkNumeric(row,section,purchase ? ['qty','sum','price'] : ['km','kmGlonass','fuelIssued','fuelActual','fuelUsed','fuelIdle','tankMeasured']);
@@ -412,7 +414,7 @@
       if (scopesOverlap(scope,document.scope)) add({code:'writeoff-overlap',documentId:document.id,message:'В этой области уже проведён акт; сначала аннулируйте его с причиной'});
     }
     const refs = [];
-    sourceSections.forEach(section => projection[section].forEach(row => refs.push({section,id:row.id || (section==='fuelCards'?fuel.gsmCardKey(row.number):[row.vehicleId,row.month,row.cardNumber || ''].join(':'))})));
+    sourceSections.forEach(section => projection[section].forEach(row => refs.push({section,id:idOr(row.id,(section==='fuelCards'?fuel.gsmCardKey(row.number):[row.vehicleId,row.month,row.cardNumber || ''].join(':')))})));
     const barrelMap = new Map();
     rows.forEach(row=>{
       const key = stableSerialize([orgKey(row.org),row.grade]);
@@ -485,7 +487,7 @@
     for (const document of after) if (!old.has(document.id)) {
       if (document.status !== 'posted') fail('INVALID_TRANSITION','Нельзя создать сразу аннулированный акт');
       const withoutOwn = {...next,fuelWriteoffs:after.filter(row=>row.id!==document.id)};
-      const expected = forVersion(temporal?3:2).post(withoutOwn,{...document.scope,date:document.date,basisNote:document.basisNote},
+      const expected = forVersion(corrected?4:temporal?3:2).post(withoutOwn,{...document.scope,date:document.date,basisNote:document.basisNote},
         {id:document.id,number:document.number,postedAt:document.postedAt,postedBy:document.postedBy,expectedFingerprint:document.sourceFingerprint});
       if (stableSerialize(expected) !== stableSerialize(document)) fail('DOCUMENT_RECALCULATION_FAILED','Снимок акта не совпадает с серверным пересчётом');
     }
@@ -494,8 +496,8 @@
   return Object.freeze({apiVersion:1,schemaVersion:1,calculationVersion,sourceSections,requiredSections,prepare,preview:prepare,fingerprint,post,voidDocument,
     validateWriteoffChanges,validateDocuments:validateWriteoffChanges,stableSerialize,sha256});
   }
-  function documentVersion(document){const version=Object.prototype.hasOwnProperty.call(document,'calculationVersion')?document.calculationVersion:Object.prototype.hasOwnProperty.call(document,'algorithmVersion')?document.algorithmVersion:1;if(version!==1&&version!==2&&version!==3)throw Object.assign(Error('Неизвестная версия расчёта проведённого акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version;}
-  const legacy=makeEngine(1),decimalVersion=makeEngine(2),current=makeEngine(3);
-  function forVersion(version){if(version!==1&&version!==2&&version!==3)throw Object.assign(Error('Неизвестная версия расчёта акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version===1?legacy:version===2?decimalVersion:current;}
+  function documentVersion(document){const version=Object.prototype.hasOwnProperty.call(document,'calculationVersion')?document.calculationVersion:Object.prototype.hasOwnProperty.call(document,'algorithmVersion')?document.algorithmVersion:1;if(version!==1&&version!==2&&version!==3&&version!==4)throw Object.assign(Error('Неизвестная версия расчёта проведённого акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version;}
+  const legacy=makeEngine(1),decimalVersion=makeEngine(2),temporalVersion=makeEngine(3),current=makeEngine(4);
+  function forVersion(version){if(version!==1&&version!==2&&version!==3&&version!==4)throw Object.assign(Error('Неизвестная версия расчёта акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version===1?legacy:version===2?decimalVersion:version===3?temporalVersion:current;}
   return Object.freeze({...current,forVersion});
 });

@@ -37,6 +37,7 @@ function execute(dataDir,input,options={}){
   if(catalogMerge&&principal.role!=='admin')fail('ACCESS_DENIED','Объединение справочников доступно администратору.',403);
   const periodAction=command.type==='PeriodAction';
   if(periodAction&&!require('./period-access.cjs').canManage(principal,command.input.scope))fail('ACCESS_DENIED','Недостаточно прав для управления выбранной областью периода.',403);
+  if(command.type==='FuelAction'&&!permitted(principal,'write','fuelMovements'))fail('ACCESS_DENIED','Недостаточно прав для проведения операций с топливом.',403);
   const dependencies=commands.dependencies(command),footprint=commands.footprint(command);
   if(!Array.isArray(dependencies)||!Array.isArray(footprint)||dependencies.some(name=>!schema.sections.includes(name)||name==='auditLog'&&!catalogMerge)||footprint.some(name=>name==='auditLog'||!dependencies.includes(name)))fail('COMMAND_DEFINITION','Некорректно определены зависимости команды',500);
   requireAccess(principal,'read',dependencies);
@@ -65,9 +66,9 @@ function execute(dataDir,input,options={}){
       const planned=commands.plan(snapshot.data,command,{id:envelope.operation.id,now,today:now.slice(0,10),actor});
       if(!planned||!planned.sections||Object.keys(planned.sections).some(name=>!footprint.includes(name)))fail('COMMAND_DEFINITION','Команда попыталась изменить посторонний раздел',500);
       contracts.validateSections(planned.sections,schema.sections);
-      // New precision rules apply to changed persisted facts only, after a
-      // committed receipt has already had the chance to replay unchanged.
-      require('../assets/core/precision-policy.js').validateChanges(snapshot.data,{...snapshot.data,...planned.sections},{readable:dependencies});
+      // The shared kernel validates precision with the same trusted intent,
+      // after receipt lookup and before backup/commit. Do not prevalidate a
+      // correction without its independently reproducible document proof.
       const result=storage.writeSections(dataDir,{databaseToken:token,base:envelope.base,sections:planned.sections,operation:envelope.operation},
         {principal,now,commandIntent:envelope,beforeCommit:options.beforeCommit});
       return filteredResult({...result,command:true},principal);

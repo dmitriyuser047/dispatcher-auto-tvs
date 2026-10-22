@@ -16,6 +16,7 @@ function app(database=fixture()){
  });
  vm.runInContext('function genRecsFor(id){return data.genRecords.filter(row=>row.generatorId===id);}function tanksAll(){return data.tanks;}',context);
  for(const file of ['29-fuel-quality.js','12-settings.js','16-generators.js'])vm.runInContext(read(file),context,{filename:file});
+ require('./tank-stock-vm.cjs')(context);
  return {context,calls,field:id=>context.document.getElementById(id),export:()=>context.exportGenWriteOffAct('2026-09-01','2026-09-30',{actDate:'2026-09-30',loc:'__ALL__'})};
 }
 function generatorRow(book){const row=Object.keys(book.sheet).find(key=>book.sheet[key]?.v==='SYNTHETIC DATED DES');assert.ok(row,'the actual worksheet must contain the selected generator');return Number(row.split(',')[0]);}

@@ -19,6 +19,7 @@ function app(data){
   alert:message=>{throw Error(message);},XLSX:{utils:{encode_cell:({r,c})=>r+','+c,encode_range:range=>JSON.stringify(range),book_new:()=>({SheetNames:[],Sheets:{}}),book_append_sheet:(book,sheet,name)=>{book.SheetNames.push(name);book.Sheets[name]=sheet;}},writeFile:(book,name)=>books.push({book:copy(book),name})}});
  vm.runInContext("function recsFor(id){return data.records.filter(row=>row.vehicleId===id);}function genRecsFor(id){return data.genRecords.filter(row=>row.generatorId===id);}function computeFuelBalances(id,from,to){return TvsFuelEngine.recordBalances(data,id,{from:from||'',to:to||''});}",context);
  for(const file of ['29-fuel-quality.js','07-summary.js','09-ui-effects.js','10-pdf-reports.js','13-gen-export.js','16-generators.js','17-tanks.js'])vm.runInContext(read(file),context,{filename:file});
+ require('./tank-stock-vm.cjs')(context);
  context._savePdf=(html,name)=>pdfs.push({html,name});
  return {context,books,pdfs,xlsx(name,...args){const before=JSON.stringify(context.data);context[name](...args);assert.equal(JSON.stringify(context.data),before);assert.ok(books.length);return books.at(-1).book.Sheets[books.at(-1).book.SheetNames[0]];},pdf(name,...args){const before=JSON.stringify(context.data);context[name](...args);assert.equal(JSON.stringify(context.data),before);assert.ok(pdfs.length);return pdfs.at(-1).html;}};
 }
@@ -65,7 +66,7 @@ test('generator report periods before accounting expose no invented zero stock w
 
 test('tank export includes modern signed receipt/issue legs exactly once, ignores old history and carries stock into an empty month',()=>{
  const h=app(fixture()),sheet=h.xlsx('exportAllGensToXlsx'),row=rowWith(sheet,0,'SYNTHETIC-TANK');assert.equal(row[12],20);assert.equal(row[14],23.537);assert.equal(row[16],920);const oct=rowWith(h.xlsx('exportAllGensToXlsx','2026-10-01','2026-10-31'),0,'SYNTHETIC-TANK');assert.equal(oct[12],0);assert.equal(oct[14],0);assert.equal(oct[16],920);
- const old=rowWith(h.xlsx('exportAllGensToXlsx','2026-08-01','2026-08-31'),0,'SYNTHETIC-TANK');assert.equal(old[12],0);assert.equal(old[14],0);assert.equal(old[16],'Учёт не начат');
+ const old=rowWith(h.xlsx('exportAllGensToXlsx','2026-08-01','2026-08-31'),0,'SYNTHETIC-TANK');assert.equal(old[12],'Учёт не начат');assert.equal(old[14],'Учёт не начат');assert.equal(old[16],'Учёт не начат');
 });
 
 test('reports without explicit metadata retain all historical litres, old two-decimal presentation and hour/distance totals',()=>{

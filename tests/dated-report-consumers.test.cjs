@@ -24,6 +24,7 @@ function harness(db=fixture(),today='2026-10-22'){
  });
  vm.runInContext('function recsFor(id){return data.records.filter(row=>row.vehicleId===id);} function genRecsFor(id){return data.genRecords.filter(row=>row.generatorId===id);}',api);
  for(const file of ['29-fuel-quality.js','55-precision-input.js','07-summary.js','09-ui-effects.js','10-pdf-reports.js','13-gen-export.js','16-generators.js','17-tanks.js','15-cards.js','18-gen-crud.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/js',file),'utf8'),api,{filename:file});
+ require('./tank-stock-vm.cjs')(api);
  api._savePdf=html=>pdfs.push(html);
  const unchanged=action=>{const before=JSON.stringify(api.data),result=action();assert.equal(JSON.stringify(api.data),before,'Read-only consumer changed source facts');return result;};
  return {api,elements,xlsx(name,...args){return unchanged(()=>{api[name](...args);return books.at(-1).Sheets[books.at(-1).SheetNames[0]];});},pdf(name,...args){return unchanged(()=>{api[name](...args);return pdfs.at(-1);});},sidebar(generators=false){return unchanged(()=>{api[generators?'renderGenSidebarSummary':'renderSidebarSummary']();return generators?elements.get('generatorList').children.at(-1).innerHTML:elements.get('sidebarSummary').innerHTML;});},cards(){return unchanged(()=>{api.renderGeneratorCards();return elements.get('genGridArea').innerHTML;});}};
@@ -37,7 +38,7 @@ const number=value=>Number(String(value).replace(/\s/g,'').replace(',','.'));
 test('dated gap is unknown in actual vehicle/sidebar and generator/sidebar/cards instead of opening or zero',()=>{
  const h=harness();assert.match(h.sidebar(),/Израсходовано[\s\S]*Неизвестно: нет нормы/);assert.match(h.sidebar(),/Остаток[\s\S]*Неизвестно: нет нормы/);
  assert.match(h.sidebar(true),/Расход по норме[\s\S]*Неизвестно: нет нормы/);assert.match(h.sidebar(true),/Остаток[\s\S]*Неизвестно: нет нормы/);assert.match(h.cards(),/Неизвестно: нет нормы/);
- assert.equal(h.api.computeGenFuelBalances('g').gr,null);assert.equal(h.api.computeTankBalanceAt('missing','2026-09-10',true),0);
+ assert.equal(h.api.computeGenFuelBalances('g').gr,null);assert.throws(()=>h.api.computeTankBalanceAt('missing','2026-09-10',true),{code:'STOCK_TARGET'});
 });
 test('vehicle XLSX and PDF propagate dated unknown into rows and grouped/overall totals',()=>{
  const h=harness(),sheet=h.xlsx('exportAllToXlsx'),v=row(sheet,1,'SYNTHETIC-DATED-VEHICLE');assert.equal(v[9],10);assert.equal(v[10],'—');assert.equal(v[11],'—');assert.equal(v[12],'Неизвестно: нет нормы');assert.equal(row(sheet,1,'ИТОГО')[10],'—');assert.equal(row(sheet,0,'Дизельное')[9],'Неизвестно: нет нормы');

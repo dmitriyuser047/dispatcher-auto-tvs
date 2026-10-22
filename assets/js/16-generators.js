@@ -416,17 +416,7 @@ function doExportGenAct() {
 }
 
 // Баланс ёмкости на дату: до (inclusive=false) или включительно (inclusive=true)
-function computeTankBalanceAt(tankId, boundary, inclusive) {
-  const t = tanksAll().find(x => x.id === tankId);
-  if (!t) return 0;
-  if(typeof DomainSources==='undefined'||DomainSources.apiVersion!==1)throw Error('Модуль источников топлива не загружен');
-  const initial=fuelAccountingOpening('tanks',t,boundary);
-  if(initial===null)return null;
-  const okDate = d => fuelAccountingIncludes('tanks',t,d)&&(!boundary || (inclusive ? d <= boundary : d < boundary));
-  const flows = DecimalCore.sum(DomainSources.projectTankFlows(data,[tankId],{accounting:true}).filter(row=>okDate(row.date)).map(row=>row.amount));
-  const issued = DecimalCore.sum((data.genRecords || []).filter(r => genRecordTankId(r) === tankId && okDate(r.date)).map(r=>fqValue(r.fuelIssued)||0));
-  return DecimalCore.toNumberExact(DecimalCore.sub(DecimalCore.add(initial,flows),issued));
-}
+function computeTankBalanceAt(tankId,boundary,inclusive){return tankStockAt(tankId,boundary||dispatcherLocalDate(),inclusive).balance;}
 
 function genRecordTankId(r) {
   return Object.prototype.hasOwnProperty.call(r, 'tankId') ? r.tankId : ((data.generators || []).find(g => g.id === r.generatorId) || {}).tankId ?? null;
@@ -498,7 +488,8 @@ function genActNormColumn(generator,from,to,field){
   return spans.map(span=>fmtDate(span.from)+' — '+fmtDate(span.to)+': '+(span.value??'Не задано')).join('\n');
 }
 
-function exportGenWriteOffAct(dateFrom, dateTo, opts) {
+function exportGenWriteOffAct(dateFrom,dateTo,opts){return tankStockWithSnapshot(()=>exportGenWriteOffActProjected(dateFrom,dateTo,opts));}
+function exportGenWriteOffActProjected(dateFrom, dateTo, opts) {
   opts = opts || {};
   const MONTHS_RU = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
   const fuelLabels = { diesel:'Дизельное топливо', gasoline:'Бензин', gas:'Газ' };

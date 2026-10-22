@@ -592,12 +592,28 @@ test('generator zero values are retained and both balance calculations agree', a
   }); assert.deepEqual(out, { zero: 0, journal: 40, act: 40 });
 });
 test('changing a generator tank preserves its previous source without changing quantities', async () => {
-  const out = await page.evaluate(async () => {
+  await page.evaluate(() => {
     data.tanks = [{ id: 'a', name: 'A', balanceInit: 1000 }, { id: 'b', name: 'B', balanceInit: 1000 }];
     data.generators = [{ id: 'g', name: 'Generator', location: 'Object', tankId: 'a' }]; data.genRecords = [{ id: 'gr', generatorId: 'g', date: '2026-09-01', hours: 1, fuelIssued: 100 }]; rebuildIndex();
-    selectedGeneratorId = 'g'; openEditGenerator('g'); document.getElementById('gm_tank').value = 'b'; await saveGenerator();
-    return { source: data.genRecords[0].tankId, qty: data.genRecords[0].fuelIssued, a: computeTankBalance('a').balance, b: computeTankBalance('b').balance };
-  }); assert.deepEqual(out, { source: 'a', qty: 100, a: 900, b: 1000 });
+    selectedGeneratorId = 'g'; openEditGenerator('g');
+  });
+  const option=await page.locator('#gm_tank option').evaluateAll(options=>options.find(option=>option.dataset.typedId!==undefined&&JSON.parse(option.dataset.typedId)==='b')?.value);assert.equal(option,'b');await page.locator('#gm_tank').selectOption(option);await page.locator('#generatorModal').getByRole('button',{name:'Сохранить',exact:true}).click();
+  const out=await page.evaluate(()=>({source:data.genRecords[0].tankId,qty:data.genRecords[0].fuelIssued,a:computeTankBalance('a').balance,b:computeTankBalance('b').balance,tank:data.generators[0].tankId,undefinedFields:Object.keys(data.generators[0]).filter(key=>data.generators[0][key]===undefined)}));
+  assert.deepEqual(out,{source:'a',qty:100,a:900,b:1000,tank:'b',undefinedFields:[]});
+});
+
+test('a note on a minimal legacy tank preserves absent optional quantities and remains readable through strict stock projection',async()=>{
+ await page.evaluate(()=>{data.tanks=[{id:0,name:'MINIMAL LEGACY TANK',balanceInit:923.537}];selectedTankId=0;openEditTank(0);});
+ await page.locator('#tk_note').fill('Synthetic note without inventing optional quantities');await page.locator('#tankModal').getByRole('button',{name:'Сохранить',exact:true}).click();
+ assert.deepEqual(await page.evaluate(()=>({balance:computeTankBalance(0).balance,capacity:Object.hasOwn(data.tanks[0],'capacity'),reserve:Object.hasOwn(data.tanks[0],'reserveLevel'),undefinedFields:Object.keys(data.tanks[0]).filter(key=>data.tanks[0][key]===undefined),note:data.tanks[0].note})),{balance:923.537,capacity:false,reserve:false,undefinedFields:[],note:'Synthetic note without inventing optional quantities'});
+});
+
+test('a note on a minimal legacy DES record preserves issued litres, actual zero and absent optional facts before opening its tank',async()=>{
+ await page.evaluate(()=>{data.tanks=[{id:0,name:'MINIMAL RECORD SOURCE',balanceInit:1000}];data.generators=[{id:0,name:'MINIMAL RECORD DES',location:'Synthetic site',tankId:0}];data.genRecords=[{id:0,generatorId:0,date:'2026-09-01',hours:1,fuelIssued:100,fuelActual:0}];selectedGeneratorId=0;rebuildIndex();openEditGenRecord(0);});
+ await page.locator('#gen_rec_note').fill('Synthetic note without inventing record facts');await page.locator('#genRecordModal').getByRole('button',{name:'Сохранить',exact:true}).click();
+ await page.evaluate(()=>{switchSection('tanks');selectTank(0);});
+ assert.deepEqual(await page.evaluate(()=>{const row=data.genRecords[0];return{id:row.id,generatorId:row.generatorId,tankId:row.tankId,issued:row.fuelIssued,actual:row.fuelActual,hours:row.hours,absent:['meterStart','meterEnd','fuelUsed','load','fuelActualSource','modelVersion'].filter(key=>!Object.hasOwn(row,key)),undefinedFields:Object.keys(row).filter(key=>row[key]===undefined),balance:computeTankBalance(0).balance,note:row.note};}),{id:0,generatorId:0,tankId:0,issued:100,actual:0,hours:1,absent:['meterStart','meterEnd','fuelUsed','load','fuelActualSource','modelVersion'],undefinedFields:[],balance:900,note:'Synthetic note without inventing record facts'});
+ assert.match(await page.locator('#mainContent').innerText(),/MINIMAL RECORD SOURCE/);
 });
 test('ambiguous manual fuel is reported for review, not mislabeled duplicate or silently changed', async () => {
   const out = await page.evaluate(async () => {

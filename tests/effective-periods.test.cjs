@@ -109,8 +109,8 @@ test('semantic linked issues with explicit zero activity do not need a dated nor
   const next={...source,records:[linked]};assert.equal(fuel.recordBalances(next,7)[linked.id],943.537);assert.ok(!fuel.buildLedger(next,{from:'2026-09-01',to:'2026-09-30'}).issues.some(issue=>issue.code==='consumption-missing'));
 });
 
-test('new acts use v3 effective projections; future periods and scalar presentation changes do not alter past dated source fingerprints',()=>{
-  const data=db(),preview=writeoff.prepare(data,request),document=post(writeoff,data),saved={...data,fuelWriteoffs:[document]};assert.equal(document.calculationVersion,3);assert.equal(preview.totals.spent,10);
+test('new acts use current effective projections; future periods and scalar presentation changes do not alter past dated source fingerprints',()=>{
+  const data=db(),preview=writeoff.prepare(data,request),document=post(writeoff,data),saved={...data,fuelWriteoffs:[document]};assert.equal(document.calculationVersion,4);assert.equal(preview.totals.spent,10);
   const future=copy(saved);future.vehicles[0].fuelNorms.periods.push({id:'oct',from:'2026-10-01',basis:'Future',parameters:vehicle(20)});
   assert.equal(writeoff.fingerprint(future,request),document.sourceFingerprint);assert.equal(writeoff.validateDocuments(saved,future),true);
   future.vehicles[0].norm=123;assert.equal(writeoff.fingerprint(future,request),document.sourceFingerprint);

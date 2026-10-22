@@ -64,15 +64,8 @@ function wfDispatchProblems(job,old) {
   if(job.status==='confirmed'&&(!job.confirmedBy||!job.result))issues.push('Для подтверждения укажите принявшего и результат');
   return [...new Set(issues)];
 }
-function wfTankBalanceAt(id,date=wfToday()) {
-  const tank=(data.tanks||[]).find(t=>t.id===id); if(!tank)return 0;
-  if(fuelAccountingFor('tanks',tank).mode==='explicit')return computeTankBalanceAt(id,date,true);
-  let bal=DecimalCore.parse(tank.balanceInit??0);
-  (data.tankIncomes||[]).filter(r=>r.tankId===id&&r.date<=date).forEach(r=>{bal=DecimalCore.add(bal,r.liters??r.litres??r.amount??r.qty??0);});
-  (data.genRecords||[]).filter(r=>genRecordTankId(r)===id&&r.date<=date).forEach(r=>{bal=DecimalCore.sub(bal,r.fuelIssued??0);});
-  (data.fuelMovements||[]).filter(r=>!r.deleted&&!r.cancelled&&r.date<=date&&(r.toTankId===id||r.fromTankId===id)).forEach(r=>{const qty=Number(r.qty);if(!Number.isFinite(qty)||qty<0)throw Error('Некорректные литры в движении топлива '+r.id);if(r.toTankId===id)bal=DecimalCore.add(bal,qty);if(r.fromTankId===id)bal=DecimalCore.sub(bal,qty);});
-  return DecimalCore.toNumberExact(bal);
-}
+function wfTankBalanceAt(id,date=wfToday()){return tankStockAt(id,date).balance;}
+
 function wfPartStock(id,date=wfToday()) { return (data.partMovements||[]).filter(r=>r.partId===id&&!r.cancelled&&!r.deleted&&r.date<=date).reduce((s,r)=>s+(r.kind==='receipt'||r.kind==='return'?1:-1)*(Number(r.qty)||0),0); }
 function wfValidDate(value,withTime=false) {
   if(typeof value!=='string'||!(withTime?/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/:/^\d{4}-\d{2}-\d{2}$/).test(value))return false;

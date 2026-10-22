@@ -7,7 +7,7 @@ const _platformPrepareQueue=[],PLATFORM_PREPARE_LIMIT=8,PLATFORM_PREPARE_CHARACT
 function platformPrepareBackgroundStatus(){return {active:_platformPrepareActive?1:0,queued:_platformPrepareQueue.length,limit:PLATFORM_PREPARE_LIMIT};}
 function platformPrepareAccessStamp(context){
   const list=value=>value==null?null:[...new Set(value)].sort();
-  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
+  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fuelActions:list(context.fuelActions),fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
 }
 function platformPrepareError(code,message){return Object.assign(Error(message),{name:'PlatformKernelError',code});}
 function platformPrepareGuard(job){
@@ -67,6 +67,7 @@ function platformSessionContext() {
   return { identity:base.identity, readable:base.readable,
     writable:access && Array.isArray(access.writable) ? access.writable.slice() : undefined,
     periodActions:access && Array.isArray(access.periodActions) ? access.periodActions.slice() : undefined,
+    fuelActions:access && Array.isArray(access.fuelActions) ? access.fuelActions.slice() : undefined,
     fieldPermissions:access?.fieldPermissions || null,
     actor:user ? { id:user.id, name:user.name || user.id, role:user.role } : { id:'local', name:'Локальный пользователь', role:'admin' },
     revisions:typeof _sync === 'undefined' ? {} : { ..._sync.revs },
@@ -172,6 +173,8 @@ function platformExecuteCommand(value,options={}){
           throw platformPrepareError('UNSUPPORTED_COMMANDS','Подключение не поддерживает атомарные команды. Загрузите данные из совместимой версии программы.');
         if(command.type==='PeriodAction'&&_sync.platform?.periods!==1)
           throw platformPrepareError('UNSUPPORTED_PERIODS','Подключение не поддерживает проверенное закрытие периодов. Загрузите данные из совместимой версии программы.');
+        if((command.type==='FuelAction'||command.type==='DocumentAction'&&command.input.section==='tankIncomes')&&_sync.platform?.fuelOperations!==1)
+          throw platformPrepareError('UNSUPPORTED_FUEL_OPERATIONS','Подключение не поддерживает проверенные операции с ёмкостями. Загрузите данные из совместимой версии программы.');
         if(names.some(name=>captured[name]!==(_sync.synced[name]||'[]')))
           throw platformPrepareError('UNSAVED_COMMAND_SOURCE','Сначала сохраните или отмените изменения исходных данных команды.');
         const persisted=platformSaveBaseline();

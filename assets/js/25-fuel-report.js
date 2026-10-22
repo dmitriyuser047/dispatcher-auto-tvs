@@ -54,6 +54,14 @@ function frIncomeSkipped(r) {
   const s = String(r.source || '').trim();
   return !s || !(+r.sum) || FR_IN_SKIP.some(re => re.test(s));
 }
+function frIncomeHasId(value){return typeof EntityIdentity!=='undefined'?EntityIdentity.presentId(value):value!==undefined&&value!==null&&value!=='';}
+function frIncomeIsPhysicalPair(row){return ['in','out'].includes(row.kind)||frIncomeHasId(row.linkId)||frIncomeHasId(row.counterTankId);}
+function frTankIncomeRows(){
+ const raw=data.tankIncomes||[];
+ if(typeof DocumentEngine==='undefined'&&raw.some(row=>Object.hasOwn(row,'lifecycle')))throw Error('Не загружены действующие версии приходных документов');
+ const rows=typeof DocumentEngine==='undefined'?raw:DocumentEngine.activeRows(data,'tankIncomes');
+ return rows.filter(row=>!row.deleted&&!row.cancelled&&row.status!=='cancelled');
+}
 
 const FR_MONTHS = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
 const FR_TABS = { in: 'Приход', veh: 'Расход ТС', gen: 'Расход ДЭС' };
@@ -122,7 +130,7 @@ function frFuelSort(a, b) {
 
 function frYears() {
   const s = new Set();
-  (data.tankIncomes || []).forEach(r => { if (r.date) s.add(r.date.slice(0, 4)); });
+  frTankIncomeRows().forEach(r => { if (r.date) s.add(r.date.slice(0, 4)); });
   (data.genRecords  || []).forEach(r => { if (r.date) s.add(r.date.slice(0, 4)); });
   (data.records     || []).forEach(r => { if (r.date) s.add(r.date.slice(0, 4)); });
   if (!s.size) s.add(String(new Date().getFullYear()));
@@ -154,8 +162,8 @@ function frRows(tab, year) {
     // Приход — только закупка. Перемещения между объектами исключены обеими
     // сторонами: у них нет ни накладной, ни НДС, а по компании один и тот же
     // объём считался бы дважды — при покупке и при перевозке.
-    (data.tankIncomes || []).forEach(r => {
-      if (!fqDate(r.date) || r.date.slice(0, 4) !== year || r.linkId || (+r.amount || 0) <= 0) return;
+    frTankIncomeRows().forEach(r => {
+      if (!fqDate(r.date) || r.date.slice(0, 4) !== year || frIncomeIsPhysicalPair(r) || (+r.amount || 0) <= 0) return;
       if (!fuelRepShowSkipped && frIncomeSkipped(r)) return;
       const t = (data.tanks || []).find(x => x.id === r.tankId);
       // Разрез: объект (куда привезли) или поставщик (от кого) — поле «Источник»
@@ -283,7 +291,7 @@ function renderFuelReport() {
       B.fuels.map(f => btn('mtab', fuelRepFuel === f, "fuelRepFuel='" + f + "';renderFuelReport()", f)).join('')
     : '';
   const skipped = fuelRepTab === 'in'
-    ? (data.tankIncomes || []).filter(r => (r.date || '').slice(0, 4) === fuelRepYear && !r.linkId && (+r.amount || 0) > 0 && frIncomeSkipped(r))
+    ? frTankIncomeRows().filter(r => (r.date || '').slice(0, 4) === fuelRepYear && !frIncomeIsPhysicalPair(r) && (+r.amount || 0) > 0 && frIncomeSkipped(r))
     : [];
   const skippedL = skipped.reduce((s, r) => frPlus(s,frNumber(r.amount)), 0);
   const dimBtns = fuelRepTab === 'in'
@@ -526,8 +534,8 @@ function exportFuelReportXlsx() {
 // цена — из суммы с НДС; в базе суммы хранятся без НДС.
 function frIncomeSummary(year) {
   const objs = new Map();
-  (data.tankIncomes || []).forEach(r => {
-    if (!fqDate(r.date) || r.date.slice(0, 4) !== year || r.linkId || (+r.amount || 0) <= 0) return;
+  frTankIncomeRows().forEach(r => {
+    if (!fqDate(r.date) || r.date.slice(0, 4) !== year || frIncomeIsPhysicalPair(r) || (+r.amount || 0) <= 0) return;
     if (frIncomeSkipped(r)) return;
     const t = (data.tanks || []).find(x => x.id === r.tankId);
     const obj = t ? (t.object || t.name) : '—';

@@ -40,7 +40,8 @@ test('tank stock is checked at every affected date, including a deficit hidden b
   const next=clone(before);next.fuelMovements=[move({qty:50})];
   assert.throws(()=>check(before,next),error=>error.issues.some(issue=>issue.code==='FUEL_STOCK_DEFICIT'&&issue.date==='2026-10-10'));
   const opening=clone(before);opening.tanks[0].balanceInit=50;fails(()=>check(before,opening),'FUEL_STOCK_DEFICIT');
-  const receipt=clone(before);receipt.tankIncomes[0].date='2026-10-21';receipt.genRecords[0].fuelIssued=120;fails(()=>check(before,receipt),'FUEL_STOCK_DEFICIT');
+  const receipt=clone(before);receipt.genRecords[0].fuelIssued=120;fails(()=>check(before,receipt),'FUEL_STOCK_DEFICIT');
+  const rewritten=clone(before);rewritten.tankIncomes[0].date='2026-10-21';fails(()=>check(before,rewritten),'DOCUMENT_FROZEN');
 });
 
 test('legacy signed tank transfers conserve litres and respect source stock and fuel type',()=>{
@@ -80,7 +81,8 @@ test('directions, quantities and reasons are validated for every new tank moveme
   for(const patch of [{kind:'receipt'},{kind:'return'},{kind:'transfer',toTankId:'t'},{kind:'adjustment',toTankId:'other'},{fromTankId:'',toTankId:''}]){
     const next=clone(before);next.fuelMovements=[move(patch)];fails(()=>check(before,next),'FUEL_DIRECTION');
   }
-  for(const qty of [0,-1,true,'garbage',Infinity,'1e309']){const next=clone(before);next.fuelMovements=[move({qty})];fails(()=>check(before,next),'FUEL_QUANTITY');}
+  for(const qty of [0,-1,true,'garbage','1e309']){const next=clone(before);next.fuelMovements=[move({qty})];fails(()=>check(before,next),'FUEL_QUANTITY');}
+  const nonJSON=clone(before);nonJSON.fuelMovements=[move({qty:Infinity})];assert.throws(()=>check(before,nonJSON),error=>error.code==='STOCK_JSON');
   const noReason=clone(before);noReason.fuelMovements=[move({reason:'  '})];fails(()=>check(before,noReason),'FUEL_REASON');
   const stringQty=clone(before);stringQty.fuelMovements=[move({qty:'10.125'})];assert.equal(check(before,stringQty),true);
 });
@@ -199,7 +201,7 @@ test('native storage catches an intermediate stock deficit created by a backdate
 });
 
 test('pure browser modules expose the same API and health inspection honors unreadable sections',()=>{
-  const context=vm.createContext({});for(const name of ['fuel-engine.js','fuel-movement-policy.js','document-lifecycle.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name),'utf8'),context);
+  const context=vm.createContext({});for(const name of ['platform-contracts.js','entity-identity.js','decimal-core.js','accounting-boundary.js','fuel-stock.js','fuel-engine.js','fuel-movement-policy.js','document-lifecycle.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name),'utf8'),context);
   assert.equal(context.FuelMovementPolicy.apiVersion,1);assert.equal(context.DocumentLifecycle.apiVersion,1);assert.equal(Object.isFrozen(context.FuelMovementPolicy),true);
   const before=db(),next=clone(before);issue(next);const copy=JSON.stringify(next);context.FuelMovementPolicy.validateChanges(before,next);assert.equal(JSON.stringify(next),copy);
   const invalid=clone(next);invalid.records=[];assert.equal(fuelPolicy.inspect(invalid,{readable:['vehicles']}).issues.length,0);

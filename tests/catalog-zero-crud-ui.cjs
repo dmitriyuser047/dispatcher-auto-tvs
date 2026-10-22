@@ -37,7 +37,6 @@ const cases=[
  {section:'generators',prepare:"selectedGeneratorId=0;renderGenDetail(data.generators.find(row=>row.id===0));",edit:'openEditGenerator',modal:'generatorModal',field:'gm_note'},
  {section:'genRecords',prepare:"selectedGeneratorId='g';selectedGenYear=2026;selectedGenMonth=9;renderGenDetail(data.generators.find(row=>row.id==='g'));",edit:'openEditGenRecord',modal:'genRecordModal',field:'gen_rec_note'},
  {section:'tanks',prepare:"selectedTankId=0;renderTankDetail(data.tanks.find(row=>row.id===0));",edit:'openEditTank',modal:'tankModal',field:'tk_note'},
- {section:'tankIncomes',prepare:"selectedTankId='t';renderTankDetail(data.tanks.find(row=>row.id==='t'));",edit:'openEditTankIncome',modal:'tankIncomeModal',field:'ti_note'},
  {section:'vehicleTo',prepare:"selectedVehicleId='v';document.getElementById('mainContent').innerHTML=renderVehicleToSection('v',0);",edit:'openEditVehicleTo',modal:'vehicleToModal',field:'vto_note'},
  {section:'toRecords',prepare:"selectedGeneratorId='g';document.getElementById('mainContent').innerHTML=renderToSection('g',0);",edit:'openEditToRecord',modal:'toModal',field:'to_note'},
  {section:'repairs',prepare:"selectedVehicleId='v';document.getElementById('mainContent').innerHTML=renderRepairSection('v');",edit:'openEditRepair',modal:'repairModal',field:'rp_note'},

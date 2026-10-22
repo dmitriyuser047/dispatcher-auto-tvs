@@ -32,6 +32,7 @@ function generators(db){
   vm.runInContext('function genRecsFor(id){return data.genRecords.filter(row=>row.generatorId===id);}function tanksAll(){return data.tanks;}',context);
   vm.runInContext(read('assets/js/29-fuel-quality.js'),context);
   vm.runInContext(read('assets/js/16-generators.js'),context);
+ require('./tank-stock-vm.cjs')(context);
   return {context,export(){context.exportGenWriteOffAct('2026-09-01','2026-09-30',{actDate:'2026-09-30',loc:'__ALL__'});return workbook.sheet;}};
 }
 const values=sheet=>Object.values(sheet).filter(cell=>cell&&Object.hasOwn(cell,'v')).map(cell=>cell.v);

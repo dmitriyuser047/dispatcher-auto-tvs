@@ -23,12 +23,18 @@ export interface MergeCatalogInput {
   section: CatalogSection; sourceId: Identifier; targetId: Identifier; reason: string;
   mutableRefs: { relationId: string; rowId: Identifier; path: string }[]; reviewFingerprint: string;
 }
-export type DocumentSection = 'shiftReports' | 'workOrders' | 'dispatchJobs' | 'fuelMovements' | 'partMovements' | 'fuelWriteoffs' | 'payments' | 'repairs' | 'vehicleTo' | 'toRecords';
+export type DocumentSection = 'shiftReports' | 'workOrders' | 'dispatchJobs' | 'fuelMovements' | 'partMovements' | 'fuelWriteoffs' | 'payments' | 'repairs' | 'vehicleTo' | 'toRecords' | 'tankIncomes';
 export interface DocumentReference {section:DocumentSection;id:Identifier}
 export type PeriodScope = 'fuel' | 'stock' | 'finance';
 export interface PeriodActionInput {
   action:'close'|'reopen';scope:PeriodScope;month:string;reason:string;reviewFingerprint:string;
 }
+export interface TankTarget {section:'tanks';id:Identifier}
+export type FuelActionInput =
+  | {action:'measure';target:TankTarget;date:string;observedQty:number;reason:string;reviewFingerprint:string}
+  | {action:'applyDifference';measurementId:Identifier;reason:string;reviewFingerprint:string}
+  | {action:'voidMeasurement';measurementId:Identifier;reason:string;reviewFingerprint:string}
+  | {action:'reverseLegacyTransfer';outId:Identifier;inId:Identifier;reason:string;reviewFingerprint:string};
 export type DocumentActionInput =
   | {action:'saveDraft';section:DocumentSection;draftId?:Identifier;payload:JsonRow;correctionOf?:DocumentReference;reason?:string}
   | {action:'postDraft';section:DocumentSection;draftId:Identifier;reviewFingerprint:string}
@@ -42,7 +48,8 @@ export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelI
   | { type: 'AssignPerson'; version: 1; input: AssignPersonInput }
   | { type: 'MergeCatalog'; version: 1; input: MergeCatalogInput }
   | { type: 'DocumentAction'; version: 1; input: DocumentActionInput }
-  | { type: 'PeriodAction'; version: 1; input: PeriodActionInput };
+  | { type: 'PeriodAction'; version: 1; input: PeriodActionInput }
+  | { type: 'FuelAction'; version: 1; input: FuelActionInput };
 export interface CommandEnvelope { protocolVersion: 1; databaseToken: string; operation: OperationDescriptor; base: Revisions; command: PlatformCommand }
 export interface ContractError extends Error { code: string; field: string; status: number }
 
@@ -170,7 +177,7 @@ export function createPlatformContracts() {
     return {section:row.section,id:commandId(row.id,field + '.id')};
   }
   function documentSection(value:unknown,field:string):DocumentSection {
-    const sections:readonly string[]=['shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords'];
+    const sections:readonly string[]=['shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords','tankIncomes'];
     if(typeof value!=='string'||!sections.includes(value))fail('INVALID_COMMAND',field,'Выберите поддерживаемый вид документа');
     return value as DocumentSection;
   }
@@ -236,6 +243,26 @@ export function createPlatformContracts() {
       const result:MergeCatalogInput={section:input.section as CatalogSection,sourceId:commandId(input.sourceId,path+'sourceId'),targetId:commandId(input.targetId,path+'targetId'),reason:commandText(input.reason,path+'reason',true),mutableRefs,reviewFingerprint:input.reviewFingerprint};
       if(result.sourceId===result.targetId)fail('INVALID_COMMAND',path+'targetId','Нельзя объединить карточку с самой собой');
       return {type:'MergeCatalog',version:1,input:result};
+    }
+    if(row.type==='FuelAction'){
+      const reason=commandText(input.reason,path+'reason',true,2000);
+      if(reason.trim().length<3)fail('INVALID_COMMAND',path+'reason','Укажите основание от 3 до 2000 знаков');
+      const fingerprint=reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint');let result:FuelActionInput;
+      if(input.action==='measure'){
+        keys(input,['action','target','date','observedQty','reason','reviewFingerprint'],'command.input');
+        const reference=commandObject(input.target,path+'target');keys(reference,['section','id'],path+'target');
+        if(reference.section!=='tanks')fail('INVALID_COMMAND',path+'target.section','Выберите ёмкость для замера');
+        if(typeof input.observedQty!=='number'||!Number.isFinite(input.observedQty)||input.observedQty<0||input.observedQty>1000000000000)fail('INVALID_COMMAND',path+'observedQty','Укажите неотрицательный измеренный остаток');
+        result={action:'measure',target:{section:'tanks',id:commandId(reference.id,path+'target.id')},date:commandDate(input.date,path+'date'),observedQty:input.observedQty,reason,reviewFingerprint:fingerprint};
+      }else if(input.action==='applyDifference'||input.action==='voidMeasurement'){
+        keys(input,['action','measurementId','reason','reviewFingerprint'],'command.input');result={action:input.action,measurementId:commandId(input.measurementId,path+'measurementId'),reason,reviewFingerprint:fingerprint};
+      }else if(input.action==='reverseLegacyTransfer'){
+        keys(input,['action','outId','inId','reason','reviewFingerprint'],'command.input');
+        const outId=commandId(input.outId,path+'outId'),inId=commandId(input.inId,path+'inId');
+        if(outId===inId)fail('INVALID_COMMAND',path+'inId','Две стороны перемещения должны иметь разные идентификаторы');
+        result={action:'reverseLegacyTransfer',outId,inId,reason,reviewFingerprint:fingerprint};
+      }else return fail('INVALID_COMMAND',path+'action','Неизвестное действие с топливом');
+      return {type:'FuelAction',version:1,input:result};
     }
     if(row.type==='PeriodAction'){
       keys(input,['action','scope','month','reason','reviewFingerprint'],'command.input');

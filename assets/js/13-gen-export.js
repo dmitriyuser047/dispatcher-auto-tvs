@@ -13,6 +13,19 @@ let genExportFormat = 'xls';
 function genExportFuelExplicit(asset){return Object.prototype.hasOwnProperty.call(asset,'fuelAccounting')||asset.fuelNorms!=null;}
 function genExportFuelRows(asset,records){return genExportFuelExplicit(asset)?records.filter(row=>fuelAccountingIncludes('generators',asset,row.date)):records;}
 function genExportFuelNumber(value,explicit){return value==null?'Нет данных':+value.toFixed(explicit?3:2);}
+function genExportTankStockSummary(dateFrom,dateTo){
+  if(typeof FuelStock==='undefined'||FuelStock.apiVersion!==1||typeof DecimalCore==='undefined')throw Error('Не загружено общее ядро топливного запаса');
+  const through=dateTo||dispatcherLocalDate(),projection=FuelStock.project(data,{to:through}),sourceRows=new Map(projection.rows.map(row=>[row.target.id,row])),result=new Map();
+  for(const tank of tanksAll()){
+    const stock=FuelStock.at(projection,{section:'tanks',id:tank.id},through);let income='0',issued='0';
+    for(const event of sourceRows.get(tank.id).events){if(!event.stockAffects||event.date>through||dateFrom&&event.date<dateFrom||stock.accountingFrom&&event.date<stock.accountingFrom)continue;const positive=DecimalCore.compare(event.deltaDecimal,0)>=0;
+      if(positive)income=DecimalCore.add(income,event.deltaDecimal);else issued=DecimalCore.sub(issued,event.deltaDecimal);
+    }
+    const known=stock.status==='known';
+    result.set(tank.id,{stock,income:known?DecimalCore.toNumberExact(income):null,issued:known?DecimalCore.toNumberExact(issued):null,balance:stock.balance,label:stock.status==='outside-accounting'?'Учёт не начат':'Нет достоверного остатка'});
+  }
+  return result;
+}
 function openGenExportAllModal(fmt) {
   if (!(data.generators||[]).length) { showToast('Нет дизельных генераторов для выгрузки'); return; }
   genExportMode = 'all';
@@ -172,36 +185,31 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     [[0,4,'Наименование'],[4,4,'Местонахождение / Объект'],[8,2,'Вид топлива'],[10,2,'Объём, л'],[12,2,'Приход за период, л'],[14,2,'Расход за период, л'],[16,1,'Остаток, л']]
       .forEach(([c,span,t])=>{ put(R(),c,t,c===0||c===4?hTk:hTkC); merge(R(),c,R(),c+span-1); });
     rowH(R(),24);next();
-    let tkIncTot=0, tkIssTot=0, tkBalTot=0,tkMissing=false,tkExplicit=false;
+    const tankSummary=genExportTankStockSummary(dateFrom,dateTo);
+    let tkIncTot='0', tkIssTot='0', tkBalTot='0',tkMissing=false;
     tanksAll().slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'','ru')).forEach((t,i)=>{
       const bg=i%2===0?P.white:P.gray1;
-      const explicit=genExportFuelExplicit(t);
-      const flows=explicit?DomainSources.projectTankFlows(data,[t.id],{from:dateFrom,to:dateTo,accounting:true}):[];
-      const income=explicit?flows.reduce((sum,row)=>sum+Math.max(0,row.amount),0):(data.tankIncomes||[]).filter(r=>r.tankId===t.id&&inPeriod(r.date)).reduce((s,r)=>s+(r.amount||0),0);
-      const boundGenIds=new Set((data.generators||[]).filter(g=>g.tankId===t.id).map(g=>g.id));
-      const issued=explicit?flows.reduce((sum,row)=>sum+Math.max(0,-row.amount),0)+(data.genRecords||[]).filter(r=>genRecordTankId(r)===t.id&&inPeriod(r.date)&&fuelAccountingIncludes('tanks',t,r.date)).reduce((sum,row)=>sum+(Number(row.fuelIssued)||0),0):(data.genRecords||[]).filter(r=>boundGenIds.has(r.generatorId)&&inPeriod(r.date)).reduce((s,r)=>s+(r.fuelIssued||0),0);
-      const cb=computeTankBalance(t.id);
-      const balance=explicit?computeTankBalanceAt(t.id,dateTo||dispatcherLocalDate(),true):cb.balance;
-      tkExplicit=tkExplicit||explicit;if(balance==null)tkMissing=true;
-      tkIncTot+=income; tkIssTot+=issued; tkBalTot+=balance??0;
+      const summary=tankSummary.get(t.id),{income,issued,balance}=summary;
+      if(balance==null||income==null||issued==null)tkMissing=true;
+      else{tkIncTot=DecimalCore.add(tkIncTot,income);tkIssTot=DecimalCore.add(tkIssTot,issued);tkBalTot=DecimalCore.add(tkBalTot,balance);}
       const bBg=balance==null?P.gray2:balance<0?P.redPale:balance===0?P.gray2:P.greenPale;
       const sB=cs({bold:true,sz:10,color:{rgb:balance==null?P.gray4:balance<0?P.red:balance===0?P.gray4:P.green}},bBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
       put(R(),0,t.name||'—',ST.tdL(bg));merge(R(),0,R(),3);
       put(R(),4,[t.location,t.object].filter(Boolean).join(' · ')||'—',ST.tdL(bg));merge(R(),4,R(),7);
       put(R(),8,fuelLabels[t.fuel||'diesel'],ST.tdC(bg));merge(R(),8,R(),9);
       put(R(),10,t.capacity!=null?+t.capacity:'—',ST.tdC(bg));merge(R(),10,R(),11);
-      put(R(),12,genExportFuelNumber(income,explicit),ST.tdR(bg));merge(R(),12,R(),13);
-      put(R(),14,genExportFuelNumber(issued,explicit),ST.tdR(bg));merge(R(),14,R(),15);
-      put(R(),16,balance==null?'Учёт не начат':genExportFuelNumber(balance,explicit),sB);
+      put(R(),12,income==null?summary.label:income,ST.tdR(bg));merge(R(),12,R(),13);
+      put(R(),14,issued==null?summary.label:issued,ST.tdR(bg));merge(R(),14,R(),15);
+      put(R(),16,balance==null?summary.label:balance,sB);
       rowH(R(),20);next();
     });
     const tkTL=cs({bold:true,sz:11,color:{rgb:P.text}},P.navyLight,{horizontal:'left',vertical:'center',indent:1},bAll('medium',P.navy));
     const tkTN=cs({bold:true,sz:11,color:{rgb:P.text}},P.navyLight,{horizontal:'right',vertical:'center',indent:1},bAll('medium',P.navy));
     put(R(),0,'ИТОГО',tkTL);merge(R(),0,R(),11);fill(R(),tkTL);
-    put(R(),12,genExportFuelNumber(tkIncTot,tkExplicit),tkTN);merge(R(),12,R(),13);
-    put(R(),14,genExportFuelNumber(tkIssTot,tkExplicit),tkTN);merge(R(),14,R(),15);
-    const tkBalRound=tkMissing?null:genExportFuelNumber(tkBalTot,tkExplicit);
-    put(R(),16,tkBalRound==null?'Учёт не начат':tkBalRound,cs({bold:true,sz:11,color:{rgb:tkBalRound==null?P.gray4:tkBalRound<0?P.red:P.green}},P.navyLight,{horizontal:'right',vertical:'center',indent:1},bAll('medium',P.navy)));
+    put(R(),12,tkMissing?'Нет полного итога':DecimalCore.toNumberExact(tkIncTot),tkTN);merge(R(),12,R(),13);
+    put(R(),14,tkMissing?'Нет полного итога':DecimalCore.toNumberExact(tkIssTot),tkTN);merge(R(),14,R(),15);
+    const tkBalRound=tkMissing?null:DecimalCore.toNumberExact(tkBalTot);
+    put(R(),16,tkBalRound==null?'Нет полного итога':tkBalRound,cs({bold:true,sz:11,color:{rgb:tkBalRound==null?P.gray4:tkBalRound<0?P.red:P.green}},P.navyLight,{horizontal:'right',vertical:'center',indent:1},bAll('medium',P.navy)));
     rowH(R(),22);next();
     spacer();
   }
