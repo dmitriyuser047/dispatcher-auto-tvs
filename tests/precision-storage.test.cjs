@@ -47,9 +47,9 @@ for(const format of ['json','sqlite']){
   assert.throws(()=>storage.executeCommand(dir,{...semantic,operation:{id:'new-strict-intent'}},{principal,now}),code('NUMERIC_PRECISION'));assert.deepEqual(storage.readSnapshot(dir),recorded);
  });
 
- test(format+' new writeoffs are canonical v2 and saved v1 snapshots stay byte-exact through unrelated fact comments',t=>{
+ test(format+' new writeoffs use the current canonical version and saved v1 snapshots stay byte-exact through unrelated fact comments',t=>{
   const {dir}=fixture(t,format),old=storage.readSnapshot(dir),request={month:'2026-09',org:'A',grade:'ДТ',date:'2026-10-01',basisNote:'Synthetic'};
-  const modern=writeoff.prepare(old.data,request),draft=writeoff.post(old.data,request,{id:'modern-act',number:'Synthetic-2',postedAt:now,postedBy:principal,expectedFingerprint:modern.sourceFingerprint});assert.equal(save(dir,{fuelWriteoffs:[draft]}).ok,true);const current=storage.readSnapshot(dir);assert.equal(current.data.fuelWriteoffs[0].calculationVersion,2);assert.deepEqual(current.data.records,old.data.records);
+  const modern=writeoff.prepare(old.data,request),draft=writeoff.post(old.data,request,{id:'modern-act',number:'Synthetic-current',postedAt:now,postedBy:principal,expectedFingerprint:modern.sourceFingerprint});assert.equal(save(dir,{fuelWriteoffs:[draft]}).ok,true);const current=storage.readSnapshot(dir);assert.equal(current.data.fuelWriteoffs[0].calculationVersion,writeoff.calculationVersion);assert.deepEqual(current.data.records,old.data.records);
   const {dir:legacyDir}=fixture(t,format),legacy=storage.readSnapshot(legacyDir),v1=writeoff.forVersion(1),preview=v1.prepare(legacy.data,request),doc=v1.post(legacy.data,request,{id:'legacy-act',number:'Synthetic-1',postedAt:now,postedBy:principal,expectedFingerprint:preview.sourceFingerprint});rawWrite(legacyDir,{fuelWriteoffs:[doc]},legacy.revisions);const saved=JSON.stringify(storage.readSnapshot(legacyDir).data.fuelWriteoffs);assert.equal(save(legacyDir,{vehicles:legacy.data.vehicles.map(row=>({...row,note:'Unrelated description'}))}).ok,true);assert.equal(JSON.stringify(storage.readSnapshot(legacyDir).data.fuelWriteoffs),saved);
  });
 

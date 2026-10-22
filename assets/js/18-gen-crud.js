@@ -9,6 +9,7 @@ function openAddGenerator() {
   document.getElementById('gm_fuel').value = 'diesel';
   ['gm_norm','gm_norm100','gm_norm50','gm_norm_idle','gm_power','gm_hours_init','gm_fuel_balance','gm_cost'].forEach(id => document.getElementById(id).value = '');
   populateGenTankSelect('');
+  if(typeof effectiveParametersLegacyForm==='function')effectiveParametersLegacyForm('generators',editingGeneratorId==null?null:(data.generators||[]).find(row=>row.id===editingGeneratorId),'generatorModal');
   openModal('generatorModal');
 }
 
@@ -33,6 +34,7 @@ function openEditGenerator(id) {
   document.getElementById('gm_status').value       = g.status      || '';
   document.getElementById('gm_note').value         = g.note        || '';
   populateGenTankSelect(g.tankId || '');
+  if(typeof effectiveParametersLegacyForm==='function')effectiveParametersLegacyForm('generators',editingGeneratorId==null?null:(data.generators||[]).find(row=>row.id===editingGeneratorId),'generatorModal');
   openModal('generatorModal');
 }
 
@@ -42,6 +44,7 @@ async function saveGenerator() {
   if (!name)     { showFieldError('Укажите наименование ДЭС', 'gm_name'); return; }
   if (!location) { showFieldError('Укажите местонахождение', 'gm_location'); return; }
   if (!data.generators) data.generators = [];
+  if(typeof effectiveParametersScalarGuard==='function'&&!effectiveParametersScalarGuard('generators',data.generators.find(row=>row.id===editingGeneratorId),{power:'gm_power',norm:'gm_norm',norm100:'gm_norm100',norm50:'gm_norm50',normIdle:'gm_norm_idle'}))return;
   const numeric=precisionRead({power:['gm_power',3],norm:['gm_norm',6],norm100:['gm_norm100',6],norm50:['gm_norm50',6],normIdle:['gm_norm_idle',6],hoursInit:['gm_hours_init',3,'zero'],fuelBalance:['gm_fuel_balance',3,'zero'],cost:['gm_cost',2]},editingGeneratorId==null?null:data.generators.find(x=>x.id===editingGeneratorId));
   if(!numeric)return;
   const obj = {
@@ -99,6 +102,13 @@ async function restoreGenerator(id) {
 }
 
 // ─── GENERATOR RECORDS CRUD ──────────────────────────────
+function genRefreshNormDate(){calcGenFuelAuto();calcGenActualAuto();}
+function genPrepareNormInput(source){
+  const input=document.getElementById('gen_rec_fuel_used');input.dataset.source=source||'';input.oninput=()=>{input.dataset.source='manual';};
+  const dateInput=document.getElementById('gen_rec_date');dateInput.onchange=genRefreshNormDate;dateInput.removeEventListener('input',genRefreshNormDate);dateInput.addEventListener('input',genRefreshNormDate);
+  let calculate=document.getElementById('gen_rec_norm_calculate');if(!calculate){calculate=document.createElement('button');calculate.id='gen_rec_norm_calculate';calculate.type='button';calculate.className='btn btn-ghost btn-sm';calculate.textContent='Рассчитать по норме на дату';input.after(calculate);}calculate.onclick=()=>calcGenFuelAuto(true);
+  let note=document.getElementById('gen_rec_norm_status');if(!note){note=document.createElement('small');note.id='gen_rec_norm_status';input.after(note);}note.textContent='';
+}
 function genPrepareActualInput(source) {
   const input = document.getElementById('gen_rec_fuel_actual');
   input.dataset.source = source || '';
@@ -116,7 +126,7 @@ function openAddGenRecord() {
   document.getElementById('gen_rec_date').value = fmtDate(now.toISOString().split('T')[0]);
   ['gen_rec_hours','gen_rec_meter_start','gen_rec_meter_end','gen_rec_fuel_issued','gen_rec_fuel_used','gen_rec_fuel_actual','gen_rec_load','gen_rec_note']
     .forEach(id => document.getElementById(id).value = '');
-  genPrepareActualInput(null);
+  genPrepareActualInput(null);genPrepareNormInput(null);
   const g    = (data.generators || []).find(x => x.id === selectedGeneratorId);
   const last = genRecsFor(selectedGeneratorId).slice().sort((a, b) => cmpDateAsc(a.date, b.date)).pop();
   if (last?.meterEnd != null) {
@@ -142,7 +152,7 @@ function openEditGenRecord(id) {
   document.getElementById('gen_rec_fuel_actual').value  = r.fuelActual ?? '';
   document.getElementById('gen_rec_load').value         = r.load       ?? '';
   document.getElementById('gen_rec_note').value         = r.note || '';
-  genPrepareActualInput(r.fuelActualSource);
+  genPrepareActualInput(r.fuelActual!=null?'record':r.fuelActualSource);genPrepareNormInput(r.fuelUsed!=null?'record':null);
   openModal('genRecordModal');
 }
 
@@ -203,17 +213,19 @@ async function deleteGenRecord(id) {
 }
 
 // ─── GENERATOR RECORD AUTO-CALC ──────────────────────────
-function calcGenFuelAuto() {
+function calcGenFuelAuto(force=false) {
   let hours;try{hours=precisionInput('gen_rec_hours',{scale:3,blank:'null'});}catch{return;}
   const g   = (data.generators || []).find(x => x.id === selectedGeneratorId);
   const inp = document.getElementById('gen_rec_fuel_used');
   if (!inp) return;
+  if(!force&&['record','manual'].includes(inp.dataset.source)&&inp.value!=='')return;
   // Раньше здесь бралось поле norm — плоская норма, которой нет ни у одного ДЭС,
   // поэтому «по норме» всегда оставалось пустым. Считаем через genNormSpent:
   // норма при номинальной мощности × моточасы.
-  if (!g || isNaN(hours) || hours <= 0) { inp.value = ''; return; }
-  const v = genNormSpent(g, { hours });
-  inp.value = v==null?'':precisionRound(v,3);
+  if (!g || hours==null) { inp.value = '';inp.dataset.source=''; return; }
+  const date=parseDate(document.getElementById('gen_rec_date').value.trim()),v=g.fuelNorms!=null&&!date?null:genNormSpent(g,{hours,date});
+  const note=document.getElementById('gen_rec_norm_status');if(note)note.textContent=v==null?'Для выбранной даты норма не задана. Укажите подтверждённый расход вручную или добавьте период норм.':'';
+  inp.value=v==null?'':precisionRound(v,3);inp.dataset.source=v==null?'':'estimate';
 }
 
 // Фактический расход = норма@100% × (факт. нагрузка / номинальная мощность) × моточасы
@@ -223,13 +235,14 @@ function calcGenActualAuto() {
   let load;try{load=precisionInput('gen_rec_load',{scale:3,blank:'null'});}catch{return;}
   const inp   = document.getElementById('gen_rec_fuel_actual');
   if (!inp || !g) return;
-  if (inp.dataset.source === 'manual' && inp.value !== '') return;
-  if (!g.norm100 || !g.power || hours==null || load==null || hours < 0 || load < 0) {
+  if (['manual','record'].includes(inp.dataset.source) && inp.value !== '') return;
+  const date=parseDate(document.getElementById('gen_rec_date').value.trim()),effective=g.fuelNorms==null?{status:'known',parameters:g}:date?EffectivePeriods.resolve('generators',g,date,'fuelNorms'):{status:'missing'};
+  if(effective.status!=='known'||effective.parameters.norm100==null||!(effective.parameters.power>0)||hours==null||load==null||hours<0||load<0){
     if (inp.dataset.source === 'estimate') { inp.value = ''; inp.dataset.source = ''; inp.classList.remove('auto-filled'); }
     return;
   }
-  const spent=genActualSpent(g,{hours,load});
-  if(spent==null)return;
+  const spent=genActualSpent(g,{hours,load,date});
+  if(spent==null){if(inp.dataset.source==='estimate'){inp.value='';inp.dataset.source='';inp.classList.remove('auto-filled');}return;}
   inp.value=spent;
   inp.dataset.source = 'estimate';
   inp.classList.add('auto-filled');
@@ -264,31 +277,32 @@ function renderGenSidebarSummary() {
   // ─── Агрегированная сводка (по подобию транспорта) ───
   let totalHours = 0;
   let issued = 0, used = 0, byNorm = 0, balance = 0;
-  let trackedFuel=0,unstartedFuel=0;
+  let trackedFuel=0,unstartedFuel=0,unknownBalance=0;
   const countedTanks = new Set();
   gens.forEach(g => {
     const gRecs = genRecsFor(g.id).slice().sort((a, b) => cmpDateAsc(a.date, b.date));
     gRecs.forEach(r => {
-      totalHours += r.hours || 0;
+      totalHours = fuelReportAdd(totalHours,r.hours||0);
       if(!fuelAccountingCurrentIncludes('generators',g,r.date))return;
-      issued     += r.fuelIssued || 0;
-      used       += genActualSpent(g, r);
-      byNorm     += genNormSpent(g, r);
+      issued = fuelReportAdd(issued,r.fuelIssued||0);
+      used = fuelReportAdd(used,genActualSpent(g,r));
+      byNorm = fuelReportAdd(byNorm,genNormSpent(g,r));
     });
     if(fuelAccountingFor('generators',g).mode==='explicit'&&fuelAccountingOpening('generators',g,dispatcherLocalDate())===null){unstartedFuel++;return;}
-    if (g.tankId) {
-      if (!countedTanks.has(g.tankId)) { countedTanks.add(g.tankId); const value=computeTankBalance(g.tankId).balance;if(value===null)unstartedFuel++;else{balance+=value;trackedFuel++;} }
+    if (g.tankId!=null&&g.tankId!=='') {
+      if (!countedTanks.has(g.tankId)) { countedTanks.add(g.tankId); const value=computeTankBalance(g.tankId).balance;if(value===null)unstartedFuel++;else{balance=fuelReportAdd(balance,value);trackedFuel++;} }
     } else {
       const balMap  = computeGenFuelBalances(g.id);
-      const lastRec = gRecs[gRecs.length - 1];
-      const value=fuelAccountingCurrentBalance('generators',g,gRecs,balMap);if(value===null)unstartedFuel++;else{balance+=value;trackedFuel++;}
+      const value=fuelAccountingCurrentBalance('generators',g,gRecs,balMap);
+      if(value===null){if(fuelReportBalanceLabel('generators',g)==='Учёт не начат')unstartedFuel++;else unknownBalance++;}
+      else{balance=fuelReportAdd(balance,value);trackedFuel++;}
     }
   });
-  const balColor = balance < 0 ? 'var(--red)' : balance === 0 ? 'var(--text3)' : 'var(--green)';
+  const balColor = unknownBalance?'var(--text3)':balance < 0 ? 'var(--red)' : balance === 0 ? 'var(--text3)' : 'var(--green)';
   // Отклонение факта от нормы: перерасход красный, экономия зелёная
-  const dev = +(used - byNorm).toFixed(1);
-  const devPct = byNorm ? Math.round(dev / byNorm * 1000) / 10 : null;
-  const devColor = !byNorm ? 'var(--text3)' : dev > 0 ? 'var(--red)' : dev < 0 ? 'var(--green)' : 'var(--text3)';
+  const dev = used==null||byNorm==null?null:DecimalCore.toNumberExact(DecimalCore.sub(used,byNorm));
+  const devPct = dev!=null&&byNorm ? Math.round(dev / byNorm * 1000) / 10 : null;
+  const devColor = dev==null||!byNorm ? 'var(--text3)' : dev > 0 ? 'var(--red)' : dev < 0 ? 'var(--green)' : 'var(--text3)';
 
   const div = document.createElement('div');
   div.className = 'gen-sidebar-summary';
@@ -322,16 +336,16 @@ function renderGenSidebarSummary() {
       </div>
     </div>
     <div class="ss-row"><span class="ss-label">Генераторов</span><span class="ss-value">${gens.length}</span></div>
-    <div class="ss-row"><span class="ss-label">Всего моточасов</span><span class="ss-value">${totalHours.toLocaleString('ru',{maximumFractionDigits:1})} мтч</span></div>
+    <div class="ss-row"><span class="ss-label">Всего моточасов</span><span class="ss-value">${precisionFormat(totalHours)} мтч</span></div>
     <div class="ss-divider"></div>
     <div class="ss-fuel-block">
       <div class="ss-fuel-title" style="color:var(--yellow)">Дизельное топливо</div>
-      <div class="ss-row"><span class="ss-label">Выдано</span><span class="ss-value">${issued.toLocaleString('ru',{maximumFractionDigits:1})} л</span></div>
-      <div class="ss-row"><span class="ss-label">Расход по норме</span><span class="ss-value">${byNorm ? byNorm.toLocaleString('ru',{maximumFractionDigits:1}) + ' л' : '—'}</span></div>
-      <div class="ss-row"><span class="ss-label">Расход по факту</span><span class="ss-value">${used.toLocaleString('ru',{maximumFractionDigits:1})} л</span></div>
-      <div class="ss-row"><span class="ss-label">Отклонение</span><span class="ss-value" style="color:${devColor}" title="Факт минус норма. Плюс — перерасход, минус — экономия.">${byNorm ? (dev > 0 ? '+' : '') + dev.toLocaleString('ru',{maximumFractionDigits:1}) + ' л' + (devPct !== null ? ' · ' + (dev > 0 ? '+' : '') + devPct + '%' : '') : '—'}</span></div>
+      <div class="ss-row"><span class="ss-label">Выдано</span><span class="ss-value">${precisionFormat(issued)} л</span></div>
+      <div class="ss-row"><span class="ss-label">Расход по норме</span><span class="ss-value">${byNorm==null?'Неизвестно: нет нормы':precisionFormat(byNorm)+' л'}</span></div>
+      <div class="ss-row"><span class="ss-label">Расход по факту</span><span class="ss-value">${used==null?'Неизвестно: нет нормы':precisionFormat(used)+' л'}</span></div>
+      <div class="ss-row"><span class="ss-label">Отклонение</span><span class="ss-value" style="color:${devColor}" title="Факт минус норма. Плюс — перерасход, минус — экономия.">${dev==null?'Нет данных':(dev>0?'+':'')+precisionFormat(dev)+' л'+(devPct!==null?' · '+(dev>0?'+':'')+devPct+'%':'')}</span></div>
       <div class="ss-divider"></div>
-      <div class="ss-row"><span class="ss-label">Остаток</span><span class="ss-value" style="color:${balColor}">${trackedFuel?balance.toLocaleString('ru',{maximumFractionDigits:3})+' л':'Учёт ещё не начат'}</span></div>
+      <div class="ss-row"><span class="ss-label">Остаток</span><span class="ss-value" style="color:${balColor}">${unknownBalance?'Неизвестно: нет нормы':trackedFuel?precisionFormat(balance)+' л':'Учёт ещё не начат'}</span></div>
       ${unstartedFuel?'<small>Учёт ещё не начат: '+unstartedFuel+'</small>':''}
     </div>
   </div>`;

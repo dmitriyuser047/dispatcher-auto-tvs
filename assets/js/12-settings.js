@@ -452,7 +452,12 @@ function calNav(dir) {
 
 function calPick(d) {
   var dd = String(d).padStart(2,'0'), mm = String(calM+1).padStart(2,'0');
-  document.getElementById(calTargetField).value = dd+'.'+mm+'.'+calY;
+  var field = document.getElementById(calTargetField), value = dd+'.'+mm+'.'+calY;
+  if(field&&!field.disabled&&!field.readOnly&&field.value!==value){
+    field.value = value;
+    field.dispatchEvent(new Event('input',{bubbles:true}));
+    field.dispatchEvent(new Event('change',{bubbles:true}));
+  }
   document.getElementById('calPopup').style.display = 'none';
 }
 
@@ -467,15 +472,31 @@ document.addEventListener('mousedown', function(e) {
   }
 });
 
-function calcFuelAuto() {
+function prepareVehicleNormForm(){
+  const input=document.getElementById('rec_fuel_used'),date=document.getElementById('rec_date');if(!input||!date)return;
+  const row=typeof editingRecordId!=='undefined'?(data.records||[]).find(record=>record.id===editingRecordId):null;
+  input.dataset.normSource=row&&row.fuelUsed!=null?'record':'auto';input.oninput=()=>{input.dataset.normSource='manual';};
+  date.onchange=()=>calcFuelAuto();
+  if(!document.getElementById('rec_recalculate_norm')){
+    const button=document.createElement('button');button.id='rec_recalculate_norm';button.type='button';button.className='btn btn-ghost btn-sm';button.textContent='Рассчитать по норме на дату';button.onclick=()=>calcFuelAuto(true);input.parentElement.append(button);
+    const status=document.createElement('small');status.id='rec_norm_status';status.setAttribute('role','status');input.parentElement.append(status);
+  }
+  document.getElementById('rec_norm_status').textContent='';
+}
+function calcFuelAuto(force=false) {
   const v   = data.vehicles.find(x => x.id === selectedVehicleId);
   const inp = document.getElementById('rec_fuel_used');
   if (!inp) return;
+  if(!force&&['record','manual'].includes(inp.dataset.normSource))return;
+  inp.dataset.normSource='auto';
   let km;
   try{km=precisionInput('rec_km',{scale:3,blank:'null'});}catch{inp.value='';return;}
   if (!v || km==null) { inp.value = ''; return; }
-  const norm=TvsFuelEngine.fqRecord({km},v).norm;
+  const date=parseDate(document.getElementById('rec_date').value.trim());
+  if(Object.hasOwn(v,'fuelNorms')&&(!date||!gsmValidDate(date))){inp.value='';const status=document.getElementById('rec_norm_status');if(status)status.textContent='Укажите дату для выбора нормы';return;}
+  const norm=TvsFuelEngine.fqRecord({km,date},v).norm;
   inp.value=norm==null?'':String(norm);
+  const status=document.getElementById('rec_norm_status');if(status)status.textContent=norm==null?'На эту дату норма не задана':'Расчёт по норме на дату записи';
 }
 
 function toggleHistoryFullscreen() {
@@ -494,20 +515,15 @@ document.addEventListener('keydown', e => {
 });
 
 function calcOdoEnd() {
-  const start = parseFloat(document.getElementById('rec_odo_start').value);
-  const km    = parseFloat(document.getElementById('rec_km').value);
-  if (!isNaN(start) && !isNaN(km)) {
-    document.getElementById('rec_odo_end').value = Math.round((start + km) * 10) / 10;
-  }
+  try{const start=precisionInput('rec_odo_start',{scale:3,blank:'null'}),km=precisionInput('rec_km',{scale:3,blank:'null'});
+    if(start!=null&&km!=null)document.getElementById('rec_odo_end').value=DecimalCore.add(start,km);
+  }catch{/* Keep the original fields until the user completes valid numbers. */}
 }
 
 function calcKmFromOdo() {
-  const start = parseFloat(document.getElementById('rec_odo_start').value);
-  const end   = parseFloat(document.getElementById('rec_odo_end').value);
-  if (!isNaN(start) && !isNaN(end) && end > start) {
-    document.getElementById('rec_km').value = Math.round((end - start) * 10) / 10;
-    calcFuelAuto();
-  }
+  try{const start=precisionInput('rec_odo_start',{scale:3,blank:'null'}),end=precisionInput('rec_odo_end',{scale:3,blank:'null'});
+    if(start!=null&&end!=null&&end>=start){document.getElementById('rec_km').value=DecimalCore.sub(end,start);calcFuelAuto();}
+  }catch{/* Leave incomplete source inputs untouched. */}
 }
 
 

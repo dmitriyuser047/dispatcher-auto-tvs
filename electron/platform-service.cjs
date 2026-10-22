@@ -97,6 +97,7 @@ function prepareTransaction(previous, supplied, options = {}) {
   const at = options.now || new Date().toISOString();
   if (!Number.isFinite(Date.parse(at))) fail('INVALID_CLOCK', 'Некорректное время операции');
   sections=canonicalShiftAcceptance(previous,sections,actor,at);
+  sections=require('../assets/core/temporal-policy.js').canonicalizeOrigins(previous,sections);
   if (options.prepareSections) sections = options.prepareSections(sections);
   const id = info?.id || 'backend:' + crypto.randomUUID();
   const plan = kernel().prepare(previous, sections, { id, identity:options.databaseToken || 'local-storage', actor,

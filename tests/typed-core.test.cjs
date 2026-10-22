@@ -68,6 +68,14 @@ test('public DTO types reject incompatible amounts, source names and identifiers
     import type {CommandContext,CommandPlan} from './src/core/platform-commands';
     import {createAccountingBoundary,type FuelAccounting,type AccountingWindow} from './src/core/accounting-boundary';
     import {createDecimalCore,type DecimalInputOptions} from './src/core/decimal-core';
+    import {createEffectivePeriods,type PeriodContainer} from './src/core/effective-periods';
+    const timeline:PeriodContainer={version:1,periods:[{id:7,from:'2026-09-01',basis:'Synthetic',parameters:{norm:10,normCity:null,normHighway:null,normIdle:null}}]};
+    const dated=createEffectivePeriods(createDecimalCore()).resolve('vehicles',{fuelNorms:timeline},'2026-09-01','fuelNorms');
+    // @ts-expect-error validated histories are readonly owned snapshots
+    timeline.periods.push(timeline.periods[0]!);
+    // @ts-expect-error period start dates remain strings rather than timestamps
+    const wrongDate:number=timeline.periods[0]!.from;
+    void dated;void wrongDate;
     const decimal=createDecimalCore();
     const exact:string=decimal.add('0.1','0.2');
     const inputOptions:DecimalInputOptions={scale:3,blank:'null'};

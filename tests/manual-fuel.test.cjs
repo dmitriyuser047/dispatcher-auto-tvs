@@ -6,6 +6,7 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const ctx = vm.createContext({ console, window: {}, document: { addEventListener() {}, documentElement: { removeAttribute() {} }, getElementById() {} }, localStorage: { getItem() {} } });
 vm.runInContext(fs.readFileSync(path.join(root, 'assets/core/decimal-core.js'), 'utf8'), ctx);
+vm.runInContext(fs.readFileSync(path.join(root, 'assets/core/effective-periods.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(root, 'assets/core/fuel-engine.js'), 'utf8'), ctx, { filename: 'assets/core/fuel-engine.js' });
 for (const file of ['55-precision-input.js', '01-core.js', '29-fuel-quality.js', '10-pdf-reports.js', '25b-fuel-purchases.js', '25c-fuel-control.js', '25i-gsm-ledger.js', '25j-gsm-workspace.js', '25k-gsm-export.js', '25l-manual-fuel.js'])
   vm.runInContext(fs.readFileSync(path.join(root, 'assets/js', file), 'utf8'), ctx, { filename: file });

@@ -6,17 +6,21 @@
   const add=(section,scale,fields)=>{if(!specs[section])specs[section]=[];for(const field of fields.split(' ').filter(Boolean))specs[section].push(Object.freeze({field,scale,max:maximum}));};
   add('vehicles',3,'odometer fuelBalance tankVolume toIntervalKm maintenanceRules[].km fuelBalanceSources[].qty fuelAccounting.opening fuelAccounting.sources[].qty');
   add('vehicles',6,'norm normCity normHighway normIdle');
+  add('vehicles',6,'fuelNorms.periods[].parameters.norm fuelNorms.periods[].parameters.normCity fuelNorms.periods[].parameters.normHighway fuelNorms.periods[].parameters.normIdle');
   add('records',3,'km kmGlonass fuelIssued fuelActual fuelUsed fuelIdle odoStart odoEnd tankMeasured');add('records',2,'fuelSum');
   add('generators',3,'hoursInit fuelBalance maintenanceRules[].hours fuelAccounting.opening fuelAccounting.sources[].qty');add('generators',6,'power norm norm100 norm50 normIdle');add('generators',2,'cost');
   add('genRecords',3,'hours meterStart meterEnd fuelIssued fuelUsed fuelActual');add('genRecords',6,'load');
+  add('generators',6,'fuelNorms.periods[].parameters.power fuelNorms.periods[].parameters.norm fuelNorms.periods[].parameters.norm100 fuelNorms.periods[].parameters.norm50 fuelNorms.periods[].parameters.normIdle');
   add('tanks',3,'capacity balanceInit reserveLevel fuelAccounting.opening fuelAccounting.sources[].qty');
   add('tankIncomes',3,'amount liters litres qty');add('tankIncomes',2,'sum vatAmount grossSum');add('tankIncomes',6,'vatRate');
   add('toRecords',3,'hours nextHours nextHoursAbs');add('toRecords',2,'cost');add('vehicleTo',3,'odometer nextKm nextOdometerAbs');add('vehicleTo',2,'cost');
   add('repairs',3,'mileage');add('repairs',2,'cost');add('payments',2,'sum paidAmount');add('budget',2,'sum');
   add('fuelPurchases',3,'qty');add('fuelPurchases',2,'sum');add('fuelPurchases',6,'price');add('monthlyFuel',3,'liters');add('monthlyFuel',2,'sum');
+  add('fuelCards',3,'limit');
   add('dispatchJobs',3,'plannedKm actualKm plannedHours actualHours partRequirements[].qty');add('dispatchJobs',2,'cost');add('workOrders',2,'cost actualCost');
   add('fuelMovements',3,'qty');add('partMovements',3,'qty meter');add('parts',3,'minStock');add('shiftReports',3,'odoStart odoEnd hours fuelIssued tankMeasured');
   add('glonassTrips',3,'km fuel fuelIdle engine idle odoStart odoEnd');add('costEntries',2,'amount');add('costProfiles',6,'salaryRate depreciationRate fuelRate fuelPrice');
+  add('costProfiles',6,'ratePeriods.periods[].parameters.salaryRate ratePeriods.periods[].parameters.depreciationRate ratePeriods.periods[].parameters.fuelRate ratePeriods.periods[].parameters.fuelPrice');
   add('procurementOrders',3,'quantity receivedQty stockPostedQty');add('procurementRules',3,'reserveQty expectedDaily');
   for(const section of Object.keys(specs))Object.freeze(specs[section]);Object.freeze(specs);
   function decimal(){let api;try{api=getDecimal();}catch{}if(!api||api.apiVersion!==1)throw Object.assign(Error('Не загружены правила точности чисел'),{code:'MODULE_UNAVAILABLE'});return api;}

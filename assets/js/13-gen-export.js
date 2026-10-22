@@ -10,9 +10,9 @@ let genExportMode = 'all';
 let exportingGenId = null;
 
 let genExportFormat = 'xls';
-function genExportFuelExplicit(asset){return Object.prototype.hasOwnProperty.call(asset,'fuelAccounting');}
+function genExportFuelExplicit(asset){return Object.prototype.hasOwnProperty.call(asset,'fuelAccounting')||asset.fuelNorms!=null;}
 function genExportFuelRows(asset,records){return genExportFuelExplicit(asset)?records.filter(row=>fuelAccountingIncludes('generators',asset,row.date)):records;}
-function genExportFuelNumber(value,explicit){return value==null?'Учёт не начат':+value.toFixed(explicit?3:2);}
+function genExportFuelNumber(value,explicit){return value==null?'Нет данных':+value.toFixed(explicit?3:2);}
 function openGenExportAllModal(fmt) {
   if (!(data.generators||[]).length) { showToast('Нет дизельных генераторов для выгрузки'); return; }
   genExportMode = 'all';
@@ -133,10 +133,10 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
   gens.forEach(g=>{
     const ft=g.fuel||'diesel';
     let gn=0, ga=0;
-    genExportFuelRows(g,filterGenRecs(g.id)).forEach(r=>{gIss[ft]+=(r.fuelIssued||0);gAct[ft]+=(r.fuelActual||0);gn+=(r.fuelUsed||0);ga+=(r.fuelActual||0);});
-    gNorm[ft]+=gn;
-    gEcon[ft]+=Math.max(0,gn-ga);
-    gOver[ft]+=Math.max(0,ga-gn);
+    genExportFuelRows(g,filterGenRecs(g.id)).forEach(r=>{gIss[ft]+=(r.fuelIssued||0);gAct[ft]=fuelReportAdd(gAct[ft],fuelReportField('generators',g,r,'fuelActual'));gn=fuelReportAdd(gn,fuelReportField('generators',g,r,'fuelUsed'));ga=fuelReportAdd(ga,fuelReportField('generators',g,r,'fuelActual'));});
+    gNorm[ft]=fuelReportAdd(gNorm[ft],gn);
+    gEcon[ft]=fuelReportAdd(gEcon[ft],gn==null||ga==null?null:Math.max(0,gn-ga));
+    gOver[ft]=fuelReportAdd(gOver[ft],gn==null||ga==null?null:Math.max(0,ga-gn));
     const bm=computeGenFuelBalances(g.id);
     const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     if(genExportFuelExplicit(g)){gExplicit[ft]=true;const value=fuelAccountingCurrentBalance('generators',g,genRecsFor(g.id),bm,dateTo||'');if(value==null)gMissing[ft]=true;else gBal[ft]+=value;}
@@ -158,7 +158,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     put(R(),7,genExportFuelNumber(gAct[ft],gExplicit[ft]),sN);merge(R(),7,R(),8);
     put(R(),9,genExportFuelNumber(gEcon[ft],gExplicit[ft]),gEcon[ft]>0?sEcon:sN);merge(R(),9,R(),10);
     put(R(),11,genExportFuelNumber(gOver[ft],gExplicit[ft]),gOver[ft]>0?sOver:sN);merge(R(),11,R(),12);
-    put(R(),13,bal==null?'Учёт не начат':bal,sB);merge(R(),13,R(),16);
+    put(R(),13,bal==null?fuelReportGroupBalanceLabel('generators',gens.filter(g=>(g.fuel||'diesel')===ft),dateTo||''):bal,sB);merge(R(),13,R(),16);
     rowH(R(),20);next();
   });
   spacer();
@@ -192,7 +192,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
       put(R(),10,t.capacity!=null?+t.capacity:'—',ST.tdC(bg));merge(R(),10,R(),11);
       put(R(),12,genExportFuelNumber(income,explicit),ST.tdR(bg));merge(R(),12,R(),13);
       put(R(),14,genExportFuelNumber(issued,explicit),ST.tdR(bg));merge(R(),14,R(),15);
-      put(R(),16,genExportFuelNumber(balance,explicit),sB);
+      put(R(),16,balance==null?'Учёт не начат':genExportFuelNumber(balance,explicit),sB);
       rowH(R(),20);next();
     });
     const tkTL=cs({bold:true,sz:11,color:{rgb:P.text}},P.navyLight,{horizontal:'left',vertical:'center',indent:1},bAll('medium',P.navy));
@@ -261,15 +261,15 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     const fuelRecs=genExportFuelRows(g,recs),explicit=genExportFuelExplicit(g);
     const hours=recs.reduce((s,r)=>s+(r.hours||0),0);
     const issued=fuelRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
-    const norm=fuelRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
-    const actual=fuelRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
-    const economy=Math.max(0,norm-actual);
-    const overrun=Math.max(0,actual-norm);
+    const norm=fuelReportSum(fuelRecs.map(r=>fuelReportField('generators',g,r,'fuelUsed')));
+    const actual=fuelReportSum(fuelRecs.map(r=>fuelReportField('generators',g,r,'fuelActual')));
+    const economy=norm==null||actual==null?null:Math.max(0,norm-actual);
+    const overrun=norm==null||actual==null?null:Math.max(0,actual-norm);
     const bm=computeGenFuelBalances(g.id);
     const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     const bal=explicit?fuelAccountingCurrentBalance('generators',g,genRecsFor(g.id),bm,dateTo||''):sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
     if(bal==null)missingBalance=true;
-    totH+=hours;totIss+=issued;totNorm+=norm;totAct+=actual;totEcon+=economy;totOver+=overrun;totBal+=bal;
+    totH+=hours;totIss+=issued;totNorm=fuelReportAdd(totNorm,norm);totAct=fuelReportAdd(totAct,actual);totEcon=fuelReportAdd(totEcon,economy);totOver=fuelReportAdd(totOver,overrun);totBal=fuelReportAdd(totBal,bal);
     if(g.cost!=null) totCost+=g.cost;
     const fBal=bal==null?null:genExportFuelNumber(bal,explicit);
     const bBg=fBal==null?P.gray2:fBal<0?P.redPale:fBal===0?P.gray2:P.greenPale;
@@ -282,12 +282,12 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     const sOver=cs({bold:true,sz:10,color:{rgb:P.red}},P.redPale,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
     put(R(),0,gNum,ST.tdC(bg));put(R(),1,g.name||'—',ST.tdL(bg));put(R(),2,g.serial||'—',ST.tdC(bg));
     put(R(),3,g.responsible||'—',ST.tdL(bg));put(R(),4,g.location||'—',ST.tdL(bg));
-    put(R(),5,g.power!=null?g.power:'—',ST.tdC(bg));put(R(),6,fuelLabels[g.fuel||'diesel'],ST.tdC(bg));
+    put(R(),5,g.power!=null?(g.fuelNorms!=null?g.power+' (исходная)':g.power):'—',ST.tdC(bg));put(R(),6,fuelLabels[g.fuel||'diesel'],ST.tdC(bg));
     put(R(),7,g.status||'—',sStatus);put(R(),8,+hours.toFixed(1),ST.tdR(bg));
     put(R(),9,genExportFuelNumber(issued,explicit),ST.tdR(bg));put(R(),10,genExportFuelNumber(norm,explicit),ST.tdR(bg));put(R(),11,genExportFuelNumber(actual,explicit),ST.tdR(bg));
     put(R(),12,economy>0?genExportFuelNumber(economy,explicit):'—',economy>0?sEcon:ST.tdR(bg));
     put(R(),13,overrun>0?genExportFuelNumber(overrun,explicit):'—',overrun>0?sOver:ST.tdR(bg));
-    put(R(),14,fBal==null?'Учёт не начат':fBal,sB);
+    put(R(),14,fBal==null?fuelReportBalanceLabel('generators',g,dateTo||''):fBal,sB);
     put(R(),15,g.cost!=null?g.cost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tdR(bg));
     put(R(),16,g.note||'—',ST.tdL(bg));
     rowH(R(),20);next();
@@ -298,7 +298,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
   put(R(),12,genExportFuelNumber(totEcon,anyExplicit),cs({bold:true,sz:10,color:{rgb:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
   put(R(),13,genExportFuelNumber(totOver,anyExplicit),cs({bold:true,sz:10,color:{rgb:P.red}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
   const tBal=missingBalance?null:genExportFuelNumber(totBal,anyExplicit);
-  put(R(),14,tBal==null?'Учёт не начат':tBal,cs({bold:true,sz:10,color:{rgb:tBal==null?P.gray4:tBal<0?P.red:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
+  put(R(),14,tBal==null?fuelReportGroupBalanceLabel('generators',gens,dateTo||''):tBal,cs({bold:true,sz:10,color:{rgb:tBal==null?P.gray4:tBal<0?P.red:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
   put(R(),15,totCost>0?totCost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',ST.tot);
   put(R(),16,'',ST.tot);
   rowH(R(),22);next();
@@ -400,9 +400,9 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
     ['Серийный номер', g.serial||'—'],
     ['Ответственное лицо', g.responsible||'—'],
     ['Местонахождение', g.location||'—'],
-    ['Мощность', g.power!=null?g.power+' кВт':'—'],
+    [g.fuelNorms!=null?'Исходная мощность (параметры по датам)':'Мощность', g.power!=null?g.power+' кВт':'—'],
     ['Вид топлива', fuelLabels[g.fuel||'diesel']],
-    ['Норма расхода', g.norm?g.norm+' л/мтч':'—'],
+    [g.fuelNorms!=null?'Исходная норма расхода (параметры по датам)':'Норма расхода', g.norm?g.norm+' л/мтч':'—'],
     ['Стоимость ДЭС', g.cost!=null?g.cost+' руб.':'—'],
     ['Состояние', g.status||'—'],
     ['Примечание', g.note||'—'],
@@ -421,12 +421,12 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
   const totHours=filtRecs.reduce((s,r)=>s+(r.hours||0),0);
   const fuelRecs=genExportFuelRows(g,filtRecs),explicit=genExportFuelExplicit(g);
   const totIssued=fuelRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
-  const totNorm=fuelRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
-  const totActual=fuelRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
-  const totEconomy=Math.max(0,totNorm-totActual);
-  const totOverrun=Math.max(0,totActual-totNorm);
+  const totNorm=fuelReportSum(fuelRecs.map(r=>fuelReportField('generators',g,r,'fuelUsed')));
+  const totActual=fuelReportSum(fuelRecs.map(r=>fuelReportField('generators',g,r,'fuelActual')));
+  const totEconomy=totNorm==null||totActual==null?null:Math.max(0,totNorm-totActual);
+  const totOverrun=totNorm==null||totActual==null?null:Math.max(0,totActual-totNorm);
   const fuelHours=fuelRecs.reduce((s,r)=>s+(r.hours||0),0);
-  const avgCons=fuelHours>0&&totActual>0?totActual/fuelHours:0;
+  const avgCons=fuelHours>0&&totActual!=null&&(g.fuelNorms!=null||totActual>0)?totActual/fuelHours:null;
   const balMap=computeGenFuelBalances(gid);
   const lastRec=allRecs[allRecs.length-1];
   const curBal=explicit?fuelAccountingCurrentBalance('generators',g,allRecs,balMap,dateTo||''):lastRec?((balMap[lastRec.id]!=null?balMap[lastRec.id]:g.fuelBalance)||0):(g.fuelBalance||0);
@@ -438,8 +438,8 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
     ['Фактический расход за период, л', genExportFuelNumber(totActual,explicit)],
     ['Экономия топлива, л', totEconomy>0?genExportFuelNumber(totEconomy,explicit):'—'],
     ['Перерасход топлива, л', totOverrun>0?genExportFuelNumber(totOverrun,explicit):'—'],
-    ['Средний расход, л/мтч', avgCons>0?+avgCons.toFixed(2):'—'],
-    ['Текущий остаток в баке, л', genExportFuelNumber(curBal,explicit)],
+    ['Средний расход, л/мтч', avgCons!=null?+avgCons.toFixed(2):'—'],
+    ['Текущий остаток в баке, л', (curBal==null?fuelReportBalanceLabel('generators',g,dateTo||''):genExportFuelNumber(curBal,explicit))],
   ].forEach(([label,val],i)=>{
     const bg=i%2===0?P.gray2:P.white;
     put(R(),0,label,cs({bold:true,sz:10,color:{rgb:P.textMid}},bg,{horizontal:'left',vertical:'center',indent:1},bAll('thin',P.gray3)));
@@ -466,18 +466,21 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
       const bal=balMap[r.id];
       const bBg=bal!=null?(bal<0?P.redPale:bal===0?P.gray2:P.greenPale):P.gray2;
       const sB=cs({bold:true,sz:10,color:{rgb:bal!=null?(bal<0?P.red:bal===0?P.gray4:P.green):P.gray4}},bBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
-      const factLh=r.fuelActual&&r.hours>0?r.fuelActual/r.hours:null;
+      const rowNorm=g.fuelNorms!=null?fuelReportField('generators',g,r,'fuelUsed'):fqValue(r.fuelUsed);
+      const rowActual=g.fuelNorms!=null?fuelReportField('generators',g,r,'fuelActual'):fqValue(r.fuelActual);
+      const factLh=rowActual!=null&&r.hours>0&&(g.fuelNorms!=null||rowActual>0)?rowActual/r.hours:null;
+      const normLh=g.fuelNorms!=null?(rowNorm!=null&&r.hours>0?rowNorm/r.hours:null):(g.norm||null);
       const current=!explicit||fuelAccountingIncludes('generators',g,r.date);
-      sH+=(r.hours||0);if(current){sIss+=(r.fuelIssued||0);sAct+=(r.fuelActual||0);}
+      sH+=(r.hours||0);if(current){sIss+=(r.fuelIssued||0);sAct=fuelReportAdd(sAct,g.fuelNorms!=null?rowActual:(r.fuelActual||0));}
       put(R(),0,`${fmtDate(r.date)} ${day}`,ST.tdC(bg));
       put(R(),1,r.hours!=null?+r.hours:'—',ST.tdR(bg));
       put(R(),2,r.meterStart!=null?+r.meterStart:'—',ST.tdR(bg));
       put(R(),3,r.meterEnd!=null?+r.meterEnd:'—',ST.tdR(bg));
       put(R(),4,r.fuelIssued!=null?+r.fuelIssued:'—',ST.tdR(bg));
-      put(R(),5,r.fuelUsed!=null?+r.fuelUsed:'—',ST.tdR(bg));
-      put(R(),6,r.fuelActual!=null?+r.fuelActual:'—',ST.tdR(bg));
-      put(R(),7,bal!=null?genExportFuelNumber(bal,explicit):'—',sB);
-      put(R(),8,g.norm?+g.norm:'—',ST.tdC(bg));
+      put(R(),5,rowNorm!=null?rowNorm:g.fuelNorms!=null?'Нет данных':'—',ST.tdR(bg));
+      put(R(),6,rowActual!=null?rowActual:g.fuelNorms!=null?'Нет данных':'—',ST.tdR(bg));
+      put(R(),7,bal!=null?genExportFuelNumber(bal,explicit):current&&g.fuelNorms!=null?fuelReportBalanceLabel('generators',g,r.date):'—',sB);
+      put(R(),8,normLh!=null?normLh:'—',ST.tdC(bg));
       put(R(),9,factLh!=null?+factLh.toFixed(2):'—',ST.tdR(bg));
       put(R(),10,current?r.note||'—':(r.note?r.note+' · ':'')+'До учёта ГСМ',ST.tdL(bg));
       rowH(R(),18);next();
@@ -485,7 +488,7 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
     put(R(),0,'ИТОГО',ST.totL);merge(R(),0,R(),0);fill(R(),ST.totL);
     put(R(),1,+sH.toFixed(1),ST.tot);[2,3].forEach(c=>put(R(),c,'',ST.tot));
     put(R(),4,genExportFuelNumber(sIss,explicit),ST.tot);put(R(),5,'',ST.tot);put(R(),6,genExportFuelNumber(sAct,explicit),ST.tot);
-    const cBal=genExportFuelNumber(curBal,explicit);
+    const cBal=(curBal==null?fuelReportBalanceLabel('generators',g,dateTo||''):genExportFuelNumber(curBal,explicit));
     put(R(),7,cBal,cs({bold:true,sz:10,color:{rgb:curBal==null?P.gray4:cBal<0?P.red:P.green}},P.navyLight,{horizontal:'center',vertical:'center'},bAll('medium',P.navy)));
     [8,9,10].forEach(c=>put(R(),c,'',ST.tot));
     rowH(R(),22);next();

@@ -99,7 +99,7 @@ function doExportAll() {
 
 function exportAllToXlsx(dateFrom, dateTo) {
   if (!data.vehicles.length) return;
-  const explicitFuel=v=>Object.prototype.hasOwnProperty.call(v,'fuelAccounting');
+  const explicitFuel=v=>Object.prototype.hasOwnProperty.call(v,'fuelAccounting')||v.fuelNorms!=null;
   const fuelRows=(v,recs)=>explicitFuel(v)?recs.filter(r=>fuelAccountingIncludes('vehicles',v,r.date)):recs;
   const fuelNumber=(value,explicit)=>value==null?'—':+value.toFixed(explicit?3:2);
 
@@ -209,7 +209,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
       const ft=v.fuel||'diesel';
       const vRecs=filterRecs(recsFor(v.id));
       vRecs.forEach(r=>{grandKm+=r.km||0;grandKmGlonass+=r.kmGlonass||0;});
-      fuelRows(v,vRecs).forEach(r=>{gIss[ft]+=r.fuelIssued||0;gUsd[ft]+=r.fuelUsed||0;});
+      fuelRows(v,vRecs).forEach(r=>{gIss[ft]+=r.fuelIssued||0;gUsd[ft]=fuelReportAdd(gUsd[ft],fuelReportField('vehicles',v,r,'fuelUsed'));});
       const bm=computeFuelBalances(v.id, dateFrom, dateTo);
       const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
       if(explicitFuel(v)){gExplicit[ft]=true;const value=fuelAccountingCurrentBalance('vehicles',v,recsFor(v.id),bm,dateTo||'');if(value==null)gMissing[ft]=true;else gBal[ft]+=value;}
@@ -227,7 +227,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
       put(R(),0,fuelLabels[ft],sL);merge(R(),0,R(),3);fill(R(),sL);
       put(R(),4,fuelNumber(gIss[ft],gExplicit[ft]),sN);merge(R(),4,R(),6);
       put(R(),7,fuelNumber(gUsd[ft],gExplicit[ft]),sN);merge(R(),7,R(),8);
-      put(R(),9,bal==null?'Учёт не начат':bal,sB);merge(R(),9,R(),13);fillRange(R(),cs(null,bg,null,{}),14,NC);
+      put(R(),9,bal==null?fuelReportGroupBalanceLabel('vehicles',data.vehicles.filter(v=>(v.fuel||'diesel')===ft),dateTo||''):bal,sB);merge(R(),9,R(),13);fillRange(R(),cs(null,bg,null,{}),14,NC);
       rowH(R(),20);next();
     });
     spacer();
@@ -321,8 +321,8 @@ function exportAllToXlsx(dateFrom, dateTo) {
       const vFuelRecs=fuelRows(v,vRecs),explicit=explicitFuel(v);
       const vKm=vRecs.reduce((s,r)=>s+(r.km||0),0);
       const vIss=vFuelRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
-      const vUsd=vFuelRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
-      const vAct=vFuelRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
+      const vUsd=fuelReportSum(vFuelRecs.map(r=>fuelReportField('vehicles',v,r,'fuelUsed')));
+      const vAct=fuelReportSum(vFuelRecs.map(r=>fuelReportField('vehicles',v,r,'fuelActual')));
       // ГЛОНАСС: пробег и расход по датчику уровня (из отчётов «Рейсы» / «Пройденный путь»)
       const vGl=vRecs.reduce((s,r)=>s+(+r.kmGlonass||0),0);
       const vSens=vFuelRecs.reduce((s,r)=>s+(+r.glonassFuel||0),0);
@@ -330,7 +330,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
       const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
       const vBal=explicit?fuelAccountingCurrentBalance('vehicles',v,recsFor(v.id),bm,dateTo||''):sorted.length?(bm[sorted[sorted.length-1].id]||0):0;
       const fuelKm=vFuelRecs.reduce((s,r)=>s+(r.km||0),0);
-      const avg=fuelKm>0&&vAct>0?+(vAct/fuelKm*100).toFixed(2):null;
+      const avg=fuelKm>0&&vAct!=null&&(v.fuelNorms!=null||vAct>0)?+(vAct/fuelKm*100).toFixed(2):null;
       const bal=vBal==null?null:fuelNumber(vBal,explicit);
       const balBg=bal==null?P.gray2:bal<0?P.redPale:bal===0?P.gray2:P.greenPale;
       const sB=cs({bold:true,sz:10,color:{rgb:bal==null?P.gray4:bal<0?P.red:bal===0?P.gray4:P.green}},balBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
@@ -361,7 +361,7 @@ function exportAllToXlsx(dateFrom, dateTo) {
       put(R(),7,v.status||'—',sStatus);
       put(R(),8,+vKm.toFixed(1)||0,ST.tdR(bg));put(R(),9,fuelNumber(vIss,explicit),ST.tdR(bg));
       put(R(),10,fuelNumber(vUsd,explicit),ST.tdR(bg));put(R(),11,fuelNumber(vAct,explicit),ST.tdR(bg));
-      put(R(),12,bal==null?'Учёт не начат':bal,sB);put(R(),13,avg??'',ST.tdR(bg));
+      put(R(),12,bal==null?fuelReportBalanceLabel('vehicles',v,dateTo||''):bal,sB);put(R(),13,avg??'',ST.tdR(bg));
       put(R(),14,vGl?+vGl.toFixed(1):'—',ST.tdR(bg));put(R(),15,vSens?+vSens.toFixed(2):'—',ST.tdR(bg));
       put(R(),16,vRoutes||'—',routeStyle);
       put(R(),17,v.note||'—',noteStyle);
@@ -375,8 +375,8 @@ function exportAllToXlsx(dateFrom, dateTo) {
     const anyExplicit=data.vehicles.some(explicitFuel);
     const aKm=filteredAll.reduce((s,r)=>s+(r.km||0),0);
     const aIss=filteredFuel.reduce((s,r)=>s+(r.fuelIssued||0),0);
-    const aUsd=filteredFuel.reduce((s,r)=>s+(r.fuelUsed||0),0);
-    const aAct=filteredFuel.reduce((s,r)=>s+(r.fuelActual||0),0);
+    const aUsd=fuelReportSum(filteredFuel.map(r=>fuelReportField('vehicles',data.vehicles.find(v=>v.id===r.vehicleId),r,'fuelUsed')));
+    const aAct=fuelReportSum(filteredFuel.map(r=>fuelReportField('vehicles',data.vehicles.find(v=>v.id===r.vehicleId),r,'fuelActual')));
     const aGl=filteredAll.reduce((s,r)=>s+(+r.kmGlonass||0),0);
     const aSens=filteredFuel.reduce((s,r)=>s+(+r.glonassFuel||0),0);
     for(let c=0;c<=NC;c++) put(R(),c,'',ST.tot);

@@ -210,7 +210,7 @@ test('a blocked database stops both new and already queued commands before any f
 
 test('the browser UMD build plans changes without filesystem, DOM or storage globals', () => {
   const sandbox = {}; vm.createContext(sandbox);
-  for (const name of ['decimal-core.js','platform-schema.js','platform-contracts.js','precision-policy.js','personnel-engine.js','fuel-engine.js','fuel-movement-policy.js','document-lifecycle.js','workflow-policy.js','platform-policies.js','platform-integrity.js','platform-kernel.js'])
+  for (const name of ['decimal-core.js','effective-periods.js','temporal-policy.js','platform-schema.js','platform-contracts.js','precision-policy.js','personnel-engine.js','fuel-engine.js','fuel-movement-policy.js','document-lifecycle.js','workflow-policy.js','platform-policies.js','platform-integrity.js','platform-kernel.js'])
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../assets/core', name), 'utf8'), sandbox);
   const plan = sandbox.PlatformKernel.prepare(fixture(), changed(), { ...context(),id:'browser',now:now() });
   assert.equal(plan.changed[0], 'vehicles'); assert.equal(plan.rowChanges[0].recordId, 'v'); assert.equal(sandbox.document, undefined);

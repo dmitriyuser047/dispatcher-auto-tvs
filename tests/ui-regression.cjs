@@ -335,7 +335,7 @@ test('actual XLSX repeated supplier ID cannot add another receipt or silently ch
 });
 test('actual vehicle norm autofill shares core millilitre precision and preserves an explicit zero norm',async()=>{
   const result=await page.evaluate(()=>{
-    openEditRecord('r1');document.getElementById('rec_km').value='1.234';calcFuelAuto();const precise=document.getElementById('rec_fuel_used').value;
+    openEditRecord('r1');document.getElementById('rec_km').value='1.234';calcFuelAuto(true);const precise=document.getElementById('rec_fuel_used').value;
     const expected=TvsFuelEngine.fqRecord({km:1.234},data.vehicles[0]).norm;
     data.vehicles[0].norm=0;calcFuelAuto();const zero=document.getElementById('rec_fuel_used').value;
     document.getElementById('rec_km').value='';calcFuelAuto();return{precise,expected,zero,blank:document.getElementById('rec_fuel_used').value};

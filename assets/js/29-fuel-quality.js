@@ -34,7 +34,7 @@ function fuelAccountingCurrentBalance(section,asset,records,balances,to=''){
   if(boundary.mode==='explicit'&&until&&until<boundary.from)return null;
   const eligible=records.filter(row=>(!until||row.date<=until)&&fuelAccountingIncludes(section,asset,row.date)).slice().sort((a,b)=>cmpDateAsc(a.date,b.date));
   const last=eligible.at(-1);
-  return last?balances[last.id]??fuelAccountingOpening(section,asset,until):fuelAccountingOpening(section,asset,until);
+  return last&&Object.hasOwn(balances,last.id)?balances[last.id]:fuelAccountingOpening(section,asset,until);
 }
 function fuelAccountingStatusHtml(section,asset){
   const boundary=fuelAccountingFor(section,asset);

@@ -2,11 +2,14 @@
 // Выделено из index.html
 
 // ─── GENERATOR DETAIL VIEW ───────────────────────────────
+function genFuelSum(values){return values.some(value=>value===null)?null:DecimalCore.toNumberExact(DecimalCore.sum(values));}
 function renderGenDetail(g) {
+  const datedParameters=Object.hasOwn(g,'fuelNorms')?EffectivePeriods.resolve('generators',g,dispatcherLocalDate(),'fuelNorms'):null;
+  const displayPower=datedParameters?datedParameters.parameters?.power:g.power,displayNorm=datedParameters?datedParameters.parameters?.norm:g.norm;
   const recs       = genRecsFor(g.id);
   const totalHours = recs.reduce((s, r) => s + (r.hours || 0), 0);
   const fuelRecs=recs.filter(r=>fuelAccountingCurrentIncludes('generators',g,r.date));
-  const totalFuel  = fuelRecs.reduce((s, r) => s + genActualSpent(g,r), 0);
+  const totalFuel  = genFuelSum(fuelRecs.map(r=>genActualSpent(g,r)));
   const fuelHours=fuelRecs.reduce((s,r)=>s+(r.hours||0),0);
   const avgConsumption = fuelHours > 0 && totalFuel > 0 ? totalFuel / fuelHours : 0;
 
@@ -19,7 +22,7 @@ function renderGenDetail(g) {
   }).sort((a,b) => cmpDateAsc(a.date, b.date));
 
   const monthHours = monthRecs.reduce((s, r) => s + (r.hours || 0), 0);
-  const monthFuel  = monthRecs.filter(r=>fuelAccountingIncludes('generators',g,r.date)).reduce((s, r) => s + genActualSpent(g,r), 0);
+  const monthFuel  = genFuelSum(monthRecs.filter(r=>fuelAccountingIncludes('generators',g,r.date)).map(r=>genActualSpent(g,r)));
 
   // Month tabs
   const months = getMonthsForGenerator(g.id);
@@ -54,7 +57,7 @@ function renderGenDetail(g) {
   } else {
     monthRecs.forEach(r => {
       const dayName = DAYS_RU[new Date(r.date).getDay()];
-      const normLh  = g.norm || null;
+      const normAmount=genNormSpent(g,r),normLh=r.hours>0&&normAmount!==null?normAmount/r.hours:null;
       const factLh  = r.fuelActualSource!=='estimate' && fqValue(r.fuelActual)!=null && r.hours>0 ? Number(r.fuelActual)/r.hours : null;
       const factDev = factLh !== null && normLh !== null ? factLh - normLh : null;
       const factDevHtml = factDev !== null
@@ -96,9 +99,9 @@ function renderGenDetail(g) {
           ${g.serial?`<div class="vdh-meta-item"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg><span style="font-family:'Courier New',monospace;letter-spacing:0.5px">С/н: ${htmlEsc(g.serial)}</span></div>`:''}
           ${g.location?`<div class="vdh-meta-item"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>${htmlEsc(g.location)}</div>`:''}
           ${g.responsible?`<div class="vdh-meta-item"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>${htmlEsc(g.responsible)}</div>`:''}
-          ${g.power!=null?`<div class="vdh-meta-item" style="color:var(--text3);font-size:12px"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>${htmlEsc(g.power)} кВт</div>`:''}
+          ${displayPower!=null?`<div class="vdh-meta-item" style="color:var(--text3);font-size:12px"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>${htmlEsc(displayPower)} кВт${datedParameters?' · на '+fmtDate(dispatcherLocalDate()):''}</div>`:''}
           ${g.fuel?`<div class="vdh-meta-item"><span class="fuel-tag ${fuelClasses[g.fuel]}">${fuelLabels[g.fuel]}</span></div>`:''}
-          ${g.norm?`<div class="vdh-meta-item" style="color:var(--text3);font-size:12px">Норма: ${htmlEsc(g.norm)} л/мтч</div>`:''}
+          ${displayNorm!=null?`<div class="vdh-meta-item" style="color:var(--text3);font-size:12px">Норма: ${htmlEsc(displayNorm)} л/мтч${datedParameters?' · на '+fmtDate(dispatcherLocalDate()):''}</div>`:datedParameters?.status==='missing'?'<div class="vdh-meta-item">Норма на сегодня не задана</div>':''}
           ${g.cost!=null?`<div class="vdh-meta-item" style="color:var(--text3);font-size:12px">Стоимость: ${g.cost.toLocaleString('ru-RU')} руб.</div>`:''}
           ${stColor?`<div class="vdh-meta-item"><span style="color:${stColor};font-weight:600">${htmlEsc(g.status)}</span></div>`:''}
         </div>
@@ -106,6 +109,7 @@ function renderGenDetail(g) {
       </div>
       <div class="vdh-actions">
         <button class="btn btn-ghost btn-sm" onclick="fuelAccountingOpen('generators',${htmlEsc(JSON.stringify(g.id))})">Начало учёта ГСМ</button>
+        <button class="btn btn-ghost btn-sm" onclick="fuelNormsOpen('generators',${htmlEsc(JSON.stringify(g.id))})">Нормы по датам</button>
         <button class="btn btn-ghost btn-sm" onclick="openGenExportOneModal(${htmlJs(g.id)})">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           XLS
@@ -135,7 +139,7 @@ function renderGenDetail(g) {
       </div>
       <div class="stat-card accent-yellow">
         <div class="stat-label">Расход топлива</div>
-        <div class="stat-value">${totalFuel.toLocaleString('ru',{maximumFractionDigits:1})} <span class="stat-unit">л</span></div>
+        <div class="stat-value">${totalFuel===null?'Не определён':totalFuel.toLocaleString('ru',{maximumFractionDigits:3})} <span class="stat-unit">л</span></div>
         <div class="stat-sub">Для баланса: факт и оценка</div>
       </div>
       <div class="stat-card accent-green">
@@ -146,7 +150,7 @@ function renderGenDetail(g) {
       <div class="stat-card ${currentBal<0?'accent-red':currentBal<50?'accent-yellow':'accent-green'}">
         <div class="stat-label">Остаток в баке</div>
         <div class="stat-value" style="color:${currentBal<0?'var(--red)':currentBal<50?'var(--yellow)':'inherit'}">${currentBal===null?'—':currentBal.toLocaleString('ru',{maximumFractionDigits:3})} <span class="stat-unit">л</span></div>
-        <div class="stat-sub">${currentBal===null?'Учёт ещё не начат':fuelAccountingStatusHtml('generators',g)}</div>
+        <div class="stat-sub">${currentBal===null?(fuelAccountingOpening('generators',g,dispatcherLocalDate())===null?'Учёт ещё не начат':'Нет нормы или расхода на одну из дат'):fuelAccountingStatusHtml('generators',g)}</div>
       </div>
     </div>
 
@@ -159,7 +163,7 @@ function renderGenDetail(g) {
       <div class="table-toolbar">
         <div class="table-toolbar-left">
           ${MONTHS_RU[selectedGenMonth-1]} ${selectedGenYear}
-          <span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:10px">${monthRecs.length} записей · ${monthHours.toLocaleString('ru',{maximumFractionDigits:1})} мтч · ${monthFuel.toLocaleString('ru',{maximumFractionDigits:1})} л</span>
+          <span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:10px">${monthRecs.length} записей · ${monthHours.toLocaleString('ru',{maximumFractionDigits:3})} мтч · ${monthFuel===null?'Расход не определён':monthFuel.toLocaleString('ru',{maximumFractionDigits:3})+' л'}</span>
         </div>
         <button class="btn btn-primary btn-sm" onclick="openAddGenRecord()">
           <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -370,7 +374,7 @@ function computeGenFuelBalances(gid) {
   recs.forEach(r => {
     if(!fuelAccountingIncludes('generators',gen,r.date))return;
     const spent = genActualSpent(gen, r);
-    balance = DecimalCore.toNumberExact(DecimalCore.sub(DecimalCore.add(balance,fqValue(r.fuelIssued)||0),spent));
+    balance = balance===null||spent===null?null:DecimalCore.toNumberExact(DecimalCore.sub(DecimalCore.add(balance,fqValue(r.fuelIssued)||0),spent));
     balMap[r.id] = balance;
   });
   _genBalCache[cacheKey] = balMap;
@@ -462,7 +466,7 @@ function genFuelRate(g, load) {
   }
   return Math.max(0,n100*(loadPct/100));
 }
-function genNormKnown(g,r){return !!g&&!!r&&(fqValue(r.fuelUsed)!=null||fqValue(g.norm)!=null||fqValue(g.norm100)!=null);}
+function genNormKnown(g,r){return FuelMovementPolicy.generatorNormKnown(g,r);}
 
 // ─── ЕДИНЫЙ РАСЧЁТ РАСХОДА ДЭС ──────────────────────────
 // Раньше расход считался в трёх местах по-разному: остаток ёмкости брал
@@ -493,8 +497,19 @@ function computeGenBalanceAt(gid, boundary, inclusive) {
   const recs = (data.genRecords || []).filter(r => r.generatorId === gid && okDate(r.date))
     .slice().sort((a,b) => cmpDateAsc(a.date, b.date));
   let bal = initial;
-  recs.forEach(r => { bal = DecimalCore.toNumberExact(DecimalCore.sub(DecimalCore.add(bal,fqValue(r.fuelIssued)||0),genActualSpent(g,r))); });
+  recs.forEach(r => { const spent=genActualSpent(g,r);bal=bal===null||spent===null?null:DecimalCore.toNumberExact(DecimalCore.sub(DecimalCore.add(bal,fqValue(r.fuelIssued)||0),spent)); });
   return bal;
+}
+
+function genActNormColumn(generator,from,to,field){
+  if(!Object.hasOwn(generator,'fuelNorms'))return generator[field]!=null?+generator[field]:'—';
+  const starts=[...new Set([from,...generator.fuelNorms.periods.map(period=>period.from).filter(date=>date>from&&date<=to)])].sort();
+  const spans=starts.map((date,index)=>{
+    const resolved=EffectivePeriods.resolve('generators',generator,date,'fuelNorms');
+    return {from:date,to:starts[index+1]?TvsFuelEngine.fqShiftDate(starts[index+1],-1):to,value:resolved.status==='known'?resolved.parameters[field]:null};
+  });
+  if(spans.every(span=>span.value===spans[0].value))return spans[0].value??'Не задано';
+  return spans.map(span=>fmtDate(span.from)+' — '+fmtDate(span.to)+': '+(span.value??'Не задано')).join('\n');
 }
 
 function exportGenWriteOffAct(dateFrom, dateTo, opts) {
@@ -514,7 +529,16 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
   if (!locsToRender.length) { alert('Нет ДЭС для акта.'); return; }
   try{
     const selected=(data.generators||[]).filter(g=>locsToRender.includes((g.location||'').trim()||'— Без местонахождения —'));
-    for(const generator of selected)fuelAccountingRequireActRange('generators',generator,dateFrom,dateTo);
+    for(const generator of selected){
+      fuelAccountingRequireActRange('generators',generator,dateFrom,dateTo);
+      if(Object.hasOwn(generator,'fuelNorms')){
+        if(!dateFrom||!dateTo||!TvsFuelEngine.gsmValidDate(dateFrom)||!TvsFuelEngine.gsmValidDate(dateTo)||dateFrom>dateTo)throw Error('Для акта с датированными нормами укажите обе корректные даты периода по порядку');
+        if(typeof EffectivePeriods==='undefined')throw Error('Не загружены датированные параметры ДЭС');
+        EffectivePeriods.validate('generators',generator,'fuelNorms');
+        const included=genRecsFor(generator.id).filter(row=>row.date>=dateFrom&&row.date<=dateTo&&fuelAccountingIncludes('generators',generator,row.date));
+        if(included.some(row=>genNormSpent(generator,row)===null||genActualSpent(generator,row)===null)||computeGenBalanceAt(generator.id,dateFrom,false)===null||computeGenBalanceAt(generator.id,dateTo,true)===null)throw Error('У ДЭС «'+generator.name+'» есть даты без нормы или расхода. Укажите подтверждённые параметры перед формированием акта.');
+      }
+    }
     const selectedTankIds=new Set(selected.map(g=>g.tankId).filter(id=>id!=null&&id!==''));
     for(const tank of tanksAll().filter(tank=>selectedTankIds.has(tank.id)))fuelAccountingRequireActRange('tanks',tank,dateFrom,dateTo);
   }catch(error){alert(error.message);return false;}
@@ -617,13 +641,14 @@ function exportGenWriteOffAct(dateFrom, dateTo, opts) {
       put(n,4,meterStart===''?'—':+meterStart,ST.tdR(bg));
       put(n,5,meterEnd===''?'—':+meterEnd,ST.tdR(bg));
       put(n,6,loadAvg!=null?num(loadAvg,1):'—',ST.tdC(bg));
-      put(n,7,g.norm100!=null?+g.norm100:'—',ST.tdC(bg));
-      put(n,8,g.norm50!=null?+g.norm50:'—',ST.tdC(bg));
+      const printedNorm100=genActNormColumn(g,dateFrom,dateTo,'norm100'),printedNorm50=genActNormColumn(g,dateFrom,dateTo,'norm50');
+      put(n,7,printedNorm100,ST.tdC(bg));
+      put(n,8,printedNorm50,ST.tdC(bg));
       put(n,9,num(normSpent),ST.tdR(bg));
       put(n,10,num(actSpent),ST.tdR(bg));
       put(n,11,num(bakKon),ST.tdR(bg));
       put(n,12,num(ostKon),ST.tdR(bg));
-      rowH(n,18); n++;
+      rowH(n,Math.max(18,...[printedNorm100,printedNorm50].map(value=>String(value).split('\n').length*24))); n++;
     });
     // ИТОГО
     put(n,0,'ИТОГО',ST.totL); merge(n,0,n,2); fillRow(n,ST.totL);

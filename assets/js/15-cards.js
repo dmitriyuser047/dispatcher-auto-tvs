@@ -135,7 +135,7 @@ function renderGeneratorCards() {
     let fuelBal;
     if(fuelAccountingFor('generators',g).mode==='explicit'&&fuelAccountingOpening('generators',g,dispatcherLocalDate())===null){
       fuelBal=null;
-    } else if (g.tankId) {
+    } else if (g.tankId!=null&&g.tankId!=='') {
       fuelBal = computeTankBalance(g.tankId).balance;
     } else {
       const balMap = computeGenFuelBalances(g.id);
@@ -146,7 +146,7 @@ function renderGeneratorCards() {
     const stColor = g.status === 'В работе' ? '#22c55e' : g.status === 'Резерв' ? '#3b82f6' : g.status ? '#ef4444' : 'transparent';
     const stBg = g.status === 'В работе' ? '#dcfce7' : g.status === 'Резерв' ? '#dbeafe' : g.status ? '#fee2e2' : '';
     const stBorder = g.status === 'В работе' ? 'rgba(22,163,74,0.2)' : g.status === 'Резерв' ? 'rgba(37,99,235,0.2)' : g.status ? 'rgba(220,38,38,0.2)' : '';
-    const balColor = fuelBal < 0 ? 'var(--red)' : fuelBal < 50 ? 'var(--yellow)' : 'var(--green)';
+    const balColor = fuelBal===null?'var(--text3)':fuelBal < 0 ? 'var(--red)' : fuelBal < 50 ? 'var(--yellow)' : 'var(--green)';
 
     return `<div class="vehicle-card" onclick="openGeneratorDetail(${htmlJs(g.id)})" style="min-height:120px">
       <div class="vc-accent-bar" style="background:${stColor}"></div>
@@ -155,9 +155,9 @@ function renderGeneratorCards() {
       <div class="vc-driver">${g.serial ? '<svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> С/н: ' + htmlEsc(g.serial) : ''}</div>
       ${g.status ? `<span class="vc-status" style="background:${stBg};color:${stColor};border:1px solid ${stBorder}"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0"></span>${htmlEsc(g.status)}</span>` : ''}
       <div class="vc-meta">
-        ${g.power != null ? '<span><svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> ' + g.power + ' кВт</span>' : ''}
+        ${g.power != null ? '<span title="'+(g.fuelNorms!=null?'Действующие параметры — в разделе «Нормы по датам»':'Мощность')+'"><svg class="vc-meta-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> ' + g.power + ' кВт'+(g.fuelNorms!=null?' (исходная)':'')+'</span>' : ''}
         <span style="font-variant-numeric:tabular-nums">${totalHours.toLocaleString('ru',{maximumFractionDigits:1})} мтч</span>
-        <span style="color:${balColor};font-variant-numeric:tabular-nums">${fuelBal===null?'Учёт ещё не начат':fuelBal.toLocaleString('ru',{maximumFractionDigits:3})+' л'}</span>
+        <span style="color:${balColor};font-variant-numeric:tabular-nums">${fuelBal===null?((g.tankId!=null&&g.tankId!=='')||fuelReportBalanceLabel('generators',g)==='Учёт не начат'?'Учёт ещё не начат':fuelReportBalanceLabel('generators',g)):fuelBal.toLocaleString('ru',{maximumFractionDigits:3})+' л'}</span>
         ${g.fuel ? '<span>' + htmlEsc(fuelLabels[g.fuel] || g.fuel) + '</span>' : ''}
       </div>
     </div>`;
@@ -268,7 +268,7 @@ function renderGeneratorList() {
     let fuelBal;
     if(fuelAccountingFor('generators',g).mode==='explicit'&&fuelAccountingOpening('generators',g,dispatcherLocalDate())===null){
       fuelBal=null;
-    } else if (g.tankId) {
+    } else if (g.tankId!=null&&g.tankId!=='') {
       fuelBal = computeTankBalance(g.tankId).balance;
     } else {
       const balMap  = computeGenFuelBalances(g.id);
@@ -276,7 +276,7 @@ function renderGeneratorList() {
       const lastRec = sorted[sorted.length - 1];
       fuelBal = fuelAccountingCurrentBalance('generators',g,gRecs,balMap);
     }
-    const balColor   = fuelBal < 0 ? 'var(--red)' : fuelBal < 50 ? 'var(--yellow)' : 'var(--green)';
+    const balColor   = fuelBal===null?'var(--text3)':fuelBal < 0 ? 'var(--red)' : fuelBal < 50 ? 'var(--yellow)' : 'var(--green)';
     const stColor    = g.status === 'В работе' ? '#22c55e' : g.status === 'Резерв' ? '#3b82f6' : g.status ? '#ef4444' : null;
     const stDot      = stColor ? `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${stColor};flex-shrink:0"></span>` : '';
     const fb         = g.fuel ? { label: fuelLabels[g.fuel], cls: fuelClasses[g.fuel] } : null;
@@ -286,11 +286,11 @@ function renderGeneratorList() {
           <div class="gen-card-name">${stDot} ${htmlEsc(g.name)}</div>
           <div class="gen-card-sub">${g.serial ? 'С/н: '+ htmlEsc(g.serial) : ''}${g.responsible ? (g.serial?' · ':'')+'Отв.: '+ htmlEsc(g.responsible) : ''}</div>
         </div>
-        ${g.power != null ? `<div class="gen-card-power">${htmlEsc(g.power)} кВт</div>` : ''}
+        ${g.power != null ? `<div class="gen-card-power" title="${g.fuelNorms!=null?'Действующие параметры — в разделе «Нормы по датам»':'Мощность'}">${htmlEsc(g.power)} кВт${g.fuelNorms!=null?' (исходная)':''}</div>` : ''}
       </div>
       <div class="gen-card-badges">
         <div class="gen-badge">${totalHours.toLocaleString('ru',{maximumFractionDigits:1})} мтч</div>
-        <div class="gen-badge" style="color:${balColor};border-color:${balColor}4d;background:${balColor}1a">${fuelBal===null?'Учёт ещё не начат':fuelBal.toLocaleString('ru',{maximumFractionDigits:3})+' л'}</div>
+        <div class="gen-badge" style="color:${balColor};border-color:${balColor}4d;background:${balColor}1a">${fuelBal===null?((g.tankId!=null&&g.tankId!=='')||fuelReportBalanceLabel('generators',g)==='Учёт не начат'?'Учёт ещё не начат':fuelReportBalanceLabel('generators',g)):fuelBal.toLocaleString('ru',{maximumFractionDigits:3})+' л'}</div>
         ${g.status ? `<div class="gen-badge" style="color:${stColor};border-color:${stColor}4d;background:${stColor}1a">${htmlEsc(g.status)}</div>` : ''}
         ${fb ? `<span class="fuel-tag ${fb.cls}" style="font-size:10px;padding:1px 6px">${fb.label}</span>` : ''}
       </div>

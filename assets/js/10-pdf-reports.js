@@ -5,9 +5,9 @@
 function _pdfEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function _pdfNum(n,d){const x=Number(n);if(!isFinite(x))return '0';return x.toLocaleString('ru-RU',{minimumFractionDigits:0,maximumFractionDigits:d==null?2:d});}
 function _balCls(b){return b<0?'neg':b===0?'zero':'pos';}
-function _pdfFuelExplicit(asset){return Object.prototype.hasOwnProperty.call(asset,'fuelAccounting');}
+function _pdfFuelExplicit(asset){return Object.prototype.hasOwnProperty.call(asset,'fuelAccounting')||asset.fuelNorms!=null;}
 function _pdfFuelRows(section,asset,records){return _pdfFuelExplicit(asset)?records.filter(row=>fuelAccountingIncludes(section,asset,row.date)):records;}
-function _pdfFuelNum(value,explicit){return value==null?'Учёт не начат':_pdfNum(value,explicit?3:2);}
+function _pdfFuelNum(value,explicit){return value==null?'Нет данных':_pdfNum(value,explicit?3:2);}
 
 // Категория состояния ТС: на ходу / в ремонте / требуется ремонт / прочее
 function vehStatusCat(status){
@@ -106,7 +106,7 @@ function exportAllToPdf(dateFrom, dateTo){
   data.vehicles.forEach(v=>{
     const ft=v.fuel||'diesel';
     const vRecs=filterRecs(recsFor(v.id));
-    _pdfFuelRows('vehicles',v,vRecs).forEach(r=>{ gIss[ft]+=r.fuelIssued||0; gUsd[ft]+=r.fuelUsed||0; });
+    _pdfFuelRows('vehicles',v,vRecs).forEach(r=>{ gIss[ft]+=r.fuelIssued||0; gUsd[ft]=fuelReportAdd(gUsd[ft],fuelReportField('vehicles',v,r,'fuelUsed')); });
     const bm=computeFuelBalances(v.id, dateFrom, dateTo);
     const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     if(_pdfFuelExplicit(v)){gExplicit[ft]=true;const value=fuelAccountingCurrentBalance('vehicles',v,recsFor(v.id),bm,dateTo||'');if(value==null)gMissing[ft]=true;else gBal[ft]+=value;}
@@ -117,7 +117,7 @@ function exportAllToPdf(dateFrom, dateTo){
   let fuelRows='';
   fuelTypes.filter(ft=>vFuelSet.has(ft)).forEach(ft=>{
     const bal=gMissing[ft]?null:+gBal[ft].toFixed(gExplicit[ft]?3:2);
-    fuelRows+='<tr><td class="l"><b>'+fuelLabels[ft]+'</b></td><td class="r">'+_pdfFuelNum(gIss[ft],gExplicit[ft])+'</td><td class="r">'+_pdfFuelNum(gUsd[ft],gExplicit[ft])+'</td><td class="r '+(bal==null?'zero':_balCls(bal))+'">'+_pdfFuelNum(bal,gExplicit[ft])+'</td></tr>';
+    fuelRows+='<tr><td class="l"><b>'+fuelLabels[ft]+'</b></td><td class="r">'+_pdfFuelNum(gIss[ft],gExplicit[ft])+'</td><td class="r">'+_pdfFuelNum(gUsd[ft],gExplicit[ft])+'</td><td class="r '+(bal==null?'zero':_balCls(bal))+'">'+(bal==null?fuelReportGroupBalanceLabel('vehicles',data.vehicles.filter(v=>(v.fuel||'diesel')===ft),dateTo||''):_pdfFuelNum(bal,gExplicit[ft]))+'</td></tr>';
   });
   const fuelTable='<div class="sec teal">Сводка по видам топлива</div><table><thead><tr><th style="width:30%">Вид топлива</th><th>Выдано, л</th><th>Израсходовано, л</th><th>Остаток, л</th></tr></thead><tbody>'+fuelRows+'</tbody></table>';
 
@@ -152,16 +152,16 @@ function exportAllToPdf(dateFrom, dateTo){
     const vFuelRecs=_pdfFuelRows('vehicles',v,vRecs),explicit=_pdfFuelExplicit(v);
     const vKm=vRecs.reduce((s,r)=>s+(r.km||0),0);
     const vIss=vFuelRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
-    const vUsd=vFuelRecs.reduce((s,r)=>s+(r.fuelUsed||0),0);
-    const vAct=vFuelRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
+    const vUsd=fuelReportSum(vFuelRecs.map(r=>fuelReportField('vehicles',v,r,'fuelUsed')));
+    const vAct=fuelReportSum(vFuelRecs.map(r=>fuelReportField('vehicles',v,r,'fuelActual')));
     const bm=computeFuelBalances(v.id, dateFrom, dateTo);
     const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     const vBal=explicit?fuelAccountingCurrentBalance('vehicles',v,recsFor(v.id),bm,dateTo||''):+(sorted.length?(bm[sorted[sorted.length-1].id]||0):0).toFixed(2);
     const fuelKm=vFuelRecs.reduce((s,r)=>s+(r.km||0),0);
-    const avg=fuelKm>0&&vAct>0?+(vAct/fuelKm*100).toFixed(2):null;
+    const avg=fuelKm>0&&vAct!=null&&(v.fuelNorms!=null||vAct>0)?+(vAct/fuelKm*100).toFixed(2):null;
     const vGl=vRecs.reduce((s,r)=>s+(+r.kmGlonass||0),0);
     const vSens=vFuelRecs.reduce((s,r)=>s+(+r.glonassFuel||0),0);
-    aKm+=vKm; aIss+=vIss; aUsd+=vUsd; aAct+=vAct; aGl+=vGl; aSens+=vSens;
+    aKm+=vKm; aIss+=vIss; aUsd=fuelReportAdd(aUsd,vUsd); aAct=fuelReportAdd(aAct,vAct); aGl+=vGl; aSens+=vSens;
     rows+='<tr>'
       +'<td class="c">'+globalNum+'</td>'
       +'<td class="c">'+_pdfEsc(v.plate)+'</td>'
@@ -175,7 +175,7 @@ function exportAllToPdf(dateFrom, dateTo){
       +'<td class="r">'+_pdfFuelNum(vIss,explicit)+'</td>'
       +'<td class="r">'+_pdfFuelNum(vUsd,explicit)+'</td>'
       +'<td class="r">'+_pdfFuelNum(vAct,explicit)+'</td>'
-      +'<td class="r '+(vBal==null?'zero':_balCls(vBal))+'">'+_pdfFuelNum(vBal,explicit)+'</td>'
+      +'<td class="r '+(vBal==null?'zero':_balCls(vBal))+'">'+(vBal==null?fuelReportBalanceLabel('vehicles',v,dateTo||''):_pdfFuelNum(vBal,explicit))+'</td>'
       +'<td class="r">'+(avg==null?'—':_pdfNum(avg))+'</td>'
       +'<td class="r">'+(vGl?_pdfNum(vGl,1):'—')+'</td>'
       +'<td class="r">'+(vSens?_pdfNum(vSens):'—')+'</td>'
@@ -214,7 +214,7 @@ function exportAllGensToPdf(dateFrom, dateTo){
   const gExplicit={},gMissing={};
   gens.forEach(g=>{
     const ft=g.fuel||'diesel';
-    _pdfFuelRows('generators',g,filterGenRecs(g.id)).forEach(r=>{ gIss[ft]+=r.fuelIssued||0; gAct[ft]+=r.fuelActual||0; });
+    _pdfFuelRows('generators',g,filterGenRecs(g.id)).forEach(r=>{ gIss[ft]+=r.fuelIssued||0; gAct[ft]=fuelReportAdd(gAct[ft],fuelReportField('generators',g,r,'fuelActual')); });
     const bm=computeGenFuelBalances(g.id);
     const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     if(_pdfFuelExplicit(g)){gExplicit[ft]=true;const value=fuelAccountingCurrentBalance('generators',g,genRecsFor(g.id),bm,dateTo||'');if(value==null)gMissing[ft]=true;else gBal[ft]+=value;}
@@ -224,7 +224,7 @@ function exportAllGensToPdf(dateFrom, dateTo){
   let fuelRows='';
   ['diesel','gasoline','gas'].filter(ft=>usedFuels.has(ft)).forEach(ft=>{
     const bal=gMissing[ft]?null:+gBal[ft].toFixed(gExplicit[ft]?3:2);
-    fuelRows+='<tr><td class="l"><b>'+fuelLabels[ft]+'</b></td><td class="r">'+_pdfFuelNum(gIss[ft],gExplicit[ft])+'</td><td class="r">'+_pdfFuelNum(gAct[ft],gExplicit[ft])+'</td><td class="r '+(bal==null?'zero':_balCls(bal))+'">'+_pdfFuelNum(bal,gExplicit[ft])+'</td></tr>';
+    fuelRows+='<tr><td class="l"><b>'+fuelLabels[ft]+'</b></td><td class="r">'+_pdfFuelNum(gIss[ft],gExplicit[ft])+'</td><td class="r">'+_pdfFuelNum(gAct[ft],gExplicit[ft])+'</td><td class="r '+(bal==null?'zero':_balCls(bal))+'">'+(bal==null?fuelReportGroupBalanceLabel('generators',gens.filter(g=>(g.fuel||'diesel')===ft),dateTo||''):_pdfFuelNum(bal,gExplicit[ft]))+'</td></tr>';
   });
   const fuelTable='<div class="sec teal">Сводка по видам топлива</div><table><thead><tr><th style="width:30%">Вид топлива</th><th>Выдано, л</th><th>Факт. расход, л</th><th>Остаток, л</th></tr></thead><tbody>'+fuelRows+'</tbody></table>';
 
@@ -259,31 +259,31 @@ function exportAllGensToPdf(dateFrom, dateTo){
     const fuelRecs=_pdfFuelRows('generators',g,recs),explicit=_pdfFuelExplicit(g);
     const hours=recs.reduce((s,r)=>s+(r.hours||0),0);
     const issued=fuelRecs.reduce((s,r)=>s+(r.fuelIssued||0),0);
-    const actual=fuelRecs.reduce((s,r)=>s+(r.fuelActual||0),0);
+    const actual=fuelReportSum(fuelRecs.map(r=>fuelReportField('generators',g,r,'fuelActual')));
     const bm=computeGenFuelBalances(g.id);
     const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     const bal=explicit?fuelAccountingCurrentBalance('generators',g,genRecsFor(g.id),bm,dateTo||''):+(sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0)).toFixed(2);
     if(bal==null)missingBalance=true;
-    totH+=hours; totIss+=issued; totAct+=actual; totBal+=bal; if(g.cost!=null) totCost+=g.cost;
+    totH+=hours; totIss+=issued; totAct=fuelReportAdd(totAct,actual); totBal+=bal; if(g.cost!=null) totCost+=g.cost;
     rows+='<tr>'
       +'<td class="c">'+gNum+'</td>'
       +'<td class="l">'+_pdfEsc(g.name||'—')+'</td>'
       +'<td class="c">'+_pdfEsc(g.serial||'—')+'</td>'
       +'<td class="l">'+_pdfEsc(g.responsible||'—')+'</td>'
       +'<td class="l">'+_pdfEsc(g.location||'—')+'</td>'
-      +'<td class="c">'+(g.power!=null?_pdfEsc(g.power):'—')+'</td>'
+      +'<td class="c">'+(g.power!=null?_pdfEsc(g.power)+(g.fuelNorms!=null?' (исходная)':''):'—')+'</td>'
       +'<td class="c">'+fuelLabels[g.fuel||'diesel']+'</td>'
       +'<td class="c">'+_pdfEsc(g.status||'—')+'</td>'
       +'<td class="r">'+_pdfNum(hours,1)+'</td>'
       +'<td class="r">'+_pdfFuelNum(issued,explicit)+'</td>'
       +'<td class="r">'+_pdfFuelNum(actual,explicit)+'</td>'
-      +'<td class="r '+(bal==null?'zero':_balCls(bal))+'">'+_pdfFuelNum(bal,explicit)+'</td>'
+      +'<td class="r '+(bal==null?'zero':_balCls(bal))+'">'+(bal==null?fuelReportBalanceLabel('generators',g,dateTo||''):_pdfFuelNum(bal,explicit))+'</td>'
       +'<td class="r">'+(g.cost!=null?_pdfNum(g.cost):'—')+'</td>'
       +'<td class="l">'+_pdfEsc(g.note||'—')+'</td>'
       +'</tr>';
   });
   const anyExplicit=gens.some(_pdfFuelExplicit),tBal=missingBalance?null:+totBal.toFixed(anyExplicit?3:2);
-  rows+='<tr class="tot"><td colspan="8" class="l">ИТОГО</td><td class="r">'+_pdfNum(totH,1)+'</td><td class="r">'+_pdfFuelNum(totIss,anyExplicit)+'</td><td class="r">'+_pdfFuelNum(totAct,anyExplicit)+'</td><td class="r '+(tBal==null?'zero':_balCls(tBal))+'">'+_pdfFuelNum(tBal,anyExplicit)+'</td><td class="r">'+(totCost>0?_pdfNum(totCost):'—')+'</td><td></td></tr>';
+  rows+='<tr class="tot"><td colspan="8" class="l">ИТОГО</td><td class="r">'+_pdfNum(totH,1)+'</td><td class="r">'+_pdfFuelNum(totIss,anyExplicit)+'</td><td class="r">'+_pdfFuelNum(totAct,anyExplicit)+'</td><td class="r '+(tBal==null?'zero':_balCls(tBal))+'">'+(tBal==null?fuelReportGroupBalanceLabel('generators',gens,dateTo||''):_pdfFuelNum(tBal,anyExplicit))+'</td><td class="r">'+(totCost>0?_pdfNum(totCost):'—')+'</td><td></td></tr>';
   const listTable='<div class="sec navy">Перечень дизельных генераторов (по местонахождению)</div><table><thead><tr>'
     +'<th style="width:24px">№</th><th>Наименование</th><th>Серийный номер</th><th>Ответственное лицо</th><th>Местонахождение</th><th>Мощность, кВт</th><th>Вид топлива</th><th>Состояние</th><th>Наработка, мтч</th><th>Выдано, л</th><th>Факт. расход, л</th><th>Остаток в баке, л</th><th>Стоимость ДЭС, руб.</th><th>Примечание</th>'
     +'</tr></thead><tbody>'+rows+'</tbody></table>';

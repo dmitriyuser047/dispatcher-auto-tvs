@@ -84,6 +84,12 @@ function costDetailHtml(row) {
 }
 function costScenarioHtml(row) {
   const scenario = row.scenario;
+  if(scenario?.mode==='dated'&&Array.isArray(scenario.periods)){
+    const before=date=>new Date(Date.parse(date+'T12:00:00Z')-86400000).toISOString().slice(0,10);
+    const interval=period=>period.from?fmtDate(period.from)+' — '+(period.toExclusive?fmtDate(before(period.toExclusive)):'без окончания'):'До '+(period.toExclusive?fmtDate(period.toExclusive):'начала периодов');
+    const rows=scenario.periods.map(period=>`<tr><td>${htmlEsc(interval(period))}${period.status==='missing'?'<small>Период ставок не задан</small>':''}</td><td>${costNumber(period.quantity)} ${htmlEsc(row.unit)}</td><td>${costMoney(period.rate)}/${htmlEsc(row.unit)}${period.complete?'':'<small>Неполный набор ставок</small>'}</td><td>${costMoney(period.amount)}</td><td>${htmlEsc(period.basis||'Нет подтверждённого периода')}</td></tr>`).join('');
+    return `<div class="cost-rate-periods"><p class="cost-note">Оценка рассчитана по ставкам, действующим на дату каждой строки журнала. Прежние поля профиля не подставляются до первого периода. Фактические документы и расходы остаются отдельными.</p><div class="cost-table-scroll"><table class="cost-table"><thead><tr><th>Период ставок</th><th>Пробег / часы</th><th>Ставка</th><th>Оценка</th><th>Основание</th></tr></thead><tbody>${rows||'<tr><td colspan="5">Нет количественных строк журнала за выбранные даты</td></tr>'}</tbody></table></div><p class="cost-note">${scenario.rate==null?'Единой ставки за выбранный диапазон нет.':'Единая ставка: '+costMoney(scenario.rate)+'/'+htmlEsc(row.unit)+'.'} ${!row.quantityComplete?'В журнале есть строки с неизвестным пробегом или наработкой; полная оценка недоступна.':scenario.coverageComplete?'Все количественные строки покрыты периодами.':'Не покрыто периодами: '+costNumber(scenario.uncoveredQuantity)+' '+htmlEsc(row.unit)+'.'}</p><p class="cost-result">${scenario.complete?'Оценка на учтённый пробег / часы: <strong>'+costMoney(scenario.amount)+'</strong>':'Полная оценка недоступна. Известная часть: <strong>'+costMoney(scenario.knownAmount)+'</strong>'}</p>${scenario.note?'<p class="cost-note">'+htmlEsc(scenario.note)+'</p>':''}</div>`;
+  }
   if (!scenario || scenario.rate == null) return '<p class="cost-note">Ставки не заданы. Укажите оплату труда и амортизацию на ' + row.unit + ', норму топлива и цену. Пустое поле остаётся неизвестным.</p>';
   return `<dl class="cost-breakdown">${scenario.pieces.map(piece => `<div><dt>${htmlEsc(piece.label)}</dt><dd>${costMoney(piece.rate)}${piece.rate != null ? '/' + row.unit : ''}</dd></div>`).join('')}<div class="cost-breakdown-total"><dt>${scenario.complete ? 'Оценка по трём статьям' : 'Известная часть оценки'}</dt><dd>${costMoney(scenario.rate)}/${row.unit}</dd></div><div><dt>На учтённый пробег / часы</dt><dd>${costMoney(scenario.amount)}</dd></div></dl><p class="cost-note">Сценарий по текущим ставкам. Ремонт, налоги и прочие статьи сюда не входят. Сумма не прибавляется к фактическим документам.${scenario.complete ? '' : ' Не все ставки заданы.'}</p>${scenario.note ? `<p class="cost-note">${htmlEsc(scenario.note)}</p>` : ''}`;
 }
@@ -149,7 +155,7 @@ function costEditProfile() {
   let assetRef = costAssetRef || costAssets()[0].ref, previous = (data.costProfiles || []).find(row => row.assetRef === assetRef);
   const identity = costFormIdentity();
   let baseline = JSON.stringify(previous || null);
-  wfShowDialog('Ставки для оценки затрат', `<form id="costProfileForm" class="wf-form cost-form"><label class="wf-wide"><span>Техника</span><select name="assetRef">${costAssetOptions(assetRef)}</select></label><p id="costRateUnit" class="wf-wide cost-note"></p>
+  wfShowDialog('Ставки для оценки затрат', `<form id="costProfileForm" class="wf-form cost-form"><label class="wf-wide"><span>Техника</span><select name="assetRef">${costAssetOptions(assetRef)}</select></label><p id="costRateUnit" class="wf-wide cost-note"></p><p id="costDatedNotice" class="wf-wide cost-note"></p><div class="wf-wide"><button type="button" class="btn btn-ghost" data-cost-periods>Периоды ставок</button></div>
     <label><span>Оплата труда, ₽/ед.</span><input type="number" name="salaryRate" min="0" max="1000000000" step="any"></label><label><span>Амортизация, ₽/ед.</span><input type="number" name="depreciationRate" min="0" max="1000000000" step="any"></label><label><span id="costFuelRateLabel">Норма топлива</span><input type="number" name="fuelRate" min="0" max="1000000000" step="any"></label><label><span>Цена топлива, ₽/л</span><input type="number" name="fuelPrice" min="0" max="1000000000" step="any"></label>
     <label class="wf-wide"><span>Основание ставок / примечание</span><textarea name="note" maxlength="10000" rows="2"></textarea></label><p class="wf-wide cost-note">Это отдельный сценарий по текущим ставкам, без включения в фактические документы. Оставьте поле пустым, если ставка неизвестна; введите 0, если статья действительно нулевая. Ремонт, налоги и прочие расходы в сценарий не входят.</p><div id="costProfileError" class="wf-wide cost-form-error" role="alert"></div><div class="wf-wide cost-actions"><button class="btn btn-ghost" type="button" onclick="closeModal('wfModal')">Отмена</button><button class="btn btn-primary" type="submit">Сохранить ставки</button></div></form>`);
   const form = document.getElementById('costProfileForm'), fields = ['salaryRate', 'depreciationRate', 'fuelRate', 'fuelPrice']; let busy = false;
@@ -158,15 +164,16 @@ function costEditProfile() {
     const unit = assetRef.startsWith('v:') ? 'км' : 'ч';
     document.getElementById('costRateUnit').textContent = 'Единица оценки: ' + (unit === 'км' ? 'километр. Норма топлива — литры на 100 км.' : 'моточас. Норма топлива — литры на час.');
     document.getElementById('costFuelRateLabel').textContent = unit === 'км' ? 'Норма топлива, л/100 км' : 'Норма топлива, л/ч';
-    fields.forEach(key => { form.elements[key].value = previous?.[key] ?? ''; }); form.elements.note.value = previous?.note || ''; precisionRemember(form);
+    fields.forEach(key => { form.elements[key].value = previous?.[key] ?? ''; form.elements[key].readOnly=previous?.ratePeriods!=null; }); form.elements.note.value = previous?.note || '';document.getElementById('costDatedNotice').textContent=previous?.ratePeriods!=null?'Действуют ставки по датам. Прежние ставки доступны только для просмотра. Изменение задаётся отдельным периодом.':'Прежние ставки действуют без отдельных дат. Можно явно включить журнал периодов.'; precisionRemember(form);
   };
-  populate(); form.elements.assetRef.addEventListener('change', populate);
+  populate(); form.elements.assetRef.addEventListener('change', populate);form.querySelector('[data-cost-periods]').onclick=()=>{closeModal('wfModal');costRatesOpen(assetRef);};
   form.addEventListener('submit', async event => {
     event.preventDefault(); if (busy) return;
     const error = document.getElementById('costProfileError'), button = form.querySelector('[type="submit"]'); error.textContent = '';
     try { costAssertFormIdentity(identity); } catch (failure) { error.textContent = failure.message; return; }
     const current = (data.costProfiles || []).find(row => row.assetRef === assetRef);
     if (JSON.stringify(current || null) !== baseline) { error.textContent = 'Ставки изменились в другом окне. Выберите технику заново, чтобы проверить актуальные значения.'; return; }
+    if(previous?.ratePeriods!=null&&fields.some(key=>form.elements[key].value!==form.elements[key]._precisionInitial)){error.textContent='Ставки уже заданы по датам. Измените нужный период в журнале ставок.';return;}
     const next = { ...(previous || { id:wfId('costprofile') }), assetRef, note:form.elements.note.value.trim() };
     try{for (const key of fields)next[key]=precisionInput(form.elements[key],{scale:6,blank:'null',...(previous?{previous:previous[key]}:{})});}catch(failure){error.textContent=failure.message;return;}
     busy = true; button.disabled = true; form.elements.assetRef.disabled = true;

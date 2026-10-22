@@ -2,13 +2,30 @@
 (function (root, factory) {
   'use strict';
   const api = factory(typeof module === 'object' && module.exports ? () => require('./accounting-boundary.js') : () => root.AccountingBoundary,
-    typeof module === 'object' && module.exports ? () => require('./decimal-core.js') : () => root.DecimalCore);
+    typeof module === 'object' && module.exports ? () => require('./decimal-core.js') : () => root.DecimalCore,
+    typeof module === 'object' && module.exports ? () => require('./effective-periods.js') : () => root.EffectivePeriods);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.TvsFuelEngine = api;
-})(typeof globalThis === 'object' ? globalThis : this, function (getAccounting,getDecimal) {
+})(typeof globalThis === 'object' ? globalThis : this, function (getAccounting,getDecimal,getPeriods) {
   'use strict';
   function makeEngine(calculationVersion){
-  const modern=calculationVersion===2;
+  const modern=calculationVersion>=2,temporal=calculationVersion>=3;
+  const has=(row,key)=>row&&Object.prototype.hasOwnProperty.call(row,key);
+  function periods(){const api=getPeriods();if(api?.apiVersion!==1)throw Object.assign(Error('Не загружены датированные параметры'),{code:'MODULE_UNAVAILABLE'});return api;}
+  function preparedVehicle(row){
+    if(!temporal||!row)return row;
+    let result=row;
+    for(const kind of ['fuelNorms','orgHistory'])if(has(row,kind)){
+      if(kind==='orgHistory'&&Array.isArray(row.orgHistory)&&!row.orgHistory.length)continue;
+      const validated=periods().validate('vehicles',row,kind);if(validated.mode==='legacy')continue;
+      if(result===row)result={...row};result[kind]=validated;
+    }return result;
+  }
+  function organization(section,row,date){
+    if(!temporal||!has(row,'orgHistory')||Array.isArray(row.orgHistory)&&!row.orgHistory.length)return null;
+    if(!gsmValidDate(date))return {status:'missing',parameters:null,reason:'invalid-date'};
+    return periods().resolve(section,row,date,'orgHistory');
+  }
   function decimal(){const api=getDecimal();if(api?.apiVersion!==1)throw Object.assign(Error('Не загружена десятичная арифметика'),{code:'MODULE_UNAVAILABLE'});return api;}
   // Intermediate ratios have an explicit 12-place budget; recorded facts remain untouched.
   function decimalNumber(value,places=12){const d=decimal();return d.toNumberExact(d.quantize(value,{scale:places,rounding:'half-away-from-zero'}));}
@@ -72,14 +89,19 @@ function fqValue(value) {
 }
 function fqRecord(record, vehicle) {
   const km = Math.max(0, fqValue(record.km) || 0);
-  const storedNorm = fqValue(record.fuelUsed), rate = fqValue(vehicle && vehicle.norm);
-  const norm = storedNorm != null ? storedNorm : rate != null ? (modern?gsmRound(ratio(times(km,rate),100)):km * rate / 100) : null;
+  const storedNorm = fqValue(record.fuelUsed);
+  const issueOnly=temporal&&record.km===0&&fqValue(record.fuelActual)==null&&storedNorm==null&&(fqValue(record.fuelIdle)==null||fqValue(record.fuelIdle)===0)&&
+    (typeof record.fuelMovementId==='string'&&record.fuelMovementId.trim()!==''||typeof record.fuelMovementId==='number'&&Number.isFinite(record.fuelMovementId));
+  const selected=temporal&&has(vehicle,'fuelNorms')&&storedNorm==null&&!issueOnly?periods().resolve('vehicles',vehicle,record.date,'fuelNorms'):null;
+  const rate=selected?(selected.status==='known'?fqValue(selected.parameters.norm):null):fqValue(vehicle && vehicle.norm);
+  const norm = storedNorm != null ? storedNorm : issueOnly?0:rate != null ? (modern?gsmRound(ratio(times(km,rate),100)):km * rate / 100) : null;
   const actual = fqValue(record.fuelActual), idleValue = fqValue(record.fuelIdle), idle = idleValue || 0;
   const driving = actual != null ? actual : norm;
   return { driving, norm, idle, total: driving == null ? idleValue : plus(driving,idle), partial:driving == null && idleValue != null,
     source: actual != null ? 'actual' : norm != null ? 'norm' : 'missing',
     actual, actualKm: actual != null ? km : 0,
-    normSource: storedNorm != null ? 'record' : norm != null ? 'vehicle' : 'missing' };
+    normSource: storedNorm != null ? 'record' : issueOnly?'issue':norm != null ? (selected?'period':'vehicle') : 'missing',
+    ...(temporal&&selected?{normPeriod:selected}:{}) };
 }
 function fqFuelFamily(grade) {
   return grade === 'ДТ' ? 'diesel' : grade === 'Газ' ? 'gas' : /^АИ-\d+$/.test(grade || '') || grade === 'Бензин' ? 'gasoline' : 'unknown';
@@ -141,6 +163,7 @@ function gsmMonthRange(month) {
 }
 function gsmVehicleOrgAt(v, date) {
   if (!v) return '';
+  const dated=organization('vehicles',v,date);if(dated)return dated.status==='known'?dated.parameters.org:'';
   const history = (v.orgHistory || []).filter(h => (!h.from || h.from <= date) && (!h.to || h.to >= date));
   return String(history.length ? history[history.length - 1].org : v.org || '').trim();
 }
@@ -152,14 +175,15 @@ function gsmCardAt(db, number, date) {
   const holders = (db.vehicles || []).filter(v => key && gsmCardKey(v.fuelcard) === key);
   const vehicle = assignment ? (db.vehicles || []).find(v => v.id === assignment.vehicleId) : (!card && holders.length === 1 ? holders[0] : null);
   const history = card ? (card.orgHistory || []).filter(h => (!h.from || h.from <= date) && (!h.to || h.to >= date)) : [];
-  const org = String(history.length ? history[history.length - 1].org : (card && card.org) || (assignment && assignment.org) || gsmVehicleOrgAt(vehicle, date) || '').trim();
+  const dated=card&&organization('fuelCards',card,date);
+  const org = dated?(dated.status==='known'?dated.parameters.org:''):String(history.length ? history[history.length - 1].org : (card && card.org) || (assignment && assignment.org) || gsmVehicleOrgAt(vehicle, date) || '').trim();
   return { card, org, provider: card && card.provider || '', vehicleId: vehicle && vehicle.id || assignment && assignment.vehicleId || '', vehicle };
 }
 
 function gsmBuildLedger(db, options) {
   options = options || {};
   const from = options.from || '', to = options.to || '';
-  const vehicles = new Map((db.vehicles || []).map(v => [v.id, v]));
+  const vehicles = new Map((db.vehicles || []).map(v => [v.id, preparedVehicle(v)]));
   const boundaries=new Map([...vehicles].map(([id,vehicle])=>[id,fuelAccounting('vehicles',vehicle)]));
   const hasExplicit=[...boundaries.values()].some(boundary=>boundary.mode==='explicit');
   const current=(id,date)=>{const boundary=boundaries.get(id);return boundary?.mode!=='explicit'||!gsmValidDate(date)||date>=boundary.from;};
@@ -254,6 +278,9 @@ function gsmBuildLedger(db, options) {
       issue('date', 'error', { vehicleId: v.id, recordId: r.id, message: 'Некорректная дата журнала' });
       return;
     }
+    const effectiveOwner=organization('vehicles',v,r.date);
+    if(effectiveOwner?.status==='missing')issue('organization-period-missing','error',{vehicleId:v.id,recordId:r.id,date:r.date,grade,reason:effectiveOwner.reason,
+      message:'Нет однозначной организации техники на '+r.date+'; проверьте пробелы и пересечения истории принадлежности'});
     if (list.length) {
       const total = gsmRound(list.reduce((s, p) => plus(s,p.qty), 0));
       if (Math.abs(total - qty) > SOURCE_EPS) issue('journal-difference', 'error', { vehicleId: v.id, recordId: r.id, date: r.date,
@@ -299,7 +326,7 @@ function gsmBuildLedger(db, options) {
       const coverage=getAccounting().window(boundary,{from,to});accounting.push({vehicleId:v.id,...coverage,from:boundary.from,opening:boundary.opening,basis:boundary.basis});
       if(coverage.status==='outside-accounting'){issue('outside-accounting','warning',{vehicleId:v.id,date:to,message:'Период полностью предшествует началу учёта ГСМ '+boundary.from});return;}
     }
-    const lots = [], defaultGrade = gsmVehicleGrade(v), defaultOrg = gsmVehicleOrgAt(v, boundary.mode==='explicit'?boundary.from:'') || GSM_UNKNOWN_ORG;
+    const lots = [], defaultGrade = gsmVehicleGrade(v), defaultOrg = (temporal&&boundary.mode!=='explicit'?String(v.org||'').trim():gsmVehicleOrgAt(v, boundary.mode==='explicit'?boundary.from:'')) || GSM_UNKNOWN_ORG;
     let lotTotal=0;const familyTotals=new Map();
     const changeStock=(grade,qty)=>{if(modern){lotTotal=plus(lotTotal,qty);const family=gsmFamily(grade);familyTotals.set(family,plus(familyTotals.get(family)||0,qty));}};
     const initial = boundary.mode==='explicit'?boundary.opening:gsmNumber(v.fuelBalance);
@@ -422,7 +449,7 @@ function gsmBuildLedger(db, options) {
           row.spent=plus(row.spent,part.qty); row.idle=plus(row.idle,times(Math.min(idle,spent),share));
           row.norm=plus(row.norm,times(norm||0,share)); row.km=plus(row.km,times(gsmNumber(r.km),share)); row.glonass=plus(row.glonass,times((!canonicalDays.has(JSON.stringify([r.vehicleId,r.date]))||r.glonassCanonical?gsmNumber(r.kmGlonass):0),share));
           movements.push({ kind: 'consumption', source:appliedMeasurement?'measurement':fuel.source, date: r.date, vehicleId: v.id, recordId: r.id, org: part.org, grade: part.grade, qty: part.qty,
-            idle: times(Math.min(idle,spent),share), norm: norm == null ? null : times(norm,share), totalNorm:norm == null ? null : times(plus(norm,idle),share), km: times(gsmNumber(r.km),share) });
+            idle: times(Math.min(idle,spent),share), norm: norm == null ? null : times(norm,share), totalNorm:norm == null ? null : times(plus(norm,idle),share), km: times(gsmNumber(r.km),share),...(temporal&&fuel.normPeriod?{normPeriod:fuel.normPeriod}:{}) });
         });
         journal.push({ recordId: r.id, vehicleId: v.id, date: r.date, grade, km: gsmNumber(r.km), norm, spent,
           issued: gsmNumber(r.fuelIssued), statement: gsmRound((byRecord.get(r.id) || []).reduce((s, p) => plus(s,p.qty), 0)), hasPurchases: (byRecord.get(r.id) || []).length > 0,
@@ -464,7 +491,7 @@ function cmpDateAsc(a, b) { if (!a || !b) return 0; return a < b ? -1 : a > b ? 
 function recordBalances(db, vehicleId, options) {
   options = options || {};
   const dateTo = options.to || '';
-  const vehicle = (db.vehicles || []).find(v => v.id === vehicleId);
+  const vehicle = preparedVehicle((db.vehicles || []).find(v => v.id === vehicleId));
   const boundary=fuelAccounting('vehicles',vehicle);
   if(boundary.mode==='explicit'&&dateTo&&dateTo<boundary.from)return {};
   const recs = (db.records || []).filter(r => r.vehicleId === vehicleId)
@@ -486,18 +513,19 @@ function recordBalances(db, vehicleId, options) {
     });
   }
   const { keyFor, lastOnDate, measurements } = fqMeasurementPlan(recs, vehicle);
-  const balMap = {};
+  const balMap = {},unknownFamilies=new Set();
   recs.forEach(r => {
     // Остаток считается по фактическому расходу; если не введён — по норме
     const fuel = fqRecord(r, vehicle);
     const family = fqRecordFuelFamily(r, vehicle);
+    if(temporal&&fuel.normPeriod&&fuel.source==='missing'&&gsmNumber(r.km)>0)unknownFamilies.add(family);
     let balance = minus(plus((familyBalances.get(family) || 0),(fqValue(r.fuelIssued) || 0)),(fuel.total || 0));
     // Замер остатка в баке — фактическое значение: расчёт с него начинается заново
     const key = keyFor(r);
-    if (lastOnDate.get(key) === r.id && measurements.has(key)) balance = Number(measurements.get(key).tankMeasured);
+    if (lastOnDate.get(key) === r.id && measurements.has(key)) {balance = Number(measurements.get(key).tankMeasured);unknownFamilies.delete(family);}
     familyBalances.set(family, balance);
     const total=[...familyBalances.values()].reduce((sum,qty)=>plus(sum,qty),0);
-    balMap[r.id] = modern?gsmRound(total):boundary.mode==='explicit'?total:+total.toFixed(2);
+    balMap[r.id] = temporal&&unknownFamilies.size?null:modern?gsmRound(total):boundary.mode==='explicit'?total:+total.toFixed(2);
   });
   return balMap;
 }
@@ -535,7 +563,7 @@ function recordBalances(db, vehicleId, options) {
     buildLedger: gsmBuildLedger
   });
   }
-  const legacy=makeEngine(1),current=makeEngine(2);
-  function forVersion(version){if(version!==1&&version!==2)throw Object.assign(Error('Неизвестная версия расчёта ГСМ'),{code:'CALCULATION_VERSION'});return version===1?legacy:current;}
+  const legacy=makeEngine(1),decimalVersion=makeEngine(2),current=makeEngine(3);
+  function forVersion(version){if(version!==1&&version!==2&&version!==3)throw Object.assign(Error('Неизвестная версия расчёта ГСМ'),{code:'CALCULATION_VERSION'});return version===1?legacy:version===2?decimalVersion:current;}
   return Object.freeze({...current,forVersion});
 });

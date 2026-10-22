@@ -135,7 +135,7 @@ async function recDeleteSelected() {
 }
 
 // ─── MODALS ──────────────────────────────────────────────
-function openModal(id) { const modal=document.getElementById(id); precisionRemember(modal); modal.classList.add('open'); }
+function openModal(id) { const modal=document.getElementById(id); precisionRemember(modal); if(id==='recordModal'&&typeof prepareVehicleNormForm==='function')prepareVehicleNormForm(); modal.classList.add('open'); }
 function closeModal(id) {
   document.getElementById(id).classList.remove('open');
   if (id === 'confirmModal' && _confirmResolve) { const resolve = _confirmResolve; _confirmResolve = null; resolve(false); }

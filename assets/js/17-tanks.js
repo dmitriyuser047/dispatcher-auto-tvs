@@ -418,8 +418,8 @@ function renderTransferHint() {
   if (!here || !other) { document.getElementById('tt_hint').textContent = ''; return; }
   const from = dir === 'out' ? here : other, to = dir === 'out' ? other : here;
   document.getElementById('tt_hint').innerHTML =
-    `Спишется с <b>${htmlEsc(from.object || from.name)}</b> (остаток ${computeTankBalance(from.id).balance.toLocaleString('ru')} л), ` +
-    `поступит на <b>${htmlEsc(to.object || to.name)}</b> (остаток ${computeTankBalance(to.id).balance.toLocaleString('ru')} л). ` +
+    `Спишется с <b>${htmlEsc(from.object || from.name)}</b> (остаток ${precisionFormat(computeTankBalance(from.id).balance,{blank:'Учёт ещё не начат'})} л), ` +
+    `поступит на <b>${htmlEsc(to.object || to.name)}</b> (остаток ${precisionFormat(computeTankBalance(to.id).balance,{blank:'Учёт ещё не начат'})} л). ` +
     `Создадутся две связанные записи.`;
 }
 
@@ -440,6 +440,7 @@ async function saveTankTransfer() {
   if (!fromT || !toT || fromT.archived || toT.archived) { showToast('Для перемещения нужны две действующие ёмкости'); return; }
   if ((fromT.fuel || 'diesel') !== (toT.fuel || 'diesel')) { showToast('Перемещение между ёмкостями разных видов топлива запрещено'); return; }
   const bal = typeof wfTankBalanceAt === 'function' ? wfTankBalanceAt(fromId, date) : computeTankBalance(fromId).balance;
+  if(bal==null){showFieldError('На выбранную дату учёт ёмкости-источника ещё не начат','tt_date');return;}
   if (amount > bal && !confirm(`На «${fromT.object || fromT.name}» остаток ${bal.toLocaleString('ru')} л, а перемещается ${amount.toLocaleString('ru')} л. Остаток уйдёт в минус. Продолжить?`)) return;
   addTankTransfer({ fromId, toId, date, amount, sum, note });
   if (!await saveData(data)) return;

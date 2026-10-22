@@ -1,5 +1,5 @@
 /* Fuel conservation and journal linkage rules shared by native, API and UI saves. */
-(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(()=>require('./fuel-engine.js'),()=>require('./accounting-boundary.js'),()=>require('./decimal-core.js'));else root.FuelMovementPolicy=factory(()=>root.TvsFuelEngine,()=>root.AccountingBoundary,()=>root.DecimalCore);})(typeof globalThis==='object'?globalThis:this,function(getFuel,getAccounting,getDecimal){
+(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(()=>require('./fuel-engine.js'),()=>require('./accounting-boundary.js'),()=>require('./decimal-core.js'),()=>require('./effective-periods.js'));else root.FuelMovementPolicy=factory(()=>root.TvsFuelEngine,()=>root.AccountingBoundary,()=>root.DecimalCore,()=>root.EffectivePeriods);})(typeof globalThis==='object'?globalThis:this,function(getFuel,getAccounting,getDecimal,getPeriods){
   'use strict';
   const EPS=1e-7;
   const own=(row,key)=>Object.prototype.hasOwnProperty.call(row,key);
@@ -113,6 +113,11 @@
   }
   function inspect(db,context={}){const issues=analyze(db,context);return {issues,counts:{error:issues.filter(issue=>issue.severity==='error').length,warning:issues.filter(issue=>issue.severity==='warning').length,total:issues.length}};}
   function decimal(){const api=getDecimal();if(api?.apiVersion!==1)throw Object.assign(Error('Не загружена десятичная арифметика'),{code:'MODULE_UNAVAILABLE'});return api;}
+  function generatorParameters(generator,row){
+    if(!generator||!own(generator,'fuelNorms'))return generator;
+    const api=getPeriods();if(api?.apiVersion!==1)throw Object.assign(Error('Не загружены датированные нормы'),{code:'MODULE_UNAVAILABLE'});
+    const selected=api.resolve('generators',generator,row.date,'fuelNorms');return selected.status==='known'?selected.parameters:null;
+  }
   function generatorRate(generator,row){
     const d=decimal(),power=number(generator?.power),n100=number(generator?.norm100),load=number(row.load),n50=number(generator?.norm50),idle=number(generator?.normIdle);
     if(!(power>0)||!Number.isFinite(n100)||!Number.isFinite(load))return null;
@@ -124,26 +129,37 @@
     return d.compare(rate,0)<0?'0':rate;
   }
   function generatorRounded(value){const d=decimal();return d.toNumberExact(d.quantize(value,{scale:3,rounding:'half-away-from-zero'}));}
+  function generatorIssueOnly(row){return row?.hours===0&&!present(row.fuelUsed)&&!present(row.fuelActual)&&
+    (typeof row.fuelMovementId==='string'&&row.fuelMovementId.trim()!==''||typeof row.fuelMovementId==='number'&&Number.isFinite(row.fuelMovementId));}
   function generatorSpent(generator,row){
     if(!row)return 0;
     if(present(row.fuelActual))return quantity(row.fuelActual);if(present(row.fuelUsed))return quantity(row.fuelUsed);
-    const hours=quantity(row.hours);if(!generator||!hours)return 0;const rate=generatorRate(generator,row);
-    return rate===null?0:generatorRounded(decimal().mul(rate,hours));
+    if(generatorIssueOnly(row))return 0;
+    const parameters=generatorParameters(generator,row);if(parameters===null)return null;
+    const hours=quantity(row.hours);if(!generator||!hours)return 0;const rate=generatorRate(parameters,row);
+    return rate===null?(own(generator,'fuelNorms')?null:0):generatorRounded(decimal().mul(rate,hours));
   }
   function generatorNormSpent(generator,row){
     if(!generator||!row)return 0;if(present(row.fuelUsed))return quantity(row.fuelUsed);
+    if(generatorIssueOnly(row))return 0;
+    const parameters=generatorParameters(generator,row);if(parameters===null)return null;
     const hours=quantity(row.hours);if(!hours)return 0;
-    const rate=present(row.load)?generatorRate(generator,row):null;
+    const rate=present(row.load)?generatorRate(parameters,row):null;
     if(rate!==null)return generatorRounded(decimal().mul(rate,hours));
-    const flat=present(generator.norm)?number(generator.norm):number(generator.norm100);
-    return Number.isFinite(flat)?generatorRounded(decimal().mul(flat,hours)):0;
+    const flat=present(parameters.norm)?number(parameters.norm):number(parameters.norm100);
+    return Number.isFinite(flat)?generatorRounded(decimal().mul(flat,hours)):(own(generator,'fuelNorms')?null:0);
+  }
+  function generatorNormKnown(generator,row){
+    if(!generator||!row)return false;if(present(row.fuelUsed)&&Number.isFinite(number(row.fuelUsed)))return true;
+    if(generatorIssueOnly(row))return true;
+    const parameters=generatorParameters(generator,row);return parameters!==null&&(Number.isFinite(number(parameters.norm))||Number.isFinite(number(parameters.norm100)));
   }
   function assetBalances(db,ref){
     const target=asset(db,ref),vehicle=String(ref).startsWith('v:'),section=vehicle?'records':'genRecords',assetField=vehicle?'vehicleId':'generatorId';
     const boundary=accounting(vehicle?'vehicles':'generators',target);
     const records=rows(db,section).filter(row=>String(row[assetField])===String(ref).slice(2)&&dateValid(row.date)&&(boundary.mode!=='explicit'||row.date>=boundary.from)).slice().sort((a,b)=>a.date.localeCompare(b.date));
     if(vehicle){const engine=getFuel();if(!engine||typeof engine.recordBalances!=='function')throw Error('Не загружено ядро расчёта ГСМ для проверки сторно');return {records,balances:engine.recordBalances(db,target?.id??String(ref).slice(2))};}
-    let balance=boundary.mode==='explicit'?boundary.opening:quantity(target?.fuelBalance);const balances={};for(const record of records){balance+=quantity(record.fuelIssued)-generatorSpent(target,record);balances[record.id]=balance;}return {records,balances};
+    let balance=boundary.mode==='explicit'?boundary.opening:quantity(target?.fuelBalance),known=true;const balances={};for(const record of records){const spent=generatorSpent(target,record);if(spent===null)known=false;if(known)balance=decimal().toNumberExact(decimal().sub(decimal().add(balance,quantity(record.fuelIssued)),spent));balances[record.id]=known?balance:null;}return {records,balances};
   }
   // Compare only facts used by fuel calculations. Legacy malformed settings
   // remain repairable during descriptive edits; they cannot authorize a new
@@ -214,10 +230,11 @@
       const original=find(next,'fuelMovements',movement.originalMovementId);
       if(!original?.assetRef||original.kind!=='issue')continue;
       const after=assetBalances(next,original.assetRef),before=assetBalances(previous,original.assetRef);
+      for(const record of after.records)if(record.date>=original.date&&after.balances[record.id]===null)issues.push({severity:'error',section:String(original.assetRef).startsWith('v:')?'records':'genRecords',recordId:record.id??'',code:'FUEL_REVERSAL_ASSET_UNKNOWN',field:'fuelIssued',message:'Нельзя доказать остаток после сторно: нет нормы или факта расхода на '+record.date,date:record.date});
       for(const record of after.records)if(record.date>=original.date&&after.balances[record.id]<-0.005&&after.balances[record.id]<(before.balances[record.id]??0)-0.005)issues.push({severity:'error',section:String(original.assetRef).startsWith('v:')?'records':'genRecords',recordId:record.id??'',code:'FUEL_REVERSAL_ASSET_DEFICIT',field:'fuelIssued',message:'Сторно создаёт нехватку топлива у техники на '+record.date,date:record.date});
     }
     if(issues.length){const error=new Error(issues.slice(0,5).map(issue=>issue.message).join('; '));error.name='FuelMovementPolicyError';error.code='POLICY_VIOLATION';error.issues=issues;error.details={issues};throw error;}
     return true;
   }
-  return Object.freeze({apiVersion:1,inspect,validateChanges,generatorSpent,generatorNormSpent});
+  return Object.freeze({apiVersion:1,inspect,validateChanges,generatorSpent,generatorNormSpent,generatorNormKnown});
 });

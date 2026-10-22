@@ -18,7 +18,7 @@ function app(data){
   document:{addEventListener(){},querySelector(){return null;},querySelectorAll(){return[];}},window:{},fmtDate:value=>value,cmpDateAsc:(a,b)=>String(a).localeCompare(String(b)),dispatcherLocalDate:()=> '2026-10-22',htmlEsc:String,
   alert:message=>{throw Error(message);},XLSX:{utils:{encode_cell:({r,c})=>r+','+c,encode_range:range=>JSON.stringify(range),book_new:()=>({SheetNames:[],Sheets:{}}),book_append_sheet:(book,sheet,name)=>{book.SheetNames.push(name);book.Sheets[name]=sheet;}},writeFile:(book,name)=>books.push({book:copy(book),name})}});
  vm.runInContext("function recsFor(id){return data.records.filter(row=>row.vehicleId===id);}function genRecsFor(id){return data.genRecords.filter(row=>row.generatorId===id);}function computeFuelBalances(id,from,to){return TvsFuelEngine.recordBalances(data,id,{from:from||'',to:to||''});}",context);
- for(const file of ['29-fuel-quality.js','09-ui-effects.js','10-pdf-reports.js','13-gen-export.js','16-generators.js','17-tanks.js'])vm.runInContext(read(file),context,{filename:file});
+ for(const file of ['29-fuel-quality.js','07-summary.js','09-ui-effects.js','10-pdf-reports.js','13-gen-export.js','16-generators.js','17-tanks.js'])vm.runInContext(read(file),context,{filename:file});
  context._savePdf=(html,name)=>pdfs.push({html,name});
  return {context,books,pdfs,xlsx(name,...args){const before=JSON.stringify(context.data);context[name](...args);assert.equal(JSON.stringify(context.data),before);assert.ok(books.length);return books.at(-1).book.Sheets[books.at(-1).book.SheetNames[0]];},pdf(name,...args){const before=JSON.stringify(context.data);context[name](...args);assert.equal(JSON.stringify(context.data),before);assert.ok(pdfs.length);return pdfs.at(-1).html;}};
 }

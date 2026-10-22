@@ -37,9 +37,8 @@ function fcVehicleAt(num, date) {
 }
 
 function fcCurrentVehicleId(c) {
-  const a = c.assignments || [];
-  const open = a.filter(x => !x.to);
-  return (open[open.length - 1] || {}).vehicleId || '';
+  const date=dispatcherLocalDate(),matches=(c.assignments||[]).filter(row=>(!row.from||row.from<=date)&&(!row.to||row.to>=date));
+  return matches.length===1?matches[0].vehicleId??'':'';
 }
 
 // Первичное заполнение: номера из карточек машин и карты из выписок.
@@ -134,7 +133,7 @@ function fcCardsHtml() {
       <td style="text-align:right;${over ? 'color:var(--red);font-weight:700' : ''}">${u ? fpNum(u, 1) : '—'}${over ? '<div style="font-size:11px">лимит превышен</div>' : ''}</td>
       <td>${last.has(c.number) ? fmtDate(last.get(c.number)) : '—'}</td>
       <td style="font-size:12px;color:var(--text3);max-width:200px;white-space:normal">${fpEsc(c.note || '')}${unassigned.get(c.number) ? `<div style="color:#d97706">без машины: ${unassigned.get(c.number)}</div>` : ''}</td>
-      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="fcEdit('${c.id}')">Изменить</button></td>
+      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="fcEdit(${htmlEsc(JSON.stringify(c.id))})">Изменить</button></td>
     </tr>`;
   }).join('');
 
@@ -163,24 +162,73 @@ async function fcSeedClick() {
   renderFuelPurchases();
 }
 
+let fcEditorState=null;
+function fcEditorStamp(){return JSON.stringify(['fuelCards','vehicles','fuelPurchases','records','fuelPeriods'].map(name=>data[name]||[]));}
+function fcGuard(state,requireOpen=false){
+  if(fcEditorState!==state||state.context!==wfCommandContextStamp()||state.database!==data||state.source!==fcEditorStamp())throw Error('Данные, база или права изменились. Откройте карту заново; введённые значения остаются в форме.');
+  if(requireOpen&&(!state.form?.isConnected||!document.getElementById('genericModal')?.classList.contains('open')||!document.getElementById('genericModal')?.contains(state.form)))throw Error('Форма карты закрыта. Откройте карту заново перед сохранением.');
+  if(!fuelAccountingWritable('fuelCards'))throw Error('Изменение топливных карт недоступно для вашей роли');
+}
+function fcPlanCard(original,input){
+  const card=JSON.parse(JSON.stringify(original||{id:input.id,number:input.number,assignments:[],org:input.org}));
+  const orgChanged=!!original&&input.org!==input.originalOrg;
+  const assignmentChanged=input.vehicleId!==input.originalVehicle;
+  const dated=!original||orgChanged||assignmentChanged||!!input.from;
+  if(!input.number||input.number.length<6)throw Error('Укажите полный номер карты');
+  if((!original||orgChanged)&&!input.org)throw Error('Укажите организацию карты');
+  if(dated&&(!input.from||!gsmValidDate(input.from)))throw Error('Укажите дату начала изменения; сегодняшняя дата не подставляется автоматически');
+  if(dated&&!input.basis.trim())throw Error('Укажите основание изменения организации или закрепления');
+  const previousDay=()=>fqShiftDate(input.from,-1);
+  if(orgChanged||!original&&input.from){
+    const history=card.orgHistory||(card.orgHistory=[]);
+    if(history.some(row=>row.from&&row.from>=input.from))throw Error('В истории уже есть период с этой или более поздней датой. Сначала проверьте существующие периоды.');
+    if(!history.length&&original&&input.originalOrg){
+      if(!input.preserveLegacy)throw Error('Подтвердите сохранение прежней организации до новой даты; её начальная дата неизвестна');
+      history.push({org:input.originalOrg,from:'',to:previousDay()});
+    }
+    const open=history.filter(row=>!row.to);
+    if(open.length>1)throw Error('В истории несколько открытых периодов организации. Сначала исправьте пересечение.');
+    if(open.length)open[0].to=previousDay();
+    if(history.some(row=>row.to&&row.to>=input.from))throw Error('Периоды организации пересекаются');
+    history.push({org:input.org,from:input.from,to:'',basis:input.basis.trim()});
+  }
+  if(assignmentChanged){
+    const assignments=card.assignments||(card.assignments=[]);
+    if(original&&assignments.some(row=>row.from&&row.from>=input.from))throw Error('Закрепление уже содержит эту или более позднюю дату');
+    const open=assignments.filter(row=>!row.to);if(open.length>1)throw Error('Несколько открытых закреплений карты требуют сверки');
+    if(open.length)open[0].to=previousDay();
+    if(input.vehicleId!==null&&input.vehicleId!=='')assignments.push({vehicleId:input.vehicleId,from:input.from||'',to:'',...(input.basis?{basis:input.basis.trim()}:{})});
+  }
+  Object.assign(card,{provider:input.provider,limit:input.limit,status:input.status,note:input.note});
+  return {card,dated,orgChanged,assignmentChanged,from:input.from,basis:input.basis};
+}
 function fcEdit(id) {
-  const c = id ? fcList().find(x => x.id === id) : null;
+  if(!fuelAccountingWritable('fuelCards')){showToast('Топливные карты доступны только для просмотра');return;}
+  const c = id!=null&&id!=='' ? fcList().find(x => x.id === id) : null;
+  if(id!=null&&id!==''&&!c){showToast('Карта не найдена');return;}
   const cur = c ? fcCurrentVehicleId(c) : '';
+  const originalOrg=c?gsmCardAt(data,c.number,dispatcherLocalDate()).org:'';
+  const choices=(data.vehicles||[]).map((vehicle,index)=>({token:'card-vehicle-'+index,id:vehicle.id,title:fpVehicleTitle(vehicle)}));
+  const state=fcEditorState={id:c?c.id:wfId('card'),original:c?JSON.parse(JSON.stringify(c)):null,originalOrg,originalVehicle:cur,choices,context:wfCommandContextStamp(),database:data,source:fcEditorStamp(),pending:false,reviewed:null};
   openGenericModal(c ? 'Карта ' + fcFormat(c.number) : 'Новая карта', `
+    <div id="fcEditor">
     <div class="form-row">
       <div class="form-group"><label>Номер карты</label><input type="text" id="fc_number" value="${c ? fcFormat(c.number) : ''}" ${c ? 'readonly' : ''}></div>
       <div class="form-group"><label>Поставщик</label><input type="text" id="fc_provider" value="${fpEsc(c ? c.provider : '')}" placeholder="Газпромнефть, Лукойл..."></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Организация карты</label><input type="text" id="fc_org" value="${fpEsc(c ? gsmCardAt(data, c.number, new Date().toISOString().slice(0, 10)).org : '')}" placeholder="ООО «...»" list="fc_org_list">
+      <div class="form-group"><label>Организация карты</label><input type="text" id="fc_org" value="${fpEsc(originalOrg)}" placeholder="ООО «...»" list="fc_org_list">
         <datalist id="fc_org_list">${[...new Set((data.vehicles||[]).map(v=>(v.org||'').trim()).filter(Boolean))].sort().map(o=>'<option value="'+fpEsc(o)+'">').join('')}</datalist></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Машина</label><select id="fc_vehicle">${fuelImportVehicleOptions(cur, true)}</select></div>
+      <div class="form-group"><label>Машина</label><select id="fc_vehicle"><option value="">Без закрепления</option>${choices.map(choice=>'<option value="'+choice.token+'"'+(choice.id===cur?' selected':'')+'>'+fpEsc(choice.title)+'</option>').join('')}</select></div>
       <div class="form-group"><label>С даты (изменение машины или организации)</label><input type="text" id="fc_from" placeholder="ДД.ММ.ГГГГ"></div>
     </div>
+    <div class="form-group"><label for="fc_basis">Основание изменения организации или закрепления</label><input id="fc_basis" maxlength="4000" placeholder="Документ или подтверждённое основание"></div>
+    ${c&&!(c.orgHistory||[]).length?'<label style="display:flex;gap:6px"><input type="checkbox" id="fc_preserve_legacy"> Сохранить прежнюю организацию до выбранной даты; её начальная дата неизвестна</label>':''}
+    ${c&&(c.orgHistory||[]).length?'<details><summary>История организации</summary>'+c.orgHistory.map(row=>'<p>'+fpEsc(row.from||'Начальная дата неизвестна')+' — '+fpEsc(row.to||'далее')+': '+fpEsc(row.org||'Не указана')+(row.basis?' · '+fpEsc(row.basis):'')+'</p>').join('')+'</details>':''}
     <div class="form-row">
-      <div class="form-group"><label>Лимит, л в месяц</label><input type="number" id="fc_limit" value="${c && c.limit ? c.limit : ''}"></div>
+      <div class="form-group"><label>Лимит, л в месяц</label><input type="number" step="any" min="0" id="fc_limit" value="${c?.limit ?? ''}"></div>
       <div class="form-group"><label>Состояние</label><select id="fc_status">
         <option value="active"${!c || c.status !== 'blocked' ? ' selected' : ''}>Действует</option>
         <option value="blocked"${c && c.status === 'blocked' ? ' selected' : ''}>Заблокирована</option></select></div>
@@ -189,69 +237,72 @@ function fcEdit(id) {
     <label style="font-size:13px;display:flex;gap:6px;align-items:center;margin:6px 0 12px">
       <input type="checkbox" id="fc_move"> перенести покупки по карте с этой даты на новую машину (кроме закрытых месяцев)</label>
     <div style="display:flex;justify-content:space-between;gap:8px">
-      ${c ? `<button class="btn btn-ghost" style="color:var(--red)" onclick="fcDelete('${c.id}')">Удалить карту</button>` : '<span></span>'}
+      ${c ? `<button class="btn btn-ghost" style="color:var(--red)" onclick="fcDelete(${htmlEsc(JSON.stringify(c.id))})">Удалить карту</button>` : '<span></span>'}
       <span><button class="btn btn-ghost" onclick="closeModal('genericModal')">Отмена</button>
-      <button class="btn btn-primary" onclick="fcSave('${c ? c.id : ''}')">Сохранить</button></span>
-    </div>`, 620);
+      <button id="fc_save" class="btn btn-primary" onclick="fcSave(${htmlEsc(JSON.stringify(state.id))})">Сохранить</button></span>
+    </div><div id="fc_preview" class="wf-note" hidden></div><label id="fc_confirmation" hidden><input id="fc_confirm" type="checkbox"> Подтверждаю дату, основание и проверенный план изменения</label><div id="fc_error" class="wf-error" role="alert"></div></div>`, 620);
+  state.form=document.getElementById('fcEditor');
+  state.form.addEventListener('input',event=>{if(event.target.id==='fc_confirm')return;state.reviewed=null;document.getElementById('fc_preview').hidden=true;document.getElementById('fc_confirmation').hidden=true;document.getElementById('fc_confirm').checked=false;});
 }
 
 async function fcSave(id) {
-  let c = id ? fcList().find(x => x.id === id) : null;
+  const state=fcEditorState;if(!state||state.pending||state.id!==id)return;
+  const errorNode=state.form.querySelector('#fc_error');errorNode.textContent='';
+  let unlock=null,saved=false;
+  try{
+  fcGuard(state,true);
   const number = fcNorm(document.getElementById('fc_number').value);
   const fromRaw = document.getElementById('fc_from').value.trim();
   const from = fromRaw ? parseDate(fromRaw) : '';
   if (fromRaw && (!from || !gsmValidDate(from))) { showFieldError('Дата в формате ДД.ММ.ГГГГ', 'fc_from'); return; }
   const org = document.getElementById('fc_org').value.trim();
-  if (!org) { showFieldError('Укажите организацию карты', 'fc_org'); return; }
-  const effective = from || new Date().toISOString().slice(0, 10);
-  const ownerPeriod = c && (c.orgHistory || []).filter(h => !h.to).pop();
-  if (ownerPeriod && ownerPeriod.org !== org && ownerPeriod.from && effective <= ownerPeriod.from) { showFieldError('Дата должна быть позже начала действующей организации', 'fc_from'); return; }
-  const before = JSON.stringify(data);
-  if (c) {
-    const oldOrg = gsmCardAt(data, number, effective).org;
-    gsmPreserveCardHistory(data, number);
-    if (oldOrg !== org && org) {
-      const yesterday = new Date(effective + 'T12:00:00Z'); yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-      const history = c.orgHistory || (c.orgHistory = [{ org: oldOrg, from: '', to: '' }]);
-      const open = history.filter(h => !h.to).pop();
-      if (open) open.to = yesterday.toISOString().slice(0, 10);
-      history.push({ org, from: effective, to: '' });
-    }
+  if (!org&&(!state.original||org!==state.originalOrg)) { showFieldError('Укажите организацию карты', 'fc_org'); return; }
+  if(!state.original&&fcByNumber(number))throw Error('Такая карта уже есть в справочнике');
+  const choice=document.getElementById('fc_vehicle').value,vid=choice?state.choices.find(row=>row.token===choice)?.id:'';
+  if(choice&&vid===undefined)throw Error('Выбранная машина не найдена');
+  const input={id:state.id,number,org,from,originalOrg:state.originalOrg,originalVehicle:state.originalVehicle,vehicleId:vid,
+    basis:document.getElementById('fc_basis').value.trim(),preserveLegacy:!!document.getElementById('fc_preserve_legacy')?.checked,
+    provider:document.getElementById('fc_provider').value.trim(),limit:precisionInput('fc_limit',{scale:3,blank:'null',...(state.original?{previous:state.original.limit}:{})}),status:document.getElementById('fc_status').value,note:document.getElementById('fc_note').value.trim(),move:document.getElementById('fc_move').checked};
+  const plan=fcPlanCard(state.original,input),text=JSON.stringify({card:plan.card,move:input.move});
+  if(input.move&&!from)throw Error('Для переноса покупок укажите дату начала');
+  if(input.move&&vid==='')throw Error('Для переноса покупок выберите машину-получателя');
+  if((plan.dated||input.move)&&(!state.reviewed||state.reviewed!==text||!document.getElementById('fc_confirm').checked)){
+    state.reviewed=text;document.getElementById('fc_preview').hidden=false;document.getElementById('fc_confirmation').hidden=false;document.getElementById('fc_confirm').checked=false;
+    document.getElementById('fc_preview').innerHTML='<p>Изменение с '+fpEsc(from)+'. Основание: '+fpEsc(input.basis)+'.</p><p>Периоды организации: '+(plan.card.orgHistory||[]).map(row=>fpEsc(row.org)+' ('+fpEsc(row.from||'начальная дата неизвестна')+' — '+fpEsc(row.to||'далее')+')').join('; ')+'</p><p>'+(input.move?'Покупки начиная с выбранной даты будут перенесены на выбранную машину; закрытые месяцы пропускаются.':'Покупки и журналы сохраняют исходные значения.')+'</p>';return;
   }
-  if (!c) {
-    if (number.length < 6) { showFieldError('Укажите номер карты', 'fc_number'); return; }
-    if (fcByNumber(number)) { alert('Такая карта уже есть в справочнике'); return; }
-    c = { id: 'fc_' + Date.now(), number, assignments: [] };
-    fcList().push(c);
-  }
-  c.provider = document.getElementById('fc_provider').value.trim();
-  c.org = org;
-  c.limit = parseFloat(document.getElementById('fc_limit').value) || null;
-  c.status = document.getElementById('fc_status').value;
-  c.note = document.getElementById('fc_note').value.trim();
-  const vid = document.getElementById('fc_vehicle').value;
+  if(typeof _pendingSaveOperations!=='undefined'&&_pendingSaveOperations.size)throw Error('Дождитесь завершения текущего сохранения');
+  const previous=platformSaveBaseline(),old=(previous.fuelCards||[]).filter(row=>row.id===state.id);
+  if(state.original?(old.length!==1||JSON.stringify(old[0])!==JSON.stringify(state.original)):old.length)throw Error('Сначала сохраните или отмените незавершённые изменения карты');
+  if(input.move&&['records','fuelPurchases'].some(name=>JSON.stringify(data[name]||[])!==JSON.stringify(previous[name]||[])))throw Error('Перед переносом сохраните или отмените изменения покупок и журналов');
+  const next=JSON.parse(JSON.stringify(previous));next.fuelCards=state.original?next.fuelCards.map(row=>row.id===state.id?plan.card:row):[...(next.fuelCards||[]),plan.card];
   let moved = 0, skipped = 0;
-  if (vid !== fcCurrentVehicleId(c)) {
-    const a = c.assignments || (c.assignments = []);
-    const open = a.filter(x => !x.to).pop();
-    if (open) {
-      if (from) { const d = new Date(from); d.setDate(d.getDate() - 1); open.to = d.toISOString().slice(0, 10); }
-      else a.splice(a.indexOf(open), 1);   // без даты — просто исправляем закрепление
-    }
-    if (vid) a.push({ vehicleId: vid, from: from || '', to: '' });
-    if (vid && document.getElementById('fc_move').checked) {
-      fpLive().filter(p => fcNorm(p.cardNo) === c.number && (!from || p.date >= from) && p.vehicleId !== vid).forEach(p => {
+  if (vid!==''&&input.move) {
+    const live=data;try{data=next;
+      fpLive().filter(p => fcNorm(p.cardNo) === number && p.date >= from && p.vehicleId !== vid).forEach(p => {
         if (fuelMonthClosed(p.date)) { skipped++; return; }
         const v = (data.vehicles || []).find(x => x.id === vid);
         fpUpdate(p, { vehicleId: vid, grade: parseFuelGrade(p.product) || p.grade || vehicleFuelGrade(v) });
         moved++;
       });
-    }
+    }finally{data=live;}
   }
-  if (await saveData(data) === false) { data = JSON.parse(before); rebuildIndex(); return; }
+  const names=['fuelCards','records','fuelPurchases'].filter(name=>JSON.stringify(previous[name]||[])!==JSON.stringify(next[name]||[]));
+  const auditBefore=JSON.stringify(data.auditLog||[]);state.pending=true;unlock=wfLockCommandForm(state.form);
+  if(state.operationText!==text){state.operationText=text;state.operationId=wfId('card-change');}
+  saved=await saveData(next,{noMerge:true,requiredCanonicalSections:names,operation:{id:state.operationId},history:{action:'Изменение топливной карты',reason:input.basis}});
+  if(saved!==true)throw Error('Изменение карты не подтверждено. Введённые значения остаются в форме.');
+  fcGuard(state);
+  const canonical=(next.fuelCards||[]).filter(row=>row.id===state.id);if(canonical.length!==1)throw Error('Сервер не вернул сохранённую карту');
+  data.fuelCards=state.original?data.fuelCards.map(row=>row.id===state.id?canonical[0]:row):[...(data.fuelCards||[]),canonical[0]];
+  for(const name of names.filter(name=>name!=='fuelCards'))data[name]=JSON.parse(JSON.stringify(next[name]));
+  if(JSON.stringify(data.auditLog||[])===auditBefore)data.auditLog=JSON.parse(JSON.stringify(next.auditLog||[]));rebuildIndex();
+  if(!document.getElementById('genericModal')?.contains(state.form))return;
   closeModal('genericModal');
+  fcEditorState=null;
   if (moved || skipped) alert('Перенесено покупок: ' + moved + (skipped ? '\nВ закрытых месяцах не тронуто: ' + skipped : ''));
   renderFuelPurchases();
+  }catch(error){errorNode.textContent=saved?'Сервер подтвердил запись, но сеанс или исходные данные изменились. Проверьте результат в исходной базе. '+error.message:error.message;}
+  finally{state.pending=false;unlock?.();}
 }
 
 async function fcDelete(id) {

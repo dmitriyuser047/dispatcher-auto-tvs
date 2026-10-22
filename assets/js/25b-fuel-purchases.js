@@ -81,9 +81,9 @@ function fpLinkedRecord(p) {
   return candidates.length === 1 ? candidates[0] : null;
 }
 function fpApply(p, sign) {
-  if (!p || !p.vehicleId || p.deleted) { if (sign < 0 && p) p.recordId = null; return null; }
+  if (!p || p.vehicleId==null || p.vehicleId==='' || p.deleted) { if (sign < 0 && p) p.recordId = null; return null; }
   if (sign > 0) {
-    let rec = p.recordId && (data.records || []).find(r => r.id === p.recordId);
+    let rec = p.recordId!=null&&p.recordId!=='' ? (data.records || []).find(r => r.id === p.recordId) : null;
     const v = (data.vehicles || []).find(x => x.id === p.vehicleId);
     if (!rec || rec.vehicleId !== p.vehicleId || rec.date !== p.date || recordFuelGrade(rec, v) !== p.grade) {
       rec = fpRecordFor(p.vehicleId, p.date, p.grade, true);
@@ -128,8 +128,8 @@ function fpCreate(tx, opts) {
     importKey: tx.importKey || null,
     date: opts.date || tx.date,
     time: tx.time || '',
-    vehicleId: opts.vehicleId || null,
-    recordId: opts.recordId || null,
+    vehicleId: opts.vehicleId==null||opts.vehicleId===''?null:opts.vehicleId,
+    recordId: opts.recordId==null||opts.recordId===''?null:opts.recordId,
     grade: opts.grade || parseFuelGrade(tx.fuel) || '',
     product: tx.fuel || '',
     qty: tx.qty,

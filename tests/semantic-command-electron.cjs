@@ -36,6 +36,11 @@ test('hidden Electron executes all three semantic commands through real preload,
       const saved=storage.readAll(dir)[section].find(row=>row.id===id);assert.equal(saved.fuelAccounting.opening,923.537);assert.equal(saved.fuelAccounting.from,'2026-09-01');assert.equal(saved[section==='vehicles'?'fuelBalance':'balanceInit'],section==='vehicles'?500:100);
     }
     assert.deepEqual(storage.readAll(dir).records,originalRows);
+    await page.evaluate(()=>fuelNormsOpen('vehicles',7));
+    const periods=page.locator('#effectiveParametersForm');await periods.locator('[data-ep-copy]').click();await periods.locator('[name="from"]').fill('2026-06-01');await periods.locator('[name="basis"]').fill('Synthetic confirmed original norm');await periods.locator('[data-ep-stage]').click();
+    await periods.locator('[name="from"]').fill('2026-11-01');await periods.locator('[name="norm"]').fill('20');await periods.locator('[name="basis"]').fill('Synthetic confirmed future norm');await periods.locator('[data-ep-stage]').click();await periods.locator('[data-ep-review]').click();await periods.locator('[name="confirm"]').check();await periods.locator('[data-ep-save]').click();await page.waitForFunction(()=>!document.querySelector('#wfModal.open'));
+    const datedVehicle=storage.readAll(dir).vehicles[0];assert.equal(datedVehicle.norm,10);assert.deepEqual(datedVehicle.fuelNorms.periods.map(row=>row.from),['2026-06-01','2026-11-01']);assert.deepEqual(storage.readAll(dir).records,originalRows);
+    const datedValues=await page.evaluate(()=>{const v=data.vehicles[0];return ['2026-09-10','2026-11-10'].map(date=>TvsFuelEngine.fqRecord({date,km:100},v).norm);});assert.deepEqual(datedValues,[10,20]);
     const result=await page.evaluate(async index=>{
       const issue={type:'IssueFuel',version:1,input:{tankId:5,target:{section:'vehicles',id:7},date:'2026-10-01',qty:80.537,reason:'Synthetic native command'}};
       const issued=await platformExecuteCommand(issue,{operationId:'native-issue-'+index});

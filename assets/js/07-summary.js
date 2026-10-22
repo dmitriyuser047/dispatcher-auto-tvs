@@ -2,6 +2,30 @@
 // Выделено из index.html
 
 // ─── SIDEBAR SUMMARY ────────────────────────────────────
+// Nullable report arithmetic: an uncovered dated norm is not a zero expense.
+function fuelReportSum(values){return values.some(value=>value==null)?null:DecimalCore.toNumberExact(DecimalCore.sum(values));}
+function fuelReportAdd(left,right){return left==null||right==null?null:DecimalCore.toNumberExact(DecimalCore.add(left,right));}
+function fuelReportField(section,asset,row,key){
+  if(!asset||asset.fuelNorms==null)return fqValue(row[key])||0;
+  if(key==='fuelIssued')return fqValue(row.fuelIssued)||0;
+  if(section==='generators')return key==='fuelUsed'?genNormSpent(asset,row):genActualSpent(asset,row);
+  const quality=fqRecord(row,asset);
+  return key==='fuelUsed'?quality.norm:key==='consumed'?(quality.partial?null:quality.total):quality.actual;
+}
+function fuelReportBalanceLabel(section,asset,to=''){
+  const boundary=fuelAccountingFor(section,asset),until=to||dispatcherLocalDate();
+  if(boundary.mode==='explicit'&&until<boundary.from)return 'Учёт не начат';
+  return asset?.fuelNorms!=null?'Неизвестно: нет нормы':'Учёт не начат';
+}
+function fuelReportGroupBalanceLabel(section,assets,to=''){
+  const missingNorm=assets.some(asset=>{
+    if(asset.fuelNorms==null||fuelReportBalanceLabel(section,asset,to)==='Учёт не начат')return false;
+    const records=section==='vehicles'?recsFor(asset.id):genRecsFor(asset.id);
+    const balances=section==='vehicles'?computeFuelBalances(asset.id):computeGenFuelBalances(asset.id);
+    return fuelAccountingCurrentBalance(section,asset,records,balances,to)===null;
+  });
+  return missingNorm?'Неизвестно: нет нормы':'Учёт не начат';
+}
 function renderSidebarSummary() {
   const el = document.getElementById('sidebarSummary');
   if (!data.vehicles.length) { el.innerHTML = ''; return; }
@@ -15,7 +39,7 @@ function renderSidebarSummary() {
   const issued  = { diesel: 0, gasoline: 0, gas: 0 };
   const used    = { diesel: 0, gasoline: 0, gas: 0 };
   const balance = { diesel: 0, gasoline: 0, gas: 0 };
-  const tracked = {diesel:0,gasoline:0,gas:0},unstarted={diesel:0,gasoline:0,gas:0};
+  const tracked = {diesel:0,gasoline:0,gas:0},unstarted={diesel:0,gasoline:0,gas:0},missingNorm={diesel:0,gasoline:0,gas:0},missingUsed={diesel:0,gasoline:0,gas:0};
 
   data.vehicles.forEach(v => {
     const ft = fuelTypeFromGrade(vehicleFuelGrade(v));
@@ -26,13 +50,13 @@ function renderSidebarSummary() {
       totalKmGlonass += (!canonicalDays.has(r.date)||r.glonassCanonical)?Number(r.kmGlonass)||0:0;
       if(fuelAccountingCurrentIncludes('vehicles',v,r.date)){
         issued[ft] += fqValue(r.fuelIssued) || 0;
-        used[ft] += fqRecord(r,v).total||0;
+        const quality=fqRecord(r,v);if(v.fuelNorms!=null&&(quality.total==null||quality.partial))missingUsed[ft]++;else used[ft] += quality.total||0;
       }
     });
     // end balance for this vehicle
     const bMap = computeFuelBalances(v.id);
     const physical=fuelAccountingCurrentBalance('vehicles',v,vRecs,bMap);
-    if(physical===null)unstarted[ft]++;else {balance[ft]+=physical;tracked[ft]++;}
+    if(physical===null){if(fuelReportBalanceLabel('vehicles',v)!=='Учёт не начат')missingNorm[ft]++;else unstarted[ft]++;}else {balance[ft]+=physical;tracked[ft]++;}
   });
 
   const vehicleFuelTypes = new Set(data.vehicles.map(v => fuelTypeFromGrade(vehicleFuelGrade(v))));
@@ -41,7 +65,7 @@ function renderSidebarSummary() {
   let fuelHtml = '';
   activeFuels.forEach(ft => {
     const bal = balance[ft];
-    const balColor = bal < 0 ? 'var(--red)' : bal === 0 ? 'var(--text3)' : 'var(--green)';
+    const balColor = missingNorm[ft]?'var(--text3)':bal < 0 ? 'var(--red)' : bal === 0 ? 'var(--text3)' : 'var(--green)';
     fuelHtml += `
       <div class="ss-fuel-block">
         <div class="ss-fuel-title" style="color:${fuelColors[ft]}">${fuelLabels[ft]}</div>
@@ -51,11 +75,11 @@ function renderSidebarSummary() {
         </div>
         <div class="ss-row">
           <span class="ss-label">Израсходовано</span>
-          <span class="ss-value">${used[ft].toLocaleString('ru',{maximumFractionDigits:1})} л</span>
+          <span class="ss-value">${missingUsed[ft]?'Неизвестно: нет нормы':used[ft].toLocaleString('ru',{maximumFractionDigits:1})+' л'}</span>
         </div>
         <div class="ss-row">
           <span class="ss-label">Остаток</span>
-          <span class="ss-value" style="color:${balColor}">${tracked[ft]?bal.toLocaleString('ru',{maximumFractionDigits:3})+' л':'Учёт ещё не начат'}</span>
+          <span class="ss-value" style="color:${balColor}">${missingNorm[ft]?'Неизвестно: нет нормы':tracked[ft]?bal.toLocaleString('ru',{maximumFractionDigits:3})+' л':'Учёт ещё не начат'}</span>
         </div>
         ${unstarted[ft]?'<small>Учёт ещё не начат: '+unstarted[ft]+'</small>':''}
       </div>`;

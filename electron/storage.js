@@ -203,7 +203,7 @@ function prepareWriteoffSections(previous, sections, options = {}) {
     const old = oldById.get(row.id);
     if (!old) {
       const withoutOwnDocument = { ...next, fuelWriteoffs:rows.filter(other => other.id !== row.id) };
-      return engine.forVersion(2).post(withoutOwnDocument, { ...row.scope, date:row.date, basisNote:row.basisNote },
+      return engine.forVersion(3).post(withoutOwnDocument, { ...row.scope, date:row.date, basisNote:row.basisNote },
         { id:row.id, number:row.number, postedAt:at, postedBy:actor, expectedFingerprint:row.sourceFingerprint });
     }
     if (old.status === 'posted' && row.status === 'void')
@@ -277,10 +277,12 @@ function checkClosedPeriods(previous, next) {
     if (JSON.stringify(old.filter(historical)) !== JSON.stringify(rows.filter(historical))) throw new Error('Месяц закрыт: ' + lastClosed + '. Сначала откройте его: более ранние операции влияют на начальный остаток.');
   }
   const fields = {
-    vehicles: ['fuelAccounting', 'fuelBalance', 'fuelBalanceSources', 'fuelGrade', 'fuel', 'org', 'orgHistory', 'norm', 'fuelcard'],
-    generators: ['fuelAccounting', 'fuelBalance', 'fuelGrade', 'fuel', 'org', 'orgHistory', 'norm', 'norm100', 'norm50', 'normIdle', 'power', 'tankId'],
+    // Effective norm and organization values are protected by TemporalPolicy
+    // under this same lock, allowing identical bridges and future-only appends.
+    vehicles: ['fuelAccounting', 'fuelBalance', 'fuelBalanceSources', 'fuelGrade', 'fuel', 'fuelcard'],
+    generators: ['fuelAccounting', 'fuelBalance', 'fuelGrade', 'fuel', 'org', 'orgHistory', 'tankId'],
     tanks: ['fuelAccounting', 'balanceInit', 'fuelGrade', 'fuel', 'org'],
-    fuelCards: ['number', 'provider', 'org', 'orgHistory', 'assignments'],
+    fuelCards: ['number', 'provider', 'assignments'],
   };
   const [closedYear,closedMonth] = lastClosed.split('-').map(Number);
   const end = new Date(Date.UTC(closedYear,closedMonth,0)).toISOString().slice(0,10);

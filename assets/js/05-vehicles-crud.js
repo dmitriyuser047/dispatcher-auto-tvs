@@ -17,6 +17,7 @@ function openAddVehicle() {
   document.getElementById('vm_tank_volume').value = '';
   document.getElementById('vm_to_km').value = '';
   document.getElementById('vm_to_months').value = '';
+  if(typeof effectiveParametersLegacyForm==='function')effectiveParametersLegacyForm('vehicles',editingVehicleId==null?null:data.vehicles.find(row=>row.id===editingVehicleId),'vehicleModal');
   openModal('vehicleModal');
 }
 
@@ -46,6 +47,7 @@ function openEditVehicle(id) {
   document.getElementById('vm_status').value = v.status || '';
   document.getElementById('vm_justification').value = v.justification || '';
   document.getElementById('vm_note').value = v.note || '';
+  if(typeof effectiveParametersLegacyForm==='function')effectiveParametersLegacyForm('vehicles',editingVehicleId==null?null:data.vehicles.find(row=>row.id===editingVehicleId),'vehicleModal');
   openModal('vehicleModal');
 }
 
@@ -58,6 +60,7 @@ async function saveVehicle() {
       !make ? 'vm_make' : !plate ? 'vm_plate' : 'vm_driver');
     return;
   }
+  if(typeof effectiveParametersScalarGuard==='function'&&!effectiveParametersScalarGuard('vehicles',data.vehicles.find(row=>row.id===editingVehicleId),{norm:'vm_norm',normCity:'vm_norm_city',normHighway:'vm_norm_highway',normIdle:'vm_norm_idle'}))return;
   const numeric = precisionRead({norm:['vm_norm',6],normCity:['vm_norm_city',6],normHighway:['vm_norm_highway',6],normIdle:['vm_norm_idle',6],odometer:['vm_odometer',3],fuelBalance:['vm_fuel_balance',3,'zero'],tankVolume:['vm_tank_volume',3],toIntervalKm:['vm_to_km',3],toIntervalMonths:['vm_to_months',0]}, editingVehicleId == null ? null : data.vehicles.find(x=>x.id===editingVehicleId));
   if(!numeric)return;
   const obj = {
