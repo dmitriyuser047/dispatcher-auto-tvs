@@ -43,6 +43,14 @@ export type ProcurementActionInput =
   | {action:'activateLegacy';kind:ProcurementKind;orderId:Identifier;receiptRefs:ProcurementReceiptReference[];reason:string;reviewFingerprint:string}
   | {action:'cancelRemaining';kind:ProcurementKind;orderId:Identifier;reason:string;reviewFingerprint:string}
   | {action:'supplierReturn';kind:ProcurementKind;orderId:Identifier;receipt:ProcurementReceiptReference;qty:number;date:string;reason:string;reviewFingerprint:string};
+export interface CostTarget {section:'tanks'|'parts'|'vehicles'|'generators';id:Identifier}
+export type CostExpenseSection='payments'|'repairs'|'vehicleTo'|'toRecords'|'workOrders'|'costEntries';
+export interface CostExpenseReference {section:CostExpenseSection;id:Identifier}
+export interface CostPolicyPayload {from:string;method:'fifo'|'weightedAverage';taxBasis:'gross'|'net';opening:{qty:number;amount:number|null;basis:string};basis:string}
+export interface CostAllocationPayload {source:CostExpenseReference;method:'manual'|'km'|'hours';from:string;to:string;targets:(AssetTarget&{amount?:number})[];basis:string}
+export type CostActionInput =
+  | {action:'savePolicy';target:CostTarget;payload:CostPolicyPayload;reason:string;reviewFingerprint:string}
+  | {action:'saveAllocation';allocationId?:Identifier;payload:CostAllocationPayload;reason:string;reviewFingerprint:string};
 export type DocumentActionInput =
   | {action:'saveDraft';section:DocumentSection;draftId?:Identifier;payload:JsonRow;correctionOf?:DocumentReference;reason?:string}
   | {action:'postDraft';section:DocumentSection;draftId:Identifier;reviewFingerprint:string}
@@ -58,7 +66,8 @@ export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelI
   | { type: 'DocumentAction'; version: 1; input: DocumentActionInput }
   | { type: 'PeriodAction'; version: 1; input: PeriodActionInput }
   | { type: 'FuelAction'; version: 1; input: FuelActionInput }
-  | { type: 'ProcurementAction'; version: 1; input: ProcurementActionInput };
+  | { type: 'ProcurementAction'; version: 1; input: ProcurementActionInput }
+  | { type: 'CostAction'; version: 1; input: CostActionInput };
 export interface CommandEnvelope { protocolVersion: 1; databaseToken: string; operation: OperationDescriptor; base: Revisions; command: PlatformCommand }
 export interface ContractError extends Error { code: string; field: string; status: number }
 
@@ -199,6 +208,8 @@ export function createPlatformContracts() {
     if(kind==='part'?reference.section!=='partMovements':reference.section!=='tankIncomes'&&reference.section!=='fuelMovements')fail('INVALID_COMMAND',field+'.section','Вид прихода не соответствует заказу');
     return {section:reference.section as ProcurementReceiptReference['section'],id:commandId(reference.id,field+'.id')};
   }
+  function costText(value:unknown,field:string):string {const result=commandText(value,field,true,2000);if(result.trim().length<3)fail('INVALID_COMMAND',field,'Укажите основание от 3 до 2000 знаков');return result;}
+  function costAmount(value:unknown,field:string):number {if(typeof value!=='number'||!Number.isFinite(value)||value<0||value>1e12)fail('INVALID_COMMAND',field,'Нужно неотрицательное число до 1 000 000 000 000');return value;}
   function validateCommand(value: unknown): PlatformCommand {
     const row = commandObject(commandJson(value,'command'),'command'); keys(row,['type','version','input'],'command');
     if (row.version !== 1) fail('COMMAND_VERSION', 'command.version', 'Версия команды не поддерживается');
@@ -258,6 +269,35 @@ export function createPlatformContracts() {
       const result:MergeCatalogInput={section:input.section as CatalogSection,sourceId:commandId(input.sourceId,path+'sourceId'),targetId:commandId(input.targetId,path+'targetId'),reason:commandText(input.reason,path+'reason',true),mutableRefs,reviewFingerprint:input.reviewFingerprint};
       if(result.sourceId===result.targetId)fail('INVALID_COMMAND',path+'targetId','Нельзя объединить карточку с самой собой');
       return {type:'MergeCatalog',version:1,input:result};
+    }
+    if(row.type==='CostAction'){
+      const reason=costText(input.reason,path+'reason'),fingerprint=reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint');let result:CostActionInput;
+      if(input.action==='savePolicy'){
+        keys(input,['action','target','payload','reason','reviewFingerprint'],'command.input');
+        const reference=commandObject(input.target,path+'target');keys(reference,['section','id'],path+'target');
+        if(!['tanks','parts','vehicles','generators'].includes(reference.section as string))fail('INVALID_COMMAND',path+'target.section','Выберите запас или технику');
+        const payload=commandObject(input.payload,path+'payload');keys(payload,['from','method','taxBasis','opening','basis'],path+'payload');
+        if(payload.method!=='fifo'&&payload.method!=='weightedAverage')fail('INVALID_COMMAND',path+'payload.method','Явно выберите метод оценки');
+        if(payload.taxBasis!=='gross'&&payload.taxBasis!=='net')fail('INVALID_COMMAND',path+'payload.taxBasis','Явно выберите налоговую основу стоимости');
+        const opening=commandObject(payload.opening,path+'payload.opening');keys(opening,['qty','amount','basis'],path+'payload.opening');
+        result={action:'savePolicy',target:{section:reference.section as CostTarget['section'],id:commandId(reference.id,path+'target.id')},payload:{from:commandDate(payload.from,path+'payload.from'),method:payload.method,taxBasis:payload.taxBasis,opening:{qty:costAmount(opening.qty,path+'payload.opening.qty'),amount:opening.amount===null?null:costAmount(opening.amount,path+'payload.opening.amount'),basis:costText(opening.basis,path+'payload.opening.basis')},basis:costText(payload.basis,path+'payload.basis')},reason,reviewFingerprint:fingerprint};
+      }else if(input.action==='saveAllocation'){
+        keys(input,['action','allocationId','payload','reason','reviewFingerprint'],'command.input');
+        const payload=commandObject(input.payload,path+'payload');keys(payload,['source','method','from','to','targets','basis'],path+'payload');
+        const source=commandObject(payload.source,path+'payload.source');keys(source,['section','id'],path+'payload.source');
+        if(!['payments','repairs','vehicleTo','toRecords','workOrders','costEntries'].includes(source.section as string))fail('INVALID_COMMAND',path+'payload.source.section','Выберите фактический источник расхода');
+        if(payload.method!=='manual'&&payload.method!=='km'&&payload.method!=='hours')fail('INVALID_COMMAND',path+'payload.method','Выберите способ распределения');
+        if(!Array.isArray(payload.targets)||!payload.targets.length||payload.targets.length>1000)fail('INVALID_COMMAND',path+'payload.targets','Выберите от 1 до 1000 получателей затрат');
+        const seen=new Set<string>(),method=payload.method,targets:CostAllocationPayload['targets']=payload.targets.map((value,index)=>{
+          const field=path+'payload.targets.'+index,row=commandObject(value,field);keys(row,method==='manual'?['section','id','amount']:['section','id'],field);
+          const reference=target({section:row.section,id:row.id},field),key=JSON.stringify([reference.section,reference.id]);if(seen.has(key))fail('INVALID_COMMAND',field,'Получатель выбран повторно');seen.add(key);
+          return method==='manual'?{...reference,amount:costAmount(row.amount,field+'.amount')}:reference;
+        });
+        const from=commandDate(payload.from,path+'payload.from'),to=commandDate(payload.to,path+'payload.to');if(to<from)fail('INVALID_COMMAND',path+'payload.to','Дата окончания раньше начала');
+        result={action:'saveAllocation',payload:{source:{section:source.section as CostExpenseSection,id:commandId(source.id,path+'payload.source.id')},method,from,to,targets,basis:costText(payload.basis,path+'payload.basis')},reason,reviewFingerprint:fingerprint};
+        if(input.allocationId!==undefined)result.allocationId=commandId(input.allocationId,path+'allocationId');
+      }else fail('INVALID_COMMAND',path+'action','Действие с себестоимостью не поддерживается');
+      return {type:'CostAction',version:1,input:result};
     }
     if(row.type==='ProcurementAction'){
       const reason=commandText(input.reason,path+'reason',true,2000);if(reason.trim().length<3)fail('INVALID_COMMAND',path+'reason','Укажите основание от 3 до 2000 знаков');

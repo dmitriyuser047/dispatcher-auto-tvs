@@ -94,9 +94,11 @@ function prepareTransaction(previous, supplied, options = {}) {
   // Client-generated audit suffixes are hints, never persisted as trusted facts.
   let sections = require('./period-access.cjs').mergePeriods(previous,require('./document-access.cjs').mergeDrafts(previous,Object.fromEntries(Object.entries(supplied).filter(([name]) => name !== 'auditLog')),options.principal||actor),options.principal||actor);
   const periodCommand=options.commandIntent?.command?.type==='PeriodAction'&&require('./period-access.cjs').canManage(options.principal||actor,options.commandIntent.command.input?.scope);
+  const costCommand=options.commandIntent?.command?.type==='CostAction'&&options.commandIntent.command.input?.action==='savePolicy'&&access.costActions(options.principal||actor).includes('savePolicy');
+  const costTarget=costCommand?options.commandIntent.command.input.target?.section:null;
   for (const [name, rows] of Object.entries(sections)) {
     if (JSON.stringify(previous[name] || []) === JSON.stringify(rows)) continue;
-    if (!access.authorize(actor, 'write', name)&&!(name==='fuelPeriods'&&periodCommand)) fail('ACCESS_DENIED', 'Роль не разрешает изменение раздела: ' + name, 403);
+    if (!access.authorize(actor, 'write', name)&&!(name==='fuelPeriods'&&periodCommand)&&!(name===costTarget&&costCommand)) fail('ACCESS_DENIED', 'Роль не разрешает изменение раздела: ' + name, 403);
     try { access.validateAssetChanges(actor, name, previous[name] || [], rows); }
     catch (error) { fail('ACCESS_DENIED', error.message, 403); }
   }
@@ -108,12 +110,12 @@ function prepareTransaction(previous, supplied, options = {}) {
   const id = info?.id || 'backend:' + crypto.randomUUID();
   // This proof is derived from the semantic execution option, never a section
   // request field. Raw/full writes cannot authorize their own catalog aliases.
-  const commandProof=['MergeCatalog','DocumentAction','PeriodAction','FuelAction','ProcurementAction'].includes(options.commandIntent?.command?.type)
+  const commandProof=['MergeCatalog','DocumentAction','PeriodAction','FuelAction','ProcurementAction','CostAction'].includes(options.commandIntent?.command?.type)
     ? {commandIntent:contracts().parseCommandEnvelope(options.commandIntent,registry)} : {};
   const plan = kernel().prepare(previous, sections, { id, identity:options.databaseToken || 'local-storage', actor,
     revisions:options.revisions || {}, now:at,today:at.slice(0,10),...commandProof,
     readable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'read', name)),
-    writable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'write', name)||name==='fuelPeriods'&&periodCommand) });
+    writable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'write', name)||name==='fuelPeriods'&&periodCommand||name===costTarget&&costCommand) });
   const changes = (plan.rowChanges || []).filter(row => row.section !== 'auditLog');
   const result = { ...plan.sections };
   delete result.auditLog;

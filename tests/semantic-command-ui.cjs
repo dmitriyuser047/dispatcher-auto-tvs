@@ -69,6 +69,31 @@ test('linked receipt drafts, posting and history actions require procurement cap
  assert.equal(results.replies.length,4);for(const reply of results.replies){assert.equal(reply.ok,false);assert.equal(reply.code,'UNSUPPORTED_PROCUREMENT');}assert.equal(results.requests,0);assert.equal(results.raw,0);
 });
 
+test('valuation commands refuse an older server before IPC and never fall back to ordinary card writes',async()=>{
+ const result=await page.evaluate(async()=>{
+  const command={type:'CostAction',version:1,input:{action:'savePolicy',target:{section:'parts',id:0},payload:{from:'2026-09-01',method:'fifo',taxBasis:'gross',opening:{qty:0,amount:0,basis:'Synthetic verified empty opening'},basis:'Synthetic documented policy'},reason:'Synthetic confirmed policy',reviewFingerprint:'sha256:'+'0'.repeat(64)}};
+  const response=await platformExecuteCommand(command,{operationId:'unsupported-cost-policy'});return{response,requests:__nativeRequests.length,raw:__nativeRawWrites};
+ });assert.equal(result.response.ok,false);assert.equal(result.response.code,'UNSUPPORTED_COST_ACCOUNTING');assert.equal(result.requests,0);assert.equal(result.raw,0);
+});
+
+test('acquisition obligations, receipt pricing and valued fuel issues require the new capability across drafts and corrections',async()=>{
+ const result=await page.evaluate(async()=>{
+  const fingerprint='sha256:'+'0'.repeat(64);_sync.platform.fuelOperations=1;
+  data.documentDrafts.push({id:0,section:'payments',payload:{source:'partReceipt',sourceId:0,sum:10}});
+  data.payments.push({id:'root',source:'tankIncome',sourceId:0,sum:10},{id:'revision',lifecycle:{correctionOf:{section:'payments',id:'root'}}});
+  data.tanks[0].costValuation={version:1};
+  const inputs=[
+   {action:'saveDraft',section:'payments',payload:{source:'tankIncome',sourceId:0,sum:10}},
+   {action:'postDraft',section:'payments',draftId:0,reviewFingerprint:fingerprint},
+   {action:'saveDraft',section:'payments',correctionOf:{section:'payments',id:'revision'},reason:'Synthetic revised obligation',payload:{sum:10}},
+   {action:'saveDraft',section:'partMovements',payload:{kind:'receipt',partId:0,qty:1,sum:10}}
+  ],replies=[];
+  for(const[index,input]of inputs.entries())replies.push(await platformExecuteCommand({type:'DocumentAction',version:1,input},{operationId:'old-cost-document-'+index}));
+  replies.push(await platformExecuteCommand(__nativeCommand,{operationId:'old-cost-fuel-issue'}));
+  return{replies,requests:__nativeRequests.length,raw:__nativeRawWrites};
+ });assert.equal(result.replies.length,5);for(const reply of result.replies){assert.equal(reply.ok,false);assert.equal(reply.code,'UNSUPPORTED_COST_ACCOUNTING');}assert.equal(result.requests,0);assert.equal(result.raw,0);
+});
+
 test('real helper double calls share one IPC and apply canonical rows and persisted baselines only after ACK',async()=>{
  const before=await page.evaluate(()=>({data:JSON.stringify(data),baseline:_lastPersisted}));await start();await page.evaluate(()=>{window.__nativeDuplicate=platformExecuteCommand(window.__nativeCommand,{operationId:'synthetic-native-command'});});
  assert.deepEqual(await page.evaluate(()=>({data:JSON.stringify(data),baseline:_lastPersisted,requests:window.__nativeRequests.length,raw:window.__nativeRawWrites})),{...before,requests:1,raw:0});await release();
@@ -81,13 +106,14 @@ test('unknown ACK retry reuses the exact envelope including original dependency 
  const second=await page.evaluate(async()=>{window.__nativeMode='ok';for(const name of PlatformCommands.dependencies(window.__nativeCommand))_sync.revs[name]+=10;return platformExecuteCommand(window.__nativeCommand,{operationId:'unknown-native-command'});});assert.equal(second.ok,true);assert.equal(second.operationReceipt.status,'replayed');const requests=await page.evaluate(()=>window.__nativeRequests);assert.equal(requests.length,2);assert.equal(requests[0],requests[1]);assert.equal(await page.evaluate(()=>window.__nativeCommits),1);assert.equal(await page.evaluate(()=>data.fuelMovements.length),1);
 });
 
-for(const kind of ['database','role','fieldPermissions','source'])test('a '+kind+' change during IPC prevents the late canonical ACK from overwriting current data',async()=>{
- if(kind==='fieldPermissions')await page.evaluate(()=>{_sync.access={user:{id:'same-admin',name:'Same admin',role:'admin'},readable:PlatformSchema.sections.slice(),writable:PlatformSchema.sections.slice(),fieldPermissions:{vehicles:['plate']}};});
+for(const kind of ['database','role','fieldPermissions','costActions','source'])test('a '+kind+' change during IPC prevents the late canonical ACK from overwriting current data',async()=>{
+ if(kind==='fieldPermissions'||kind==='costActions')await page.evaluate(()=>{_sync.access={user:{id:'same-admin',name:'Same admin',role:'admin'},readable:PlatformSchema.sections.slice(),writable:PlatformSchema.sections.slice(),fieldPermissions:{vehicles:['plate']},costActions:['savePolicy']};});
  const baseline=await page.evaluate(()=>_lastPersisted);await start('stale-native-'+kind);
  await page.evaluate(kind=>{
   if(kind==='database'){const replacement=structuredClone(data);replacement.vehicles[0].plate='NEW-SYNTHETIC-DATABASE';data=replacement;_sync.databaseToken='synthetic-command-IPC-B';_lastPersisted=JSON.stringify(replacement);}
   else if(kind==='role')_sync.access={user:{id:'synthetic-viewer',name:'Viewer',role:'viewer'},readable:PlatformSchema.sections.slice(),writable:[]};
   else if(kind==='fieldPermissions')_sync.access.fieldPermissions.vehicles.push('note');
+  else if(kind==='costActions')_sync.access.costActions.push('saveAllocation');
   else data.vehicles[0].note='New local source change';
  },kind);const captured=await page.evaluate(()=>({data:JSON.stringify(data),baseline:_lastPersisted}));await release();const result=await page.evaluate(async()=>({result:await window.__nativeOperation,data:JSON.stringify(data),baseline:_lastPersisted,movements:data.fuelMovements.length,records:data.records.length,commits:window.__nativeCommits,raw:window.__nativeRawWrites}));assert.equal(result.result.ok,false);assert.equal(result.data,captured.data);assert.equal(result.baseline,captured.baseline);assert.equal(result.movements,0);assert.equal(result.records,0);assert.equal(result.commits,1);assert.equal(result.raw,0);if(kind!=='database')assert.equal(result.baseline,baseline);if(kind==='source'){assert.equal(result.result.committed,true);assert.equal(result.result.needsReload,true);}
 });

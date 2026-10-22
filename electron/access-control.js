@@ -153,10 +153,15 @@ function procurementActions(principal) {
   const planning=writable('procurementOrders');
   return Object.fromEntries(['tank','part'].map(kind=>[kind,!planning?[]:['saveOrder','activateLegacy','cancelRemaining',...(writable(kind==='tank'?'fuelMovements':'partMovements')?['supplierReturn']:[])]]));
 }
+function costActions(principal) {
+  if(!['admin','accountant'].includes(principal?.role))return [];
+  const narrowed=principal?.writable,writable=name=>authorize(principal,'write',name)&&(!narrowed||narrowed.includes('*')||narrowed.includes(name));
+  return [...(writable('costProfiles')?['savePolicy']:[]),...(writable('costEntries')?['saveAllocation']:[])];
+}
 
 function publicUser(user) {
   return { id:user.id, name:user.name, role:user.role, enabled:user.enabled !== false,
     createdAt:user.createdAt || null, rotatedAt:user.rotatedAt || null, expiresAt:user.expiresAt || null };
 }
 
-module.exports = { ROLES, FINANCIAL_SECTIONS, hashToken, issueToken, normalizeServerUsers, authenticate, authorize, publicUser, validateAssetChanges, fieldPermissions,fuelActions,procurementActions };
+module.exports = { ROLES, FINANCIAL_SECTIONS, hashToken, issueToken, normalizeServerUsers, authenticate, authorize, publicUser, validateAssetChanges, fieldPermissions,fuelActions,procurementActions,costActions };

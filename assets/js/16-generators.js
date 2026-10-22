@@ -154,6 +154,7 @@ function renderGenDetail(g) {
       </div>
     </div>
 
+    ${typeof costValuationCardHtml==='function'?costValuationCardHtml({section:'generators',id:g.id}):''}
     <div>
       <div class="section-header"><div class="section-title">История по месяцам</div></div>
       <div class="month-tabs">${monthTabsHtml}</div>
@@ -186,6 +187,7 @@ function renderGenDetail(g) {
 
     ${renderToSection(g.id, totalHours + (g.hoursInit || 0))}`;
   if(typeof personnelMountAssetPeople==='function')personnelMountAssetPeople(document.querySelector('#mainContent .vehicle-detail-header'),'g:'+g.id);
+  if(typeof costValuationMountCards==='function')void costValuationMountCards();
 }
 
 // ─── ГРАФИК ТО ───────────────────────────────────────────

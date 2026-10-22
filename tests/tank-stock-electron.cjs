@@ -3,6 +3,12 @@ const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{createRequire}=require('node:module');
 const storage=require('../electron/storage'),sqlite=require('../electron/sqlite-storage.cjs'),root=path.resolve(__dirname,'..');
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
+// The running app may briefly own the database lock during its background
+// refresh. Retry only this observational read, never the tested command.
+async function readDatabase(directory){
+ const deadline=Date.now()+5000;
+ for(;;){try{return storage.readAll(directory);}catch(error){if(error.code!=='DB_BUSY'||Date.now()>=deadline)throw error;await new Promise(resolve=>setTimeout(resolve,25));}}
+}
 function fixture(){return{...Object.fromEntries(storage.SECTIONS.map(name=>[name,[]])),
  tanks:[{id:0,name:'SYNTHETIC NUMERIC TANK',fuel:'diesel',balanceInit:100},{id:'0',name:'SYNTHETIC TEXT TANK',fuel:'diesel',balanceInit:20}],
  tankIncomes:[{id:'receipt',tankId:0,date:'2026-09-03',amount:5,source:'SYNTHETIC INVOICE'},{id:'out',tankId:0,counterTankId:'0',date:'2026-09-04',amount:-5.125,kind:'out',linkId:'synthetic-pair'},{id:'in',tankId:'0',counterTankId:0,date:'2026-09-04',amount:5.125,kind:'in',linkId:'synthetic-pair'}],
@@ -28,14 +34,14 @@ test('hidden Electron records and applies a reviewed tank measurement through re
  }
  for(const[index,dir]of [jsonDir,sqlDir].entries()){
   if(index)await page.evaluate(async()=>{await window.electronAPI.switchUser(1);data=await loadData();rebuildIndex();});
-  assert.equal(await page.evaluate(()=>_sync.platform.fuelOperations),1);const original=storage.readAll(dir);
+  assert.equal(await page.evaluate(()=>_sync.platform.fuelOperations),1);const original=await readDatabase(dir);
   assert.equal(await page.evaluate(()=>wfTankBalanceAt(0,'2026-09-30')),99.875);
-  await reviewed('measure',{tankId:0},99.874);const measured=storage.readAll(dir),measurement=measured.fuelMovements.find(row=>row.kind==='measurement');
+  await reviewed('measure',{tankId:0},99.874);const measured=await readDatabase(dir),measurement=measured.fuelMovements.find(row=>row.kind==='measurement');
   assert.equal(measurement.qty,0);assert.deepEqual(measurement.measurement.target,{section:'tanks',id:0});assert.equal(measurement.measurement.calculatedQty,'99.875');assert.equal(measurement.measurement.differenceQty,'-0.001');assert.equal(await page.evaluate(()=>wfTankBalanceAt(0,'2026-09-30')),99.875);
-  await reviewed('applyDifference',{measurementId:measurement.id});const adjusted=storage.readAll(dir);assert.equal(adjusted.fuelMovements.length,2);assert.equal(await page.evaluate(()=>wfTankBalanceAt(0,'2026-09-30')),99.874);assert.equal(await page.evaluate(()=>wfTankBalanceAt('0','2026-09-30')),25.125);
+  await reviewed('applyDifference',{measurementId:measurement.id});const adjusted=await readDatabase(dir);assert.equal(adjusted.fuelMovements.length,2);assert.equal(await page.evaluate(()=>wfTankBalanceAt(0,'2026-09-30')),99.874);assert.equal(await page.evaluate(()=>wfTankBalanceAt('0','2026-09-30')),25.125);
   assert.deepEqual(adjusted.fuelMovements.find(row=>row.id===measurement.id),measurement);for(const name of ['tanks','tankIncomes','generators','genRecords'])assert.deepEqual(adjusted[name],original[name]);
-  const replay=await page.evaluate(async()=>{const adjustment=data.fuelMovements.find(row=>row.kind!=='measurement'),id=adjustment.lifecycle.operationId,envelope=_platformCommandIntents.get(id).envelope;return window.electronAPI.executeCommand(JSON.stringify(envelope));});assert.equal(replay.ok,true);assert.equal(storage.readAll(dir).fuelMovements.length,2);
-  const forged=await page.evaluate(async()=>{const snap=JSON.parse(await window.electronAPI.readSnapshot()),rows=structuredClone(snap.data.fuelMovements);rows.find(row=>row.kind==='measurement').measurement.observedQty=0;return window.electronAPI.writeSections(JSON.stringify({databaseToken:snap.databaseToken,base:{fuelMovements:snap.revisions.fuelMovements},sections:{fuelMovements:rows}}));});assert.equal(forged.ok,false);assert.deepEqual(storage.readAll(dir).fuelMovements,adjusted.fuelMovements);
+  const replay=await page.evaluate(async()=>{const adjustment=data.fuelMovements.find(row=>row.kind!=='measurement'),id=adjustment.lifecycle.operationId,envelope=_platformCommandIntents.get(id).envelope;return window.electronAPI.executeCommand(JSON.stringify(envelope));});assert.equal(replay.ok,true);assert.equal((await readDatabase(dir)).fuelMovements.length,2);
+  const forged=await page.evaluate(async()=>{const snap=JSON.parse(await window.electronAPI.readSnapshot()),rows=structuredClone(snap.data.fuelMovements);rows.find(row=>row.kind==='measurement').measurement.observedQty=0;return window.electronAPI.writeSections(JSON.stringify({databaseToken:snap.databaseToken,base:{fuelMovements:snap.revisions.fuelMovements},sections:{fuelMovements:rows}}));});assert.equal(forged.ok,false);assert.deepEqual((await readDatabase(dir)).fuelMovements,adjusted.fuelMovements);
  }
  assert.deepEqual(errors,[]);
 });

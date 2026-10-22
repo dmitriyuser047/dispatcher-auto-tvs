@@ -119,6 +119,7 @@ const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 
 function renderDetail(v) {
   const recs = recsFor(v.id);
+  const valuationHtml=typeof costValuationCardHtml==='function'?costValuationCardHtml({section:'vehicles',id:v.id}):'';
   const totalKm = recs.reduce((s, r) => s + (r.km || 0), 0);
   const fuelRecs=recs.filter(r=>fuelAccountingCurrentIncludes('vehicles',v,r.date));
   const totalFuel = fuelRecs.reduce((s, r) => s + (r.fuelActual || 0), 0);
@@ -332,7 +333,7 @@ function renderDetail(v) {
     }
     if (!toBadge && !toRecs.length) toBadge = `<span class="vd-journal-card-badge" style="background:var(--bg3);color:var(--text3)">Нет записей</span>`;
 
-    document.getElementById('mainContent').innerHTML = vehicleHeaderHtml + statsHtml + `
+    document.getElementById('mainContent').innerHTML = vehicleHeaderHtml + statsHtml + valuationHtml + `
       <div class="vd-journals-grid">
         <!-- Журнал пробега -->
         <div class="vd-journal-card" onclick="openVehicleJournal('journal')">
@@ -404,7 +405,7 @@ function renderDetail(v) {
     `;
   } else if (vehicleDetailView === 'journal') {
     // --- Full journal view ---
-    document.getElementById('mainContent').innerHTML = vehicleHeaderHtml + statsHtml + `
+    document.getElementById('mainContent').innerHTML = vehicleHeaderHtml + statsHtml + valuationHtml + `
     <div>
       <div class="section-header">
         <div class="section-title">История по месяцам</div>
@@ -465,13 +466,14 @@ function renderDetail(v) {
     </div>
     `;
   } else if (vehicleDetailView === 'to') {
-    document.getElementById('mainContent').innerHTML = vehicleHeaderHtml + statsHtml +
+    document.getElementById('mainContent').innerHTML = vehicleHeaderHtml + statsHtml + valuationHtml +
       renderVehicleToSection(v.id, (v.odometer || 0) + totalKm);
   } else if (vehicleDetailView === 'repairs') {
-    document.getElementById('mainContent').innerHTML = vehicleHeaderHtml + statsHtml +
+    document.getElementById('mainContent').innerHTML = vehicleHeaderHtml + statsHtml + valuationHtml +
       renderRepairSection(v.id);
   }
   if(typeof personnelMountAssetPeople==='function')personnelMountAssetPeople(document.querySelector('#mainContent .vehicle-detail-header'),'v:'+v.id);
+  if(typeof costValuationMountCards==='function')void costValuationMountCards();
 }
 
 function selectMonth(year, month) {

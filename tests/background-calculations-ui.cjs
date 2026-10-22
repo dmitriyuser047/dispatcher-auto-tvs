@@ -32,12 +32,12 @@ afterEach(async()=>{await page?.close();assert.deepEqual(errors,[]);});
 test('real browser worker returns the same isolated results for every calculation',async()=>{
  const result=await page.evaluate(async()=>{
   const before=JSON.stringify(data),answers=[];
-  for(const [name,options]of [['fuel',{from:'2026-10-01',to:'2026-10-31'}],['fuelRecords',{vehicleId:'async-v'}],['costs',{from:'2026-10-01',to:'2026-10-31'}],['procurement',{date:'2026-10-21'}],['writeoff',{month:'2026-10',date:'2026-10-21'}]]){
+  for(const [name,options]of [['fuel',{from:'2026-10-01',to:'2026-10-31'}],['fuelRecords',{vehicleId:'async-v'}],['costs',{from:'2026-10-01',to:'2026-10-31'}],['costValuation',{from:'2026-10-01',to:'2026-10-31'}],['procurement',{date:'2026-10-21'}],['writeoff',{month:'2026-10',date:'2026-10-21'}]]){
    const actual=await dispatcherQueryAsync(name,options),expected=dispatcherQuery(name,options);answers.push({name,same:JSON.stringify(actual)===JSON.stringify(expected)});
   }
   return {answers,unchanged:before===JSON.stringify(data),writes:window.__writes};
  });
- assert.deepEqual(result.answers.map(row=>[row.name,row.same]),[['fuel',true],['fuelRecords',true],['costs',true],['procurement',true],['writeoff',true]]);assert.equal(result.unchanged,true);assert.equal(result.writes,0);
+ assert.deepEqual(result.answers.map(row=>[row.name,row.same]),[['fuel',true],['fuelRecords',true],['costs',true],['costValuation',true],['procurement',true],['writeoff',true]]);assert.equal(result.unchanged,true);assert.equal(result.writes,0);
 });
 test('large cost workspace calculates off the UI thread and renders current totals',async()=>{
  await page.evaluate(()=>{data.records=Array.from({length:1500},(_,id)=>({id,vehicleId:'async-v',date:'2026-10-01',km:1,fuelActual:0}));costPeriodFrom='2026-10-01';costPeriodTo='2026-10-31';window.__ticks=0;window.__tick=setInterval(()=>window.__ticks++,1);switchSection('costs');});

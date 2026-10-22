@@ -160,6 +160,8 @@ function finRenderCurrentSection(){
         <div style="flex:1"></div>
         <button class="toggle-btn ${finView==='analytics'?'active':''}" onclick="finView=finView==='table'?'analytics':'table';renderFinancesSection()">Аналитика</button>
         <button class="btn btn-ghost btn-sm" onclick="finView='budget';renderFinancesSection()">Бюджет</button>
+        <button class="btn btn-ghost btn-sm" onclick="costOpenValuationReport()">Запасы и стоимость расхода</button>
+        ${typeof costActionAllowed==='function'&&costActionAllowed('saveAllocation')?'<button class="btn btn-ghost btn-sm" onclick="costAllocationOpen()">Распределить общий расход</button>':''}
         <button class="btn btn-ghost btn-sm" onclick="periodControlOpen('finance',finMonth==='all'?'':finMonth)">Периоды финансов</button><button class="btn btn-ghost btn-sm" onclick="documentDraftsOpen('payments')">Черновики</button><button class="btn btn-ghost btn-sm" onclick="importPaymentsFromJournals()">Импорт из журналов</button>
         <button class="btn btn-primary btn-sm" onclick="openAddPayment()">
           <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -441,6 +443,25 @@ function finEnsurePaymentFields(payment = {}) {
 }
 
 async function openAddPayment() { return newDocument('payments'); }
+
+function finReceiptObligationAllowed(){return typeof lifecycleCanWrite==='function'&&lifecycleCanWrite(['payments','documentDrafts']);}
+function finCreateReceiptObligation(section,id){
+  try{
+    lifecycleReady();
+    if(typeof _sync==='undefined'||_sync.platform?.costAccounting!==1)throw Error('Подключение не поддерживает обязательства по приходам. Обновите основную программу; прямого сохранения нет.');
+    if(!['tankIncomes','partMovements'].includes(section)||!EntityIdentity.identifier(id))throw Error('Выберите действующий приход');
+    if(!finReceiptObligationAllowed()||!lifecycleCanRead([...DocumentEngine.describe('payments').readSections,section,'documentDrafts']))throw Error('Нет доступа к созданию и проверке обязательства по этому приходу');
+    if(typeof DomainSources==='undefined'||typeof DomainSources.acquisitionObligation!=='function')throw Error('Не загружены правила обязательств по приходам. Обновите окно.');
+    const resolution=DocumentEngine.resolveDocument(data,{section,id}),proof=DomainSources.acquisitionObligation(data,{section,id:resolution.root.id}),source=section==='tankIncomes'?'tankIncome':'partReceipt',same=row=>row?.source===source&&row.sourceId===proof.root.id;
+    const existing=(data.payments||[]).filter(same);
+    if(existing.length){const rootIds=[...new Set(existing.map(row=>DocumentEngine.rootId(data,'payments',row.id)))];if(rootIds.length!==1)throw Error('Найдено несколько обязательств по приходу. Проверьте историю; новый дубль не создаётся.');showToast('По приходу уже есть обязательство. Сумма и фактические оплаты сохраняются.');return lifecycleOpen('payments',rootIds[0]);}
+    const drafts=(data.documentDrafts||[]).filter(row=>row.section==='payments'&&same(row.payload));
+    const active=drafts.filter(row=>row.status==='draft');if(active.length>1)throw Error('По приходу найдено несколько черновиков; сначала проверьте их историю.');
+    if(active.length){showToast('Открыт сохранённый черновик. Введённые суммы не заменяются текущей ценой прихода.');return lifecycleDraftOpen(active[0].id);}
+    if(drafts.some(row=>row.status==='discarded'))throw Error('Черновик обязательства по этому приходу был отменён. Автоматическое повторное создание отключено; проверьте историю отмены.');
+    return newDocument('payments',{date:proof.date,category:'Приобретение запасов',description:proof.description,invoiceNo:proof.invoiceNo,source,sourceId:proof.root.id,...(proof.amount===null?{}:{sum:proof.amount})});
+  }catch(error){showToast(error.message);return null;}
+}
 
 async function openEditPayment(id) {
   const p = (data.payments||[]).find(x => x.id === id);

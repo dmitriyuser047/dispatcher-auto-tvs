@@ -3,6 +3,8 @@ import type { AccountingBoundaryAPI } from './accounting-boundary';
 import type { DocumentEngineAPI } from './document-engine';
 import type { FuelStockAPI } from './fuel-stock';
 import type { DecimalCoreAPI } from './decimal-core';
+import type { EntityIdentityAPI } from './entity-identity';
+import type { JsonRow, JsonValue } from './platform-contracts';
 export type EntityId = string | number;
 export type ISODate = string & { readonly __isoDate: unique symbol };
 export type SourceKey = `${string}:${string}`;
@@ -67,16 +69,26 @@ export interface DomainSourcesAPI {
   projectFinancialSources(database: unknown): FinancialProjection;
   projectTankFlows(database: unknown, tankIds: unknown, options?: unknown): TankFlowEntry[];
   sourceKey(source: string, id: EntityId): SourceKey;
+  typedSourceKey(source: string, id: EntityId): string;
+  projectExpenses(database: unknown): ExpenseProjection;
+  resolveExpense(database: unknown, reference: unknown): ExpenseSource;
+  indexExpenses(database: unknown): {projection:ExpenseProjection;resolve(reference:unknown):ExpenseSource};
+  acquisitionObligation(database: unknown, reference: unknown): AcquisitionObligation;
 }
+export interface ExpenseIssue {severity:'error'|'warning';section:string;recordId:EntityId|null;code:string;message:string}
+export interface ExpenseSource {root:{section:string;id:EntityId};current:{section:string;id:EntityId};date:string;amount:number;assetRef:string|null;assetTarget:{section:'vehicles'|'generators';id:EntityId}|null;vehicleId:EntityId|null;recognitionKey:string;legacyKey:string;category:string;description:string;fingerprint:string;snapshot:JsonRow}
+export interface ExpenseProjection {sources:ExpenseSource[];excluded:{section:string;id:EntityId|null;code:string}[];diagnostics:ExpenseIssue[];complete:boolean}
+export interface AcquisitionObligation {root:{section:'tankIncomes'|'partMovements';id:EntityId};current:{section:'tankIncomes'|'partMovements';id:EntityId};date:string;amount:number|null;invoiceNo:string;description:string;snapshot:JsonRow;fingerprint:string}
 
 type UnknownRow = Record<string, unknown>;
 type IdentifiedRow = UnknownRow & { id: EntityId };
 
 /** The build adapter exposes this frozen API identically in Node and browsers. */
-export function createDomainSources(_accounting?: Readonly<AccountingBoundaryAPI>,getDocuments?:()=>Readonly<DocumentEngineAPI>|undefined,getStock?:()=>Readonly<FuelStockAPI>|undefined,decimal?:Readonly<DecimalCoreAPI>): Readonly<DomainSourcesAPI> {
-  const isRecord = (value: unknown): value is UnknownRow =>
-    value !== null && typeof value === 'object' && !Array.isArray(value)
-      && Object.prototype.toString.call(value) === '[object Object]';
+export function createDomainSources(_accounting?: Readonly<AccountingBoundaryAPI>,getDocuments?:()=>Readonly<DocumentEngineAPI>|undefined,getStock?:()=>Readonly<FuelStockAPI>|undefined,decimal?:Readonly<DecimalCoreAPI>,identity?:Readonly<EntityIdentityAPI>,getWriteoff?:()=>{sha256(text:string):string}): Readonly<DomainSourcesAPI> {
+  const isRecord = (value: unknown): value is UnknownRow => {
+    if(value===null||typeof value!=='object'||Array.isArray(value))return false;
+    const prototype:unknown=Object.getPrototypeOf(value);return prototype===null||typeof prototype==='object'&&prototype!==null&&Object.getPrototypeOf(prototype)===null;
+  };
   const isEntityId = (value: unknown): value is EntityId =>
     typeof value === 'string' || typeof value === 'number' && Number.isFinite(value);
   const identified = (row: UnknownRow): row is IdentifiedRow => isEntityId(row.id) && row.id !== '';
@@ -98,6 +110,15 @@ export function createDomainSources(_accounting?: Readonly<AccountingBoundaryAPI
     if (typeof source !== 'string' || !isEntityId(id)) throw new TypeError('Некорректный ключ источника');
     return `${source}:${String(id)}`;
   };
+  const typedSourceKey=(source:string,id:EntityId):string=>{
+    if(typeof source!=='string'||!source.trim()||!isEntityId(id)||typeof id==='string'&&!id.trim())throw new TypeError('Некорректный типизированный ключ источника');
+    return identity?.typedKey(source,id)??JSON.stringify([source,typeof id,id]);
+  };
+  function sourceReference(value:unknown):{section:string;id:EntityId} {
+    if(!isRecord(value))throw Object.assign(Error('Нужен типизированный источник'),{code:'SOURCE_REFERENCE'});
+    for(const key of Reflect.ownKeys(value)){const descriptor=Object.getOwnPropertyDescriptor(value,key);if(typeof key!=='string'||!['section','id'].includes(key)||!descriptor?.enumerable||descriptor.get||descriptor.set)throw Object.assign(Error('Исполняемая или неизвестная ссылка источника'),{code:'SOURCE_REFERENCE'});}
+    const section=Object.getOwnPropertyDescriptor(value,'section')?.value,id=Object.getOwnPropertyDescriptor(value,'id')?.value;if(typeof section!=='string'||!section.trim()||!isEntityId(id)||typeof id==='string'&&!id.trim())throw Object.assign(Error('Нужен типизированный источник'),{code:'SOURCE_REFERENCE'});return {section,id};
+  }
   function date(value: unknown): ISODate | null {
     if (typeof value !== 'string') return null;
     let valueText = value.trim();
@@ -174,7 +195,7 @@ export function createDomainSources(_accounting?: Readonly<AccountingBoundaryAPI
       const assetRef = explicitRef || (vehicleId !== null ? 'v:' + vehicleId
         : source === 'toRecord' && generatorId !== null ? 'g:' + generatorId : null);
       sources.push({ source, sourceId: rootId, sourceSection: section, key: sourceKey(source, rootId), date: day, sum: amount,
-        ...(revision?{revisionId:revision.revisionId,recognitionKey:revision.recognitionKey}:{}),
+        revisionId:revision?.revisionId??row.id,recognitionKey:typedSourceKey(section,rootId),
         category: source === 'repair' || source === 'workOrder' ? 'Ремонт' : 'ТО',
         description: source === 'repair' ? text(row.description) || 'Ремонт'
           : source === 'workOrder' ? text(row.title) || 'Принятый ремонтный заказ'
@@ -187,6 +208,91 @@ export function createDomainSources(_accounting?: Readonly<AccountingBoundaryAPI
     ];
     for (const [section, source] of sections) (effective.get(section)||rows(database, section)).forEach(row => add(row, source, section));
     return { sources, excluded };
+  }
+  /** Canonical actual expenses. Acquisitions, settlements and allocations are separate ledgers. */
+  function projectExpenses(database:unknown):ExpenseProjection {
+    const names=['repairs','vehicleTo','toRecords','workOrders','payments','costEntries','vehicles','generators','tankIncomes','partMovements'];
+    const safe=(value:unknown):JsonValue=>{
+      const seen=new Set<object>();let count=0;
+      const visit=(item:unknown,depth:number):JsonValue=>{
+        if(++count>2000000||depth>100)throw Object.assign(Error('Слишком большой снимок источников'),{code:'SOURCE_LIMIT'});
+        if(item===null||typeof item==='string'||typeof item==='boolean'||typeof item==='number'&&Number.isFinite(item))return item;
+        if(item===null||typeof item!=='object'||seen.has(item))throw Object.assign(Error('Источники должны содержать конечный JSON'),{code:'SOURCE_JSON'});
+        const array=Array.isArray(item),proto:unknown=Object.getPrototypeOf(item);
+        if(!array&&!(proto===null||typeof proto==='object'&&proto!==null&&Object.getPrototypeOf(proto)===null))throw Object.assign(Error('Недопустимый объект источника'),{code:'SOURCE_JSON'});
+        seen.add(item);for(const key of Reflect.ownKeys(item)){if(array&&key==='length')continue;const descriptor=Object.getOwnPropertyDescriptor(item,key);if(typeof key!=='string'||!descriptor?.enumerable||descriptor.get||descriptor.set||['__proto__','constructor','prototype','toJSON'].includes(key)||array&&!/^(0|[1-9]\d*)$/.test(key))throw Object.assign(Error('Исполняемые свойства источника недопустимы'),{code:'SOURCE_JSON'});}
+        let output:JsonValue;if(array){const list:JsonValue[]=[];for(let index=0;index<item.length;index++){const descriptor=Object.getOwnPropertyDescriptor(item,String(index));if(!descriptor)throw Object.assign(Error('Пропуск строки источника'),{code:'SOURCE_JSON'});list.push(visit(descriptor.value,depth+1));}output=list;}else{const result:JsonRow={};for(const key of Object.keys(item))result[key]=visit(Object.getOwnPropertyDescriptor(item,key)!.value,depth+1);output=result;}seen.delete(item);return output;
+      };return visit(value,0);
+    };
+    if(!isRecord(database))throw Object.assign(Error('Нужен снимок источников'),{code:'SOURCE_DATABASE'});
+    const db:Record<string,JsonRow[]>={};for(const name of names){const descriptor=Object.getOwnPropertyDescriptor(database,name);if(descriptor?.get||descriptor?.set)throw Object.assign(Error('Исполняемый раздел недопустим'),{code:'SOURCE_JSON'});const value=safe(descriptor?descriptor.value:[]);if(!Array.isArray(value)||value.some(item=>!isRecord(item)))throw Object.assign(Error('Нужен массив источников'),{code:'SOURCE_DATABASE'});db[name]=value as JsonRow[];}
+    const hash=getWriteoff?.();if(!hash||typeof hash.sha256!=='function')throw Object.assign(Error('Не загружено вычисление отпечатка источника'),{code:'MODULE_UNAVAILABLE'});
+    const stable=(value:JsonValue):string=>value===null||typeof value!=='object'?JSON.stringify(value):Array.isArray(value)?'['+value.map(stable).join(',')+']':'{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+stable(value[key]!)).join(',')+'}';
+    const result:ExpenseProjection={sources:[],excluded:[],diagnostics:[],complete:true},effective=new Map<string,JsonRow[]>(),roots=new Map<string,EntityId>(),sourceSections:Record<string,string>={repair:'repairs',to:'vehicleTo',toRecord:'toRecords',workOrder:'workOrders',tankIncome:'tankIncomes',partReceipt:'partMovements'};
+    const issue=(section:string,row:UnknownRow,code:string,message:string):void=>{result.diagnostics.push({severity:'error',section,recordId:optionalId(row.id),code,message});result.complete=false;};
+    const documents=getDocuments?.();
+    for(const name of [...names.slice(0,6),'tankIncomes','partMovements']){
+      const raw=db[name]!,explicit=raw.some(row=>Object.prototype.hasOwnProperty.call(row,'lifecycle')||Object.prototype.hasOwnProperty.call(row,'paymentSettlements'));
+      if(explicit&&documents?.apiVersion!==1)throw Object.assign(Error('Не загружены действующие версии источников'),{code:'MODULE_UNAVAILABLE'});
+      if(explicit&&documents&&name!=='costEntries'){const projection=documents.resolveSection(db,name);effective.set(name,projection.rows);for(const item of projection.identities)roots.set(typedSourceKey(name,item.id),item.rootId);for(const diagnostic of projection.diagnostics){result.diagnostics.push(diagnostic);result.complete=false;}}
+      else effective.set(name,raw);
+    }
+    const root=(section:string,row:JsonRow):EntityId|null=>identified(row)?roots.get(typedSourceKey(section,row.id))??row.id:null;
+    const primaryIndex=new Map<string,JsonRow[]>();for(const [section,list]of effective)for(const row of list){const id=root(section,row);if(id===null)continue;const key=typedSourceKey(section,id),group=primaryIndex.get(key)||[];group.push(row);primaryIndex.set(key,group);}
+    const hasPrimary=(section:string,id:EntityId):boolean=>primaryIndex.get(typedSourceKey(section,id))?.length===1;
+    for(const name of names.slice(0,6))for(const row of effective.get(name)||[]){
+      const id=root(name,row),exclude=(code:string):void=>{result.excluded.push({section:name,id,code});};
+      if(!live(row)||row.status==='cancelled'){exclude('cancelled-source');continue;}
+      if((name==='vehicleTo'||name==='toRecords')&&row.planned){exclude('planned-source');continue;}
+      if(name==='workOrders'&&row.status!=='accepted'){exclude('unaccepted-source');continue;}
+      if(name==='costEntries'&&(row.kind==='allocation'||row.costAllocation!==undefined||row.independent!==true||row.kind==='income')){exclude('not-independent-expense');continue;}
+      if(id===null){issue(name,row,'SOURCE_ID','У расхода нет устойчивого типизированного ID');continue;}
+      if((primaryIndex.get(typedSourceKey(name,id))||[]).length>1)issue(name,row,'SOURCE_AMBIGUOUS','Типизированный корень расхода повторяется; исходные суммы сохранены, источник распределения неоднозначен');
+      if(name==='workOrders'){
+        const links=[['repairId','repairs'],['vehicleToId','vehicleTo'],['toRecordId','toRecords']] as const;
+        const selected=links.filter(([field])=>row[field]!==null&&row[field]!==undefined&&row[field]!=='');
+        if(selected.length){for(const [field,section]of selected){const target=optionalId(row[field]);if(target===null||!hasPrimary(section,target))issue(name,row,'SOURCE_LINK','Первичный документ заказа не найден однозначно');}exclude('linked-primary');continue;}
+      }
+      if(name==='payments'&&typeof row.source==='string'&&Object.prototype.hasOwnProperty.call(sourceSections,row.source)&&row.sourceId!==null&&row.sourceId!==undefined&&row.sourceId!==''){
+        const section=sourceSections[row.source]!,sourceId=optionalId(row.sourceId),acquisition=section==='tankIncomes'||section==='partMovements';if(sourceId===null||!hasPrimary(section,sourceId))issue(name,row,'SOURCE_LINK','Источник обязательства не найден; требуется сверка');else{const primary=primaryIndex.get(typedSourceKey(section,sourceId))![0]!;if(section==='partMovements'&&primary.kind!=='receipt')issue(name,row,'SOURCE_LINK','Обязательство закупки должно ссылаться на фактический приход');let amount=number(section==='workOrders'?primary.actualCost??(primary.incurred===true?primary.cost:null):primary.cost);if(acquisition){amount=number(primary.grossSum);const net=number(primary.sum),vat=number(primary.vatAmount);if(amount===null&&net!==null&&vat!==null&&decimal)amount=decimal.toNumberExact(decimal.add(net,vat));if(amount===null&&net!==null&&number(primary.vatRate)===0)amount=net;if(amount===null)result.diagnostics.push({severity:'warning',section:name,recordId:id,code:'SOURCE_PURCHASE_AMOUNT_UNKNOWN',message:'У закупки нет подтверждённой суммы с НДС; обязательство не переписано и не включено повторно в расход'});}const saved=number(row.sum);if(amount!==null&&saved!==null&&decimal&&decimal.compare(amount,saved)!==0)result.diagnostics.push({severity:'warning',section:name,recordId:id,code:'SOURCE_DISCREPANCY',message:'Сохранённое обязательство отличается от действующей стоимости первичного документа'});}exclude(acquisition?'inventory-acquisition-obligation':'linked-primary');continue;
+      }
+      const amount=number(name==='workOrders'?row.actualCost??(row.incurred===true?row.cost:null):name==='payments'?row.sum:name==='costEntries'?row.amount:row.cost);
+      const day=date(name==='repairs'?row.invoiceDate:name==='workOrders'?(text(row.downtimeTo)||text(row.completedAt)).slice(0,10):row.date);
+      if(amount===null||amount<0){issue(name,row,'SOURCE_AMOUNT','Фактическая стоимость не задана или некорректна');continue;}
+      if(!day){issue(name,row,'SOURCE_DATE','У фактического расхода нет действительной даты');continue;}
+      let assetRef=typeof row.assetRef==='string'&&row.assetRef?row.assetRef:null;const vehicleId=optionalId(row.vehicleId),generatorId=optionalId(row.generatorId);let assetTarget:ExpenseSource['assetTarget']=null;
+      if(vehicleId!==null||generatorId!==null){const section=vehicleId!==null?'vehicles':'generators',id=vehicleId??generatorId!,matches=(db[section]||[]).filter(value=>value.id===id);if(matches.length===1)assetTarget={section,id};else issue(name,row,'SOURCE_ASSET','Техника расхода не найдена однозначно по типизированной ссылке');}
+      if(!assetRef&&identity&&assetTarget){try{assetRef=identity.assetRef(db,assetTarget.section,assetTarget.id);}catch{/* Exact typed binding remains known when the old string format cannot represent it. */}}
+      if(assetRef&&identity){const resolved=identity.resolveAsset(db,assetRef);if(resolved.status==='known'){if(assetTarget&&(assetTarget.section!==resolved.section||assetTarget.id!==resolved.id))issue(name,row,'SOURCE_ASSET','Прямое назначение и строковая ссылка расхода противоречат друг другу');else assetTarget={section:resolved.section as 'vehicles'|'generators',id:resolved.id};}else if(!assetTarget)issue(name,row,'SOURCE_ASSET','Строковая ссылка техники расхода неоднозначна или не найдена');}
+      const snapshot:JsonRow={};for(const [key,value]of Object.entries(row)){if(!['paid','paidAmount','paidDate','paymentSettlements','updatedAt','updatedBy'].includes(key))snapshot[key]=value;}
+      const canonical:JsonRow={root:{section:name,id},current:{section:name,id:row.id!},date:day,amount,assetRef,assetTarget,snapshot};
+      const aliases:Record<string,string>={repairs:'repair',vehicleTo:'to',toRecords:'toRecord',workOrders:'workOrder'};
+      result.sources.push({root:{section:name,id},current:{section:name,id:row.id as EntityId},date:day,amount,assetRef,assetTarget,vehicleId,recognitionKey:typedSourceKey(name,id),legacyKey:sourceKey(aliases[name]??name,id),category:text(row.category)||(name==='vehicleTo'||name==='toRecords'?'ТО':name==='repairs'||name==='workOrders'?'Ремонт':'Прочее'),description:text(row.description)||text(row.title)||text(row.type),fingerprint:'sha256:'+hash.sha256(stable(canonical)),snapshot});
+    }
+    return result;
+  }
+  function indexExpenses(database:unknown):{projection:ExpenseProjection;resolve(reference:unknown):ExpenseSource} {
+    const projection=projectExpenses(database),byRoot=new Map<string,ExpenseSource[]>(),problems=new Set(projection.diagnostics.filter(issue=>issue.severity==='error'&&issue.recordId!==null).map(issue=>typedSourceKey(issue.section,issue.recordId!)));
+    for(const source of projection.sources){const key=typedSourceKey(source.root.section,source.root.id),list=byRoot.get(key)||[];list.push(source);byRoot.set(key,list);}
+    const freeze=<T>(value:T):T=>{if(value&&typeof value==='object'&&!Object.isFrozen(value)){for(const item of Object.values(value))freeze(item);Object.freeze(value);}return value;};freeze(projection);
+    const resolve=(reference:unknown):ExpenseSource=>{const ref=sourceReference(reference),key=typedSourceKey(ref.section,ref.id),found=byRoot.get(key)||[];if(found.length!==1)throw Object.assign(Error('Источник не является единственным действующим самостоятельным расходом'),{code:found.length?'SOURCE_AMBIGUOUS':'SOURCE_NOT_RECOGNIZED',issues:projection.diagnostics});if(problems.has(key))throw Object.assign(Error('Источник расхода требует сверки'),{code:'SOURCE_INCOMPLETE',issues:projection.diagnostics});return found[0]!;};
+    return Object.freeze({projection,resolve});
+  }
+  function resolveExpense(database:unknown,reference:unknown):ExpenseSource {return indexExpenses(database).resolve(reference);}
+  function acquisitionObligation(database:unknown,reference:unknown):AcquisitionObligation {
+    const ref=sourceReference(reference);if(ref.section!=='tankIncomes'&&ref.section!=='partMovements')throw Object.assign(Error('Выберите корневой приход по типизированной ссылке'),{code:'SOURCE_REFERENCE'});
+    const documents=getDocuments?.(),hasher=getWriteoff?.();if(documents?.apiVersion!==1||!hasher||decimal?.apiVersion!==1)throw Object.assign(Error('Не загружены версии и суммы закупок'),{code:'MODULE_UNAVAILABLE'});
+    const section=ref.section,resolution=documents.resolveDocument(database,{section,id:ref.id}),current=resolution.current;
+    if(resolution.root.id!==ref.id||!live(current)||current.status==='cancelled'||section==='partMovements'&&current.kind!=='receipt')throw Object.assign(Error('Нужен корень действующего обычного прихода'),{code:'SOURCE_NOT_RECOGNIZED'});
+    if(section==='tankIncomes'&&(['in','out'].includes(text(current.kind))||optionalId(current.linkId)!==null||optionalId(current.counterTankId)!==null))throw Object.assign(Error('Половина внутреннего перемещения не является закупкой'),{code:'SOURCE_NOT_RECOGNIZED'});
+    const quantities=section==='partMovements'?[number(current.qty)]:['amount','liters','litres','qty'].filter(key=>current[key]!==undefined&&current[key]!==null&&current[key]!=='').map(key=>number(current[key]));
+    if(!quantities.length||quantities.some(value=>value===null||value<=0)||quantities.some(value=>decimal.compare(value,quantities[0])!==0))throw Object.assign(Error('Количество прихода не подтверждено однозначными полями'),{code:'SOURCE_QUANTITY'});
+    const active=documents.resolveSection(database,section);if(active.diagnostics.some(item=>resolution.history.some(row=>row.id===item.recordId))||!active.rows.some(row=>row.id===current.id))throw Object.assign(Error('Приход отменён или его версии требуют сверки'),{code:'SOURCE_NOT_RECOGNIZED'});
+    const rawDate=date(current.date);if(!rawDate)throw Object.assign(Error('У прихода нет действительной даты'),{code:'SOURCE_DATE'});
+    let amount=number(current.grossSum);const net=number(current.sum),vat=number(current.vatAmount);if(amount===null&&net!==null&&vat!==null)amount=decimal.toNumberExact(decimal.add(net,vat));if(amount===null&&net!==null&&number(current.vatRate)===0)amount=net;
+    if(amount!==null&&amount<0)throw Object.assign(Error('Сумма закупки некорректна'),{code:'SOURCE_AMOUNT'});
+    const snapshot:JsonRow={...current},root:AcquisitionObligation['root']={section,id:ref.id},revision:AcquisitionObligation['current']={section,id:current.id as EntityId},stable=(value:JsonValue):string=>value===null||typeof value!=='object'?JSON.stringify(value):Array.isArray(value)?'['+value.map(stable).join(',')+']':'{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+stable(value[key]!)).join(',')+'}';
+    return {root,current:revision,date:rawDate,amount,invoiceNo:text(current.invoiceNo),description:text(current.source)||text(current.reason)||text(current.note)||'Приход запасов',snapshot,fingerprint:'sha256:'+hasher.sha256(stable({root,current:revision,date:rawDate,amount,snapshot}))};
   }
   function projectTankFlows(database: unknown, tankIds: unknown, options: unknown = {}): TankFlowEntry[] {
     const ids: unknown[] = Array.isArray(tankIds) ? tankIds : [tankIds];
@@ -234,5 +340,5 @@ export function createDomainSources(_accounting?: Readonly<AccountingBoundaryAPI
     });
     return entries.sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
   }
-  return Object.freeze({ apiVersion: 1, projectFinancialSources, projectTankFlows, sourceKey });
+  return Object.freeze({ apiVersion: 1, projectFinancialSources, projectTankFlows, sourceKey,typedSourceKey,projectExpenses,resolveExpense,indexExpenses,acquisitionObligation });
 }

@@ -165,6 +165,7 @@ function renderTankDetailProjected(t) {
         <div style="font-size:18px;font-weight:700">${boundGens.length}</div>
       </div>
     </div>
+    ${typeof costValuationCardHtml==='function'?costValuationCardHtml({section:'tanks',id:t.id}):''}
     ${b.diagnostics.length?'<div class="wf-note" role="alert">'+b.diagnostics.map(issue=>htmlEsc(issue.message)).join('<br>')+'</div>':''}
     <div class="ss-title" style="margin:18px 0 8px">Все события ёмкости</div>
     <table class="data-table" style="width:100%">
@@ -173,6 +174,7 @@ function renderTankDetailProjected(t) {
     </table>
     <div class="ss-title" style="margin:22px 0 4px">Привязанные ДЭС (выдача из ёмкости)</div>
     <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">${boundHtml}</div>`;
+  if(typeof costValuationMountCards==='function')void costValuationMountCards();
 }
 
 // Подсказки объектов для ёмкости (из ТС, местонахождений ДЭС и ёмкостей)

@@ -1,8 +1,8 @@
 /* Pure document-based operating cost calculation, shared by UI and storage validation. */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(()=>require('../core/decimal-core.js'),()=>require('../core/effective-periods.js'),()=>require('../core/document-engine.js'));
-  else root.TvsCostEngine = factory(()=>root.DecimalCore,()=>root.EffectivePeriods,()=>root.DocumentEngine);
-})(typeof globalThis === 'object' ? globalThis : this, function (getDecimal,getPeriods,getDocuments) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(()=>require('../core/decimal-core.js'),()=>require('../core/effective-periods.js'),()=>require('../core/document-engine.js'),()=>require('../core/cost-valuation.js'),()=>require('../core/cost-operations.js'),()=>require('../core/financial-recognition.js'),()=>require('../core/entity-identity.js'));
+  else root.TvsCostEngine = factory(()=>root.DecimalCore,()=>root.EffectivePeriods,()=>root.DocumentEngine,()=>root.CostValuation,()=>root.CostOperations,()=>root.DomainSources,()=>root.EntityIdentity);
+})(typeof globalThis === 'object' ? globalThis : this, function (getDecimal,getPeriods,getDocuments,getValuation,getCostOperations,getSources,getIdentity) {
   'use strict';
   const SOURCES = ['vehicles', 'generators', 'records', 'genRecords', 'repairs', 'vehicleTo', 'toRecords', 'workOrders', 'payments', 'fuelPurchases', 'partMovements', 'costEntries', 'costProfiles'];
   const LABELS = { records:'Журнал ТС', genRecords:'Журнал ДЭС', repairs:'Ремонт', vehicleTo:'ТО транспорта', toRecords:'ТО ДЭС', workOrders:'Ремонтный заказ', payments:'Финансы', fuelPurchases:'Покупка ГСМ', costEntries:'Ручная операция', partMovements:'Движение запчастей' };
@@ -57,6 +57,8 @@
       checkObject(row); text(row, 'id', 200, true);
       if (ids.has(row.id) || ['__proto__', 'constructor', 'prototype'].includes(row.id)) throw Error('ID операций должны быть уникальными');
       ids.add(row.id);
+      // Semantic allocation rows have their own independently replanned proof.
+      if(section==='costEntries'&&row.kind==='allocation'&&row.costAllocation?.version===1)return;
       if (typeof row.assetRef !== 'string' || !/^[vg]:.+/.test(row.assetRef) || !refs.has(row.assetRef)) throw Error('Выберите существующий транспорт или ДЭС');
       text(row, 'note', 10000);
       if (section === 'costEntries') {
@@ -223,7 +225,7 @@
     for (const row of db.workOrders.filter(live)) {
       const entry = sourceEntry('workOrders', row, { date:dateOf(row.downtimeTo || row.completedAt), amount:number(row.actualCost != null && row.actualCost !== '' ? row.actualCost : row.incurred === true ? row.cost : null), category:'Ремонт' });
       if (row.status !== 'accepted') { if (inPeriod(entry.date)) exclude(entry, 'Заказ не принят: согласованная сумма не является фактическим расходом', false); continue; }
-      if (row.repairId || row.vehicleToId || row.toRecordId) { if (inPeriod(entry.date)) exclude(entry, 'Заказ связан с первичным журналом; используется сумма журнала', true); continue; }
+      if ([row.repairId,row.vehicleToId,row.toRecordId].some(value=>value!==undefined&&value!==null&&value!=='')) { if (inPeriod(entry.date)) exclude(entry, 'Заказ связан с первичным журналом; используется сумма журнала', true); continue; }
       const possible = documents.find(document => document.assetRef === entry.assetRef && document.date === entry.date && document.category === 'Ремонт');
       if (possible && !entry.invoiceNo) { if (inPeriod(entry.date)) exclude(entry, 'На эту дату уже есть ремонт в журнале. Подтвердите отдельный расход ручной операцией, если заказ самостоятельный', true); continue; }
       add(entry, true);
@@ -282,6 +284,7 @@
     for (const row of db.payments.filter(live)) {
       const entry = sourceEntry('payments', row, { date:dateOf(row.date), amount:number(row.sum), category:row.category || 'Прочее' });
       if (!inPeriod(entry.date)) { if (!entry.date) add(entry); continue; }
+      if(['tankIncome','partReceipt'].includes(row.source)&&row.sourceId!==undefined&&row.sourceId!==null&&row.sourceId!==''){exclude(entry,'Обязательство связано с приобретением запаса; поступление и расходование показаны в полной себестоимости отдельно от оплаты',false);continue;}
       if (row.sourceId!=null&&row.sourceId!=='' && own(sourceSections, row.source)) {
         const section = sourceSections[row.source], source = db[section].find(item => (documentIdentities.get(section)?.get(item.id)?.rootId??item.id) === row.sourceId && live(item));
         if(source){const amount=number(section==='workOrders'?source.actualCost??(source.incurred===true?source.cost:null):source.cost);if(amount!=null&&entry.amount!=null&&differenceExceeds(amount,entry.amount,'0.005'))issue(entry.assetRef,'source-discrepancy','Сумма сохранённого расхода отличается от действующей версии первичного документа; требуется сверка',entry.sourceKey);}
@@ -294,6 +297,7 @@
     }
     for (const row of db.costEntries.filter(live)) {
       const entry = sourceEntry('costEntries', row, { date:dateOf(row.date), amount:number(row.amount), kind:row.kind, category:row.category || (row.kind === 'income' ? 'Выручка' : 'Прочее'), note:row.note || '' });
+      if(row.kind==='allocation'&&row.costAllocation?.version===1){if(inPeriod(entry.date))exclude(entry,'Распределение первичного расхода показано в полной себестоимости; новый расход не создаётся',false);continue;}
       if (!['expense', 'income'].includes(row.kind) || row.independent !== true) { if (inPeriod(entry.date)) exclude(entry, 'Ручная операция не подтверждена как самостоятельная', true); continue; }
       // A manual operation is explicitly certified as independent by the user.
       add(entry);
@@ -319,5 +323,71 @@
       unavailable:allowed ? SOURCES.filter(section => !allowed.has(section)) : [],
       method:'Учтённые расходы по датам первичных документов. Покупки ГСМ признаются в дату покупки и не означают стоимость израсходованного топлива. Журналы пробега и наработки — единственный источник км/ч. Полная себестоимость и прибыль могут отличаться: неучтённые расходы не заменяются нулями.' };
   }
-  return Object.freeze({ buildReport, validateSection, number, validDate, scenario, datedScenario, sourceLabels:LABELS });
+  /** Inventory consumption, document expenses and cash remain separate views. */
+  function buildFullReport(database,options={}){
+    const db=database||{},allowed=Array.isArray(options.readable)?new Set(options.readable):null,can=name=>!allowed||allowed.has(name),from=options.from||null,to=options.to||null;
+    if(from&&!validDate(from)||to&&!validDate(to)||from&&to&&from>to)throw Error('Проверьте период полной себестоимости');
+    const ids=getIdentity(),valuationApi=getValuation(),costs=getCostOperations(),sourcesApi=getSources();
+    if(ids?.apiVersion!==1||valuationApi?.apiVersion!==1||costs?.apiVersion!==1||typeof sourcesApi?.projectExpenses!=='function')throw Object.assign(Error('Не загружено ядро полной себестоимости'),{code:'MODULE_UNAVAILABLE'});
+    const key=target=>ids.typedKey(target.section,target.id),issues=[],unavailable=[],unassigned=[],inPeriod=date=>typeof date==='string'&&(!from||date>=from)&&(!to||date<=to),rows=[],byTarget=new Map();
+    const notice=(code,message,source=null,target=null)=>{const item={severity:'error',code,message,...(source?{source}:{}),...(target?{target}:{})};issues.push(item);const row=target&&byTarget.get(key(target));if(row){row.complete=false;row.issues.push(item);}return item;};
+    let selected=null,selection=null;if(options.assetRef){const resolved=ids.resolveAsset(db,options.assetRef,{v:'vehicles',g:'generators'});if(resolved.status!=='known')throw Object.assign(Error('Техника для отчёта не найдена однозначно'),{code:'AMBIGUOUS_ASSET'});selected={section:resolved.section,id:resolved.id};selection=new Set([key(selected)]);}
+    if(options.targets!==undefined){if(!Array.isArray(options.targets))throw Object.assign(Error('Нужны типизированные цели отчёта'),{code:'COST_TARGET'});selection=new Set();for(const target of options.targets){if(!target||!['tanks','parts','vehicles','generators'].includes(target.section)||!ids.identifier(target.id))throw Object.assign(Error('Некорректная цель отчёта'),{code:'COST_TARGET'});if(!can(target.section))throw Object.assign(Error('Цель отчёта недоступна'),{code:'ACCESS_DENIED'});if(list(db,target.section).filter(value=>value.id===target.id).length!==1)throw Object.assign(Error('Цель отчёта не найдена однозначно'),{code:'COST_TARGET'});if(selection.has(key(target)))throw Object.assign(Error('Цели отчёта повторяются'),{code:'COST_TARGET'});selection.add(key(target));}}
+    const selectedTarget=target=>!selection||!!target&&selection.has(key(target));
+    if(!selection&&options.kind){const section=options.kind==='vehicle'?'vehicles':options.kind==='generator'?'generators':null;if(!section)throw Object.assign(Error('Неизвестный вид техники'),{code:'COST_TARGET'});selection=new Set(list(db,section).filter(value=>ids.identifier(value.id)).map(value=>key({section,id:value.id})));}
+    const journalGroups={};for(const [section,parent]of [['records','vehicleId'],['genRecords','generatorId']]){const index=new Map();if(can(section))for(const value of list(db,section))if(live(value)&&ids.identifier(value[parent])&&inPeriod(dateOf(value.date))){const group=index.get(value[parent])||[];group.push(value);index.set(value[parent],group);}journalGroups[section]=index;}
+    for(const section of ['vehicles','generators'])if(can(section))for(const asset of list(db,section)){
+      const target={section,id:asset.id};if(!ids.identifier(asset.id)||!selectedTarget(target)||options.kind&&options.kind!==(section==='vehicles'?'vehicle':'generator'))continue;
+      const row={target,label:section==='vehicles'?[asset.plate,asset.make].filter(Boolean).join(' · '):asset.name||String(asset.id),quantity:null,unit:section==='vehicles'?'км':'ч',recognizedAmount:null,consumptionAmount:null,knownSubtotal:0,total:null,complete:true,entries:[],issues:[]};rows.push(row);if(byTarget.has(key(target)))notice('COST_TARGET_AMBIGUOUS','Типизированный ID техники повторяется',null,target);else byTarget.set(key(target),row);
+      const journal=section==='vehicles'?'records':'genRecords',field=section==='vehicles'?'km':'hours',facts=journalGroups[journal].get(asset.id)||[];
+      if(can(journal)&&facts.length&&facts.every(value=>number(value[field])!==null))row.quantity=exactSum(facts.map(value=>number(value[field])));
+    }
+    const targets=[];for(const section of ['tanks','parts','vehicles','generators'])if(can(section)){
+      const descriptor=valuationApi.describe(section);if(descriptor.readSections.every(can)){for(const asset of list(db,section))if(ids.identifier(asset.id))targets.push({section,id:asset.id});}else unavailable.push(...descriptor.readSections.filter(name=>!can(name)));
+    }
+    const physicalReady=targets.length>0||['tanks','parts','vehicles','generators'].every(can)&&['tanks','parts','vehicles','generators'].every(section=>valuationApi.describe(section).readSections.every(can));
+    const valuationAll=targets.length?valuationApi.project(db,{...(from?{from}:{}),...(to?{to}:{}),targets},{...(allowed?{readable:[...allowed]}:{})}):{apiVersion:1,from,to,rows:[],diagnostics:[],complete:physicalReady},shown=valuationAll.rows.filter(row=>selectedTarget(row.target)),valuation={...valuationAll,rows:shown,diagnostics:valuationAll.diagnostics.filter(issue=>!issue.target||selectedTarget(issue.target)),complete:physicalReady&&shown.every(row=>row.status==='known')};
+    if(!physicalReady)unavailable.push(...['tanks','parts','vehicles','generators'].filter(name=>!can(name)));
+    issues.push(...valuation.diagnostics);
+    const financeReads=['costEntries','tankIncomes','partMovements','payments','repairs','vehicleTo','toRecords','workOrders','vehicles','generators','records','genRecords','fuelPeriods','assetAssignments','contragents'],financeReady=financeReads.every(can);
+    const recognized=financeReady?sourcesApi.projectExpenses(db):{sources:[],excluded:[],diagnostics:[],complete:false,unavailable:financeReads.filter(name=>!can(name))};
+    const expenseBySource=new Map();for(const source of recognized.sources)for(const ref of [source.root,source.current]){const k=key(ref),group=expenseBySource.get(k)||[];if(!group.includes(source))group.push(source);expenseBySource.set(k,group);}
+    const allocations=financeReady?costs.allocations(db,{...(from?{from}:{}),...(to?{to}:{})},{...(allowed?{readable:[...allowed]}:{})}):{rows:[],issues:[],complete:false,unavailable:financeReads.filter(name=>!can(name))};
+    if(!financeReady)unavailable.push(...financeReads.filter(name=>!can(name)));issues.push(...recognized.diagnostics,...allocations.issues);
+    const allocated=new Map(allocations.rows.map(value=>[key(value.source),value])),add=(target,entry,origin=null)=>{
+      if(!selectedTarget(target)){if(origin&&selectedTarget(origin))target=origin;else return;}const row=target&&byTarget.get(key(target));if(row){row.entries.push(entry);if(entry.amount===null)row.complete=false;}else unassigned.push({...entry,target:target||null});
+    };
+    if(financeReady)for(const source of recognized.sources){if(!inPeriod(source.date))continue;const distribution=allocated.get(key(source.root));if(distribution){if(distribution.status!=='known'){notice('COST_ALLOCATION_STALE','Распределение первичного расхода требует нового подтверждения',source.root);continue;}for(const target of distribution.targets)add({section:target.section,id:target.id},{source:source.root,date:source.date,kind:'recognized',amount:target.amount,basis:distribution.basis,allocationId:distribution.rootId});continue;}
+      const resolved=source.assetRef?ids.resolveAsset(db,source.assetRef,{v:'vehicles',g:'generators'}):null;add(source.assetTarget||(resolved?.status==='known'?{section:resolved.section,id:resolved.id}:null),{source:source.root,date:source.date,kind:'recognized',amount:source.amount,basis:source.description||source.category||'Первичный расход'});
+    }
+    const rawBySource=new Map();for(const section of ['partMovements','workOrders','repairs','vehicleTo','toRecords'])for(const value of list(db,section))if(ids.identifier(value.id)){const k=key({section,id:value.id}),old=rawBySource.get(k);rawBySource.set(k,old?null:value);}
+    for(const store of valuationAll.rows){
+      const assetTarget=['vehicles','generators'].includes(store.target.section)?store.target:null;
+      if(assetTarget&&byTarget.has(key(assetTarget))&&store.status!=='known')notice('COST_VALUATION_INCOMPLETE','Стоимость топлива или его остатка определена не полностью',null,assetTarget);
+      for(const entry of store.consumptions){let target=assetTarget||entry.counterparty||null,raw=null;if(store.target.section==='parts'){
+        raw=ids.identifier(entry.source.id)?rawBySource.get(key(entry.source)):null;if(raw?.assetRef){const resolved=ids.resolveAsset(db,raw.assetRef,{v:'vehicles',g:'generators'});target=resolved.status==='known'?{section:resolved.section,id:resolved.id}:null;}
+        if(!selectedTarget(target)&&!selectedTarget(store.target))continue;
+        if(raw&&ids.presentId(raw.workOrderId)){
+          const order=rawBySource.get(key({section:'workOrders',id:raw.workOrderId})),primary=order?[['repairId','repairs'],['vehicleToId','vehicleTo'],['toRecordId','toRecords']].filter(([field])=>ids.presentId(order[field])):[],bindings=primary.length?primary.map(([field,section])=>({section,id:order[field]})):[{section:'workOrders',id:raw.workOrderId}],matched=[...new Set(bindings.flatMap(ref=>expenseBySource.get(key(ref))||[]))],included=matched.length===1?matched[0].snapshot.costIncludesMaterials:undefined;
+          if(included===true)continue;
+          if(included!==false){notice('COST_MATERIAL_SCOPE_UNKNOWN','Не подтверждено, включена ли стоимость запчастей в первичный расход по ремонту; сумма не прибавлена повторно',entry.source,target);continue;}
+        }
+      }
+      if(!selectedTarget(target)&&!selectedTarget(store.target))continue;add(target,{source:entry.source,date:entry.date,kind:'consumption',amount:entry.amount,basis:entry.basis,quantityBasis:entry.quantityBasis||'unknown'},store.target);if(entry.amount===null)notice('COST_CONSUMPTION_UNKNOWN','Стоимость расходованного запаса неизвестна',entry.source,target);
+      }
+    }
+    const cash={scope:'all-accessible-obligations',rows:[],knownTotal:null,complete:financeReady};if(financeReady){
+      for(const root of list(db,'payments')){if(root.lifecycle?.correctionOf)continue;const ref={section:'payments',id:root.id},baseline=root.paidAmount!==undefined&&root.paidAmount!==null?number(root.paidAmount):root.paid===true?number(root.sum):0;
+        if(baseline===null){cash.complete=false;notice('COST_CASH_UNKNOWN','Историческая сумма оплаты неизвестна',ref);}
+        else if(baseline>0){const date=dateOf(root.paidDate);if(!date){cash.complete=false;cash.rows.push({source:ref,date:null,kind:'baseline',amount:baseline,basis:'Историческая оплата без даты'});}else if(inPeriod(date))cash.rows.push({source:ref,date,kind:'baseline',amount:baseline,basis:'Сохранённая фактическая оплата'});}
+        if(root.paymentSettlements){const events=root.paymentSettlements.version===1&&Array.isArray(root.paymentSettlements.events)?root.paymentSettlements.events:null;if(!events){cash.complete=false;notice('COST_CASH_HISTORY','Повреждена история фактических оплат',ref);}else for(const event of events){if(number(event.amount)===null||!validDate(event.date)){cash.complete=false;notice('COST_CASH_HISTORY','У события оплаты нет корректных суммы или даты',ref);continue;}if(inPeriod(event.date))cash.rows.push({source:ref,date:event.date,kind:'settlement',amount:event.amount,basis:event.reason||'',operationId:event.operationId});}}
+      }
+      cash.knownTotal=exactSum(cash.rows.filter(value=>value.date!==null).map(value=>value.amount));
+    }
+    for(const row of rows){const stock=valuationAll.rows.find(value=>key(value.target)===key(row.target)),stockVisible=stock?.status==='known';row.recognizedAmount=financeReady?exactSum(row.entries.filter(value=>value.kind==='recognized'&&value.amount!==null).map(value=>value.amount)):null;const consumption=row.entries.filter(value=>value.kind==='consumption');row.consumptionAmount=!stockVisible||consumption.some(value=>value.amount===null)?null:exactSum(consumption.map(value=>value.amount));row.knownSubtotal=exactSum(row.entries.filter(value=>value.amount!==null).map(value=>value.amount));row.complete=row.complete&&stockVisible&&financeReady&&recognized.complete&&allocations.complete;row.total=row.complete?row.knownSubtotal:null;}
+    const entries=[...rows.flatMap(row=>row.entries),...unassigned],knownSubtotal=exactSum(entries.filter(value=>value.amount!==null).map(value=>value.amount)),inventoryComplete=valuation.complete,complete=financeReady&&recognized.complete&&allocations.complete&&inventoryComplete&&rows.every(row=>row.complete)&&!issues.some(value=>value.severity==='error');
+    const acquisitions=valuation.rows.flatMap(row=>row.acquisitions),stockAmounts=valuation.rows.map(row=>row.closing.amount);
+    return {apiVersion:1,calculationVersion:1,from,to,valuation,allocations,recognized,cash,rows,unassigned,issues,unavailable:[...new Set(unavailable)].sort(),totals:{recognizedAmount:financeReady?exactSum(entries.filter(value=>value.kind==='recognized'&&value.amount!==null).map(value=>value.amount)):null,consumptionAmount:!physicalReady||!valuation.complete||rows.some(row=>row.consumptionAmount===null)||entries.some(value=>value.kind==='consumption'&&value.amount===null)?null:exactSum(entries.filter(value=>value.kind==='consumption').map(value=>value.amount)),knownSubtotal,total:complete?knownSubtotal:null,acquisitions:!physicalReady||acquisitions.some(value=>value.amount===null)?null:exactSum(acquisitions.map(value=>value.amount)),stock:!physicalReady||stockAmounts.some(value=>value===null)?null:exactSum(stockAmounts),cash:cash.complete?cash.knownTotal:null,complete},method:'Первичные расходы, стоимость израсходованных запасов и фактические оплаты показаны раздельно. Поступление на склад не признаётся повторным расходом.'};
+  }
+  return Object.freeze({ buildReport,buildFullReport, validateSection, number, validDate, scenario, datedScenario, sourceLabels:LABELS });
 });

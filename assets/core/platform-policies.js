@@ -1,9 +1,9 @@
 /* Shared dispatch, acceptance and inventory rules from the existing workflows. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'),()=>require('./catalog-policy.js'),()=>require('./entity-identity.js'),()=>require('./period-policy.js'),()=>require('./platform-integrity.js'),()=>require('./inventory-stock.js'),()=>require('./procurement-operations.js'));
-  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy,()=>root.CatalogPolicy,()=>root.EntityIdentity,()=>root.PeriodPolicy,()=>root.PlatformIntegrity,()=>root.InventoryStock,()=>root.ProcurementOperations);
-})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal,getCatalog,getIdentity,getPeriods,getIntegrity,getInventory,getProcurement) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'),()=>require('./catalog-policy.js'),()=>require('./entity-identity.js'),()=>require('./period-policy.js'),()=>require('./platform-integrity.js'),()=>require('./inventory-stock.js'),()=>require('./procurement-operations.js'),()=>require('./cost-operations.js'));
+  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy,()=>root.CatalogPolicy,()=>root.EntityIdentity,()=>root.PeriodPolicy,()=>root.PlatformIntegrity,()=>root.InventoryStock,()=>root.ProcurementOperations,()=>root.CostOperations);
+})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal,getCatalog,getIdentity,getPeriods,getIntegrity,getInventory,getProcurement,getCosts) {
   'use strict';
   const rows = (db, section) => Array.isArray(db?.[section]) ? db[section] : [];
   const present = value => value != null && String(value).trim() !== '';
@@ -107,6 +107,7 @@
     if (personnel && personnel.apiVersion === 1) issues.push(...personnel.inspect(db,context).issues);
     for (const module of [getFuelMovements(),getDocuments(),getWorkflow(),getTemporal(),periodsModule()]) if (module && module.apiVersion === 1) issues.push(...module.inspect(db,context).issues);
     const catalog=catalogModule(db);if(catalog)issues.push(...catalog.inspect(db,context).issues);
+    let costs;try{costs=getCosts();}catch{}if(costs?.apiVersion===1&&typeof costs.inspect==='function')issues.push(...costs.inspect(db,context).issues);
     return { issues,counts:{ error:issues.filter(issue=>issue.severity==='error').length,warning:issues.filter(issue=>issue.severity==='warning').length,total:issues.length } };
   }
   function validateChanges(previous,next,context) {
@@ -116,7 +117,7 @@
     const blocking = current.filter(issue => {
       // Personnel uses field/assignment delta semantics below. Its read-only
       // report may show legacy rows and active links that need manual review.
-      if (/^(PERSONNEL_|FUEL_|DOCUMENT_|WORKFLOW_|TEMPORAL_|CATALOG_|PERIOD_|PART_|PROCUREMENT_)/.test(issue.code)) return false;
+      if (/^(PERSONNEL_|FUEL_|DOCUMENT_|WORKFLOW_|TEMPORAL_|CATALOG_|PERIOD_|PART_|PROCUREMENT_|COST_)/.test(issue.code)) return false;
       const before = prior.get(key(issue));
       if (!before) return true;
       if (issue.code === 'PART_STOCK_DEFICIT') return issue.deficit > before.deficit + 1e-9;
@@ -140,6 +141,9 @@
     }
     const catalog=catalogModule(previous,next);if(catalog)catalog.validateChanges(previous,next,context);
     const procurement=getProcurement();if(!procurement||procurement.apiVersion!==1)throw Object.assign(Error('Не загружены правила исполнения закупок'),{code:'MODULE_UNAVAILABLE'});procurement.validateChanges(previous,next,context);
+    let costs;try{costs=getCosts();}catch{}
+    if(costs?.apiVersion===1)costs.validateChanges(previous,next,context);
+    else if([previous,next].some(db=>['tanks','parts','vehicles','generators'].some(name=>rows(db,name).some(row=>Object.hasOwn(row,'costValuation')))||rows(db,'costEntries').some(row=>Object.hasOwn(row,'costAllocation')||row.kind==='allocation')))throw Object.assign(Error('Не загружены правила стоимости'),{code:'MODULE_UNAVAILABLE'});
     return true;
   }
   return Object.freeze({ apiVersion:1,inspect,inspectStock,inspectFuel,periodRowIdentity,scopePeriods,validatePeriodChanges,validateStockChanges,validateFuelChanges,validateChanges });

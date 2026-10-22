@@ -195,7 +195,7 @@ function prepareWriteoffSections(previous, sections, options = {}) {
   const principal = options.principal || { id:'local-profile', name:'Локальный пользователь', role:'admin' };
   for (const name of SECTIONS.filter(name => Object.hasOwn(sections, name))) {
     if (JSON.stringify(previous[name] || []) === JSON.stringify(sections[name])) continue;
-    if (!access.authorize(principal, 'write', name)&&!(name==='fuelPeriods'&&options.commandIntent?.command?.type==='PeriodAction'&&require('./period-access.cjs').canManage(principal,options.commandIntent.command.input?.scope))) throw new Error('Роль не разрешает изменение раздела: ' + name);
+    if (!access.authorize(principal, 'write', name)&&!(name==='fuelPeriods'&&options.commandIntent?.command?.type==='PeriodAction'&&require('./period-access.cjs').canManage(principal,options.commandIntent.command.input?.scope))&&!(options.commandIntent?.command?.type==='CostAction'&&options.commandIntent.command.input?.action==='savePolicy'&&options.commandIntent.command.input.target?.section===name&&access.costActions(principal).includes('savePolicy'))) throw new Error('Роль не разрешает изменение раздела: ' + name);
     access.validateAssetChanges(principal, name, previous[name] || [], sections[name]);
   }
   const documentSources = ['fuelWriteoffs', 'vehicles', 'records', 'fuelPurchases', 'fuelCards', 'monthlyFuel'];
@@ -421,7 +421,7 @@ function readSnapshot(dataDir,options={}) {
   let data = readAll(dataDir);
   if(options.principal)data=Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?require('./platform-service.cjs').visibleRows(name,data[name],options.principal):[]]));
   const version=schemaVersion(dataDir);
-  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:version,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,needsSchemaUpgrade:version<2 } };
+  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:version,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,needsSchemaUpgrade:version<2 } };
 }
 function readOperation(dataDir,query,principal){
   const token=databaseToken(dataDir),audit=readSection(dataDir,'auditLog');

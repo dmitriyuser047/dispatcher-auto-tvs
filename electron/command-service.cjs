@@ -39,6 +39,8 @@ function execute(dataDir,input,options={}){
   if(periodAction&&!require('./period-access.cjs').canManage(principal,command.input.scope))fail('ACCESS_DENIED','Недостаточно прав для управления выбранной областью периода.',403);
   if(command.type==='FuelAction'&&!permitted(principal,'write','fuelMovements'))fail('ACCESS_DENIED','Недостаточно прав для проведения операций с топливом.',403);
   if(command.type==='ProcurementAction'&&!access.procurementActions(principal)[command.input.action==='saveOrder'?command.input.payload.kind:command.input.kind]?.includes(command.input.action))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия с закупкой.',403);
+  const costPolicy=command.type==='CostAction'&&command.input.action==='savePolicy';
+  if(command.type==='CostAction'&&!access.costActions(principal).includes(command.input.action))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия со стоимостью.',403);
   const dependencies=commands.dependencies(command),footprint=commands.footprint(command);
   if(!Array.isArray(dependencies)||!Array.isArray(footprint)||dependencies.some(name=>!schema.sections.includes(name)||name==='auditLog'&&!catalogMerge)||footprint.some(name=>name==='auditLog'||!dependencies.includes(name)))fail('COMMAND_DEFINITION','Некорректно определены зависимости команды',500);
   requireAccess(principal,'read',dependencies);
@@ -56,7 +58,7 @@ function execute(dataDir,input,options={}){
         return filteredResult(platform.replayResult(snapshot.data,snapshot.revisions,token,info,changed),principal);
       }
       storage.assertWritable(dataDir);
-      requireAccess(principal,'write',periodAction?footprint.filter(name=>name!=='fuelPeriods'):footprint);
+      requireAccess(principal,'write',periodAction?footprint.filter(name=>name!=='fuelPeriods'):costPolicy?footprint.filter(name=>name!==command.input.target.section):footprint);
       const missing=dependencies.filter(name=>!own(envelope.base,name));
       if(missing.length)fail('COMMAND_BASE_REQUIRED','Для команды нужны версии всех её зависимостей: '+missing.join(', '),428);
       const conflicts=dependencies.filter(name=>envelope.base[name]!==snapshot.revisions[name]);

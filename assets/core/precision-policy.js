@@ -13,6 +13,9 @@
   add('generators',6,'fuelNorms.periods[].parameters.power fuelNorms.periods[].parameters.norm fuelNorms.periods[].parameters.norm100 fuelNorms.periods[].parameters.norm50 fuelNorms.periods[].parameters.normIdle');
   add('tanks',3,'capacity balanceInit reserveLevel fuelAccounting.opening fuelAccounting.sources[].qty');
   add('tankIncomes',3,'amount liters litres qty');add('tankIncomes',2,'sum vatAmount grossSum');add('tankIncomes',6,'vatRate');
+  add('tankIncomes',6,'unitCost');add('partMovements',2,'sum vatAmount grossSum');add('partMovements',6,'unitCost vatRate');
+  for(const section of ['tanks','parts','vehicles','generators'])add(section,2,'costValuation.opening.amount');
+  add('costEntries',2,'costAllocation.targets[].amount');
   add('toRecords',3,'hours nextHours nextHoursAbs');add('toRecords',2,'cost');add('vehicleTo',3,'odometer nextKm nextOdometerAbs');add('vehicleTo',2,'cost');
   add('repairs',3,'mileage');add('repairs',2,'cost');add('payments',2,'sum paidAmount');add('budget',2,'sum');
   add('fuelPurchases',3,'qty');add('fuelPurchases',2,'sum');add('fuelPurchases',6,'price');add('monthlyFuel',3,'liters');add('monthlyFuel',2,'sum');
@@ -69,7 +72,7 @@
     }return issues;
   }
   function taxIssues(section,row,before,reportAll){
-    if(section!=='tankIncomes')return [];
+    if(!['tankIncomes','partMovements'].includes(section))return [];
     const fields=['sum','vatAmount','grossSum'],group=value=>fields.map(field=>value?.[field]);
     if(fields.some(field=>row[field]===undefined||row[field]===null||row[field]==='')||!reportAll&&before&&stable(group(row))===stable(group(before)))return [];
     const api=decimal();let net,vat,gross;
@@ -81,9 +84,10 @@
   }
   function inheritedReceiptFacts(previous,next,context){
     const result=new Map(),intent=context?.commandIntent?.command||context?.commandIntent;
-    if(!previous||intent?.type!=='DocumentAction'||intent.input?.action!=='postDraft'||intent.input.section!=='tankIncomes')return result;
+    if(!previous||intent?.type!=='DocumentAction'||intent.input?.action!=='postDraft'||!['tankIncomes','partMovements'].includes(intent.input.section))return result;
+    const section=intent.input.section;
     const drafts=rows(previous,'documentDrafts').filter(row=>row.id===intent.input.draftId),draft=drafts.length===1?drafts[0]:null;
-    if(draft?.section!=='tankIncomes'||draft.correctionOf?.section!=='tankIncomes')return result;
+    if(draft?.section!==section||draft.correctionOf?.section!==section)return result;
     const documents=getDocuments?.();
     if(documents?.apiVersion!==1)throw Object.assign(Error('Не загружены правила исправления приходных документов'),{code:'MODULE_UNAVAILABLE'});
     const resolved=documents.resolveDocument(previous,draft.correctionOf);
@@ -92,13 +96,13 @@
     // Replanning does not call the kernel or precision validation recursively.
     const plan=documents.plan(previous,intent.input,context);
     for(const name of schema.sections)if(name!=='auditLog'&&stable(rows(next,name))!==stable(plan.sections[name]??rows(previous,name)))return result;
-    const children=rows(next,'tankIncomes').filter(row=>row.id===context.id&&row.lifecycle?.correctionOf?.section==='tankIncomes'&&row.lifecycle.correctionOf.id===resolved.current.id);
+    const children=rows(next,section).filter(row=>row.id===context.id&&row.lifecycle?.correctionOf?.section===section&&row.lifecycle.correctionOf.id===resolved.current.id);
     if(children.length!==1)return result;
     const source=resolved.current,child=children[0],fields=new Set();
-    for(const field of ['amount','sum','vatAmount','grossSum','vatRate'])if(own(source,field)&&stable(source[field])===stable(child[field])){
+    for(const field of ['amount','qty','sum','vatAmount','grossSum','vatRate','unitCost'])if(own(source,field)&&stable(source[field])===stable(child[field])){
       try{const value=decimal().parse(source[field]);decimal().toNumberExact(value);fields.add(field);}catch{}
     }
-    if(fields.size)result.set(rowKey('tankIncomes',child,0),{source,fields});
+    if(fields.size)result.set(section+':'+rowKey(section,child,0),{source,fields});
     return result;
   }
   function collect(db,context={},previous){
@@ -108,7 +112,7 @@
       if(previous&&previous[section]===db[section])continue;
       const current=rows(db,section),old=previous===undefined?null:previousRows(section,rows(previous,section),current);
       current.forEach((row,rowIndex)=>{if(!row||typeof row!=='object'||Array.isArray(row))return;const before=old?.get(rowIndex);
-        const recordId=typeof row.id==='string'||typeof row.id==='number'&&Number.isFinite(row.id)?row.id:'',receipt=section==='tankIncomes'&&!before?inherited.get(rowKey(section,row,rowIndex)):null;
+        const recordId=typeof row.id==='string'||typeof row.id==='number'&&Number.isFinite(row.id)?row.id:'',receipt=['tankIncomes','partMovements'].includes(section)&&!before?inherited.get(section+':'+rowKey(section,row,rowIndex)):null;
         for(const spec of fields)for(const entry of values(row,spec.field)){
           if(before&&stable(at(before,entry.path))===stable(entry.value))continue;
           if(receipt?.fields.has(entry.path)&&stable(receipt.source[entry.path])===stable(entry.value))continue;

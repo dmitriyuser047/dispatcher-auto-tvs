@@ -7,7 +7,7 @@ const ENTRIES=Object.freeze([
   Object.freeze({source:'src/core/entity-identity.ts',output:'assets/core/entity-identity.js',global:'EntityIdentity',factory:'createEntityIdentity'}),
   Object.freeze({source:'src/core/decimal-core.ts',output:'assets/core/decimal-core.js',global:'DecimalCore',factory:'createDecimalCore'}),
   Object.freeze({source:'src/core/effective-periods.ts',output:'assets/core/effective-periods.js',global:'EffectivePeriods',factory:'createEffectivePeriods',dependencies:[{path:'./decimal-core.js',global:'DecimalCore'}]}),
-  Object.freeze({source:'src/core/financial-recognition.ts',output:'assets/core/financial-recognition.js',global:'DomainSources',factory:'createDomainSources',dependencies:[{path:'./accounting-boundary.js',global:'AccountingBoundary'},{path:'./document-engine.js',global:'DocumentEngine',lazy:true},{path:'./fuel-stock.js',global:'FuelStock',lazy:true},{path:'./decimal-core.js',global:'DecimalCore'}]}),
+  Object.freeze({source:'src/core/financial-recognition.ts',output:'assets/core/financial-recognition.js',global:'DomainSources',factory:'createDomainSources',dependencies:[{path:'./accounting-boundary.js',global:'AccountingBoundary'},{path:'./document-engine.js',global:'DocumentEngine',lazy:true},{path:'./fuel-stock.js',global:'FuelStock',lazy:true},{path:'./decimal-core.js',global:'DecimalCore'},{path:'./entity-identity.js',global:'EntityIdentity'},{path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true}]}),
   Object.freeze({source:'src/core/accounting-boundary.ts',output:'assets/core/accounting-boundary.js',global:'AccountingBoundary',factory:'createAccountingBoundary'}),
   Object.freeze({source:'src/core/platform-contracts.ts',output:'assets/core/platform-contracts.js',global:'PlatformContracts',factory:'createPlatformContracts'}),
   Object.freeze({source:'src/core/document-engine.ts',output:'assets/core/document-engine.js',global:'DocumentEngine',factory:'createDocumentEngine',dependencies:[
@@ -18,6 +18,7 @@ const ENTRIES=Object.freeze([
     {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true},
     {path:'./fuel-operations.js',global:'FuelOperations',lazy:true},
     {path:'./procurement-operations.js',global:'ProcurementOperations',lazy:true},
+    {path:'./financial-recognition.js',global:'DomainSources',lazy:true},
   ]}),
   Object.freeze({source:'src/core/period-policy.ts',output:'assets/core/period-policy.js',global:'PeriodPolicy',factory:'createPeriodPolicy',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./platform-schema.js',global:'PlatformSchema'},
@@ -25,6 +26,7 @@ const ENTRIES=Object.freeze([
     {path:'./document-engine.js',global:'DocumentEngine',lazy:true}, {path:'./financial-recognition.js',global:'DomainSources',lazy:true},
     {path:'./temporal-policy.js',global:'TemporalPolicy',lazy:true}, {path:'./fuel-engine.js',global:'TvsFuelEngine',lazy:true},
     {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true}, {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true},
+    {path:'./cost-valuation.js',global:'CostValuation',lazy:true},
   ]}),
   Object.freeze({source:'src/core/fuel-stock.ts',output:'assets/core/fuel-stock.js',global:'FuelStock',factory:'createFuelStock',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./entity-identity.js',global:'EntityIdentity'},
@@ -49,6 +51,20 @@ const ENTRIES=Object.freeze([
     {path:'./document-engine.js',global:'DocumentEngine',lazy:true}, {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
     {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true},
   ]}),
+  Object.freeze({source:'src/core/cost-valuation.ts',output:'assets/core/cost-valuation.js',global:'CostValuation',factory:'createCostValuation',dependencies:[
+    {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./entity-identity.js',global:'EntityIdentity'},
+    {path:'./decimal-core.js',global:'DecimalCore'}, {path:'./accounting-boundary.js',global:'AccountingBoundary'},
+    {path:'./fuel-stock.js',global:'FuelStock',lazy:true}, {path:'./inventory-stock.js',global:'InventoryStock',lazy:true},
+    {path:'./fuel-engine.js',global:'TvsFuelEngine',lazy:true}, {path:'./fuel-movement-policy.js',global:'FuelMovementPolicy',lazy:true},
+    {path:'./document-engine.js',global:'DocumentEngine',lazy:true}, {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
+  ]}),
+  Object.freeze({source:'src/core/cost-operations.ts',output:'assets/core/cost-operations.js',global:'CostOperations',factory:'createCostOperations',dependencies:[
+    {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./platform-schema.js',global:'PlatformSchema'},
+    {path:'./entity-identity.js',global:'EntityIdentity'}, {path:'./decimal-core.js',global:'DecimalCore'},
+    {path:'./cost-valuation.js',global:'CostValuation',lazy:true}, {path:'./financial-recognition.js',global:'DomainSources',lazy:true},
+    {path:'./document-engine.js',global:'DocumentEngine',lazy:true}, {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true},
+    {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
+  ]}),
   Object.freeze({source:'src/core/platform-commands.ts',output:'assets/core/platform-commands.js',global:'PlatformCommands',factory:'createPlatformCommands',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./personnel-engine.js',global:'TvsPersonnelEngine'},
     {path:'./fuel-movement-policy.js',global:'FuelMovementPolicy'}, {path:'./fuel-engine.js',global:'TvsFuelEngine'},
@@ -57,6 +73,7 @@ const ENTRIES=Object.freeze([
     {path:'./period-policy.js',global:'PeriodPolicy'},
     {path:'./fuel-operations.js',global:'FuelOperations'},
     {path:'./procurement-operations.js',global:'ProcurementOperations'},
+    {path:'./cost-operations.js',global:'CostOperations'},
   ]}),
 ]);
 const normalize=text=>text.replace(/\r\n?/g,'\n');

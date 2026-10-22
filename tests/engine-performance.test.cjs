@@ -127,11 +127,11 @@ test('worker queue capacity and clear invalidate pending jobs without returning 
   f.endpoint.close();const count=f.replies.length;f.endpoint.handle(f.query(loaded,'after-close'));assert.equal(f.replies.length,count);
 });
 
-test('real worker_threads execute the same five calculation services and preserve Sets, typed IDs and litres',async t=>{
+test('real worker_threads execute current calculations including valuation and preserve Sets, typed IDs and litres',async t=>{
   const send=thread(t),db=fixture(),engine=application.create();db.vehicles.push({id:7,plate:'SYNTHETIC NUMBER',fuelGrade:'ДТ',fuelBalance:923.537},{id:'8',plate:'SYNTHETIC STRING',fuelGrade:'ДТ',fuelBalance:1.001});
   db.costEntries=[{id:'cost',assetRef:'v:perf-v-0',date:'2026-10-01',kind:'expense',category:'Прочее',title:'Synthetic expense',amount:25000,independent:true}];
   const loaded=await send({type:'load',requestId:'thread-load',generation:1,database:db,context});assert.equal(loaded.ok,true);
-  for(const [name,options]of [['fuel',range],['fuelRecords',{vehicleId:'perf-v-0'}],['writeoff',{month:'2026-10',date:'2026-10-31'}],['costs',range],['procurement',{date:'2026-10-31'}]]){
+  for(const [name,options]of [['fuel',range],['fuelRecords',{vehicleId:'perf-v-0'}],['writeoff',{month:'2026-10',date:'2026-10-31'}],['costs',range],['costValuation',range],['procurement',{date:'2026-10-31'}]]){
     const result=await send({type:'query',requestId:'thread-'+name,generation:1,identity:context.identity,sourceFingerprint:loaded.sourceFingerprint,name,options});
     assert.equal(result.ok,true,JSON.stringify(result.error));assert.deepEqual(result.value,engine.query(name,db,options,context));
     if(name==='fuel'){assert.ok(result.value.rows[0].cards instanceof Set);assert.equal(result.value.rows.find(row=>row.vehicleId===7).start,923.537);assert.equal(result.value.rows.find(row=>row.vehicleId==='8').start,1.001);}
@@ -156,11 +156,11 @@ test('browser UMD worker imports only the bundled pure core and matches financia
     for(const file of files){const absolute=path.resolve(directory,file);assert.ok(absolute.startsWith(path.resolve(__dirname,'../assets')+path.sep));imports.push(file);vm.runInContext(fs.readFileSync(absolute,'utf8'),sandbox,{filename:absolute});}
   }});
   vm.runInContext(fs.readFileSync(path.join(directory,'engine-worker.js'),'utf8'),sandbox,{filename:'engine-worker.js'});
-  assert.deepEqual(imports,['./dispatcher-core.js','./entity-identity.js','./decimal-core.js','./accounting-boundary.js','./effective-periods.js','./temporal-policy.js','./fuel-engine.js','./fuel-audit.js','./writeoff-engine.js','./platform-schema.js','./platform-contracts.js','./document-engine.js','./fuel-stock.js','./inventory-stock.js','./period-policy.js','./fuel-operations.js','./procurement-operations.js','./financial-recognition.js','../js/45-cost-engine.js','../js/47-procurement-engine.js','./application-engine.js']);
+  assert.deepEqual(imports,['./dispatcher-core.js','./entity-identity.js','./decimal-core.js','./accounting-boundary.js','./effective-periods.js','./temporal-policy.js','./fuel-engine.js','./fuel-audit.js','./writeoff-engine.js','./platform-schema.js','./platform-contracts.js','./document-engine.js','./fuel-stock.js','./inventory-stock.js','./period-policy.js','./fuel-operations.js','./procurement-operations.js','./financial-recognition.js','./fuel-movement-policy.js','./cost-valuation.js','./cost-operations.js','../js/45-cost-engine.js','../js/47-procurement-engine.js','./application-engine.js']);
   const db=fixture();db.repairs=[{id:'repair',vehicleId:'perf-v-0',date:'2026-10-01',status:'done',cost:10000}];db.workOrders=[{id:'order',repairId:'repair',vehicleId:'perf-v-0',date:'2026-10-01',status:'done',totalCost:10000}];
   db.payments=[{id:'manual',vehicleId:'perf-v-0',date:'2026-10-01',sum:1000,type:'expense',description:'Synthetic manual expense'}];
   sandbox.onmessage({data:{type:'load',requestId:'browser-load',generation:1,database:db,context}});const loaded=replies.at(-1);assert.equal(loaded.ok,true);
-  for(const [name,options]of [['fuel',range],['fuelAudit',range],['costs',range],['writeoff',{month:'2026-10',date:'2026-10-31'}],['writeoffPost',postParameters(db,'browser-post-document')],['procurement',{date:'2026-10-31'}]]){
+  for(const [name,options]of [['fuel',range],['fuelAudit',range],['costs',range],['costValuation',range],['writeoff',{month:'2026-10',date:'2026-10-31'}],['writeoffPost',postParameters(db,'browser-post-document')],['procurement',{date:'2026-10-31'}]]){
     sandbox.onmessage({data:{type:'query',requestId:'browser-'+name,generation:1,identity:context.identity,sourceFingerprint:loaded.sourceFingerprint,name,options}});while(tasks.length)tasks.shift()();
     assert.equal(replies.at(-1).ok,true,JSON.stringify(replies.at(-1).error));assert.deepEqual(replies.at(-1).value,application.create().query(name,db,options,context));
   }

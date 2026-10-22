@@ -12,6 +12,7 @@
 
   const writeoffSections = Object.freeze(['vehicles', 'records', 'fuelPurchases', 'fuelCards', 'monthlyFuel', 'fuelWriteoffs']);
   const fuelSections = Object.freeze(['vehicles', 'records', 'fuelPurchases', 'fuelCards', 'monthlyFuel']);
+  const costValuationSections = Object.freeze(['vehicles','generators','tanks','parts','records','genRecords','repairs','vehicleTo','toRecords','workOrders','payments','fuelPurchases','partMovements','costEntries','costProfiles','tankIncomes','fuelMovements','fuelCards','monthlyFuel','fuelWriteoffs','fuelPeriods','assetAssignments','contragents']);
   const sections = Object.freeze({
     fuel: fuelSections,
     fuelAudit: fuelSections,
@@ -20,6 +21,7 @@
     writeoffPost: writeoffSections,
     costs: Object.freeze(['vehicles', 'generators', 'records', 'genRecords', 'repairs', 'vehicleTo',
       'toRecords', 'workOrders', 'payments', 'fuelPurchases', 'partMovements', 'costEntries', 'costProfiles']),
+    costValuation: costValuationSections,
     procurement: Object.freeze(['tanks', 'parts', 'tankIncomes', 'genRecords', 'generators',
       'fuelMovements', 'partMovements', 'dispatchJobs', 'procurementRules', 'procurementOrders'])
   });
@@ -44,9 +46,14 @@
           calculate:(db, query) => writeoff.prepare(db, query) },
         writeoffPost: { version:'4', sections:sections.writeoffPost,
           calculate:(db, query) => writeoff.post(db, query.request, query.metadata) },
-        costs: { version:'3', sections:sections.costs,
+        costs: { version:'4', sections:sections.costs,
           calculate:(db, query) => costs.buildReport(db, query) },
-        procurement: { version:'3', sections:sections.procurement,
+        costValuation: { version:'1', sections:sections.costValuation,
+          calculate:(db,query) => {
+            if(typeof costs.buildFullReport!=='function')throw Object.assign(Error('Не загружен расчёт полной себестоимости'),{code:'MODULE_UNAVAILABLE'});
+            return costs.buildFullReport(db,query);
+          } },
+        procurement: { version:'4', sections:sections.procurement,
           calculate:(db, query) => {
             if (!query.date) throw Error('Укажите дату расчёта закупок');
             return procurement.plan(db, query);
