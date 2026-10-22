@@ -5,7 +5,6 @@ const os      = require('os');
 const http    = require('http');
 const updater = require('./updater');
 const server  = require('./server');
-const { createExtractorFromData } = require('node-unrar-js');
 const storage = require('./storage');
 const { writeAtomic, validateSettings, databaseIdentity } = require('./settings');
 const { trustedPage, canInvoke, staticFile } = require('./security');
@@ -61,13 +60,14 @@ if (!settings.networkKey) {
 server.configureKey(settings.networkKey);
 let networkConfigError='';
 function configureNetwork(s){
-  const ca=s.networkMode==='client'&&s.remoteCaFile?fs.readFileSync(s.remoteCaFile):null;
+  const ca=s.networkMode==='client'&&s.remoteCaFile?require('./safe-file.cjs').readRegularFileSync(s.remoteCaFile,{maxBytes:2*1024*1024,minBytes:1}):null;
   server.configureTransport({protocol:s.remoteProtocol||'http:',ca});
   server.configureKey(s.networkKey);networkConfigError='';
 }
 try{configureNetwork(settings);}catch(e){networkConfigError=e.message;server.configureTransport({protocol:'https:'});console.error('[network] '+e.message);}
 
 const dataBindings = new Map();
+const reestrWindowData = new Map();
 const dataReadGenerations=new Map();
 const saveBarriers=new Map(),approvedCloseWindows=new Set();
 function finishSaveBarrier(senderId,ready){
@@ -145,12 +145,39 @@ function renderArchivedDocumentPdf(snapshot){
   if(!documentPrintRenderer)documentPrintRenderer=require('./document-print-renderer.cjs').createDocumentPrintRenderer({BrowserWindow,session});
   return documentPrintRenderer(snapshot);
 }
-function readImportOriginal(filename){
-  const before=fs.lstatSync(filename);
-  if(!before.isFile()||before.isSymbolicLink()||before.size>25*1024*1024)throw Object.assign(Error('Нужен обычный исходный файл не больше 25 МБ'),{code:'IMPORT_SOURCE_FILE'});
-  const bytes=fs.readFileSync(filename),after=fs.lstatSync(filename);
-  if(after.ino!==before.ino||after.dev!==before.dev||after.size!==bytes.length||after.mtimeMs!==before.mtimeMs)throw Object.assign(Error('Исходный файл изменился во время чтения'),{code:'IMPORT_SOURCE_CHANGED'});
+function readImportOriginal(filename,context){
+  const bytes=require('./safe-file.cjs').readRegularFileSync(filename,{maxBytes:25*1024*1024,minBytes:1,assertCurrent:()=>{if(context)assertFileContextSync(context);}});
   return {name:path.basename(filename),bytes};
+}
+async function captureFileContext(event){
+  if(!event?.sender||event.sender.isDestroyed())throw Object.assign(Error('Окно закрыто'),{code:'SESSION_CHANGED'});
+  const sender=event.sender,url=sender.getURL(),frame=sender.mainFrame,registry=reestrWindowData.get(sender.id)||null;
+  const operation=await verifiedOperationContext(registry?{sender:{id:registry.ownerId}}:event);
+  const context={operation,sender,url,frame,registry,accessJSON:JSON.stringify(dataBindings.get(operation.senderId)?.notificationAccess),progress:Promise.resolve(),failure:null};
+  assertFileContextSync(context);return context;
+}
+function assertFileContextSync(context){
+  if(context.failure)throw context.failure;
+  if(context.sender.isDestroyed()||context.sender.getURL()!==context.url||context.sender.mainFrame!==context.frame)throw Object.assign(Error('Окно закрыто или изменилось'),{code:'SESSION_CHANGED'});
+  assertOperationContext(context.operation);
+  if(context.registry&&(reestrWindowData.get(context.sender.id)!==context.registry||context.registry.identity!==settingsIdentity()))throw Object.assign(Error('Окно реестра изменилось'),{code:'SESSION_CHANGED'});
+}
+async function assertFileContext(context){
+  assertFileContextSync(context);
+  if(context.operation.client){
+    let ping;try{ping=await server.getJson(context.operation.host,context.operation.port,'/api/ping',5000);}catch{throw Object.assign(Error('Текущие права не подтверждены. Повторите действие после загрузки данных.'),{code:'SESSION_CHANGED'});}
+    assertFileContextSync(context);
+    if(!ping?.ok||ping.databaseToken!==context.operation.databaseToken||JSON.stringify(ping.access)!==context.accessJSON)throw Object.assign(Error('База или права изменились. Повторите действие после загрузки данных.'),{code:'SESSION_CHANGED'});
+  }else if(storage.databaseToken(context.operation.directory)!==context.operation.databaseToken)throw Object.assign(Error('База изменилась'),{code:'SESSION_CHANGED'});
+}
+function sendFileProgress(context,channel,payload){
+  if(context.failure)return;
+  context.progress=context.progress.then(async()=>{await assertFileContext(context);context.sender.send(channel,payload);}).catch(error=>{context.failure=error;});
+}
+function selectedFileName(value,extension,fallback){
+  const name=value==null?fallback:value;
+  if(typeof name!=='string'||!name||name.length>240||path.basename(name)!==name||/[<>:"/\\|?*\x00-\x1f]/.test(name)||/[. ]$/.test(name)||!name.toLowerCase().endsWith('.'+extension))throw Error('Недопустимое имя файла');
+  return name;
 }
 function capturedOperationContext(event,binding=assertDataBinding(event)){
   const client=settings.networkMode==='client',principal=client?(binding.notificationAccess?.user?{...binding.notificationAccess.user,...(binding.notificationAccess?.accessPolicy?{accessPolicy:binding.notificationAccess.accessPolicy}:{}),...(binding.notificationAccess?.readable?{readable:binding.notificationAccess.readable}:{}),...(binding.notificationAccess?.writable?{writable:binding.notificationAccess.writable}:{}),...(binding.notificationAccess?.policyStamp?{policyStamp:binding.notificationAccess.policyStamp}:{})}:null):{id:'local-profile',name:getActiveUser().name||'Локальный пользователь',role:'admin'};
@@ -206,7 +233,7 @@ function queueSettings(next) {
   const operation = settingsChain.then(async () => {
     const checked = validateSettings(typeof next === 'function' ? next(settings) : next);
     // Validate the CA before mutating the active transport or settings.
-    if (checked.networkMode === 'client' && checked.remoteCaFile) fs.readFileSync(checked.remoteCaFile);
+    if (checked.networkMode === 'client' && checked.remoteCaFile) require('./safe-file.cjs').readRegularFileSync(checked.remoteCaFile,{maxBytes:2*1024*1024,minBytes:1});
     const changed = settingsIdentity() !== databaseIdentity(checked) || settings.networkMode !== checked.networkMode ||
       JSON.stringify([settings.serverPort,settings.serverProtocol,settings.serverTlsCert,settings.serverTlsKey]) !== JSON.stringify([checked.serverPort,checked.serverProtocol,checked.serverTlsCert,checked.serverTlsKey]);
     const restart = changed && checked.networkMode === 'server' && server.isRunning();
@@ -316,7 +343,7 @@ function createWindow() {
         if (err) { res.writeHead(404); res.end(); return; }
         const ext = path.extname(filePath).toLowerCase();
         res.writeHead(200, { 'Content-Type': mime[ext] || 'application/octet-stream', 'X-Content-Type-Options':'nosniff',
-          'Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'" });
+          'Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'" });
         res.end(req.method === 'HEAD' ? undefined : data);
       });
     });
@@ -572,25 +599,26 @@ app.whenReady().then(() => {
   ipcMain.handle('document-print',async(event,payload)=>{
     let archiveAck={};
     try{
-      const context=await verifiedOperationContext(event);
+      const fileContext=await captureFileContext(event),context=fileContext.operation;
       if(dataBindings.get(context.senderId)?.platform?.documentPrint!==1)return {ok:false,unsupported:true,code:'UNSUPPORTED_DOCUMENT_PRINT',error:'Подключение не поддерживает сохранённые печатные редакции.'};
       if(!payload||typeof payload!=='object'||Array.isArray(payload)||!['preview','list','read','export'].includes(payload.action))throw Object.assign(Error('Неизвестное действие печати'),{code:'PRINT_ACTION'});
       const invoke=()=>context.client?server.postDocumentPrint(context.host,context.port,JSON.stringify(payload)):require('./document-archive.cjs').handle(context.directory,payload,{principal:context.principal,renderPdf:renderArchivedDocumentPdf});
-      const result=await invoke();assertOperationContext(context);
+      const result=await invoke();await assertFileContext(fileContext);
       if(payload.action!=='export'||result?.ok!==true)return result;
       archiveAck=Object.fromEntries(['archiveHeadChanged','canonicalSections','revisions','databaseToken'].filter(name=>Object.hasOwn(result,name)).map(name=>[name,result[name]]));
       const bytes=require('./document-print-export.cjs').verifiedBytes(result,payload);
       const format=payload.format;
       const choice=await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender),{title:'Сохранить печатную редакцию',defaultPath:path.join(app.getPath('documents'),'Документ_'+payload.archiveId+'.'+format),filters:[{name:format==='pdf'?'PDF документ':'Книга Excel',extensions:[format]}]});
+      await assertFileContext(fileContext);
       if(choice.canceled||!choice.filePath)return {ok:false,canceled:true,archiveId:payload.archiveId,format,...archiveAck};
-      assertOperationContext(context);await verifiedOperationContext(event);assertOperationContext(context);
-      fs.writeFileSync(choice.filePath,bytes);
+      await require('./safe-file.cjs').writeRegularFileAtomic(choice.filePath,bytes,{maxBytes:128*1024*1024,assertCurrent:()=>assertFileContextSync(fileContext)});
+      await assertFileContext(fileContext);
       return {ok:true,saved:true,archiveId:payload.archiveId,format,size:bytes.length,sha256:result.sha256,path:choice.filePath,...archiveAck};
-    }catch(error){return {ok:false,code:error.code||'PRINT_FAILED',error:error.message,...archiveAck};}
+    }catch(error){return {ok:false,code:error.code||'PRINT_FAILED',error:error.message,...(error.code==='SESSION_CHANGED'?{}:archiveAck)};}
   });
   ipcMain.handle('import-source',async(event,payload)=>{
     try{
-      const context=await verifiedOperationContext(event);
+      const fileContext=await captureFileContext(event),context=fileContext.operation;
       if(dataBindings.get(context.senderId)?.platform?.controlledImports!==1)return {ok:false,unsupported:true,code:'UNSUPPORTED_CONTROLLED_IMPORTS',error:'Подключение не поддерживает проверяемый импорт.'};
       if(!payload||typeof payload!=='object'||Array.isArray(payload)||!['stage','preview','read'].includes(payload.action))throw Object.assign(Error('Неизвестное действие источника импорта'),{code:'IMPORT_SOURCE_ACTION'});
       const request=structuredClone(payload);
@@ -599,7 +627,7 @@ app.whenReady().then(() => {
       const encode=source=>{if(!source||typeof source!=='object')return source;if(source.bytes!==undefined){if(source.base64!==undefined)throw Error('Источник задан дважды');const raw=source.bytes;let bytes;if(raw instanceof ArrayBuffer)bytes=Buffer.from(raw);else if(ArrayBuffer.isView(raw))bytes=Buffer.from(raw.buffer,raw.byteOffset,raw.byteLength);else if(Array.isArray(raw)&&raw.every(value=>Number.isInteger(value)&&value>=0&&value<=255))bytes=Buffer.from(raw);else throw Error('Некорректные байты источника');if(bytes.length>25*1024*1024)throw Error('Исходный файл больше 25 МБ');source.base64=bytes.toString('base64');delete source.bytes;}return source;};
       if(request.source){if(Array.isArray(request.source.files))request.source.files=request.source.files.map(encode);else request.source=encode(request.source);}
       const result=context.client?await server.postImportSource(context.host,context.port,JSON.stringify(request)):await require('./import-source.cjs').handle(context.directory,request,{principal:context.principal});
-      assertOperationContext(context);
+      await assertFileContext(fileContext);
       if(result?.ok===true&&result.databaseToken!==context.databaseToken)throw Object.assign(Error('Ответ импорта относится к другой базе'),{code:'DATABASE_CHANGED'});
       return result;
     }catch(error){return {ok:false,code:error.code||'IMPORT_SOURCE_FAILED',error:error.message,...(Array.isArray(error.issues)?{issues:error.issues}:{})};}
@@ -731,7 +759,7 @@ app.whenReady().then(() => {
       renderPdf:renderArchivedDocumentPdf,
       key: settings.networkKey,
       settings:()=>settings,
-      tls:settings.serverProtocol==='https:'?{cert:fs.readFileSync(settings.serverTlsCert),key:fs.readFileSync(settings.serverTlsKey)}:null,
+      tls:settings.serverProtocol==='https:'?{cert:require('./safe-file.cjs').readRegularFileSync(settings.serverTlsCert,{maxBytes:2*1024*1024,minBytes:1}),key:require('./safe-file.cjs').readRegularFileSync(settings.serverTlsKey,{maxBytes:2*1024*1024,minBytes:1})}:null,
     });
   }catch(e){return {ok:false,error:'Сервер не запущен: '+e.message};}}
   restartConfiguredServer = startConfiguredServer;
@@ -762,12 +790,14 @@ app.whenReady().then(() => {
 
   // Импорт данных из RAR-архива (data.json + backups) для пополнения базы
   ipcMain.handle('import-rar', async (event) => {
+    const context=await captureFileContext(event);
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
       title: 'Выберите RAR-архив с данными',
       filters: [{ name: 'RAR архив', extensions: ['rar'] }],
       properties: ['openFile'],
     });
+    await assertFileContext(context);
     if (canceled || !filePaths || !filePaths[0]) return { ok: false, canceled: true };
 
     const KEYS = ['vehicles', 'records', 'generators', 'genRecords', 'toRecords', 'tanks', 'tankIncomes'];
@@ -778,23 +808,19 @@ app.whenReady().then(() => {
     };
 
     try {
-      const source=readImportOriginal(filePaths[0]),buf=source.bytes;
-      const ab  = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-      const extractor = await createExtractorFromData({ data: ab });
-      const headers = [...extractor.getFileList().fileHeaders];
-      const jsonNames = headers
-        .filter(h => !h.flags.directory && h.name.toLowerCase().endsWith('.json'))
-        .map(h => h.name);
-      if (!jsonNames.length) return { ok: false, error: 'В архиве не найдено JSON-файлов с данными.' };
-
-      const extracted = extractor.extract({ files: jsonNames });
+      const source=readImportOriginal(filePaths[0],context),buf=source.bytes;
+      const entries=await require('./archive-decoder.cjs').extractRAR(buf,{assertCurrent:()=>assertFileContextSync(context)});
+      await assertFileContext(context);
+      const jsonEntries=entries.filter(entry=>!entry.isDirectory&&entry.name.toLowerCase().endsWith('.json'));
+      if (!jsonEntries.length) return { ok: false, error: 'В архиве не найдено JSON-файлов с данными.' };
       const dec = new TextDecoder('utf-8');
       let main = null;
       const backupObjs = [];
-      for (const f of extracted.files) {
-        const name = f.fileHeader.name.split('\\').join('/');
+      for (const f of jsonEntries) {
+        assertFileContextSync(context);
+        const name = f.name;
         let obj;
-        try { obj = JSON.parse(dec.decode(f.extraction)); } catch { continue; }
+        try { obj = JSON.parse(dec.decode(f.bytes)); } catch { continue; }
         if (!obj || typeof obj !== 'object') continue;
         const isBackup = /backups\//i.test(name);
         const isMain   = /(^|\/)data\.json$/i.test(name) && !isBackup;
@@ -820,6 +846,7 @@ app.whenReady().then(() => {
         backupExtra[k] = extra;
       });
 
+      await assertFileContext(context);
       return { ok: true, fileName: path.basename(filePaths[0]), source, backupCount: backupObjs.length, main, backupExtra };
     } catch (e) {
       return { ok: false, error: e.message };
@@ -828,29 +855,37 @@ app.whenReady().then(() => {
 
   // Экспорт произвольного JSON-подмножества данных в файл (для передачи между приложениями)
   ipcMain.handle('export-json', async (event, jsonStr, defaultFileName) => {
+    const context=await captureFileContext(event);
+    const name=selectedFileName(defaultFileName,'json','export.json');
+    if(typeof jsonStr!=='string'||Buffer.byteLength(jsonStr)>32*1024*1024)throw Error('JSON превышает 32 МБ');
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePath } = await dialog.showSaveDialog(senderWin, {
       title: 'Сохранить JSON-файл',
-      defaultPath: path.join(app.getPath('documents'), defaultFileName || 'export.json'),
+      defaultPath: path.join(app.getPath('documents'), name),
       filters: [{ name: 'JSON файл', extensions: ['json'] }],
     });
+    await assertFileContext(context);
     if (canceled || !filePath) return { ok: false, canceled: true };
-    fs.writeFileSync(filePath, jsonStr, 'utf8');
+    await require('./safe-file.cjs').writeRegularFileAtomic(filePath,Buffer.from(jsonStr,'utf8'),{maxBytes:32*1024*1024,assertCurrent:()=>assertFileContextSync(context)});
+    await assertFileContext(context);
     shell.showItemInFolder(filePath);
     return { ok: true, filePath };
   });
 
   // Импорт JSON-файла (сырые данные, без RAR) — выбор файла и чтение содержимого
   ipcMain.handle('import-json-file', async (event) => {
+    const context=await captureFileContext(event);
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
       title: 'Выберите JSON-файл с данными',
       filters: [{ name: 'JSON файл', extensions: ['json'] }],
       properties: ['openFile'],
     });
+    await assertFileContext(context);
     if (canceled || !filePaths || !filePaths[0]) return { ok: false, canceled: true };
     try {
-      const source=readImportOriginal(filePaths[0]);
+      const source=readImportOriginal(filePaths[0],context);
+      await assertFileContext(context);
       return { ok: true, fileName: source.name, source, content:source.bytes.toString('utf8') };
     } catch (e) {
       return { ok: false, error: e.message };
@@ -868,8 +903,9 @@ app.whenReady().then(() => {
 
   // Экспорт HTML-сводки в PDF (рендер через printToPDF — корректная кириллица)
   ipcMain.handle('export-pdf', async (event, payload) => {
+    const context=await captureFileContext(event);
     const html = payload && payload.html;
-    const defaultFileName = (payload && payload.defaultFileName) || 'Сводка.pdf';
+    const defaultFileName = selectedFileName(payload?.defaultFileName,'pdf','Сводка.pdf');
     if (!html) return { ok: false, error: 'Пустой документ' };
 
     const senderWin = BrowserWindow.fromWebContents(event.sender);
@@ -878,30 +914,19 @@ app.whenReady().then(() => {
       defaultPath: path.join(app.getPath('documents'), defaultFileName),
       filters: [{ name: 'PDF документ', extensions: ['pdf'] }],
     });
+    await assertFileContext(context);
     if (canceled || !filePath) return { ok: false, canceled: true };
-
-    const tmpFile = path.join(os.tmpdir(), `svodka_${Date.now()}.html`);
-    const pdfWin = new BrowserWindow({
-      show: false,
-      webPreferences: { contextIsolation: true, nodeIntegration: false },
-    });
     try {
-      fs.writeFileSync(tmpFile, html, 'utf8');
-      await pdfWin.loadFile(tmpFile);
-      const pdfData = await pdfWin.webContents.printToPDF({
-        printBackground: true,
-        landscape: true,
-        pageSize: 'A4',
-        margins: { top: 0.4, bottom: 0.4, left: 0.3, right: 0.3 },
-      });
-      fs.writeFileSync(filePath, pdfData);
-      shell.openPath(filePath);
+      const renderPdf=require('./safe-html-pdf.cjs').createSafeHtmlPdfRenderer({BrowserWindow,session});
+      const pdfData=await renderPdf(html,{landscape:true,pageSize:'A4',preferCSSPageSize:false},()=>assertFileContextSync(context));
+      await assertFileContext(context);
+      await require('./safe-file.cjs').writeRegularFileAtomic(filePath,pdfData,{maxBytes:128*1024*1024,assertCurrent:()=>assertFileContextSync(context)});
+      await assertFileContext(context);
+      await shell.openPath(filePath);
+      await assertFileContext(context);
       return { ok: true, path: filePath };
     } catch (e) {
       return { ok: false, error: e.message };
-    } finally {
-      pdfWin.destroy();
-      try { fs.unlinkSync(tmpFile); } catch (_) { /* ignore */ }
     }
   });
 
@@ -938,7 +963,8 @@ app.whenReady().then(() => {
   // ─── РЕЕСТР-БИЛДЕР ──────────────────────────────────────
   const REESTR_DIR = path.join(__dirname, '..', 'ReestrBuilder');
   const REESTR_LIB_URL = pathToFileURL(path.join(REESTR_DIR, 'lib.mjs'));
-  async function loadReestrLib(event) {
+  async function loadReestrLib(event,context) {
+    context=context||await captureFileContext(event);
     const identity = settingsIdentity(), directory = path.join(getDataDir(), 'reestr-knowledge');
     const registry = event && reestrWindowData.get(event.sender.id);
     if (registry && registry.identity !== identity) throw new Error('База переключена. Откройте реестр заново.');
@@ -946,40 +972,50 @@ app.whenReady().then(() => {
     const url = new URL(REESTR_LIB_URL); url.searchParams.set('profile', identity);
     // Each database owns its module instance and knowledge path during long OCR jobs.
     const lib = await import(url.href);
-    if (identity !== settingsIdentity()) throw new Error('База переключена во время обработки реестра. Повторите действие.');
+    await assertFileContext(context);
     lib.configureKnowledgePath(directory);
     return lib;
   }
 
   ipcMain.handle('reestr-parse-invoices', async (event, zipArrayBuffer) => {
+    const context=await captureFileContext(event);
     console.log('[reestr] parse-invoices start');
-    const { parseInvoices, loadConfig } = await loadReestrLib(event);
+    const { parseInvoices, loadConfig,createArchiveBudget } = await loadReestrLib(event,context);
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const log = [];
-    const rows = await parseInvoices(Buffer.from(zipArrayBuffer), config, (msg) => { log.push(msg); console.log('[reestr] log:', msg.type, msg.text); });
+    if(!zipArrayBuffer||!Number.isSafeInteger(zipArrayBuffer.byteLength??zipArrayBuffer.length)||(zipArrayBuffer.byteLength??zipArrayBuffer.length)>25*1024*1024)throw Error('Исходные файлы превышают 25 МБ');
+    const rows = await parseInvoices(Buffer.from(zipArrayBuffer), config, (msg) => { assertFileContextSync(context);log.push(msg); },{budget:createArchiveBudget()});
+    await assertFileContext(context);
     console.log('[reestr] parse-invoices done, rows:', rows.length);
     return { log, rows, config };
   });
 
   ipcMain.handle('reestr-parse-pdfs', async (event, pdfFilesRaw) => {
+    const context=await captureFileContext(event);
+    if(!Array.isArray(pdfFilesRaw)||!pdfFilesRaw.length||pdfFilesRaw.length>1000)throw Error('Нужно от 1 до 1000 исходных файлов');
+    let inputBytes=0;for(const file of pdfFilesRaw){const size=file?.buffer?.byteLength??file?.buffer?.length;if(!Number.isSafeInteger(size)||size<1||(inputBytes+=size)>25*1024*1024)throw Error('Исходные файлы превышают 25 МБ');}
     console.log('[reestr] parse-pdfs start, files:', pdfFilesRaw.length);
-    const { parsePdfFiles, loadConfig } = await loadReestrLib(event);
+    const { parsePdfFiles, loadConfig,createArchiveBudget } = await loadReestrLib(event,context);
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const log = [];
     const pdfFiles = pdfFilesRaw.map(f => ({ name: f.name, buffer: Buffer.from(f.buffer) }));
     const rows = await parsePdfFiles(pdfFiles, config,
-      (msg) => { log.push(msg); console.log('[reestr] log:', msg.type, msg.text); },
-      (progress) => { event.sender.send('reestr-progress', progress); },
-      (ocr) => { event.sender.send('reestr-ocr-page', ocr); }
+      (msg) => { assertFileContextSync(context);log.push(msg); },
+      (progress) => { sendFileProgress(context,'reestr-progress',progress); },
+      (ocr) => { sendFileProgress(context,'reestr-ocr-page',ocr); },
+      {budget:createArchiveBudget()}
     );
+    await context.progress;await assertFileContext(context);
     console.log('[reestr] parse-pdfs done, rows:', rows.length);
     return { log, rows, config };
   });
 
   ipcMain.handle('reestr-build-xlsx', async (event, { rows }) => {
-    const { buildXlsxFromRows, loadConfig } = await loadReestrLib(event);
+    const context=await captureFileContext(event);
+    const { buildXlsxFromRows, loadConfig } = await loadReestrLib(event,context);
     const config = loadConfig(path.join(REESTR_DIR, 'config.json'));
     const { buffer, total } = await buildXlsxFromRows(rows, config);
+    await assertFileContext(context);
     return {
       filename: `Реестр_${new Date().toISOString().slice(0, 10)}.xlsx`,
       xlsxBase64: buffer.toString('base64'),
@@ -988,17 +1024,21 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('reestr-learn', async (event, rows) => {
-    const { learnFromRows } = await loadReestrLib(event);
+    const context=await captureFileContext(event);
+    const { learnFromRows } = await loadReestrLib(event,context);
+    await assertFileContext(context);
     return learnFromRows(rows);
   });
 
   ipcMain.handle('reestr-apply-knowledge', async (event, rows) => {
-    const { applyKnowledge } = await loadReestrLib(event);
+    const context=await captureFileContext(event);
+    const { applyKnowledge } = await loadReestrLib(event,context);
     return applyKnowledge(rows);
   });
 
   ipcMain.handle('reestr-analytics', async (event, rows) => {
-    const { getAnalytics } = await loadReestrLib(event);
+    const context=await captureFileContext(event);
+    const { getAnalytics } = await loadReestrLib(event,context);
     return getAnalytics(rows);
   });
 
@@ -1015,20 +1055,24 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('reestr-save-xlsx', async (event, { filename, xlsxBase64 }) => {
+    const context=await captureFileContext(event);
+    const name=selectedFileName(filename,'xlsx','Реестр.xlsx');
+    if(typeof xlsxBase64!=='string'||!xlsxBase64.length||xlsxBase64.length>Math.ceil(128*1024*1024*4/3)+4||xlsxBase64.length%4!==0||!/^[A-Za-z0-9+/]+={0,2}$/.test(xlsxBase64))throw Error('Некорректный размер Excel');
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePath } = await dialog.showSaveDialog(senderWin, {
       title: 'Сохранить реестр',
-      defaultPath: path.join(app.getPath('downloads'), filename),
+      defaultPath: path.join(app.getPath('downloads'), name),
       filters: [{ name: 'Excel', extensions: ['xlsx'] }],
     });
+    await assertFileContext(context);
     if (canceled || !filePath) return { saved: false };
-    fs.writeFileSync(filePath, Buffer.from(xlsxBase64, 'base64'));
+    await require('./safe-file.cjs').writeRegularFileAtomic(filePath,Buffer.from(xlsxBase64,'base64'),{maxBytes:128*1024*1024,assertCurrent:()=>assertFileContextSync(context)});
+    await assertFileContext(context);
     shell.showItemInFolder(filePath);
     return { saved: true, path: filePath };
   });
 
   // ─── Отдельное окно реестра ───
-  const reestrWindowData = new Map();
   const registryRows = rows => {
     if (!Array.isArray(rows) || rows.length > 100000 || rows.some(row => !row || typeof row !== 'object' || Array.isArray(row)) || Buffer.byteLength(JSON.stringify(rows)) > 32 * 1024 * 1024) throw new Error('Некорректные строки реестра');
     return rows;
@@ -1071,28 +1115,34 @@ app.whenReady().then(() => {
   });
 
   // PDF-редактор: независимые документы окон, шрифты, сохранение и OCR.
-  require('./pdf-editor-service.cjs').registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog });
+  require('./pdf-editor-service.cjs').registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog,getOpeningContext:captureFileContext,assertOpeningContext:assertFileContext,assertOpeningContextSync:assertFileContextSync });
 
   // ─── Импорт Сводки из PDF ───
   ipcMain.handle('import-svodka-pdf', async (event) => {
+    const context=await captureFileContext(event);
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
       title: 'Выберите PDF-файл сводки',
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
       properties: ['openFile'],
     });
+    await assertFileContext(context);
     if (canceled || !filePaths || !filePaths[0]) return { ok: false };
     let loadingTask;
     try {
-      const source=readImportOriginal(filePaths[0]),pdfData=new Uint8Array(source.bytes);
+      const source=readImportOriginal(filePaths[0],context),pdfData=new Uint8Array(source.bytes);
       const pdfjsPkg = await require('./pdfjs-runtime.cjs').loadPdfJs();
+      await assertFileContext(context);
       const { getDocument } = pdfjsPkg;
       loadingTask = getDocument({ ...require('./pdfjs-runtime.cjs').pdfDocumentOptions(), data:pdfData });
       const doc = await loadingTask.promise;
+      await assertFileContext(context);
       const allItems = [];
       for (let i = 1; i <= doc.numPages; i++) {
         const page = await doc.getPage(i);
+        await assertFileContext(context);
         const content = await page.getTextContent();
+        await assertFileContext(context);
         for (const item of content.items) {
           if (!item.str || !item.str.trim()) continue;
           allItems.push({
@@ -1105,6 +1155,7 @@ app.whenReady().then(() => {
           });
         }
       }
+      await assertFileContext(context);
       return { ok: true, items: allItems, source, fileName: path.basename(filePaths[0]) };
     } catch (e) {
       return { ok: false, error: e.message };
@@ -1113,32 +1164,40 @@ app.whenReady().then(() => {
 
   // Отчёт ГЛОНАСС: PDF отдаём текстом с координатами, Excel — как есть
   ipcMain.handle('import-glonass-file', async (event) => {
+    const context=await captureFileContext(event);
     const senderWin = BrowserWindow.fromWebContents(event.sender);
     const { canceled, filePaths } = await dialog.showOpenDialog(senderWin, {
       title: 'Выберите отчёт ГЛОНАСС («Рейсы» или суточный пробег)',
       filters: [{ name: 'Отчёт ГЛОНАСС', extensions: ['pdf', 'xlsx', 'xls'] }],
       properties: ['openFile'],
     });
+    await assertFileContext(context);
     if (canceled || !filePaths || !filePaths[0]) return { ok: false };
     const file = filePaths[0];
     let loadingTask;
     try {
-      const source=readImportOriginal(file);
+      const source=readImportOriginal(file,context);
       if (!/\.pdf$/i.test(file)) {
+        await assertFileContext(context);
         return { ok: true, kind: 'xlsx', base64:source.bytes.toString('base64'), source, fileName:path.basename(file) };
       }
       const { getDocument } = await require('./pdfjs-runtime.cjs').loadPdfJs();
+      await assertFileContext(context);
       loadingTask = getDocument({ ...require('./pdfjs-runtime.cjs').pdfDocumentOptions(), data:new Uint8Array(source.bytes) });
       const doc = await loadingTask.promise;
+      await assertFileContext(context);
       const items = [];
       for (let i = 1; i <= doc.numPages; i++) {
         const page = await doc.getPage(i);
+        await assertFileContext(context);
         const content = await page.getTextContent();
+        await assertFileContext(context);
         for (const it of content.items) {
           if (!it.str || !it.str.trim()) continue;
           items.push({ str: it.str, x: Math.round(it.transform[4] * 10) / 10, y: Math.round(it.transform[5] * 10) / 10, page: i });
         }
       }
+      await assertFileContext(context);
       return { ok: true, kind: 'pdf', items, source, fileName: path.basename(file) };
     } catch (e) {
       return { ok: false, error: e.message };

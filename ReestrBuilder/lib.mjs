@@ -5,10 +5,10 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { fileURLToPath } from "url";
-import AdmZip from "adm-zip";
-import { createExtractorFromData } from "node-unrar-js";
+import { createArchiveBudget, requireArchiveBudget, createOwnedTemp, removeOwnedTemp, extractArchiveTree } from './archive-budget.mjs';
+export { createArchiveBudget, ARCHIVE_LIMITS } from './archive-budget.mjs';
+const INTERNAL_PRECHARGED = Symbol('internal-extracted-files');
 import ExcelJS from "exceljs";
-import iconv from "iconv-lite";
 import { createCanvas } from '@napi-rs/canvas';
 import pdfjsRuntime from '../electron/pdfjs-runtime.cjs';
 const { getDocument } = await pdfjsRuntime.loadPdfJs();
@@ -258,51 +258,6 @@ export function loadConfig(configPath) {
     return { ...DEFAULT_CONFIG, ...user };
   }
   return DEFAULT_CONFIG;
-}
-
-function fixEntryName(entry) {
-  const name = entry.entryName;
-  const hasCyrillic = /[А-яёЁ]/.test(name);
-  if (hasCyrillic) return name;
-  if (/^[\x00-\x7F]*$/.test(name)) return name;
-  if (!entry.rawEntryName || !Buffer.isBuffer(entry.rawEntryName)) return name;
-  try {
-    const decoded = iconv.decode(entry.rawEntryName, "cp866");
-    if (/[А-яёЁ]/.test(decoded)) return decoded;
-  } catch {}
-  return name;
-}
-
-async function extractZip(buffer, destDir) {
-  const zip = new AdmZip(buffer);
-  for (const entry of zip.getEntries()) {
-    if (entry.isDirectory) continue;
-    const fixedName = fixEntryName(entry);
-    const outPath = safeArchivePath(destDir, fixedName);
-    fs.mkdirSync(path.dirname(outPath), { recursive: true });
-    fs.writeFileSync(outPath, entry.getData());
-  }
-}
-
-async function extractRar(buffer, destDir) {
-  const extractor = await createExtractorFromData({ data: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) });
-  const list = [...extractor.getFileList().fileHeaders].filter(h => !h.flags.directory).map(h => h.name);
-  const extracted = extractor.extract({ files: list });
-  for (const f of extracted.files) {
-    if (!f.extraction) continue;
-    const outPath = safeArchivePath(destDir, f.fileHeader.name);
-    fs.mkdirSync(path.dirname(outPath), { recursive: true });
-    fs.writeFileSync(outPath, Buffer.from(f.extraction));
-  }
-}
-
-function safeArchivePath(directory, entryName) {
-  const name = String(entryName).replace(/\\/g, '/');
-  if (!name || name.includes('\0') || /^(?:\/|[a-z]:)/i.test(name)) throw new Error('Недопустимый путь в архиве: ' + entryName);
-  const target = path.resolve(directory, name);
-  const relative = path.relative(path.resolve(directory), target);
-  if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) throw new Error('Путь выходит из папки архива: ' + entryName);
-  return target;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1440,32 +1395,17 @@ async function processSinglePdf(filePath, config, label = "", onOcrPage = () => 
 /**
  * Шаг 1: разбор архива — возвращает массив строк для редактирования.
  */
-export async function parseInvoices(zipBuffer, config, onLog = () => {}) {
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "reestr-"));
+export async function parseInvoices(zipBuffer, config, onLog = () => {}, options = {}) {
+  const budget = options.budget ? requireArchiveBudget(options.budget) : createArchiveBudget();
+  if (!Buffer.isBuffer(zipBuffer) && !(zipBuffer instanceof Uint8Array)) throw new Error('Нужны байты исходного архива');
+  budget.input(zipBuffer.byteLength);
+  const temporary = createOwnedTemp('reestr-');
   try {
-    await extractZip(zipBuffer, workDir);
-    const visited = new Set();
-    // Ordinary ZIPs and nested packages use the same multi-document parser.
-    for (let depth = 0; depth < 5; depth++) {
-      const archives = findFilesRecursive(workDir).filter(file => /\.(zip|rar)$/i.test(file) && !visited.has(file));
-      if (!archives.length) break;
-      for (const archive of archives) {
-        visited.add(archive);
-        const output = archive + '.unpacked';
-        fs.mkdirSync(output, { recursive: true });
-        try {
-          const buffer = fs.readFileSync(archive);
-          if (/\.rar$/i.test(archive)) await extractRar(buffer, output);
-          else await extractZip(buffer, output);
-        } catch (error) { onLog({ type: 'warn', text: `Не удалось распаковать «${path.basename(archive)}»: ${error.message}` }); }
-      }
-    }
-    if (findFilesRecursive(workDir).some(file => /\.(zip|rar)$/i.test(file) && !visited.has(file))) onLog({ type: 'warn', text: 'Архивы глубже пяти уровней пропущены' });
-    const files = findFilesRecursive(workDir).filter(file => /\.(pdf|jpe?g|png|tiff?|bmp)$/i.test(file));
+    const files = await extractArchiveTree(zipBuffer, temporary.directory, budget, 0, { signal: options.signal });
     if (!files.length) { onLog({ type: 'warn', text: 'В архиве не найдены PDF или изображения счетов' }); return []; }
-    return await parsePdfFiles(files.map(file => ({ name: path.relative(workDir, file), buffer: fs.readFileSync(file) })), config, onLog);
+    return await parsePdfFiles(files.map(file => ({ name: file.name, buffer: fs.readFileSync(file.path) })), config, onLog, () => {}, () => {}, { budget, [INTERNAL_PRECHARGED]: true });
   } finally {
-    fs.rmSync(workDir, { recursive: true, force: true });
+    removeOwnedTemp(temporary);
   }
 }
 
@@ -1475,8 +1415,15 @@ export async function parseInvoices(zipBuffer, config, onLog = () => {}) {
  */
 const IMG_EXTS = /\.(jpe?g|png|tiff?|bmp)$/i;
 
-export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgress = () => {}, onOcrPage = () => {}) {
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "reestr-pdf-"));
+export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgress = () => {}, onOcrPage = () => {}, options = {}) {
+  const budget = options.budget ? requireArchiveBudget(options.budget) : createArchiveBudget();
+  if (!Array.isArray(pdfFiles)) throw new Error('Нужен список исходных документов');
+  // Validate the complete batch before the first file write or recognition callback.
+  for (const file of pdfFiles) {
+    if (!file || typeof file.name !== 'string' || (!Buffer.isBuffer(file.buffer) && !(file.buffer instanceof Uint8Array))) throw new Error('Некорректный исходный документ');
+    if (!options[INTERNAL_PRECHARGED]) budget.input(file.buffer.byteLength);
+  }
+  const temporary = createOwnedTemp('reestr-pdf-'), workDir = temporary.directory;
   try {
     onLog({ type: "info", text: `Загружено файлов: ${pdfFiles.length}` });
 
@@ -1615,7 +1562,7 @@ export async function parsePdfFiles(pdfFiles, config, onLog = () => {}, onProgre
     rows.sort((a, b) => ddmmyyyyToSortable(a.date).localeCompare(ddmmyyyyToSortable(b.date)));
     return rows;
   } finally {
-    fs.rmSync(workDir, { recursive: true, force: true });
+    removeOwnedTemp(temporary);
   }
 }
 

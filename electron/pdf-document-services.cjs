@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const AdmZip = require('adm-zip');
 const ExcelJS = require('exceljs');
+const safeFile=require('./safe-file.cjs');
 
 const SCHEMA = 'tvs.pdf-project';
 const SCHEMA_VERSION = 1;
@@ -368,9 +369,15 @@ function registerPdfDocumentServices({ app, ipcMain, dialog, BrowserWindow, getS
       // Do not expose filesystem operations to an unrelated renderer.
       throw new Error('Проверка окна PDF-редактора не настроена');
     }
+    return typeof getSession==='function'?await getSession(event):true;
   };
   const handle = (name, handler) => ipcMain.handle(name, async (event, payload) => {
-    try { await authorize(event); return await handler(event, payload); }
+    try {
+      const url=event.sender.getURL?.(),frame=event.sender.mainFrame,owner=await authorize(event);
+      const assertSync=()=>{if(event.sender.isDestroyed()||event.sender.getURL?.()!==url||event.sender.mainFrame!==frame)throw Error('Окно редактора закрыто или изменилось');if(typeof getSession==='function'&&getSession(event)!==owner)throw Error('Документ уже изменён');};
+      const scope={assertSync,assert:async()=>{assertSync();if(await authorize(event)!==owner)throw Error('Документ уже изменён');assertSync();}};
+      await scope.assert();const result=await handler(event,payload,scope);await scope.assert();return result;
+    }
     catch (error) { return { ok: false, error: message(error) }; }
   });
   const queued = (key, action) => {
@@ -379,24 +386,17 @@ function registerPdfDocumentServices({ app, ipcMain, dialog, BrowserWindow, getS
     queues.set(key, next);
     return next.finally(() => { if (queues.get(key) === next) queues.delete(key); });
   };
-  const atomicWrite = (filePath, bytes) => queued(path.resolve(filePath).toLowerCase(), async () => {
-    const temp = path.join(path.dirname(filePath), '.' + path.basename(filePath) + '.' + crypto.randomBytes(8).toString('hex') + '.tmp');
-    try {
-      const file = await fs.promises.open(temp, 'wx', 0o600);
-      try { await file.writeFile(bytes); await file.sync(); } finally { await file.close(); }
-      await fs.promises.rename(temp, filePath);
-    } catch (error) { await fs.promises.unlink(temp).catch(() => {}); throw error; }
+  const atomicWrite = (filePath, bytes,scope) => queued(path.resolve(filePath).toLowerCase(), async () => {
+    await scope.assert();await safeFile.writeRegularFileAtomic(filePath,bytes,{maxBytes:MAX_PROJECT_BYTES,assertCurrent:scope.assertSync});await scope.assert();
   });
-  const pickSave = async (event, title, extension, name) => {
+  const pickSave = async (event, title, extension, name,scope) => {
     const selected = await dialog.showSaveDialog(parentOf(event), { title, defaultPath: `${safeTitle(name)}.${extension}`, filters: [{ name: extension.toUpperCase(), extensions: [extension] }] });
+    await scope.assert();
     if (selected.canceled || !selected.filePath) return null;
     return path.extname(selected.filePath) ? selected.filePath : selected.filePath + '.' + extension;
   };
-  const readBounded = async (filePath, limit = MAX_PROJECT_BYTES) => {
-    const stat = await fs.promises.stat(filePath);
-    if (!stat.isFile() || stat.size <= 0 || stat.size > limit) throw new Error('Файл пуст или превышает допустимый размер');
-    const bytes = await fs.promises.readFile(filePath);
-    if (bytes.length > limit) throw new Error('Файл превышает допустимый размер');
+  const readBounded = async (filePath, limit = MAX_PROJECT_BYTES,scope) => {
+    await scope.assert();const bytes=await safeFile.readRegularFile(filePath,{maxBytes:limit,minBytes:1,assertCurrent:scope.assertSync});await scope.assert();
     return bytes;
   };
   const recoveryPath = id => {
@@ -416,59 +416,62 @@ function registerPdfDocumentServices({ app, ipcMain, dialog, BrowserWindow, getS
     }))).filter(Boolean);
   };
 
-  handle('pdf-studio-export', async (event, payload) => {
+  handle('pdf-studio-export', async (event, payload,scope) => {
     const model = normalizeExport(payload);
-    const destination = await pickSave(event, 'Экспорт документа', model.format, model.title);
+    const destination = await pickSave(event, 'Экспорт документа', model.format, model.title,scope);
     if (!destination) return { ok: false, canceled: true };
     let bytes;
     if (model.format === 'docx') bytes = await createDocx(model);
     else if (model.format === 'xlsx') bytes = await createXlsx(model);
     else if (model.format === 'txt') bytes = createText(model);
     else bytes = createCsv(model);
-    await atomicWrite(destination, bytes);
+    await atomicWrite(destination, bytes,scope);
     return { ok: true, path: destination, format: model.format, pages: model.pages.length, bytes: bytes.length };
   });
 
-  handle('pdf-studio-save-project', async (event, payload) => {
+  handle('pdf-studio-save-project', async (event, payload,scope) => {
     const packed = await packProject(payload && payload.project);
-    const destination = await pickSave(event, 'Сохранить проект PDF', 'tvspdf', packed.manifest.title);
+    await scope.assert();const destination = await pickSave(event, 'Сохранить проект PDF', 'tvspdf', packed.manifest.title,scope);
     if (!destination) return { ok: false, canceled: true };
-    await atomicWrite(destination, packed.bytes);
+    await atomicWrite(destination, packed.bytes,scope);
     return { ok: true, path: destination, bytes: packed.bytes.length, savedAt: packed.manifest.savedAt };
   });
 
-  handle('pdf-studio-open-project', async event => {
+  handle('pdf-studio-open-project', async (event,payload,scope) => {
     const selected = await dialog.showOpenDialog(parentOf(event), { title: 'Открыть проект PDF', filters: [{ name: 'Проект PDF ТВС', extensions: ['tvspdf'] }], properties: ['openFile'] });
+    await scope.assert();
     if (selected.canceled || !selected.filePaths || !selected.filePaths[0]) return { ok: false, canceled: true };
-    const opened = unpackProject(await readBounded(selected.filePaths[0]));
+    const opened = unpackProject(await readBounded(selected.filePaths[0],MAX_PROJECT_BYTES,scope));
     return { ok: true, path: selected.filePaths[0], ...opened };
   });
 
-  handle('pdf-studio-autosave', (event, payload) => queued('autosave-window:' + event.sender.id, async () => {
+  handle('pdf-studio-autosave', (event, payload,scope) => queued('autosave-window:' + event.sender.id, async () => {
+    await scope.assert();
     const packed = await packProject(payload && payload.project);
+    await scope.assert();
     const id = payload && payload.recoveryId ? payload.recoveryId : hash(Buffer.from(String(event.sender.id) + '|' + packed.identity));
     const destination = recoveryPath(id);
     const owner = autosaveOwners.get(id);
     if (owner && owner !== event.sender.id) throw new Error('Этот документ восстанавливается в другом окне');
     autosaveOwners.set(id, event.sender.id);
     return queued('recovery-quota', async () => {
-      await fs.promises.mkdir(recoveryDir, { recursive: true });
+      await scope.assert();safeFile.verifiedDirectory(recoveryDir,{create:true});
       const existing = await recoveryFiles();
       const size = existing.filter(file => file.id !== id).reduce((sum, file) => sum + file.bytes, 0);
       if (size + packed.bytes.length > MAX_RECOVERY_BYTES) throw new Error('Хранилище восстановления PDF заняло 1 ГБ. Удалите ненужные копии в окне восстановления');
-      await atomicWrite(destination, packed.bytes);
+      await atomicWrite(destination, packed.bytes,scope);
       return { ok: true, id, savedAt: packed.manifest.savedAt, bytes: packed.bytes.length };
     });
   }));
 
-  handle('pdf-studio-recovery-list', async () => {
+  handle('pdf-studio-recovery-list', async (event,payload,scope) => {
     const files = await recoveryFiles();
     const entries = [];
     for (const file of files) {
       try {
         // Read only the bounded manifest here; large PDF sources are restored
         // only when the user chooses this entry.
-        const zip = new AdmZip(await readBounded(file.filePath));
+        const zip = new AdmZip(await readBounded(file.filePath,MAX_PROJECT_BYTES,scope));
         if (zip.getEntries().length > MAX_ARCHIVE_ENTRIES) throw new Error('Слишком много файлов');
         const manifestEntry = zip.getEntry('manifest.json');
         if (!manifestEntry || manifestEntry.header.size > MAX_MODEL_BYTES) throw new Error('Повреждено описание');
@@ -481,42 +484,45 @@ function registerPdfDocumentServices({ app, ipcMain, dialog, BrowserWindow, getS
     return { ok: true, entries };
   });
 
-  handle('pdf-studio-recovery-open', async (event, payload) => {
+  handle('pdf-studio-recovery-open', async (event, payload,scope) => {
     const id = payload && payload.id;
     const filePath = recoveryPath(id);
     const stat = await fs.promises.lstat(filePath);
+    await scope.assert();
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Недопустимая копия восстановления');
     const owner = autosaveOwners.get(id);
     if (owner && owner !== event.sender.id) throw new Error('Эта копия уже открыта в другом окне редактора');
-    const opened = unpackProject(await readBounded(filePath));
+    const opened = unpackProject(await readBounded(filePath,MAX_PROJECT_BYTES,scope));
     autosaveOwners.set(id, event.sender.id);
     return { ok: true, id, ...opened };
   });
 
-  handle('pdf-studio-recovery-delete', async (event, payload) => {
+  handle('pdf-studio-recovery-delete', async (event, payload,scope) => {
     const id = payload && payload.id;
     const filePath = recoveryPath(id);
     const owner = autosaveOwners.get(id);
     if (owner && owner !== event.sender.id) throw new Error('Копия используется другим окном редактора');
-    try { await fs.promises.unlink(filePath); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    await scope.assert();safeFile.verifiedDirectory(path.dirname(filePath));try { await fs.promises.unlink(filePath); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    await scope.assert();
     autosaveOwners.delete(id);
     return { ok: true };
   });
 
-  handle('pdf-studio-compare-file', async event => {
+  handle('pdf-studio-compare-file', async (event,payload,scope) => {
     const selected = await dialog.showOpenDialog(parentOf(event), { title: 'Выберите PDF для сравнения', filters: [{ name: 'PDF', extensions: ['pdf'] }], properties: ['openFile'] });
+    await scope.assert();
     if (selected.canceled || !selected.filePaths || !selected.filePaths[0]) return { ok: false, canceled: true };
-    const bytes = await readBounded(selected.filePaths[0], MAX_SOURCE_BYTES);
+    const bytes = await readBounded(selected.filePaths[0], MAX_SOURCE_BYTES,scope);
     assertPdf(bytes);
     return { ok: true, name: path.basename(selected.filePaths[0]), bytesBase64: bytes.toString('base64') };
   });
 
-  handle('pdf-studio-export-pages', async (event, payload) => {
+  handle('pdf-studio-export-pages', async (event, payload,scope) => {
     const bytes = decodeBase64(payload && payload.bytesBase64, MAX_PROJECT_BYTES);
     assertPdf(bytes);
-    const destination = await pickSave(event, 'Сохранить выбранные страницы PDF', 'pdf', payload && payload.title || 'Страницы');
+    const destination = await pickSave(event, 'Сохранить выбранные страницы PDF', 'pdf', payload && payload.title || 'Страницы',scope);
     if (!destination) return { ok: false, canceled: true };
-    await atomicWrite(destination, bytes);
+    await atomicWrite(destination, bytes,scope);
     return { ok: true, path: destination, bytes: bytes.length };
   });
 

@@ -1,10 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const safeFile=require('./safe-file.cjs');
+const MAX_PDF_BYTES=128*1024*1024,MAX_IMAGE_BYTES=16*1024*1024;
 
 // Each editor owns its document. An editor opened later must never replace the
 // bytes or destination of an already open window.
-function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
+function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog,getOpeningContext,assertOpeningContext,assertOpeningContextSync }) {
   const sessions = new Map();
   const rootDir = path.resolve(__dirname, '..');
   const fontData = new Map();
@@ -18,10 +20,12 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
   const errorText = error => String(error && error.message || error || 'Неизвестная ошибка');
   const parentOf = event => BrowserWindow.fromWebContents(event.sender) || undefined;
   const sessionOf = event => {
+    if(!event?.sender||event.sender.isDestroyed())throw Error('Окно редактора закрыто');
     const session = sessions.get(event.sender.id);
     if (!session) throw new Error('Документ редактора не найден. Откройте PDF заново');
     return session;
   };
+  const capture=(event,owner=sessionOf(event))=>{const url=event.sender.getURL?.(),frame=event.sender.mainFrame;const assertSync=()=>{if(event.sender.isDestroyed()||event.sender.getURL?.()!==url||event.sender.mainFrame!==frame||owner&&sessions.get(event.sender.id)!==owner)throw Error('Документ закрыт или изменён');};return {assertSync,assert:async()=>assertSync()};};
   const publicData = session => ({
     pdfBase64: session.pdfBase64,
     filePath: session.filePath,
@@ -30,21 +34,21 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
   const canonicalPath = value => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
   const samePath = (left, right) => !!left && !!right && canonicalPath(left) === canonicalPath(right);
 
-  function decodeBase64(value, kind) {
-    if (typeof value !== 'string') throw new Error('Не получены данные ' + kind);
+  function decodeBase64(value, kind,limit=MAX_PDF_BYTES) {
+    if (typeof value !== 'string'||value.length>Math.ceil(limit*4/3)+2048) throw new Error('Не получены данные или превышен допустимый размер ' + kind);
     const encoded = value.replace(/^data:[^;,]+;base64,/i, '').replace(/\s/g, '');
     if (!encoded || !/^[a-zA-Z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 === 1) {
       throw new Error('Повреждены данные ' + kind);
     }
-    return Buffer.from(encoded, 'base64');
+    const bytes=Buffer.from(encoded,'base64');if(!bytes.length||bytes.length>limit)throw Error('Файл превышает допустимый размер');return bytes;
   }
 
   function assertPdf(bytes) {
     if (!bytes.subarray(0, 1024).includes(Buffer.from('%PDF-'))) throw new Error('Выбранный файл не является PDF');
   }
 
-  async function readPdf(filePath) {
-    const bytes = await fs.promises.readFile(filePath);
+  async function readPdf(filePath,scope) {
+    const bytes = await safeFile.readRegularFile(filePath,{maxBytes:MAX_PDF_BYTES,minBytes:1,assertCurrent:scope.assertSync});await scope.assert();
     assertPdf(bytes);
     const { PDFDocument } = require('pdf-lib');
     let parsed;
@@ -53,18 +57,20 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
       if (/encrypt|password/i.test(errorText(error))) throw new Error('PDF защищён паролем. Откройте для редактирования копию без пароля');
       throw new Error('Не удалось открыть PDF: ' + errorText(error));
     }
+    await scope.assert();
     if (!parsed.getPageCount()) throw new Error('В PDF нет страниц');
     return { pdfBase64: bytes.toString('base64'), filePath, hash: digest(bytes), busy: false };
   }
 
-  async function choosePdf(event, title) {
+  async function choosePdf(event, title,scope) {
     const selection = await dialog.showOpenDialog(parentOf(event), {
       title,
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
       properties: ['openFile'],
     });
+    await scope.assert();
     if (selection.canceled || !selection.filePaths || !selection.filePaths[0]) return null;
-    return readPdf(selection.filePaths[0]);
+    return readPdf(selection.filePaths[0],scope);
   }
 
   function setTitle(event, session) {
@@ -74,7 +80,9 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
 
   ipcMain.handle('open-pdf-editor', async event => {
     try {
-      const session = await choosePdf(event, 'Выберите PDF-файл для редактирования');
+      const scope=capture(event,null),opening=getOpeningContext?await getOpeningContext(event):null;
+      const senderAssert=scope.assertSync;scope.assertSync=()=>{senderAssert();if(opening&&assertOpeningContextSync)assertOpeningContextSync(opening);};scope.assert=async()=>{scope.assertSync();if(opening)await assertOpeningContext(opening);scope.assertSync();};
+      await scope.assert();const session = await choosePdf(event, 'Выберите PDF-файл для редактирования',scope);
       if (!session) return { ok: false, canceled: true };
       const iconPath = path.join(rootDir, 'build', 'icon.ico');
       const pdfWin = new BrowserWindow({
@@ -98,6 +106,7 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
       pdfWin.on('closed', () => sessions.delete(webContentsId));
       try {
         await pdfWin.loadFile(path.join(rootDir, 'pdf-editor.html'));
+        await scope.assert();
       } catch (error) {
         sessions.delete(webContentsId);
         if (!pdfWin.isDestroyed()) pdfWin.destroy();
@@ -115,8 +124,10 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
   ipcMain.handle('pdf-editor-open', async event => {
     try {
       const previous = sessionOf(event);
+      const scope=capture(event,previous);
       if (previous.busy) return { ok: false, error: 'Дождитесь окончания сохранения' };
-      const session = await choosePdf(event, 'Открыть другой PDF');
+      const session = await choosePdf(event, 'Открыть другой PDF',scope);
+      await scope.assert();
       if (!session) return { ok: false, canceled: true };
       // The renderer still owns the previous document until PDF.js has loaded
       // the candidate successfully. Its save target must stay unchanged.
@@ -157,20 +168,8 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
 
   // Write and flush a complete sibling file first. A failed write leaves the
   // original file intact; rename is the only operation replacing its contents.
-  async function atomicWrite(filePath, bytes) {
-    const tmpPath = path.join(path.dirname(filePath), '.' + path.basename(filePath) + '.' + crypto.randomBytes(10).toString('hex') + '.tmp');
-    let handle;
-    try {
-      handle = await fs.promises.open(tmpPath, 'wx');
-      await handle.writeFile(bytes);
-      await handle.sync();
-      await handle.close();
-      handle = null;
-      await fs.promises.rename(tmpPath, filePath);
-    } finally {
-      if (handle) await handle.close().catch(() => {});
-      await fs.promises.unlink(tmpPath).catch(() => {});
-    }
+  async function atomicWrite(filePath, bytes,scope) {
+    await scope.assert();await safeFile.writeRegularFileAtomic(filePath,bytes,{maxBytes:MAX_PDF_BYTES,assertCurrent:scope.assertSync});await scope.assert();
   }
 
   async function saveDocument(event, payload, saveAs) {
@@ -178,6 +177,7 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
     let ownsSave = false;
     try {
       session = sessionOf(event);
+      const scope=capture(event,session);
       if (session.busy) return { saved: false, error: 'Сохранение уже выполняется' };
       session.busy = true;
       ownsSave = true;
@@ -185,6 +185,7 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
       assertPdf(bytes);
       const { PDFDocument } = require('pdf-lib');
       const parsed = await PDFDocument.load(bytes, { updateMetadata: false });
+      await scope.assert();
       if (!parsed.getPageCount()) throw new Error('В PDF должна быть хотя бы одна страница');
 
       let savePath = session.filePath;
@@ -195,6 +196,7 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
           defaultPath: savePath ? path.join(path.dirname(savePath), baseName) : baseName,
           filters: [{ name: 'PDF', extensions: ['pdf'] }],
         });
+        await scope.assert();
         if (selection.canceled || !selection.filePath) return { saved: false, canceled: true };
         savePath = /\.pdf$/i.test(selection.filePath) ? selection.filePath : selection.filePath + '.pdf';
       }
@@ -203,15 +205,16 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
       // windows, so both cannot pass the original-file check simultaneously.
       const key = canonicalPath(savePath);
       const write = (fileWrites.get(key) || Promise.resolve()).catch(() => {}).then(async () => {
+        await scope.assert();
         if (samePath(savePath, session.filePath)) {
           let existing;
-          try { existing = await fs.promises.readFile(savePath); }
+          try { existing = await safeFile.readRegularFile(savePath,{maxBytes:MAX_PDF_BYTES,minBytes:1,assertCurrent:scope.assertSync});await scope.assert(); }
           catch (error) { if (error.code !== 'ENOENT') throw error; }
           if (existing && digest(existing) !== session.hash) {
             return { saved: false, conflict: true, error: 'Файл уже изменён в другом окне или программе. Используйте «Сохранить как…», чтобы сохранить свою копию' };
           }
         }
-        await atomicWrite(savePath, bytes);
+        await atomicWrite(savePath, bytes,scope);
         session.pdfBase64 = bytes.toString('base64');
         session.filePath = savePath;
         session.hash = digest(bytes);
@@ -232,10 +235,12 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
   ipcMain.handle('pdf-editor-adopt-project', async (event, payload) => {
     try {
       const previous = sessionOf(event);
+      const scope=capture(event,previous);
       if (previous.busy) throw new Error('Дождитесь окончания сохранения');
       const bytes = decodeBase64(payload && payload.pdfBase64, 'PDF проекта');
       assertPdf(bytes);
       const parsed = await require('pdf-lib').PDFDocument.load(bytes, { updateMetadata: false });
+      await scope.assert();
       if (!parsed.getPageCount()) throw new Error('В проекте нет страниц PDF');
       if (sessionOf(event) !== previous) throw new Error('Документ уже изменён');
       const displayName = path.basename(String(payload.title || 'Документ.pdf')).slice(0, 240);
@@ -251,6 +256,7 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
     let ownsJob=false;
     try {
       session=sessionOf(event);
+      const scope=capture(event,session);
       if(session.contentBusy)throw new Error('Обработка содержимого этого документа уже выполняется');
       session.contentBusy=true;ownsJob=true;
       const bytes = decodeBase64(payload && payload.bytesBase64, 'PDF');
@@ -259,11 +265,12 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
       const enginePath = path.join(__dirname, 'pdf-content-engine.cjs');
       const physicalEngine = enginePath.replace(/([\\/])app\.asar(?=[\\/]|$)/i, '$1app.asar.unpacked');
       const run=contentQueue.catch(()=>{}).then(()=>{
-        if(event.sender.isDestroyed()||sessionOf(event)!==session)throw new Error('Документ уже закрыт или заменён');
+        scope.assertSync();
         return require(fs.existsSync(physicalEngine) ? physicalEngine : enginePath).applyContentChanges(bytes, payload.changes, { rasterizePages: payload.rasterizePages });
       });
       contentQueue=run.catch(()=>{});
       const result = await run;
+      await scope.assert();
       return { ok: true, bytesBase64: Buffer.from(result.bytes).toString('base64'), warnings: result.warnings || [], pages: result.pages || [], engine: result.engine };
     } catch (error) { return { ok: false, error: errorText(error) }; }
     finally { if(session&&ownsJob)session.contentBusy=false; }
@@ -273,42 +280,42 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
 
   ipcMain.handle('pdf-editor-merge', async event => {
     try {
-      sessionOf(event);
+      const scope=capture(event);
       const selection = await dialog.showOpenDialog(parentOf(event), {
         title: 'Выберите PDF для объединения',
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
         properties: ['openFile', 'multiSelections'],
       });
+      await scope.assert();
       if (selection.canceled || !selection.filePaths || !selection.filePaths.length) return { ok: false, canceled: true };
-      const files = await Promise.all(selection.filePaths.map(async filePath => {
-        const data = await readPdf(filePath);
-        return { name: path.basename(filePath), base64: data.pdfBase64 };
-      }));
+      if(selection.filePaths.length>1000)throw Error('Выбрано больше 1000 PDF');
+      const files=[];let total=0;for(const filePath of selection.filePaths){const data=await readPdf(filePath,scope);total+=Math.floor(data.pdfBase64.length*3/4);if(total>256*1024*1024)throw Error('Исходные PDF превышают 256 МБ');files.push({name:path.basename(filePath),base64:data.pdfBase64});}await scope.assert();
       return { ok: true, files };
     } catch (error) { return { ok: false, error: errorText(error) }; }
   });
 
   ipcMain.handle('pdf-editor-insert-image', async event => {
     try {
-      sessionOf(event);
+      const scope=capture(event);
       const selection = await dialog.showOpenDialog(parentOf(event), {
         title: 'Выберите изображение',
         filters: [{ name: 'Изображения', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'webp'] }],
         properties: ['openFile'],
       });
+      await scope.assert();
       if (selection.canceled || !selection.filePaths || !selection.filePaths[0]) return { ok: false, canceled: true };
       const filePath = selection.filePaths[0];
       const mimeTypes = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.bmp': 'image/bmp', '.webp': 'image/webp' };
       const mimeType = mimeTypes[path.extname(filePath).toLowerCase()];
       if (!mimeType) throw new Error('Поддерживаются PNG, JPEG, BMP и WebP');
-      const bytes = await fs.promises.readFile(filePath);
+      const bytes = await safeFile.readRegularFile(filePath,{maxBytes:MAX_IMAGE_BYTES,minBytes:1,assertCurrent:scope.assertSync});await scope.assert();
       return { ok: true, dataUrl: 'data:' + mimeType + ';base64,' + bytes.toString('base64'), name: path.basename(filePath), mimeType };
     } catch (error) { return { ok: false, error: errorText(error) }; }
   });
 
   ipcMain.handle('pdf-editor-font', async (event, requestedStyle = 'regular') => {
     try {
-      sessionOf(event);
+      const scope=capture(event);
       const styles = {
         regular: { arial: 'arial.ttf', segoe: 'segoeui.ttf', liberation: 'Regular', dejavu: '' },
         bold: { arial: 'arialbd.ttf', segoe: 'segoeuib.ttf', liberation: 'Bold', dejavu: '-Bold' },
@@ -330,8 +337,11 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
         ];
         const fontPath = candidates.find(filePath => fs.existsSync(filePath));
         if (!fontPath) throw new Error('Не найден шрифт для русского текста');
-        fontData.set(style, { ok: true, base64: (await fs.promises.readFile(fontPath)).toString('base64'), name: path.basename(fontPath), style });
+        // Windows system fonts can share a WinSxS inode. Only this fixed list,
+        // never a renderer-selected path, may read a hardlinked regular file.
+        const bytes=await safeFile.readRegularFile(fontPath,{maxBytes:16*1024*1024,minBytes:1,allowHardLinks:true,assertCurrent:scope.assertSync});await scope.assert();fontData.set(style,{ok:true,base64:bytes.toString('base64'),name:path.basename(fontPath),style});
       }
+      await scope.assert();
       return fontData.get(style);
     } catch (error) { return { ok: false, error: errorText(error) }; }
   });
@@ -339,7 +349,7 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
   function disposeOcrWorker() { return getOcrRuntime().dispose(); }
 
   ipcMain.handle('pdf-editor-ocr-info', async event => {
-    try { sessionOf(event);return {ok:true,...await getOcrRuntime().info()}; }
+    try { const scope=capture(event),info=await getOcrRuntime().info();await scope.assert();return {ok:true,...info}; }
     catch(error) {return {ok:false,error:errorText(error)};}
   });
 
@@ -349,17 +359,19 @@ function registerPdfEditorService({ app, BrowserWindow, ipcMain, dialog }) {
     const cancel=()=>controller.abort();
     try {
       session=sessionOf(event);
+      const scope=capture(event,session);
       if(session.ocrBusy)throw Error('Распознавание этого документа уже выполняется');
       session.ocrBusy=true;ownsJob=true;
-      const bytes=decodeBase64(payload && payload.imageBase64,'изображения');
+      const bytes=decodeBase64(payload && payload.imageBase64,'изображения',MAX_IMAGE_BYTES);
       const requested=payload.options||{};
       if(['codes','amount'].includes(requested.decode)&&requested.isRegion!==true)throw Error('Для режима реквизитов выделите отдельную текстовую область OCR');
       event.sender.once('destroyed',cancel);
       const result=await getOcrRuntime().recognize(bytes,{
         language:requested.language||'rus+eng',profile:requested.profile||'accurate',decode:requested.decode||'document',
         psm:requested.psm,threshold:requested.threshold,autorotate:false,timeoutMs:180000,signal:controller.signal,
-        onProgress(progress){if(!event.sender.isDestroyed())event.sender.send('pdf-editor-ocr-progress',progress);},
+        onProgress(progress){try{scope.assertSync();event.sender.send('pdf-editor-ocr-progress',progress);}catch{controller.abort();}},
       });
+      await scope.assert();
       return {ok:true,...result};
     }catch(error){return {ok:false,error:errorText(error)};}
     finally {event.sender.removeListener('destroyed',cancel);if(session&&ownsJob)session.ocrBusy=false;}

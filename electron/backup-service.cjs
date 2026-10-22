@@ -41,8 +41,7 @@ function newTarget(value) { const proposed = explicit(value), parent = directory
     fail('BACKUP_TARGET_EXISTS', 'Целевой путь уже существует; выберите новый'); return { parent, target }; }
 function file(filename) { const parent = directory(path.dirname(filename)), target = path.join(parent, path.basename(filename)), info = stat(target); if (!info || !info.isFile() || info.isSymbolicLink())
     fail('BACKUP_FILE', 'Нужен обычный файл без ссылок'); return { target, info }; }
-function readFile(filename) { const { target, info } = file(filename); const bytes = fs.readFileSync(target), after = stat(target); if (!after || after.ino !== info.ino || after.dev !== info.dev || after.size !== bytes.length || after.mtimeMs !== info.mtimeMs)
-    fail('BACKUP_SOURCE_CHANGED', 'Файл изменился во время чтения'); return bytes; }
+function readFile(filename) { return require('./safe-file.cjs').readRegularFileSync(explicit(filename),{maxBytes:MAX_BYTES}); }
 function writeFile(filename, bytes) { const fd = fs.openSync(filename, 'wx', 0o600), identity = fs.fstatSync(fd); let failed = false; try {
     fs.writeFileSync(fd, bytes);
     fs.fsyncSync(fd);
@@ -179,10 +178,15 @@ function readPackage(archivePath) {
         fail('BACKUP_LIMIT', 'Резервный пакет превышает 512 МБ');
     let zip;
     try {
-        zip = new AdmZip(archive);
+        const bounded=require('../ReestrBuilder/archive-budget.mjs');
+        const budget=bounded.createArchiveBudget({inputBytes:MAX_BYTES,entries:MAX_FILES+1,entryBytes:MAX_BYTES,extractedBytes:MAX_BYTES,depth:0});
+        budget.input(archive.length);
+        const decoded=bounded.extractZipBounded(archive,path.join(require('node:os').tmpdir(),'tvs-backup-memory'),budget,{collectBytes:true,includeDirectories:true});
+        const entries=decoded.map(entry=>({entryName:entry.name,isDirectory:entry.directory,attr:0,header:{size:entry.size},getData:()=>entry.bytes}));
+        zip={getEntries:()=>entries,getEntry:name=>entries.find(entry=>entry.entryName===name)};
     }
-    catch {
-        fail('BACKUP_ARCHIVE', 'Повреждён ZIP пакет');
+    catch (error) {
+        fail(error.code==='ARCHIVE_LIMIT'?'BACKUP_LIMIT':error.code==='ARCHIVE_PATH'?'BACKUP_PATH':'BACKUP_ARCHIVE', 'Повреждён ZIP пакет или превышены пределы безопасной распаковки');
     }
     const entries = zip.getEntries(), seen = new Set();
     let total = 0;

@@ -38,7 +38,7 @@ for (const format of ['json', 'sqlite'])
     test(format + ' backup verifies and restores 40 sections without changing typed, missing or duplicate legacy IDs', t => {
         const paths = temp(t), expected = source(paths, format), before = businessTree(paths.sourceDir), settings = { networkKey: 'SECRET-NETWORK-TOKEN', users: [{ name: 'Synthetic', dataDir: 'Synthetic path' }] };
         const created = backup.createPackage({ ...paths, settings }), verified = backup.verifyPackage(paths);
-        assert.equal(created.ok, true);
+        assert.equal(created.ok, true, JSON.stringify(created));
         assert.equal(verified.sections.length, schema.sections.length);
         assert.equal(verified.sourceFormat, format);
         assert.equal(JSON.stringify(created).includes('SECRET-NETWORK-TOKEN'), false);
@@ -334,9 +334,10 @@ test('Electron archive IPC stays a thin compatible wrapper around the tested ser
     const electron = { dialog: { showSaveDialog: async () => ({ canceled: false, filePath: paths.archivePath }), showOpenDialog: async () => ({ canceled: false, filePaths: [selection++ === 0 ? paths.archivePath : paths.parent] }) }, shell: {}, BrowserWindow: { fromWebContents: () => null } };
     vm.runInNewContext(fs.readFileSync(filename, 'utf8'), { module: exported, exports: exported.exports, Buffer, Date, require(name) { return name === 'electron' ? electron : requireHere(name); } }, { filename });
     exported.exports.register({ ipcMain: { handle(name, handler) { handlers[name] = handler; } }, getDataDir: () => paths.sourceDir, isClientMode: () => false, getSettings: () => ({ networkKey: 'PRIVATE-KEY' }), knowledgeDir: () => path.join(paths.sourceDir, 'reestr-knowledge') });
-    const created = await handlers['create-backup-package']({ sender: {} });
-    assert.equal(created.ok, true);
-    const restored = await handlers['verify-backup-package']({ sender: {} });
+    const event={sender:{id:1,getURL:()=> 'http://127.0.0.1/synthetic',isDestroyed:()=>false,mainFrame:{}}};
+    const created = await handlers['create-backup-package'](event);
+    assert.equal(created.ok, true, JSON.stringify(created));
+    const restored = await handlers['verify-backup-package'](event);
     assert.equal(restored.ok, true);
     assert.ok(restored.path);
     assert.deepEqual(storage.readSnapshot(restored.path).data, data());

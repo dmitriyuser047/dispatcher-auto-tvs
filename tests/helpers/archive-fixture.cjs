@@ -1,0 +1,4 @@
+'use strict';
+function crc32(bytes){let crc=0xffffffff;for(const byte of bytes){crc^=byte;for(let bit=0;bit<8;bit++)crc=crc&1?0xedb88320^(crc>>>1):crc>>>1;}return(crc^0xffffffff)>>>0;}
+function rarStored(name,value){const stamp=buffer=>{buffer.writeUInt16LE(crc32(buffer.subarray(2))&0xffff);return buffer;};const main=Buffer.alloc(13);main[2]=0x73;main.writeUInt16LE(main.length,5);const rawName=Buffer.from(name),file=Buffer.alloc(32+rawName.length);file[2]=0x74;file.writeUInt16LE(0x8000,3);file.writeUInt16LE(file.length,5);file.writeUInt32LE(value.length,7);file.writeUInt32LE(value.length,11);file[15]=2;file.writeUInt32LE(crc32(value),16);file[24]=20;file[25]=0x30;file.writeUInt16LE(rawName.length,26);file.writeUInt32LE(0x20,28);rawName.copy(file,32);const end=Buffer.alloc(7);end[2]=0x7b;end.writeUInt16LE(7,5);return Buffer.concat([Buffer.from([0x52,0x61,0x72,0x21,0x1a,0x07,0]),stamp(main),stamp(file),value,stamp(end)]);}
+module.exports={crc32,rarStored};

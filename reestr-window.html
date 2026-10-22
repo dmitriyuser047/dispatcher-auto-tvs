@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; worker-src 'none'; object-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">
 <title>Реестр счетов</title>
 <style>
   :root {
@@ -343,9 +344,10 @@ function buildDropdownPicker(currentVal, items, placeholder, onSelect) {
     } else {
       const opt = document.createElement('div');
       opt.className = 'dd-option' + (currentVal === item.value ? ' selected' : '');
-      opt.innerHTML = item.html || item.label;
+      opt.textContent = String(item.label ?? '');
+      if(item.detail!==undefined&&item.detail!==null){const detail=document.createElement('span');detail.className='co-obj';detail.textContent=String(item.detail);opt.appendChild(detail);}
       opt.dataset.value = item.value;
-      opt.dataset.search = (item.search || item.label).toLowerCase();
+      opt.dataset.search = String(item.search || item.label || '').toLowerCase();
       optionsWrap.appendChild(opt);
     }
   });
@@ -428,7 +430,7 @@ function buildDropdownPicker(currentVal, items, placeholder, onSelect) {
 
 function buildStatyaItems() {
   const items = [];
-  const groups = {};
+  const groups = Object.create(null);
   statyi.forEach(s => { const g = s.vid || 'Прочее'; if (!groups[g]) groups[g] = []; groups[g].push(s); });
   for (const [gName, list] of Object.entries(groups)) {
     items.push({ group: gName });
@@ -439,7 +441,7 @@ function buildStatyaItems() {
 
 function buildContractItems() {
   const items = [];
-  const groups = {};
+  const groups = Object.create(null);
   contracts.forEach(c => { const g = c.company || 'Без компании'; if (!groups[g]) groups[g] = []; groups[g].push(c); });
   for (const [gName, list] of Object.entries(groups)) {
     items.push({ group: gName });
@@ -448,7 +450,7 @@ function buildContractItems() {
       items.push({
         value: c.contract,
         label: label,
-        html: label + '<span class="co-obj">' + c.obj + '</span>',
+        detail: c.obj,
         search: c.contract + ' ' + c.obj + ' ' + (c.note || '')
       });
     });
@@ -520,7 +522,7 @@ function renderTable() {
     tdComp.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
     const compSel = document.createElement('select');
     compSel.className = 'razdel-sel';
-    compSel.innerHTML = '<option value="">—</option>' + getUniqueCompanies().map(c => `<option value="${c}"${row.company === c ? ' selected' : ''}>${c}</option>`).join('');
+    compSel.add(new Option('—',''));for(const company of getUniqueCompanies())compSel.add(new Option(String(company),String(company),false,row.company===company));
     compSel.addEventListener('change', () => { rows[i].company = compSel.value; });
     tdComp.appendChild(compSel);
     tr.appendChild(tdComp);
@@ -551,10 +553,10 @@ function renderTable() {
     tdVeh.style.cssText = 'padding:6px 8px;border-bottom:1px solid var(--border)';
     const vehSel = document.createElement('select');
     vehSel.className = 'razdel-sel';
-    vehSel.innerHTML = '<option value="">— не указан —</option>' +
-      vehicles.slice().sort((a,b) => (a.plate||'').localeCompare(b.plate||'','ru'))
-        .map(v => `<option value="${v.plate}"${row.vehiclePlate === v.plate ? ' selected' : ''}>${v.plate} — ${v.make}</option>`).join('');
-    if (row.vehiclePlate && !vehSel.value) { vehSel.innerHTML += `<option value="${row.vehiclePlate}" selected>${row.vehiclePlate}</option>`; }
+    vehSel.add(new Option('— не указан —',''));
+    for(const vehicle of vehicles.slice().sort((a,b)=>String(a.plate||'').localeCompare(String(b.plate||''),'ru')))
+      vehSel.add(new Option(String(vehicle.plate||'')+' — '+String(vehicle.make||''),String(vehicle.plate||''),false,row.vehiclePlate===vehicle.plate));
+    if(row.vehiclePlate&&!vehSel.value)vehSel.add(new Option(String(row.vehiclePlate),String(row.vehiclePlate),true,true));
     vehSel.addEventListener('change', () => { rows[i].vehiclePlate = vehSel.value; });
     tdVeh.appendChild(vehSel);
     tr.appendChild(tdVeh);

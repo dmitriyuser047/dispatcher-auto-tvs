@@ -58,9 +58,13 @@ document.addEventListener('keydown', (e) => {
 // ─── UTILS ──────────────────────────────────────────────
 // ISO → ДД.ММ.ГГГГ
 function fmtDate(isoStr) {
-  if (!isoStr) return '';
-  const [y, m, d] = isoStr.split('-');
-  return `${d}.${m}.${y}`;
+  if(isoStr===undefined||isoStr===null||isoStr==='')return '';
+  if(typeof isoStr!=='string')return '—';
+  const match=/^(\d{4})-(\d{2})-(\d{2})(?:T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,9})?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?)?$/.exec(isoStr);
+  if(!match)return '—';
+  const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]),leap=year%4===0&&(year%100!==0||year%400===0),days=[31,leap?29:28,31,30,31,30,31,31,30,31,30,31];
+  if(year<1||month<1||month>12||day<1||day>days[month-1])return '—';
+  return match[3]+'.'+match[2]+'.'+match[1];
 }
 // Сравнение дат для сортировок.
 // Даты хранятся как ГГГГ-ММ-ДД с ведущими нулями, поэтому строки сравниваются
@@ -371,7 +375,7 @@ function populateOrgSelect() {
   if (orgs.length > 1) {
     orgRow.style.display = 'flex';
     sel.innerHTML = `<option value="">Все организации</option>` +
-      orgs.map(o => `<option value="${o.replace(/"/g,'&quot;')}">${o}</option>`).join('');
+      orgs.map(o => `<option value="${htmlEsc(o)}">${htmlEsc(o)}</option>`).join('');
     sel.value = filterOrg;
   } else {
     orgRow.style.display = 'none';

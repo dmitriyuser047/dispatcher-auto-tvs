@@ -102,10 +102,10 @@ async function renderSettingsBody() {
       <div class="settings-section-title">Пользователи</div>
       ${users.map((u, i) => `
         <div class="settings-user-card ${i === activeIdx ? 'active' : ''}" onclick="settingsSwitchUser(${i})">
-          <div class="settings-user-avatar">${(u.name || 'П')[0].toUpperCase()}</div>
+          <div class="settings-user-avatar">${htmlEsc((u.name || 'П')[0].toUpperCase())}</div>
           <div style="flex:1;min-width:0">
-            <div class="settings-user-name">${u.name || 'Без имени'}</div>
-            <div class="settings-user-path" title="${u.dataDir || ''}">${u.dataDir || 'путь не задан'}</div>
+            <div class="settings-user-name">${htmlEsc(u.name || 'Без имени')}</div>
+            <div class="settings-user-path" title="${htmlEsc(u.dataDir || '')}">${htmlEsc(u.dataDir || 'путь не задан')}</div>
           </div>
           <div class="settings-actions">
             <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();settingsEditUser(${i})" title="Редактировать" style="font-size:11px;padding:3px 8px">
@@ -127,7 +127,7 @@ async function renderSettingsBody() {
         <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color:var(--text3);flex-shrink:0">
           <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
         </svg>
-        <span class="settings-path-text">${users[activeIdx].dataDir || 'не задан'}</span>
+        <span class="settings-path-text">${htmlEsc(users[activeIdx].dataDir || 'не задан')}</span>
         <button class="btn btn-ghost btn-sm" onclick="settingsChooseFolder()" style="font-size:11px;padding:3px 10px;white-space:nowrap">Изменить</button>
         <button class="btn btn-ghost btn-sm" onclick="window.electronAPI.openDataFolder()" style="font-size:11px;padding:3px 10px;white-space:nowrap">Открыть</button>
       </div>
