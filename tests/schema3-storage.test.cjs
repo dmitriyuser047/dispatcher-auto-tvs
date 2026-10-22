@@ -40,6 +40,12 @@ test('SQLite schema2 reads from a separate copy and never creates or repairs sou
   assert.throws(() => storage.writeSections(dir, request(dir, { drivers: [{ id: 'new', name: 'Synthetic' }] })), { code: 'SCHEMA_UPGRADE_REQUIRED' });
   assert.deepEqual(tree(dir), before); assert.equal(fs.existsSync(sqlite.filename(dir) + '-wal'), false); assert.equal(fs.existsSync(sqlite.filename(dir) + '-shm'), false);
 });
+
+test('SQLite schema2 reads a completed PERSIST journal without modifying any source byte',t=>{
+ const dir=path.join(temporary(t),'old-cold-persist'),data=empty();data.vehicles=[{id:0,plate:'SYNTHETIC COMMITTED',fuelBalance:923.537}];sqlite.create(dir,{data});downgradeSql(dir);
+ const db=new DatabaseSync(sqlite.filename(dir));try{db.exec('PRAGMA journal_mode=PERSIST;');db.prepare("UPDATE metadata SET value='2' WHERE key='generation'").run();db.prepare("UPDATE metadata SET value='1' WHERE key='generation'").run();}finally{db.close();}
+ const journal=sqlite.filename(dir)+'-journal';assert.ok(fs.statSync(journal).size>=28);assert.deepEqual(fs.readFileSync(journal).subarray(0,28),Buffer.alloc(28));const before=tree(dir);const snapshot=storage.readSnapshot(dir);assert.deepEqual(snapshot.data,data);assert.equal(snapshot.platform.readOnly,true);assert.deepEqual(tree(dir),before);
+});
 test('SQLite schema2 refuses a real active rollback journal before copying or recovering any source bytes', t => {
   const dir = path.join(temporary(t), 'old-rollback'); sqlite.create(dir, { data: empty() }); downgradeSql(dir);
   const db = new DatabaseSync(sqlite.filename(dir));

@@ -102,8 +102,11 @@ function transaction(dataDir,action,options={}){
   const cleanRead=()=>{if(!readStage)return;const info=fs.lstatSync(readStage);if(path.dirname(path.resolve(readStage))!==path.resolve(os.tmpdir())||!path.basename(readStage).startsWith('tvs-sqlite-legacy-read-')||info.isSymbolicLink()||info.ino!==readIdentity.ino||info.dev!==readIdentity.dev)fail('SQLITE_READ_CLEANUP','Не подтверждён временный каталог чтения');fs.rmSync(readStage,{recursive:true,force:true});readStage=null;};
   if(legacy){
     if(!readOnly)storageFormat.upgradeRequired();
-    for(const suffix of ['-wal','-journal']){const file=target.file+suffix;let state;try{state=fs.lstatSync(file);}catch(error){if(error.code==='ENOENT')continue;throw error;}if(!state.isFile()||state.isSymbolicLink()||state.nlink>1||state.size)fail('SQLITE_LEGACY_BUSY','Старая SQLite содержит незавершённый журнал. Закройте прежнюю программу штатно перед чтением или созданием копии');}
+    const rollback=require('./sqlite-rollback.cjs');let rollbackToken;
+    try{rollbackToken=rollback.assertQuiescent(target.file);}catch{fail('SQLITE_LEGACY_BUSY','Старая SQLite содержит незавершённый или небезопасный журнал. Завершите сохранение в прежней программе');}
+    const assertWal=()=>{const file=target.file+'-wal';let state;try{state=fs.lstatSync(file);}catch(error){if(error.code==='ENOENT')return;throw error;}if(!state.isFile()||state.isSymbolicLink()||state.nlink>1||state.size)fail('SQLITE_LEGACY_BUSY','Старая SQLite содержит незавершённый журнал. Закройте прежнюю программу штатно перед чтением или созданием копии');};assertWal();
     const before=fs.statSync(target.file),bytes=fs.readFileSync(target.file),after=fs.statSync(target.file);if(before.size!==after.size||before.mtimeMs!==after.mtimeMs||before.ino!==after.ino)fail('SQLITE_LEGACY_CHANGED','Старая база изменилась при чтении');
+    try{rollback.assertUnchanged(target.file,rollbackToken);}catch{fail('SQLITE_LEGACY_BUSY','Журнал старой SQLite изменился во время чтения');}assertWal();
     readStage=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-sqlite-legacy-read-'));readIdentity=fs.statSync(readStage);openFile=path.join(readStage,FILE);try{fs.writeFileSync(openFile,bytes,{flag:'wx'});}catch(error){cleanRead();throw error;}
   }
   let db;

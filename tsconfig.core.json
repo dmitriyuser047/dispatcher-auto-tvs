@@ -46,6 +46,7 @@
     "src/core/document-print.ts",
     "src/core/import-engine.ts",
     "src/core/access-policy.ts",
-    "src/core/access-scope.ts"
+    "src/core/access-scope.ts",
+    "src/core/database-lifecycle.ts"
   ]
 }

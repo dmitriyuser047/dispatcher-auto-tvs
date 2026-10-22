@@ -141,6 +141,20 @@ async function freshDataCacheContext(event){
   }catch(error){assertDataRead(event,generation,identity);invalidateDataBinding(event);throw Object.assign(new Error([401,403].includes(error.status)?'Доступ к серверу отозван':'Не удалось подтвердить текущие права сервера'),{code:[401,403].includes(error.status)?'ACCESS_REVOKED':error.code||'ACCESS_UNVERIFIED',status:error.status||0});}
 }
 let recoveryService=null;
+let maintenanceController=null;
+function databaseMaintenance(){
+  if(!maintenanceController)maintenanceController=require('./database-maintenance.cjs').createDatabaseMaintenance({
+    reviewDir:()=>path.join(app.getPath('userData'),'database-maintenance'),
+    assertContext:context=>{assertFileContextSync(context.file);assertDataBinding({sender:context.file.sender},context.file.operation.databaseToken);},
+    knownProfiles:()=>settings.users.map((profile,id)=>({id,name:profile.name,dataDir:profile.dataDir}))
+  });
+  return maintenanceController;
+}
+async function maintenanceContext(event){
+  const file=await captureFileContext(event),operation=file.operation;
+  if(operation.client||operation.principal?.role!=='admin')throw Object.assign(Error('Действия с базой доступны администратору на основном компьютере'),{code:'MAINTENANCE_ACCESS'});
+  return {file,sourceDir:operation.directory,scope:operation.scope,actor:operation.principal,client:operation.client};
+}
 let documentPrintRenderer=null;
 function renderArchivedDocumentPdf(snapshot){
   if(!documentPrintRenderer)documentPrintRenderer=require('./document-print-renderer.cjs').createDocumentPrintRenderer({BrowserWindow,session});
@@ -655,6 +669,22 @@ app.whenReady().then(() => {
   }catch(error){return {ok:false,error:error.message,code:error.code};}});
 
   ipcMain.handle('get-data-path', () => getDataDir());
+  ipcMain.handle('database-maintenance',async(event,payload)=>{
+    try{
+      if(!payload||typeof payload!=='object'||Array.isArray(payload)||!['inspect','profiles','list','preview','apply'].includes(payload.action))throw Object.assign(Error('Неизвестное действие с базой'),{code:'MAINTENANCE_INPUT'});
+      const {action,...input}=payload,context=await maintenanceContext(event),controller=databaseMaintenance();
+      if(['inspect','profiles','list'].includes(action)&&Object.keys(input).length)throw Object.assign(Error('Недопустимые параметры действия с базой'),{code:'MAINTENANCE_INPUT'});
+      const result=await controller[action](context,...(['preview','apply'].includes(action)?[input]:[]));
+      assertFileContextSync(context.file);return action==='profiles'?{...result,ok:true}:result;
+    }catch(error){return {ok:false,code:error.code||'MAINTENANCE_FAILED',error:error.message};}
+  });
+  ipcMain.handle('choose-maintenance-backup',async event=>{
+    try{
+      const context=await maintenanceContext(event),pick=await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender),{title:'Резервный пакет для отдельного восстановления',properties:['openFile'],filters:[{name:'ZIP',extensions:['zip']}]});
+      await assertFileContext(context.file);if(pick.canceled)return {ok:false,canceled:true};
+      const result=databaseMaintenance().selectBackup(context,pick.filePaths[0]);assertFileContextSync(context.file);return result;
+    }catch(error){return {ok:false,code:error.code||'MAINTENANCE_FAILED',error:error.message};}
+  });
   for(const [channel,action]of [['inspect-schema-upgrade','inspect'],['upgrade-schema-copy','copy']])ipcMain.handle(channel,async(event,payload)=>{
     try{
       const handlers=require('./schema-upgrade-ipc.cjs').createHandlers({

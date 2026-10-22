@@ -4,6 +4,9 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
 const ROOT=path.resolve(__dirname,'..');
 const COMPILER_VERSION='5.9.3';
 const ENTRIES=Object.freeze([
+  Object.freeze({source:'src/core/database-lifecycle.ts',output:'assets/core/database-lifecycle.js',global:'DatabaseLifecycle',factory:'createDatabaseLifecycle',dependencies:[
+    {path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
+  ]}),
   Object.freeze({source:'src/core/access-policy.ts',output:'assets/core/access-policy.js',global:'AccessPolicy',factory:'createAccessPolicy',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./platform-schema.js',global:'PlatformSchema'},
     {path:'./entity-identity.js',global:'EntityIdentity'},{path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},

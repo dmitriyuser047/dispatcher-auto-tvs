@@ -84,10 +84,10 @@ function revisions(value = {}) { try {
 catch {
     fail('BACKUP_REVISIONS', 'Некорректные версии разделов');
 } return Object.fromEntries(SECTIONS.map(name => [name, value[name] ?? 0])); }
+function sourceRollback(source){try{return require('./sqlite-rollback.cjs').assertQuiescent(path.join(source,'platform.sqlite'));}catch{fail('BACKUP_SOURCE_BUSY','В SQLite есть неподтверждённый журнал. Завершите сохранение в прежней программе перед резервированием.');}}
+function verifySourceRollback(source,token){try{require('./sqlite-rollback.cjs').assertUnchanged(path.join(source,'platform.sqlite'),token);}catch{fail('BACKUP_SOURCE_BUSY','Журнал исходной SQLite изменился во время резервирования.');}}
 function snapshotFiles(source,allowOwnedLock=false) {
-    const rollback=stat(path.join(source,'platform.sqlite-journal'));
-    if(rollback&&(!rollback.isFile()||rollback.isSymbolicLink()||rollback.size>0))
-        fail('BACKUP_SOURCE_BUSY','В SQLite есть незавершённый журнал. Закройте все экземпляры программы и редакторы базы перед резервированием.');
+    const rollback=sourceRollback(source);
     for (const name of ['.tvs-database.lock', '.tvs-database.lock.recovery', 'sections/.transaction.json'])
         if (!(name==='.tvs-database.lock'&&allowOwnedLock&&storage.isDatabaseLockHeld(source))&&stat(path.join(source, ...name.split('/'))))
             fail('BACKUP_SOURCE_BUSY', 'База занята или содержит незавершённое сохранение');
@@ -117,9 +117,10 @@ function snapshotFiles(source,allowOwnedLock=false) {
             add(name + '/' + entry);
         }
     }
-    return result.sort((a, b) => a.name.localeCompare(b.name));
+    verifySourceRollback(source,rollback);return result.sort((a, b) => a.name.localeCompare(b.name));
 }
 function sourceSnapshot(source, files) {
+    const rollback=sourceRollback(source);try{
     const expected = new Map(files.map(entry => [entry.name, entry]));
     const read = relative => { const bytes = readFile(path.join(source, ...relative.split('/'))), entry = expected.get(relative); if (!entry || entry.size !== bytes.length || entry.sha256 !== sha(bytes))
         fail('BACKUP_SOURCE_CHANGED', 'Исходная база изменилась'); return json(bytes, relative); };
@@ -146,6 +147,7 @@ function sourceSnapshot(source, files) {
         return { data: database(data), revisions: revisions(versions), sourceFormat: 'json', sourceDescriptor: decoded.descriptor, sourceIdentity: require('./database-identity.cjs').readOrCreate(source,{create:false}) };
     }
     return { data: database(read('data.json')), revisions: revisions(), sourceFormat: 'json', sourceDescriptor: require('./storage-format.cjs').describe(1), sourceIdentity: require('./database-identity.cjs').readOrCreate(source,{create:false}) };
+    }finally{verifySourceRollback(source,rollback);}
 }
 function references(data, files) {
     const byName = new Map(files.map(entry => [entry.name, entry])), used = new Set();
@@ -343,7 +345,7 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir,all
         throw error;
     }
 }
-function restorePackage({ archivePath, targetDir, format, protectedDir } = {}) {
+function restoreLegacyPackage({ archivePath, targetDir, format, protectedDir } = {}) {
     const archive = explicit(archivePath), checked = readPackage(archive), { parent, target } = newTarget(targetDir);
     if (protectedDir) {
         const protectedPath = directory(protectedDir);
@@ -406,4 +408,71 @@ function restorePackage({ archivePath, targetDir, format, protectedDir } = {}) {
         throw error;
     }
 }
-module.exports = Object.freeze({ packageNameSafe, createPackage, verifyPackage, restorePackage });
+function restoreReviewedPackage({ archivePath, targetDir, format, protectedDir } = {}, options, journal) {
+    const plan=options.lifecyclePlan;
+    if(!plain(plan)||!['clone','restoreContinuation'].includes(plan.action)||plan.source?.format!=='backup'||typeof options.assertLifecycleCurrent!=='function')
+        fail('BACKUP_LIFECYCLE','Нужен подтверждённый план копии или продолжения резервного пакета и проверка его актуальности');
+    const requested=explicit(archivePath),archive=path.join(directory(path.dirname(requested)),path.basename(requested)),proposed=explicit(targetDir),parent=directory(path.dirname(proposed)),target=path.join(parent,path.basename(proposed));
+    if(!safeName(path.basename(target))||within(target,archive))fail('BACKUP_PATH','Нужна новая отдельная папка вне исходного резервного пакета');
+    if(protectedDir){const protectedPath=directory(protectedDir);if(within(protectedPath,target)||within(target,protectedPath))fail('BACKUP_PATH','Восстановление должно выполняться вне рабочей папки базы');}
+    const chosen=format??plan.target?.format,descriptor=require('./storage-format.cjs').describe(3);
+    if(!['json','sqlite'].includes(chosen))fail('BACKUP_FORMAT','Неизвестный формат восстановления');
+    let checked=null;
+    const load=()=>{
+        if(!checked){
+            const value=readPackage(archive);
+            if('sha256:'+value.archiveSha256!==plan.source.fingerprint||JSON.stringify(value.sourceIdentity)!==JSON.stringify(plan.source.identity)||JSON.stringify(value.sourceDescriptor)!==JSON.stringify(plan.source.descriptor))fail('BACKUP_SOURCE_CHANGED','Резервный пакет не совпадает с проверенным планом');
+            checked=value;
+        }
+        return checked;
+    };
+    const verifyIdentity=(location,metadata)=>{
+        const inspected=require('./database-lifecycle.cjs').inspectMetadata(location);
+        if(inspected.state!=='known'||JSON.stringify(inspected.identity)!==JSON.stringify(metadata.identity)||JSON.stringify(inspected.descriptor)!==JSON.stringify(metadata.descriptor))fail('BACKUP_IDENTITY','Не подтверждена идентичность восстановленной базы');
+    };
+    return journal({sourceDir:archive,targetDir:target,sourceFingerprint:plan.source.fingerprint,targetFormat:chosen,kind:'backup-restore',descriptor,sourceIdentity:plan.source.identity,reportName:'backup-restore-report.json',
+        verifySource(){load();if('sha256:'+sha(readFile(archive))!==plan.source.fingerprint)fail('BACKUP_SOURCE_CHANGED','Резервный пакет изменился после проверки');},
+        create(stage,metadata){
+            const value=load();
+            if(value.files.some(entry=>entry.name==='migration-history/'+metadata.migrationId+'.json'))fail('BACKUP_HISTORY_COLLISION','Новый идентификатор восстановления совпал с сохранённой историей');
+            if(chosen==='sqlite'){
+                const child=path.join(stage,'sqlite-data');sqlite.create(child,{data:value.data,revisions:value.revisions,descriptor:metadata.descriptor,identity:metadata.identity});
+                for(const suffix of ['-wal','-shm']){const filename=path.join(child,'platform.sqlite'+suffix),state=stat(filename);if(state){if(!state.isFile()||state.isSymbolicLink()||state.nlink!==1||suffix==='-wal'&&state.size)fail('BACKUP_INTEGRITY','Не завершён или небезопасен журнал новой SQLite');fs.unlinkSync(filename);}}
+                if(JSON.stringify(fs.readdirSync(child).sort())!==JSON.stringify(['platform.sqlite','sections']))fail('BACKUP_INTEGRITY','Неожиданные файлы в новой SQLite');
+                for(const name of ['platform.sqlite','sections'])fs.renameSync(path.join(child,name),path.join(stage,name));fs.rmdirSync(child);
+            }else{
+                fs.mkdirSync(path.join(stage,'sections'));
+                for(const name of SECTIONS)writeFile(path.join(stage,'sections',name+'.json'),Buffer.from(JSON.stringify(value.data[name])));
+                writeFile(path.join(stage,'sections/revisions.json'),Buffer.from(JSON.stringify(storage.encodeRevisions(value.revisions,metadata.descriptor))));
+                writeFile(path.join(stage,'database-identity.json'),Buffer.from(JSON.stringify(metadata.identity)));
+            }
+            for(const entry of value.files){
+                if(entry.name==='database.json')continue;
+                const filename=path.join(stage,...entry.name.split('/'));if(entry.name!=='settings.json')fs.mkdirSync(path.dirname(filename),{recursive:true,mode:0o700});
+                writeFile(filename,entry.bytes);if(sha(readFile(filename))!==entry.sha256)fail('BACKUP_HASH','Восстановленный файл не совпал с пакетом');
+            }
+        },
+        verify(stage,metadata){
+            const value=load(),actual=storage.readSnapshot(stage);
+            for(const name of SECTIONS)if(JSON.stringify(actual.data[name])!==JSON.stringify(value.data[name])||actual.revisions[name]!==value.revisions[name])fail('BACKUP_PARITY','Восстановленные данные или версии не совпали');
+            if(chosen==='sqlite'){
+                const inspected=sqlite.inspect(stage);if(!inspected.ok||inspected.integrity.length!==1||inspected.integrity[0]!=='ok'||inspected.foreignKeyErrors.length)fail('BACKUP_INTEGRITY','Проверка целостности восстановленной SQLite не пройдена');
+                if(stat(path.join(stage,'platform.sqlite-wal'))?.size)fail('BACKUP_INTEGRITY','Не завершён журнал восстановленной SQLite');
+                for(const suffix of ['-wal','-shm']){const filename=path.join(stage,'platform.sqlite'+suffix),state=stat(filename);if(state){if(!state.isFile()||state.isSymbolicLink()||state.nlink!==1)fail('BACKUP_INTEGRITY','Небезопасный служебный файл восстановленной SQLite');fs.unlinkSync(filename);}}
+            }
+            verifyIdentity(stage,metadata);
+        },
+        verifyPublishedIdentity:verifyIdentity,
+        report(stage,metadata){return {...report(load()),path:target,restoredFormat:chosen,restoredDescriptor:metadata.descriptor,targetIdentity:metadata.identity,migrationId:metadata.migrationId,startedAt:metadata.startedAt,retainedStages:metadata.retainedStages};}
+    },options);
+}
+function createBackupService({journal}={}){
+    if(journal!==undefined&&typeof journal!=='function')throw new TypeError('Нужен доверенный журнал восстановления');
+    function restorePackage(request,options={}){
+        if(!plain(options)||Object.keys(options).some(key=>!['lifecyclePlan','assertLifecycleCurrent'].includes(key)))fail('BACKUP_LIFECYCLE','Некорректные доверенные параметры восстановления');
+        if(options.lifecyclePlan===undefined){if(options.assertLifecycleCurrent!==undefined)fail('BACKUP_LIFECYCLE','Проверке актуальности нужен подтверждённый план');return restoreLegacyPackage(request);}
+        return restoreReviewedPackage(request,options,journal??require('./migration-journal.cjs').runCopy);
+    }
+    return Object.freeze({packageNameSafe,createPackage,verifyPackage,restorePackage});
+}
+module.exports = Object.freeze({...createBackupService(),createBackupService});

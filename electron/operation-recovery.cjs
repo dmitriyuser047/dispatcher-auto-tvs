@@ -40,6 +40,8 @@ function createOperationRecovery({outbox,send,lookup,onWarning=()=>{}}){
     }
   }
   async function execute(context,payload){
+    if(payload?.databaseToken!==context.databaseToken||typeof context.databaseToken!=='string'||!context.databaseToken)
+      return {ok:false,databaseChanged:true,code:'DATABASE_CHANGED',error:'Запрос относится к другой базе. Загрузите выбранную базу перед сохранением.'};
     const command=payload&&Object.hasOwn(payload,'command');
     if(command&&(!context.supportsOperations||context.supportsCommands!==true||!payload.operation))
       return {ok:false,unsupported:true,code:'UNSUPPORTED_COMMANDS',error:'Это подключение не поддерживает атомарные команды. Загрузите данные из совместимой версии программы.'};
