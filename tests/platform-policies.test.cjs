@@ -1,25 +1,31 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const policies = require('../assets/core/platform-policies.js');
+const calendar = require('../assets/core/business-calendar.js');
 const repairs = require('../assets/core/repair-operations.js'),documents = require('../assets/core/document-engine.js');
-const at = { now:'2026-10-21T12:00:00Z' };
+const at = {id:'synthetic-readiness-proof',now:'2026-10-21T12:00:00.000Z',today:'2026-10-21',actor:{id:'synthetic-admin',name:'Synthetic admin',role:'admin'}};
 function fixture() { return { vehicles:[{id:'v'},{id:'v2'}],drivers:[{id:'d'},{id:'d2'}],parts:[{id:'p'}],dispatchJobs:[],workOrders:[],partMovements:[] }; }
 function job(patch = {}) { return { id:'job',status:'assigned',assetRef:'v:v',driverId:'d',start:'2026-10-21T09:00',end:'2026-10-21T11:00',...patch }; }
 function movement(patch = {}) { return { id:'issue',partId:'p',date:'2026-10-20',kind:'issue',qty:3,...patch }; }
+function confirmedJobs(db) {
+  return {...db,...calendar.canonicalizeIntervals({...db,dispatchJobs:[]},{dispatchJobs:db.dispatchJobs},at)};
+}
 
 test('assigned work requires a valid interval, asset and driver but adjacent work can share resources', () => {
   const before = fixture();
-  for (const patch of [{assetRef:''},{driverId:''},{start:'2026-10-21T12:00'},{end:'2026-02-30T12:00'}])
-    assert.throws(() => policies.validateChanges(before,{...before,dispatchJobs:[job(patch)]},at),{code:'POLICY_VIOLATION'});
-  assert.equal(policies.validateChanges(before,{...before,dispatchJobs:[job(),job({id:'adjacent',start:'2026-10-21T11:00',end:'2026-10-21T13:00'})]},at),true);
+  for (const patch of [{assetRef:''},{driverId:''}])
+    assert.throws(() => policies.validateChanges(before,confirmedJobs({...before,dispatchJobs:[job(patch)]}),at),{code:'POLICY_VIOLATION'});
+  for(const patch of [{start:'2026-10-21T12:00'},{end:'2026-02-30T12:00'}])
+    assert.throws(()=>policies.validateChanges(before,{...before,dispatchJobs:[job(patch)]},at),error=>/^CALENDAR_/.test(error.code));
+  assert.equal(policies.validateChanges(before,confirmedJobs({...before,dispatchJobs:[job(),job({id:'adjacent',start:'2026-10-21T11:00',end:'2026-10-21T13:00'})]}),at),true);
 });
 
 test('simultaneous reservations cannot double-book either equipment or a driver', () => {
   const before = fixture();
   for (const patch of [{id:'second',driverId:'d2'},{id:'second',assetRef:'v:v2'}])
-    assert.throws(() => policies.validateChanges(before,{...before,dispatchJobs:[job(),job(patch)]},at),error=>error.issues.some(issue=>/OVERLAP/.test(issue.code)));
-  assert.equal(policies.validateChanges(before,{...before,dispatchJobs:[job(),job({id:'cancelled',status:'cancelled'})]},at),true);
-  assert.equal(policies.validateChanges(before,{...before,dispatchJobs:[job(),job({id:'archived',archived:true})]},at),true);
+    assert.throws(() => policies.validateChanges(before,confirmedJobs({...before,dispatchJobs:[job(),job(patch)]}),at),error=>error.issues.some(issue=>/OVERLAP/.test(issue.code)));
+  assert.equal(policies.validateChanges(before,confirmedJobs({...before,dispatchJobs:[job(),job({id:'cancelled',status:'cancelled'})]}),at),true);
+  assert.equal(policies.validateChanges(before,confirmedJobs({...before,dispatchJobs:[job(),job({id:'archived',archived:true})]}),at),true);
 });
 
 test('confirmed work and accepted repairs retain their existing required acceptance details', () => {

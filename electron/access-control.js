@@ -163,10 +163,24 @@ function repairActions(principal) {
   return ['admin','mechanic'].includes(principal?.role)&&authorize(principal,'write','workOrders')&&(!narrowed||narrowed.includes('*')||narrowed.includes('workOrders'))
     ? ['saveOrder','approve','start','cancel'] : [];
 }
+function calendarActions(principal) {
+  const narrowed=principal?.writable,readable=principal?.readable;
+  const can=(action,name)=>authorize(principal,action,name)&&(!(action==='write'?narrowed:readable)||(action==='write'?narrowed:readable).includes('*')||(action==='write'?narrowed:readable).includes(name));
+  if(!can('read','appMeta'))return [];
+  const configure=principal?.role==='admin'&&can('write','appMeta');
+  const confirm=(['admin','dispatcher'].includes(principal?.role)&&can('write','dispatchJobs')&&can('read','dispatchJobs'))||(['admin','mechanic'].includes(principal?.role)&&can('write','workOrders')&&can('read','workOrders'));
+  return [...(configure?['configure']:[]),...(confirm?['confirmInterval']:[])];
+}
+function canCalendarAction(principal,input) {
+  if(!calendarActions(principal).includes(input?.action))return false;
+  if(input.action==='configure')return true;
+  const section=input.target?.section,roles=section==='dispatchJobs'?['admin','dispatcher']:section==='workOrders'?['admin','mechanic']:[];
+  return roles.includes(principal?.role)&&authorize(principal,'write',section)&&(!principal.writable||principal.writable.includes('*')||principal.writable.includes(section))&&authorize(principal,'read',section)&&(!principal.readable||principal.readable.includes('*')||principal.readable.includes(section));
+}
 
 function publicUser(user) {
   return { id:user.id, name:user.name, role:user.role, enabled:user.enabled !== false,
     createdAt:user.createdAt || null, rotatedAt:user.rotatedAt || null, expiresAt:user.expiresAt || null };
 }
 
-module.exports = { ROLES, FINANCIAL_SECTIONS, hashToken, issueToken, normalizeServerUsers, authenticate, authorize, publicUser, validateAssetChanges, fieldPermissions,fuelActions,procurementActions,costActions,repairActions };
+module.exports = { ROLES, FINANCIAL_SECTIONS, hashToken, issueToken, normalizeServerUsers, authenticate, authorize, publicUser, validateAssetChanges, fieldPermissions,fuelActions,procurementActions,costActions,repairActions,calendarActions,canCalendarAction };

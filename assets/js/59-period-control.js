@@ -2,7 +2,7 @@
 let periodControlSession=null;
 function periodControlContext(){return platformSessionContext();}
 function periodControlContextStamp(){return JSON.stringify([wfCommandContextStamp(),typeof _sync==='undefined'?null:_sync.access?.periodActions??null]);}
-function periodControlToday(){return new Date().toISOString().slice(0,10);}
+function periodControlToday(){return BusinessCalendar.resolve(data,new Date().toISOString()).today;}
 function periodControlRead(names){const allowed=periodControlContext().readable;return !Array.isArray(allowed)||allowed.includes('*')||names.every(name=>allowed.includes(name));}
 function periodControlPermission(scope){
  const context=periodControlContext();if(context.blocked)return false;

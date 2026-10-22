@@ -53,6 +53,27 @@ test('exactly 1000 total rows, including metadata and cards, enable background t
  assert.equal(result.count,1000);assert.equal(result.saved,true);assert.ok(result.workers>=1);assert.equal(result.writes,1);assert.equal(result.status.active,0);assert.equal(result.status.queued,0);
 });
 
+test('a real transaction Worker validates a new timed job with canonical proof while native persistence receives raw intent and calendar read CAS',async()=>{
+ const result=await page.evaluate(async()=>{
+  _sync.platform.calendar=1;const original=platformPrepareInBackground;platformPrepareInBackground=async(...args)=>{const plan=await original(...args);window.__timePlan=structuredClone(plan);return plan;};
+  data.dispatchJobs.push({id:'worker-timed-job',status:'new',title:'Explicit new timed job',start:'2026-09-01T10:00',end:'2026-09-01T11:00'});
+  const saved=await saveData(data,{operation:{id:'worker-new-time'}}),plan=window.__timePlan,request=window.__writes[0];
+  return{saved,workers:window.__workers.filter(url=>url.includes('transaction-worker')).length,writes:window.__writes.length,proof:plan?.sections.dispatchJobs[0].timeContext,raw:request?.sections.dispatchJobs[0],readVersion:request?.base.appMeta,currentVersion:_sync.revs.appMeta,digest:plan?.requestDigest,rawDigest:PlatformKernel.requestDigest({base:plan?.base,sections:{dispatchJobs:request?.sections.dispatchJobs}})};
+ });
+ assert.equal(result.saved,true);assert.ok(result.workers>=1);assert.equal(result.writes,1);assert.equal(result.proof.fields.start.instant,'2026-09-01T10:00:00.000Z');assert.equal(result.raw.start,'2026-09-01T10:00');assert.equal(result.raw.timeContext,undefined);assert.equal(result.readVersion,result.currentVersion);assert.equal(result.digest,result.rawDigest);
+});
+
+test('an external calendar revision conflict cannot auto-merge and retry a raw timed job under the newly selected zone',async()=>{
+ const result=await page.evaluate(async()=>{
+  _sync.platform.calendar=1;window.__calendarReads=0;const write=window.electronAPI.writeSections;
+  window.electronAPI.readSection=async name=>{window.__calendarReads++;return{name,rev:2,rows:window.__disks[window.__token][name],databaseToken:window.__token};};
+  window.electronAPI.writeSections=async json=>{if(!window.__calendarConflict){window.__calendarConflict=true;window.__writes.push(JSON.parse(json));window.__disks[window.__token].appMeta.push({id:'business-calendar',kind:'businessCalendar',calendar:{version:1,timeZone:'Europe/Moscow'},history:[{operationId:'external-calendar',reason:'Another user explicitly changed the timezone',at:'2026-10-01T12:00:00.000Z',actor:{id:'other-admin',name:'Other administrator',role:'admin'},previousTimeZone:'UTC',timeZone:'Europe/Moscow'}]});return{ok:false,conflicts:['appMeta'],revisions:{...window.__revisions,appMeta:2},databaseToken:window.__token};}return write(json);};
+  data.dispatchJobs.push({id:'raw-calendar-conflict',status:'new',title:'Unconfirmed timed job',start:'2026-09-01T10:00',end:'2026-09-01T11:00'});
+  const saved=await saveData(data,{operation:{id:'raw-calendar-conflict'}});return{saved,writes:window.__writes.length,reads:window.__calendarReads,storedJobs:window.__disks[window.__token].dispatchJobs.length,error:_platformLastError};
+ });
+ assert.equal(result.saved,false);assert.equal(result.writes,1);assert.equal(result.reads,0);assert.equal(result.storedJobs,0);assert.match(result.error?.message,/календар|calendar|пояс/i);
+});
+
 test('a few rows containing over one MiB of card text also prepare in a real Worker',async()=>{
  const result=await page.evaluate(async()=>{data.records=data.records.slice(0,2);data.vehicles[0].note='SYNTHETIC-LARGE-CARD-TEXT '+ 'x'.repeat(1100000);window.__disks[window.__token]=structuredClone(data);data=await loadData();rebuildIndex();_platformRuntime=null;_platformRuntimeIdentity=null;const count=Object.values(data).reduce((sum,rows)=>sum+(Array.isArray(rows)?rows.length:0),0),length=JSON.stringify(data).length;data.records[0].note='Small row in a large snapshot';const saved=await saveData(data,{operation:{id:'transaction-large-card'}});return{saved,count,length,workers:window.__workers.filter(url=>url.includes('transaction-worker')).length,writes:window.__writes.length,storedLength:window.__disks[window.__token].vehicles[0].note.length};});
  assert.ok(result.count<1000);assert.ok(result.length>1048576);assert.equal(result.saved,true);assert.ok(result.workers>=1);assert.equal(result.writes,1);assert.ok(result.storedLength>1100000);

@@ -19,7 +19,7 @@ function gsmWriteoffModel() {
     if(!prepared)throw Error('Расчёт ГСМ не готов или источники изменились. Обновите раздел и дождитесь новой проверки.');
     return prepared;
   }
-  return dispatcherQuery('writeoff', { ...gsmWriteoffScope(), date:gsmActDate });
+  return dispatcherQuery('writeoff', { ...gsmWriteoffScope(), date:gsmActDateValue() });
 }
 function gsmWriteoffIdentity() { return dispatcherContext().identity; }
 function gsmWriteoffActor() {
@@ -102,7 +102,7 @@ function gsmPostWriteoffDialog() {
     openGenericModal('Проверка перед проведением', '<form id="gsmWriteoffPostForm"><p>' + fpEsc([fpMonthLabel(model.scope.month),model.scope.org || 'Все организации',model.scope.grade || 'Все марки топлива'].join(' · ')) + '</p>' +
       '<p>Строк: <strong>' + model.rows.length + '</strong> · К списанию: <strong>' + fpNum(model.totals.spent,3) + ' л</strong> · Остаток: <strong>' + fpNum(model.totals.end,3) + ' л</strong></p>' +
       '<p class="gsm-status">Введённый факт: ' + fpNum(basis.actual,3) + ' л · По норме: ' + fpNum(basis.norm,3) + ' л · По замеру: ' + fpNum(basis.measurement,3) + ' л. Замечаний: ' + model.issues.length + '.</p>' +
-      '<div class="form-row"><label class="form-group">Номер акта<input name="actNo" aria-label="Номер акта" required maxlength="80" value="' + fpEsc(gsmActNo) + '"></label><label class="form-group">Дата акта<input name="actDate" aria-label="Дата акта" type="date" required value="' + fpEsc(gsmActDate) + '"></label></div>' +
+      '<div class="form-row"><label class="form-group">Номер акта<input name="actNo" aria-label="Номер акта" required maxlength="80" value="' + fpEsc(gsmActNo) + '"></label><label class="form-group">Дата акта<input name="actDate" aria-label="Дата акта" type="date" required value="' + fpEsc(gsmActDateValue()) + '"></label></div>' +
       '<label class="form-group">Основание / документ' + (basis.norm > 0 ? ' (обязательно для расчёта по норме)' : '') + '<textarea name="basisNote" rows="3" maxlength="4000" ' + (basis.norm > 0 ? 'required' : '') + ' placeholder="Например: путевые листы, утверждённые нормы и период"></textarea></label>' +
       '<p class="gsm-overview-note">Акт сохранит именно этот расчёт. Изменения источников после просмотра потребуют новой проверки. Исправление проведённого документа выполняется через аннулирование и новый акт.</p><div id="gsmWriteoffPostError" class="gsm-error" role="alert"></div><div class="gsm-actions"><button type="button" class="btn btn-ghost" onclick="closeModal(\'genericModal\')">Отмена</button><button type="submit" class="btn btn-primary">Провести акт</button></div></form>', 740);
     document.getElementById('gsmWriteoffPostForm').onsubmit = gsmPostWriteoff;
@@ -193,7 +193,7 @@ async function gsmVoidWriteoff(event) {
 function gsmWriteoffWorkbook(doc, draft) {
   const sourceData = { vehicles:doc.snapshot.vehicles, records:doc.snapshot.records };
   const wb = gsmActWorkbook(doc.snapshot.ledger, doc.scope.org, { sourceData, issues:doc.issues, draft:!!draft, voided:doc.status === 'void', voidReason:doc.voidReason,
-    actNo:doc.number || gsmActNo, actDate:doc.date || gsmActDate, fuelGrade:doc.scope.grade });
+    actNo:doc.number || gsmActNo, actDate:doc.date || gsmActDateValue(), fuelGrade:doc.scope.grade });
   gsmExportSheet(wb, 'Паспорт акта', [['Поле','Значение'], ['Статус',doc.status === 'void' ? 'Аннулирован' : draft ? 'Черновик' : 'Проведён'],
     ['Идентификатор',doc.id || ''], ['Номер',doc.number || ''], ['Период',doc.scope.month], ['Организация',doc.scope.org || 'Все организации'], ['Топливо',doc.scope.grade || 'Все марки'],
     ['Проведён',doc.postedAt || ''], ['Пользователь',gsmWriteoffActorName(doc.postedBy)], ['Основание',doc.basisNote || ''], ['Отпечаток источников',doc.sourceFingerprint],

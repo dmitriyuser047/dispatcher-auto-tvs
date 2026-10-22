@@ -282,7 +282,7 @@ function toPlanOverview() {
 function toShowRegs() {
   const list = toPlanOverview();
   const n = (x, d) => (+x || 0).toLocaleString('ru', { maximumFractionDigits: d ?? 0 });
-  const today = new Date().toISOString().slice(0, 10);
+  const today = BusinessCalendar.resolve(data,new Date().toISOString()).today;
   const rows = list.map(r => {
     const left = r.next ? r.next.odo - r.cur : null;
     const soon = r.next && (r.next.overdue || left <= r.interval * 0.15);
@@ -328,7 +328,7 @@ function toExportRegs() {
                 'Следующее ТО (дата)', 'Следующее ТО (пробег)', 'Осталось, км', 'Плановых ТО за год'];
   const ws = {};
   const put = (r, c, v, s, z) => { const cell = { v: v == null ? '' : v, t: typeof v === 'number' ? 'n' : 's', s }; if (z && typeof v === 'number') cell.z = z; ws[XLSX.utils.encode_cell({ r, c })] = cell; };
-  put(0, 0, 'Регламенты ТО и график обслуживания на ' + fmtDate(new Date().toISOString().slice(0, 10)), { font: { bold: true, sz: 13 } });
+  put(0, 0, 'Регламенты ТО и график обслуживания на ' + fmtDate(BusinessCalendar.resolve(data,new Date().toISOString()).today), { font: { bold: true, sz: 13 } });
   cols.forEach((c, i) => put(2, i, c, head));
   list.forEach((r, i) => {
     const R = i + 3, fill = i % 2 ? { fill: { patternType: 'solid', fgColor: { rgb: P.gray1 } } } : {};
@@ -346,7 +346,7 @@ function toExportRegs() {
   ws['!rows'] = [{ hpt: 22 }, {}, { hpt: 40 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Регламенты ТО');
-  XLSX.writeFile(wb, 'Регламенты_и_график_ТО_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+  XLSX.writeFile(wb, 'Регламенты_и_график_ТО_' + BusinessCalendar.resolve(data,new Date().toISOString()).today + '.xlsx');
 }
 
 

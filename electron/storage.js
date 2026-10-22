@@ -372,6 +372,10 @@ function writeAll(dataDir, data, options = {}) {
     // Only actual application-data changes participate; history is server-owned.
     const candidates = SECTIONS.filter(name => name !== 'auditLog' && Object.hasOwn(data, name) &&
       JSON.stringify(previous[name]) !== JSON.stringify(data[name]));
+    if(candidates.some(name=>name==='dispatchJobs'||name==='workOrders')){
+      if(!Object.hasOwn(base,'appMeta')){const error=new Error('Для сохранения интервала нужна исходная версия рабочего календаря. Загрузите базу заново.');error.code='CALENDAR_CONTEXT_REQUIRED';error.status=428;throw error;}
+      if(!candidates.includes('appMeta'))candidates.push('appMeta');
+    }
     const missing = candidates.filter(name => !Object.hasOwn(base, name));
     if (missing.length) {
       const error = new Error('Не указаны исходные версии изменённых разделов: ' + missing.join(', '));
@@ -421,7 +425,7 @@ function readSnapshot(dataDir,options={}) {
   let data = readAll(dataDir);
   if(options.principal)data=Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?require('./platform-service.cjs').visibleRows(name,data[name],options.principal):[]]));
   const version=schemaVersion(dataDir);
-  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:version,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,needsSchemaUpgrade:version<2 } };
+  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:version,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,calendar:version>=2?1:0,personnelPlanning:version>=2?1:0,needsSchemaUpgrade:version<2 } };
 }
 function readOperation(dataDir,query,principal){
   const token=databaseToken(dataDir),audit=readSection(dataDir,'auditLog');
@@ -451,7 +455,9 @@ function writeSections(dataDir, payload, options = {}) {
   const operation = platform.operationInfo(previous, sections, context);
   if (operation?.receipt) return platform.filteredResult(platform.replayResult(previous, revisions, token, operation, names),options.principal);
   assertWritable(dataDir);
-  const conflicts = names.filter(n => (revisions[n] || 0) !== (base[n] || 0));
+  const calendarRead=names.some(name=>(name==='dispatchJobs'||name==='workOrders')&&JSON.stringify(previous[name])!==JSON.stringify(sections[name]));
+  if(calendarRead&&(!Object.hasOwn(base,'appMeta')||!Number.isSafeInteger(base.appMeta)||base.appMeta<0)){const error=new Error('Для сохранения интервала нужна исходная версия рабочего календаря. Загрузите базу заново.');error.code='CALENDAR_CONTEXT_REQUIRED';error.status=428;throw error;}
+  const conflicts = [...new Set([...names,...(calendarRead?['appMeta']:[])])].filter(n => (revisions[n] || 0) !== (base[n] || 0));
   if (conflicts.length) return { ok: false, conflicts, revisions, databaseToken: token };
   const prepared = platform.prepareTransaction(previous, sections, { ...context,
     prepareSections:supplied => {

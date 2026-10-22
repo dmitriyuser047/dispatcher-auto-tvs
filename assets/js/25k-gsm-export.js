@@ -354,9 +354,9 @@ function gsmExportPendingActReconciliation() {
   return wb;
 }
 function gsmExportCurrentAct() {
-  if (!gsmValidDate(gsmActDate)) { alert('Укажите дату акта'); return null; }
+  if (!gsmValidDate(gsmActDateValue())) { alert('Укажите дату акта'); return null; }
   const range = gsmMonthRange(fpMonth);
-  return exportFuelWriteOffAct(range.from, range.to, { org: gsmOrg, fuelGrade: gsmFuel, actNo: gsmActNo, actDate: gsmActDate });
+  return exportFuelWriteOffAct(range.from, range.to, { org: gsmOrg, fuelGrade: gsmFuel, actNo: gsmActNo, actDate: gsmActDateValue() });
 }
 function gsmExportReconciliation() {
   const prepared=typeof gsmBackgroundRequired==='function'&&gsmBackgroundRequired()?gsmPreparedWorkspace():null;

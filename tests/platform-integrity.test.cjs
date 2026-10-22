@@ -18,6 +18,7 @@ function validGraph(){
   db.payments=[{id:'pay',vehicleId:'v',contragentId:'c',source:'repair',sourceId:'rp',sum:10,date:'2026-09-01'}];db.budget=[{id:'b',contragentId:'c',year:2026,month:9,sum:10}];db.costEntries=[{id:'ce',assetRef:'v:v',source:'workOrder',sourceId:'w',amount:10,date:'2026-09-01'}];db.costProfiles=[{id:'cp',assetRef:'g:g',fuelPrice:10}];
   db.procurementRules=[{id:'rule',kind:'tank',itemId:'t',leadDays:3}];db.procurementOrders=[{id:'order',kind:'part',itemId:'p',status:'draft',quantity:3,deliveryDate:'2026-10-23'}];
   db.glonassImports=[{id:'gi',at:'2026-10-21T10:00:00Z'}];db.glonassTrips=[{id:'gt',vehicleId:'v',importId:'gi',importIds:['gi'],date:'2026-09-01',km:100}];
+  db.dispatchJobs=require('../assets/core/business-calendar.js').canonicalizeIntervals({appMeta:db.appMeta},{dispatchJobs:db.dispatchJobs},{id:'synthetic-confirmed-calendar',now:'2026-10-21T12:00:00.000Z',today:'2026-10-21',actor:{id:'synthetic',name:'Synthetic author',role:'admin'}}).dispatchJobs;
   return db;
 }
 

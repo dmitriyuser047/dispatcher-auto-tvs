@@ -8,9 +8,9 @@ const policies=require('../assets/core/platform-policies.js');
 function legacyOracle(){
  const file=path.resolve(__dirname,'../assets/core/platform-policies.js');let source=fs.readFileSync(file,'utf8');
  const replacements=[
-  ["const jobs = rows(db,'dispatchJobs'), dispatchIndex=dispatchOverlapPeers(jobs);","const jobs = rows(db,'dispatchJobs'); const overlap=(a,b)=>date(a.start,true)&&date(a.end,true)&&date(b.start,true)&&date(b.end,true)&&Date.parse(a.start)<Date.parse(b.end)&&Date.parse(b.start)<Date.parse(a.end);"],
+  ["const jobs = rows(db,'dispatchJobs'), dispatchIndex=dispatchOverlapPeers(jobs,db);","const jobs = rows(db,'dispatchJobs'); const overlap=(a,b)=>date(a.start,true)&&date(a.end,true)&&date(b.start,true)&&date(b.end,true)&&Date.parse(a.start)<Date.parse(b.end)&&Date.parse(b.start)<Date.parse(a.end);"],
   ['const interval=dispatchIndex.intervals[jobIndex];',''],
-  ['if (interval.start===null || interval.end===null || interval.start>=interval.end)',"if (!date(job.start,true) || !date(job.end,true) || Date.parse(job.start) >= Date.parse(job.end))"],
+  ['if (!date(job.start,true)||!date(job.end,true)||interval.start!==null&&interval.end!==null&&interval.start>=interval.end)',"if (!date(job.start,true) || !date(job.end,true) || Date.parse(job.start) >= Date.parse(job.end))"],
   ['for (const other of dispatchIndex.peers[jobIndex]) {',"for (const other of jobs) { if(other===job||other.id===job.id||other.archived||['cancelled','done','confirmed'].includes(other.status)||!overlap(job,other))continue;"]
  ];
  for(const [current,original]of replacements){assert.equal(source.split(current).length,2,'Oracle patch must match exactly once: '+current);source=source.replace(current,original);}
@@ -22,7 +22,13 @@ function same(db,ctx=context){
  const capture=inspect=>{try{return {report:inspect(db,ctx)};}catch(error){return {error:{name:error.name,code:error.code,message:error.message}};}};
  const actual=capture(policies.inspect);assert.deepEqual(actual,capture(old.inspect));return actual;
 }
-function job(id,status='assigned',extra={}){return {id,status,assetRef:'v:a',driverId:'d',start:'2026-10-22T08:00:00Z',end:'2026-10-22T17:00:00Z',...extra};}
+function job(id,status='assigned',extra={}){return {...(id===undefined?{}:{id}),status,assetRef:'v:a',driverId:'d',start:'2026-10-22T08:00:00Z',end:'2026-10-22T17:00:00Z',...extra};}
+function countedPolicy(){
+ const file=path.resolve(__dirname,'../assets/core/platform-policies.js'),load=createRequire(file),calendar=load('./business-calendar.js');let reads=0;
+ const module={exports:{}},counted={...calendar,timeAt(...args){reads++;return calendar.timeAt(...args);}};
+ new Function('require','module','exports',fs.readFileSync(file,'utf8'))(name=>name==='./business-calendar.js'?counted:load(name),module,module.exports);
+ return {api:module.exports,reads:()=>reads};
+}
 function rng(seed){return ()=>((seed=(Math.imul(seed,1664525)+1013904223)>>>0)/0x100000000);}
 
 test('indexed dispatch preserves asymmetric statuses, strict IDs, proofs and original issue order',()=>{
@@ -59,7 +65,9 @@ test('deterministic randomized valid and damaged legacy snapshots produce identi
   const db=fixture(),count=Math.floor(random()*24);
   for(let index=0;index<count;index++)db.dispatchJobs.push(job(pick([index,'job-'+index,7,'7',undefined]),pick(['new','assigned','started','done','confirmed','cancelled','legacy']),{assetRef:pick(['v:a','v:b','g:g','',null,7,'7',NaN]),driverId:pick(['d','e','',null,undefined,NaN,7,'7']),start:pick(stamps),end:pick(stamps),archived:random()<0.1,confirmedBy:random()<0.5?'Synthetic approver':'',result:random()<0.5?'Synthetic result':''}));
   for(let index=0;index<Math.floor(random()*70);index++)db.partMovements.push({id:'m-'+index,partId:pick(['p','q',null,7,'7']),date:pick(['2026-10-01','2026-10-02','2026-10-03','2026-10-21','2026-10-22','2026-02-30','bad',null]),kind:pick(['receipt','return','issue','writeoff','legacy']),qty:pick([0,1,2,7,-1,0.1,0.2,0.3,'2','0.1','bad','',null,1e16]),deleted:random()<0.1,cancelled:random()<0.1});
-  try{if(same(db,run%7===0?{today:'2026-10-02'}:context).report)reports++;}catch(error){error.message='Synthetic seed 0x5a17, fixture '+run+': '+error.message;throw error;}
+  // Persisted legacy snapshots contain JSON values. Executable/non-JSON inputs
+  // have their own strict boundary cases below instead of a legacy oracle.
+  try{if(same(JSON.parse(JSON.stringify(db)),run%7===0?{today:'2026-10-02'}:context).report)reports++;}catch(error){error.message='Synthetic seed 0x5a17, fixture '+run+': '+error.message;throw error;}
  }
  assert.ok(reports>100,'The oracle must compare complete reports as well as identical legacy failures');
 });
@@ -70,22 +78,22 @@ test('inspection leaves source arrays and rows unchanged',()=>{
 });
 
 test('unique dispatch groups stay linear and inventory accessors are rejected without evaluation',()=>{
- const db=fixture(),count=1200;let startReads=0,quantityReads=0;
+ const db=fixture(),count=1200,measured=countedPolicy();let quantityReads=0;
  for(let index=0;index<count;index++){
-  const row=job('j-'+index,'assigned',{assetRef:'v:unique-'+index,driverId:'unique-'+index});Object.defineProperty(row,'start',{enumerable:true,get(){startReads++;return '2026-10-22T08:00:00Z';}});db.dispatchJobs.push(row);
+  db.dispatchJobs.push(job('j-'+index,'assigned',{assetRef:'v:unique-'+index,driverId:'unique-'+index}));
   db.partMovements.push({id:'m-'+index,partId:'p',date:'2026-10-'+String(index%20+1).padStart(2,'0'),kind:index%2?'issue':'receipt',qty:1});
  }
- policies.inspect(db,context);assert.ok(startReads<count*40,'dispatch reads must stay linear for distinct groups: '+startReads);
+ measured.api.inspect(db,context);assert.ok(measured.reads()<=count*4,'timestamp checks must stay linear for distinct resource groups: '+measured.reads());
  Object.defineProperty(db.partMovements[0],'qty',{enumerable:true,get(){quantityReads++;return 1;}});assert.ok(policies.inspectStock(db,context).issues.some(issue=>issue.severity==='error'));assert.equal(quantityReads,0,'strict stock parsing must not execute accessors');
 });
 
 test('many new counterparts do not trigger comparisons against one another during the sweep',()=>{
- const db=fixture(),count=800;let idReads=0;
+ const db=fixture(),count=800,measured=countedPolicy();
  for(let index=0;index<count;index++){
-  const row=job('new-'+index,'new');Object.defineProperty(row,'id',{enumerable:true,get(){idReads++;return 'new-'+index;}});db.dispatchJobs.push(row);
+  db.dispatchJobs.push(job('new-'+index,'new'));
  }
  db.dispatchJobs.push(job('assigned'));
- const result=policies.inspect(db,context),overlaps=result.issues.filter(issue=>/OVERLAP$/.test(issue.code));assert.equal(overlaps.length,count*2);assert.ok(overlaps.every(issue=>issue.recordId==='assigned'));assert.ok(idReads<count*35,'inner-only rows must not be pairwise compared: '+idReads);
+ const result=measured.api.inspect(db,context),overlaps=result.issues.filter(issue=>/OVERLAP$/.test(issue.code));assert.equal(overlaps.length,count*2);assert.ok(overlaps.every(issue=>issue.recordId==='assigned'));assert.ok(measured.reads()<=(count+1)*4,'timestamp checks must stay linear for inner-only counterparts: '+measured.reads());
 });
 
 test('exact stock prefix preserves date boundaries while the dispatch oracle remains unchanged',()=>{

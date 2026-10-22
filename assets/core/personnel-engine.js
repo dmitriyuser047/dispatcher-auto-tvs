@@ -1,9 +1,9 @@
 /* Shared personnel directory and assignment rules. No storage, DOM or clock writes. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.TvsPersonnelEngine = factory();
-})(typeof globalThis === 'object' ? globalThis : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-planning.js'));
+  else root.TvsPersonnelEngine = factory(() => root.PersonnelPlanning);
+})(typeof globalThis === 'object' ? globalThis : this, function (getPlanning) {
   'use strict';
   const own = (row, field) => !!row && Object.prototype.hasOwnProperty.call(row, field);
   const object = row => row !== null && typeof row === 'object' && !Array.isArray(row);
@@ -35,8 +35,10 @@
     return null;
   }
   function matchesRole(row, kind) { return kinds.includes(kind) && rolesOf(row).includes(kind); }
-  function availability(row, _date) {
+  function planning(db) {let api;try{api=getPlanning();}catch{}if(api?.apiVersion===1)return api;const explicit=rows(db,'drivers').some(row=>own(row,'personnelPlanning'))||['vehicles','generators','dispatchJobs'].some(section=>rows(db,section).some(row=>own(row,'personnelRequirements')));if(explicit)throw Object.assign(Error('Не загружены правила датированного планирования сотрудников'),{code:'MODULE_UNAVAILABLE'});return null;}
+  function availability(row, date) {
     if (!object(row)) return { available:false, status:'unavailable', reason:'Сотрудник не найден' };
+    if(own(row,'personnelPlanning')&&dateValid(date)){const api=planning({drivers:[row]});return api.availability(row,date);}
     if (row.archived || row.deleted) return { available:false, status:'archived', reason:'Сотрудник в архиве' };
     const status = own(row, 'employmentStatus') ? row.employmentStatus : 'active';
     if (status === 'active') return { available:true, status, reason:'' };
@@ -86,7 +88,8 @@
     if (!employee) return [{ ...base, code:'PERSONNEL_NOT_FOUND', message:'Выберите существующего сотрудника', proof:[row.driverId,row.assetRef] }];
     const issues = [];
     if (!matchesRole(employee, kind)) issues.push({ ...base, code:'PERSONNEL_ROLE_MISMATCH', message:'Для выбранной техники нужен ' + roleLabels[kind], proof:[row.driverId,row.assetRef,employee.personnelRoles] });
-    const state = availability(employee);
+    const date = section==='assetAssignments'?row.from:section==='dispatchJobs'?typeof row.start==='string'?row.start.slice(0,10):null:row.date;
+    const state = availability(employee,date);
     if (!state.available) issues.push({ ...base, code:'PERSONNEL_UNAVAILABLE', message:state.reason + ': новое назначение недоступно', proof:[row.driverId,row.assetRef,state.status] });
     return issues;
   }
@@ -121,6 +124,7 @@
       rows(db, section).forEach((row,index) => { if (linkRelevant(section,row,today)) issues.push(...linkIssues(db,section,row,index,'warning')); });
     }
     if (readable(context,'assetAssignments')) issues.push(...assignmentOverlaps(db).map(overlap=>overlap.issue));
+    const api=planning(db);if(api)issues.push(...api.inspect(db,context).issues);
     return { issues, counts:{ error:issues.filter(issue=>issue.severity==='error').length, warning:issues.filter(issue=>issue.severity==='warning').length, total:issues.length } };
   }
   function validateChanges(previous, next, context = {}) {
@@ -174,6 +178,7 @@
       const error = new Error(issues.slice(0,5).map(issue=>issue.message).join('; '));
       error.name='PersonnelValidationError'; error.code='PERSONNEL_VALIDATION'; error.issues=issues; error.details={issues}; throw error;
     }
+    const api=planning(next);if(api)api.validateChanges(previous,next,context);
     return true;
   }
   return Object.freeze({ apiVersion:1, rolesOf, kindForAsset, matchesRole, availability, inspect, validateChanges });

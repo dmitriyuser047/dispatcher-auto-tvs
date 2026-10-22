@@ -24,7 +24,7 @@ beforeEach(async()=>{
  });
  await page.addInitScript(({database,sections})=>{
   window.__disk=JSON.stringify(database);window.__rawWrites=0;window.__token='synthetic-semantic-ui-A';window.__revisions=Object.fromEntries(sections.map(name=>[name,1]));
-  window.electronAPI={readSnapshot:async()=>JSON.stringify({data:JSON.parse(window.__disk),databaseToken:window.__token,revisions:window.__revisions,platform:{apiVersion:1,operations:1,commands:1,outbox:1,schemaVersion:2,documentDrafts:1}}),writeSections:async()=>{window.__rawWrites++;return{ok:false,error:'Unexpected raw save in a semantic UI test'};}};
+  window.electronAPI={readSnapshot:async()=>JSON.stringify({data:JSON.parse(window.__disk),databaseToken:window.__token,revisions:window.__revisions,platform:{apiVersion:1,operations:1,commands:1,outbox:1,schemaVersion:2,documentDrafts:1,personnelPlanning:1,calendar:1}}),writeSections:async()=>{window.__rawWrites++;return{ok:false,error:'Unexpected raw save in a semantic UI test'};}};
  },{database:fixture(),sections:schema.sections});
  await page.goto(pathToFileURL(path.resolve(__dirname,'../index.html')).href);await page.waitForFunction(()=>typeof wfExecuteSemanticCommand==='function'&&typeof data!=='undefined'&&data.vehicles[0]?.id===712);
  await page.evaluate(()=>{
@@ -47,7 +47,7 @@ beforeEach(async()=>{
  });
 });
 afterEach(async()=>{await page?.close();assert.deepEqual(errors,[]);});
-async function holdSubmit(form){await page.evaluate(()=>{window.__semanticHold=true;});await form.locator('[type="submit"]').click();await page.waitForFunction(()=>window.__semanticReleases.length===1);}
+async function holdSubmit(form){if(await form.locator('[data-personnel-shift-preview]').count()){await form.locator('[data-personnel-shift-preview]').click();await form.locator('[data-personnel-confirm]').check();}await page.evaluate(()=>{window.__semanticHold=true;});await form.locator('[type="submit"]').click();await page.waitForFunction(()=>window.__semanticReleases.length===1);}
 async function release(){await page.evaluate(()=>{window.__semanticHold=false;window.__semanticReleases.splice(0).forEach(resolve=>resolve());});}
 async function waitClosed(){await page.waitForFunction(()=>!document.querySelector('#wfModal')?.classList.contains('open'));}
 async function waitError(selector='#wfError'){await page.waitForFunction(selector=>!!document.querySelector(selector)?.textContent.trim(),selector);}

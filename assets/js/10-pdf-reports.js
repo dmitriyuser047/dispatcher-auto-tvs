@@ -324,7 +324,7 @@ function exportAllGensToPdf(dateFrom, dateTo){
 
 // Акт использует тот же расчёт, что журнал и общие бочки.
 function actGsmCardOrg(cardNumber, date) {
-  return gsmCardAt(data, cardNumber, date || new Date().toISOString().slice(0, 10)).org;
+  return gsmCardAt(data, cardNumber, date || BusinessCalendar.resolve(data,new Date().toISOString()).today).org;
 }
 function actGsmVehicleOrg(v) { return (v.org || '').trim() || GSM_UNKNOWN_ORG; }
 function actGsmVehicleOrgs(v, dateFrom, dateTo) {
@@ -335,7 +335,7 @@ function actGsmOrgs(dateFrom, dateTo) {
 }
 function openActGsmModal() {
   if (!data.vehicles.length) return;
-  const now = new Date(), today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  const today = BusinessCalendar.resolve(data,new Date().toISOString()).today;
   document.getElementById('ag_all').checked = true;
   document.getElementById('ag_range_inputs').style.display = 'none';
   document.getElementById('ag_date').value = fmtDate(today);

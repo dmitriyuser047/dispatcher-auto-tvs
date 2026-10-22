@@ -1,7 +1,7 @@
 // Reviewed procurement intents. Fulfilment comes only from posted linked documents.
 let procurementControlSession=null;
 function procurementApi(){if(typeof ProcurementOperations==='undefined'||ProcurementOperations.apiVersion!==1)throw Error('Не загружены общие правила закупок. Обновите окно.');return ProcurementOperations;}
-function procurementToday(){return new Date().toISOString().slice(0,10);}
+function procurementToday(){return BusinessCalendar.resolve(data,new Date().toISOString()).today;}
 function procurementRead(names){const allowed=platformSessionContext().readable;return !Array.isArray(allowed)||allowed.includes('*')||names.every(name=>allowed.includes(name));}
 function procurementReadContext(){const readable=platformSessionContext().readable;return Array.isArray(readable)?{readable}:{};}
 function procurementSupported(){return typeof _sync!=='undefined'&&_sync.platform?.procurement===1&&typeof platformExecuteCommand==='function';}

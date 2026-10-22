@@ -10,6 +10,16 @@ const ENTRIES=Object.freeze([
   Object.freeze({source:'src/core/financial-recognition.ts',output:'assets/core/financial-recognition.js',global:'DomainSources',factory:'createDomainSources',dependencies:[{path:'./accounting-boundary.js',global:'AccountingBoundary'},{path:'./document-engine.js',global:'DocumentEngine',lazy:true},{path:'./fuel-stock.js',global:'FuelStock',lazy:true},{path:'./decimal-core.js',global:'DecimalCore'},{path:'./entity-identity.js',global:'EntityIdentity'},{path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true}]}),
   Object.freeze({source:'src/core/accounting-boundary.ts',output:'assets/core/accounting-boundary.js',global:'AccountingBoundary',factory:'createAccountingBoundary'}),
   Object.freeze({source:'src/core/platform-contracts.ts',output:'assets/core/platform-contracts.js',global:'PlatformContracts',factory:'createPlatformContracts'}),
+  Object.freeze({source:'src/core/business-calendar.ts',output:'assets/core/business-calendar.js',global:'BusinessCalendar',factory:'createBusinessCalendar',dependencies:[{path:'./platform-contracts.js',global:'PlatformContracts'}]}),
+  Object.freeze({source:'src/core/calendar-operations.ts',output:'assets/core/calendar-operations.js',global:'CalendarOperations',factory:'createCalendarOperations',dependencies:[
+    {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./platform-schema.js',global:'PlatformSchema'},
+    {path:'./business-calendar.js',global:'BusinessCalendar',lazy:true}, {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
+  ]}),
+  Object.freeze({source:'src/core/personnel-planning.ts',output:'assets/core/personnel-planning.js',global:'PersonnelPlanning',factory:'createPersonnelPlanning',dependencies:[
+    {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./entity-identity.js',global:'EntityIdentity'},
+    {path:'./personnel-engine.js',global:'TvsPersonnelEngine',lazy:true}, {path:'./document-engine.js',global:'DocumentEngine',lazy:true},
+    {path:'./business-calendar.js',global:'BusinessCalendar',lazy:true},
+  ]}),
   Object.freeze({source:'src/core/document-engine.ts',output:'assets/core/document-engine.js',global:'DocumentEngine',factory:'createDocumentEngine',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./platform-schema.js',global:'PlatformSchema'},
     {path:'./entity-identity.js',global:'EntityIdentity'}, {path:'./decimal-core.js',global:'DecimalCore'},
@@ -20,6 +30,8 @@ const ENTRIES=Object.freeze([
     {path:'./procurement-operations.js',global:'ProcurementOperations',lazy:true},
     {path:'./financial-recognition.js',global:'DomainSources',lazy:true},
     {path:'./repair-process.js',global:'RepairProcess',lazy:true},
+    {path:'./business-calendar.js',global:'BusinessCalendar',lazy:true},
+    {path:'./personnel-planning.js',global:'PersonnelPlanning',lazy:true},
   ]}),
   Object.freeze({source:'src/core/period-policy.ts',output:'assets/core/period-policy.js',global:'PeriodPolicy',factory:'createPeriodPolicy',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./platform-schema.js',global:'PlatformSchema'},
@@ -28,6 +40,7 @@ const ENTRIES=Object.freeze([
     {path:'./temporal-policy.js',global:'TemporalPolicy',lazy:true}, {path:'./fuel-engine.js',global:'TvsFuelEngine',lazy:true},
     {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true}, {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true},
     {path:'./cost-valuation.js',global:'CostValuation',lazy:true},
+    {path:'./business-calendar.js',global:'BusinessCalendar',lazy:true},
   ]}),
   Object.freeze({source:'src/core/fuel-stock.ts',output:'assets/core/fuel-stock.js',global:'FuelStock',factory:'createFuelStock',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./entity-identity.js',global:'EntityIdentity'},
@@ -40,6 +53,7 @@ const ENTRIES=Object.freeze([
     {path:'./fuel-stock.js',global:'FuelStock'}, {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
     {path:'./fuel-movement-policy.js',global:'FuelMovementPolicy',lazy:true}, {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true},
     {path:'./document-engine.js',global:'DocumentEngine',lazy:true},
+    {path:'./business-calendar.js',global:'BusinessCalendar',lazy:true},
   ]}),
   Object.freeze({source:'src/core/inventory-stock.ts',output:'assets/core/inventory-stock.js',global:'InventoryStock',factory:'createInventoryStock',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./entity-identity.js',global:'EntityIdentity'},
@@ -51,6 +65,7 @@ const ENTRIES=Object.freeze([
     {path:'./inventory-stock.js',global:'InventoryStock',lazy:true}, {path:'./fuel-stock.js',global:'FuelStock',lazy:true},
     {path:'./document-engine.js',global:'DocumentEngine',lazy:true}, {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
     {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true},
+    {path:'./business-calendar.js',global:'BusinessCalendar',lazy:true},
   ]}),
   Object.freeze({source:'src/core/cost-valuation.ts',output:'assets/core/cost-valuation.js',global:'CostValuation',factory:'createCostValuation',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./entity-identity.js',global:'EntityIdentity'},
@@ -65,18 +80,21 @@ const ENTRIES=Object.freeze([
     {path:'./cost-valuation.js',global:'CostValuation',lazy:true}, {path:'./financial-recognition.js',global:'DomainSources',lazy:true},
     {path:'./document-engine.js',global:'DocumentEngine',lazy:true}, {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true},
     {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
+    {path:'./business-calendar.js',global:'BusinessCalendar',lazy:true},
   ]}),
   Object.freeze({source:'src/core/repair-process.ts',output:'assets/core/repair-process.js',global:'RepairProcess',factory:'createRepairProcess',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./entity-identity.js',global:'EntityIdentity'},
     {path:'./decimal-core.js',global:'DecimalCore'}, {path:'./document-engine.js',global:'DocumentEngine',lazy:true},
     {path:'./financial-recognition.js',global:'DomainSources',lazy:true}, {path:'./inventory-stock.js',global:'InventoryStock',lazy:true},
     {path:'./cost-valuation.js',global:'CostValuation',lazy:true},
+    {path:'./business-calendar.js',global:'BusinessCalendar',lazy:true},
   ]}),
   Object.freeze({source:'src/core/repair-operations.ts',output:'assets/core/repair-operations.js',global:'RepairOperations',factory:'createRepairOperations',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./platform-schema.js',global:'PlatformSchema'},
     {path:'./entity-identity.js',global:'EntityIdentity'}, {path:'./decimal-core.js',global:'DecimalCore'},
     {path:'./document-engine.js',global:'DocumentEngine',lazy:true}, {path:'./repair-process.js',global:'RepairProcess',lazy:true},
     {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true}, {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
+    {path:'./business-calendar.js',global:'BusinessCalendar',lazy:true},
   ]}),
   Object.freeze({source:'src/core/platform-commands.ts',output:'assets/core/platform-commands.js',global:'PlatformCommands',factory:'createPlatformCommands',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./personnel-engine.js',global:'TvsPersonnelEngine'},
@@ -88,6 +106,9 @@ const ENTRIES=Object.freeze([
     {path:'./procurement-operations.js',global:'ProcurementOperations'},
     {path:'./cost-operations.js',global:'CostOperations'},
     {path:'./repair-operations.js',global:'RepairOperations'},
+    {path:'./calendar-operations.js',global:'CalendarOperations'},
+    {path:'./business-calendar.js',global:'BusinessCalendar'},
+    {path:'./personnel-planning.js',global:'PersonnelPlanning'},
   ]}),
 ]);
 const normalize=text=>text.replace(/\r\n?/g,'\n');

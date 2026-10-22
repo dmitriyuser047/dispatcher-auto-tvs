@@ -14,7 +14,7 @@ function browserAPI(entry){
   function load(item){
     const filename=path.resolve(item.outputPath);if(loaded.has(filename)||visiting.has(filename))return;visiting.add(filename);
     const dependencies=item.dependencies||[];
-    function dependency(value){const file=path.resolve(path.dirname(filename),value.path),typed=compiled().artifacts.find(artifact=>path.resolve(artifact.outputPath)===file);if(typed){load(typed);return;}if(loaded.has(file))return;vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});loaded.add(file);globals.add(value.global);}
+    function dependency(value){const file=path.resolve(path.dirname(filename),value.path),typed=compiled().artifacts.find(artifact=>path.resolve(artifact.outputPath)===file);if(typed){load(typed);return;}if(loaded.has(file))return;if(value.global==='TvsWriteoffEngine'&&!context.TvsFuelEngine)dependency({path:'./fuel-engine.js',global:'TvsFuelEngine'});vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});loaded.add(file);globals.add(value.global);}
     for(const value of dependencies)if(!value.lazy)dependency(value);
     vm.runInContext(item.artifact,context,{filename:item.output});loaded.add(filename);globals.add(item.global);visiting.delete(filename);
     for(const value of dependencies)if(value.lazy)dependency(value);

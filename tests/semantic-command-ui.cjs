@@ -17,7 +17,7 @@ beforeEach(async()=>{
   window.__disk=JSON.stringify(database);window.__token='synthetic-command-IPC-A';window.__revisions=Object.fromEntries(sections.map(name=>[name,1]));
   window.__nativeRequests=[];window.__nativeRawWrites=0;window.__nativeHold=false;window.__nativeReleases=[];window.__nativeMode='ok';window.__nativeCommits=0;window.__nativeReceipts={};window.__nativeSnapshotReads=0;window.__closeReplies=[];
   window.electronAPI={
-   readSnapshot:async()=>{window.__nativeSnapshotReads++;return JSON.stringify({data:JSON.parse(window.__disk),databaseToken:window.__token,revisions:{...window.__revisions},platform:{apiVersion:1,operations:1,outbox:1,commands:1}});},
+   readSnapshot:async()=>{window.__nativeSnapshotReads++;return JSON.stringify({data:JSON.parse(window.__disk),databaseToken:window.__token,revisions:{...window.__revisions},platform:{apiVersion:1,operations:1,outbox:1,commands:1,personnelPlanning:1,calendar:1}});},
    writeSections:async()=>{window.__nativeRawWrites++;return{ok:false,error:'Unexpected raw persistence in semantic command test'};},
    executeCommand:async raw=>{
     window.__nativeRequests.push(raw);const request=JSON.parse(raw);if(window.__nativeHold)await new Promise(resolve=>window.__nativeReleases.push(resolve));

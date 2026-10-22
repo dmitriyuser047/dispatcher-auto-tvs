@@ -1,9 +1,9 @@
 /* Shared dispatch, acceptance and inventory rules from the existing workflows. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'),()=>require('./catalog-policy.js'),()=>require('./entity-identity.js'),()=>require('./period-policy.js'),()=>require('./platform-integrity.js'),()=>require('./inventory-stock.js'),()=>require('./procurement-operations.js'),()=>require('./cost-operations.js'),()=>require('./repair-process.js'),()=>require('./repair-operations.js'));
-  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy,()=>root.CatalogPolicy,()=>root.EntityIdentity,()=>root.PeriodPolicy,()=>root.PlatformIntegrity,()=>root.InventoryStock,()=>root.ProcurementOperations,()=>root.CostOperations,()=>root.RepairProcess,()=>root.RepairOperations);
-})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal,getCatalog,getIdentity,getPeriods,getIntegrity,getInventory,getProcurement,getCosts,getRepairs,getRepairOperations) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'),()=>require('./catalog-policy.js'),()=>require('./entity-identity.js'),()=>require('./period-policy.js'),()=>require('./platform-integrity.js'),()=>require('./inventory-stock.js'),()=>require('./procurement-operations.js'),()=>require('./cost-operations.js'),()=>require('./repair-process.js'),()=>require('./repair-operations.js'),()=>require('./calendar-operations.js'),()=>require('./business-calendar.js'));
+  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy,()=>root.CatalogPolicy,()=>root.EntityIdentity,()=>root.PeriodPolicy,()=>root.PlatformIntegrity,()=>root.InventoryStock,()=>root.ProcurementOperations,()=>root.CostOperations,()=>root.RepairProcess,()=>root.RepairOperations,()=>root.CalendarOperations,()=>root.BusinessCalendar);
+})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal,getCatalog,getIdentity,getPeriods,getIntegrity,getInventory,getProcurement,getCosts,getRepairs,getRepairOperations,getCalendarOperations,getCalendar) {
   'use strict';
   const rows = (db, section) => Array.isArray(db?.[section]) ? db[section] : [];
   const present = value => value != null && String(value).trim() !== '';
@@ -31,11 +31,10 @@
     for(const value of rows(next,'partMovements')){const matches=rows(previous,'partMovements').filter(old=>old.id===value.id),old=matches.length===1?matches[0]:null;if((present(value.workOrderId)||present(old?.workOrderId)||Object.hasOwn(value,'repairReturn')||old&&Object.hasOwn(old,'repairReturn'))&&!same(old,value))return true;}
     return false;
   }
-  function dispatchOverlapPeers(jobs) {
+  function dispatchOverlapPeers(jobs,db) {
     const peers=jobs.map(()=>new Set()),groups=new Map();
     const entries=jobs.map((job,index)=>{
-      const start=job.start,end=job.end;
-      return {job,index,start:date(start,true)?Date.parse(start):null,end:date(end,true)?Date.parse(end):null,
+      const calendar=getCalendar?.(),a=calendar?.apiVersion===1?calendar.timeAt(db,'dispatchJobs',job,'start'):null,b=calendar?.apiVersion===1?calendar.timeAt(db,'dispatchJobs',job,'end'):null;const start=job.start,end=job.end;return {job,index,start:a?.status==='known'?Date.parse(a.instant):date(start,true)&&/(?:Z|[+-]\d{2}:\d{2})$/.test(start)?Date.parse(start):null,end:b?.status==='known'?Date.parse(b.instant):date(end,true)&&/(?:Z|[+-]\d{2}:\d{2})$/.test(end)?Date.parse(end):null,
         outer:!job.archived&&assigned.has(job.status),inner:!job.archived&&!['cancelled','done','confirmed'].includes(job.status)};
     });
     for(const entry of entries){
@@ -86,10 +85,10 @@
     context = context || {};
     const issues = [];
     const add = (section,row,code,field,message,proof,extra) => issues.push({ severity:'error',section,recordId:row.id ?? '',code,field,message,proof,...extra });
-    const jobs = rows(db,'dispatchJobs'), dispatchIndex=dispatchOverlapPeers(jobs);
+    const jobs = rows(db,'dispatchJobs'), dispatchIndex=dispatchOverlapPeers(jobs,db);
     for (const [jobIndex,job] of jobs.entries()) {
       const interval=dispatchIndex.intervals[jobIndex];
-      if (interval.start===null || interval.end===null || interval.start>=interval.end)
+      if (!date(job.start,true)||!date(job.end,true)||interval.start!==null&&interval.end!==null&&interval.start>=interval.end)
         add('dispatchJobs',job,'DISPATCH_INTERVAL','start/end','Начало задания должно быть раньше окончания',[job.start,job.end]);
       if (!job.archived && assigned.has(job.status)) {
         if (!asset(db,job.assetRef)) add('dispatchJobs',job,'DISPATCH_ASSET_REQUIRED','assetRef','Для назначения нужна существующая техника',[job.status,job.assetRef]);
@@ -105,7 +104,7 @@
         if (!present(job[field])) add('dispatchJobs',job,'DISPATCH_CONFIRMATION_REQUIRED',field,'Для подтверждения укажите ' + label,[job[field]]);
     }
     for (const order of rows(db,'workOrders')) {
-      if (order.downtimeFrom && order.downtimeTo && Date.parse(order.downtimeFrom) > Date.parse(order.downtimeTo))
+      const calendar=getCalendar?.(),from=calendar?.apiVersion===1?calendar.timeAt(db,'workOrders',order,'downtimeFrom'):null,to=calendar?.apiVersion===1?calendar.timeAt(db,'workOrders',order,'downtimeTo'):null;if (from?.status==='known'&&to?.status==='known'&&Date.parse(from.instant)>Date.parse(to.instant))
         add('workOrders',order,'WORK_ORDER_INTERVAL','downtimeFrom/downtimeTo','Конец простоя раньше начала',[order.downtimeFrom,order.downtimeTo]);
       if (order.status === 'accepted'&&!Object.hasOwn(order,'downtime')&&!Object.hasOwn(order,'repairProcess')) for (const [field,label] of [['acceptedBy','принявший'],['result','результат'],['downtimeTo','конец простоя']])
         if (!present(order[field])) add('workOrders',order,'WORK_ORDER_ACCEPTANCE_REQUIRED',field,'Для приёмки нужен ' + label,[order[field]]);
@@ -115,11 +114,12 @@
     if (personnel && personnel.apiVersion === 1) issues.push(...personnel.inspect(db,context).issues);
     for (const module of [getFuelMovements(),getDocuments(),getWorkflow(),getTemporal(),periodsModule()]) if (module && module.apiVersion === 1) issues.push(...module.inspect(db,context).issues);
     const catalog=catalogModule(db);if(catalog)issues.push(...catalog.inspect(db,context).issues);
-    let costs;try{costs=getCosts();}catch{}if(costs?.apiVersion===1&&typeof costs.inspect==='function')issues.push(...costs.inspect(db,context).issues);
+    const calendar=getCalendar?.();if(calendar?.apiVersion===1)issues.push(...calendar.inspect(db,context).issues);let costs;try{costs=getCosts();}catch{}if(costs?.apiVersion===1&&typeof costs.inspect==='function')issues.push(...costs.inspect(db,context).issues);
     let repairs;try{repairs=getRepairs();}catch{}if(repairs?.apiVersion===1)issues.push(...repairs.inspect(db,context).issues);
     return { issues,counts:{ error:issues.filter(issue=>issue.severity==='error').length,warning:issues.filter(issue=>issue.severity==='warning').length,total:issues.length } };
   }
   function validateChanges(previous,next,context) {
+    const calendar=getCalendarOperations?.();if(calendar?.apiVersion===1)calendar.validateChanges(previous,next,context);else if(['appMeta'].some(name=>JSON.stringify(rows(previous,name).filter(row=>row.id==='business-calendar'||row.kind==='businessCalendar'))!==JSON.stringify(rows(next,name).filter(row=>row.id==='business-calendar'||row.kind==='businessCalendar')))||['dispatchJobs','workOrders'].some(name=>rows(next,name).some(row=>{const matches=rows(previous,name).filter(old=>old.id===row.id),old=matches.length===1?matches[0]:{};return (name==='dispatchJobs'?['start','end','actualStart','actualEnd','timeContext']:['downtimeFrom','downtimeTo','completedAt','timeContext']).some(field=>JSON.stringify(old[field])!==JSON.stringify(row[field]));})))throw Object.assign(Error('Не загружены правила рабочего календаря'),{code:'MODULE_UNAVAILABLE'});
     const old = inspect(previous,context).issues, current = inspect(next,context).issues;
     const key = issue => JSON.stringify([issue.section,issue.recordId,issue.code,issue.field,issue.relatedRecordId || '']);
     const prior = new Map(old.map(issue => [key(issue),issue]));

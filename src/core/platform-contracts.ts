@@ -12,7 +12,7 @@ export interface IssueFuelInput { tankId: Identifier; target: AssetTarget; date:
 export interface AcceptShiftChanges {
   acceptedBy: string; title?: string; date?: string; target?: AssetTarget; driverId?: Identifier; jobId?: Identifier | null;
   odoStart?: number | null; odoEnd?: number | null; hours?: number | null; fuelIssued?: number | null; tankMeasured?: number | null;
-  defect?: string; result?: string;
+  defect?: string; result?: string; planningDeviationReason?: string;
 }
 export interface AssignPersonInput {
   assignmentId?: Identifier; driverId: Identifier; target: AssetTarget; from: string; to?: string; site: string; org?: string;
@@ -62,6 +62,9 @@ export interface RepairOrderPayload {
 export type RepairActionInput =
   | {action:'saveOrder';orderId?:Identifier;payload:RepairOrderPayload;reason:string;reviewFingerprint:string}
   | {action:'approve'|'start'|'cancel';orderId:Identifier;reason:string;reviewFingerprint:string};
+export type CalendarActionInput =
+  | {action:'configure';timeZone:string;reason:string;reviewFingerprint:string}
+  | {action:'confirmInterval';target:{section:'dispatchJobs'|'workOrders';id:Identifier};reason:string;reviewFingerprint:string};
 export type DocumentActionInput =
   | {action:'saveDraft';section:DocumentSection;draftId?:Identifier;payload:JsonRow;correctionOf?:DocumentReference;reason?:string}
   | {action:'postDraft';section:DocumentSection;draftId:Identifier;reviewFingerprint:string}
@@ -79,7 +82,8 @@ export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelI
   | { type: 'FuelAction'; version: 1; input: FuelActionInput }
   | { type: 'ProcurementAction'; version: 1; input: ProcurementActionInput }
   | { type: 'CostAction'; version: 1; input: CostActionInput }
-  | { type: 'RepairAction'; version: 1; input: RepairActionInput };
+  | { type: 'RepairAction'; version: 1; input: RepairActionInput }
+  | { type: 'CalendarAction'; version: 1; input: CalendarActionInput };
 export interface CommandEnvelope { protocolVersion: 1; databaseToken: string; operation: OperationDescriptor; base: Revisions; command: PlatformCommand }
 export interface ContractError extends Error { code: string; field: string; status: number }
 
@@ -243,7 +247,7 @@ export function createPlatformContracts() {
     if (row.type === 'AcceptShift') {
       keys(input,['shiftId','changes'],'command.input');
       const changes=commandObject(input.changes,path+'changes');
-      keys(changes,['acceptedBy','title','date','target','driverId','jobId','odoStart','odoEnd','hours','fuelIssued','tankMeasured','defect','result'],path+'changes');
+      keys(changes,['acceptedBy','title','date','target','driverId','jobId','odoStart','odoEnd','hours','fuelIssued','tankMeasured','defect','result','planningDeviationReason'],path+'changes');
       const result: AcceptShiftChanges = {acceptedBy:commandText(changes.acceptedBy,path+'changes.acceptedBy',true,200)};
       if (changes.title !== undefined) result.title=commandText(changes.title,path+'changes.title',true,200);
       if (changes.date !== undefined) result.date=commandDate(changes.date,path+'changes.date');
@@ -256,6 +260,7 @@ export function createPlatformContracts() {
         result[field]=amount;
       }
       for (const field of ['defect','result'] as const) if (changes[field] !== undefined) result[field]=commandText(changes[field],path+'changes.'+field,false);
+      if(changes.planningDeviationReason!==undefined)result.planningDeviationReason=costText(changes.planningDeviationReason,path+'changes.planningDeviationReason');
       return {type:'AcceptShift',version:1,input:{shiftId:commandId(input.shiftId,path+'shiftId'),changes:result}};
     }
     if (row.type === 'AssignPerson') {
@@ -286,6 +291,19 @@ export function createPlatformContracts() {
       if(result.sourceId===result.targetId)fail('INVALID_COMMAND',path+'targetId','Нельзя объединить карточку с самой собой');
       return {type:'MergeCatalog',version:1,input:result};
     }
+    if(row.type==='CalendarAction'){
+      const reason=costText(input.reason,path+'reason'),fingerprint=reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint');let result:CalendarActionInput;
+      if(input.action==='configure'){
+        keys(input,['action','timeZone','reason','reviewFingerprint'],'command.input');
+        result={action:'configure',timeZone:commandText(input.timeZone,path+'timeZone',true,200),reason,reviewFingerprint:fingerprint};
+      }else if(input.action==='confirmInterval'){
+        keys(input,['action','target','reason','reviewFingerprint'],'command.input');
+        const ref=commandObject(input.target,path+'target');keys(ref,['section','id'],path+'target');
+        if(ref.section!=='dispatchJobs'&&ref.section!=='workOrders')fail('INVALID_COMMAND',path+'target.section','Выберите заявку либо ремонтный заказ');
+        result={action:'confirmInterval',target:{section:ref.section,id:commandId(ref.id,path+'target.id')},reason,reviewFingerprint:fingerprint};
+      }else fail('INVALID_COMMAND',path+'action','Действие с учётным календарём не поддерживается');
+      return {type:'CalendarAction',version:1,input:result};
+    }
     if(row.type==='RepairAction'){
       const reason=costText(input.reason,path+'reason'),fingerprint=reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint');let result:RepairActionInput;
       if(input.action==='saveOrder'){
@@ -302,7 +320,7 @@ export function createPlatformContracts() {
         if(p.warrantyUntil!==undefined)payload.warrantyUntil=commandDate(p.warrantyUntil,field+'warrantyUntil');
         if(p.primary!==undefined){if(p.primary===null)payload.primary=null;else{const primary=commandObject(p.primary,field+'primary');keys(primary,['section','id'],field+'primary');if(!['repairs','vehicleTo','toRecords'].includes(primary.section as string))fail('INVALID_COMMAND',field+'primary.section','Выберите единственный первичный ремонт или ТО');payload.primary={section:primary.section as RepairPrimaryReference['section'],id:commandId(primary.id,field+'primary.id')};}}
         if(p.source!==undefined){const source=commandObject(p.source,field+'source');keys(source,['section','id'],field+'source');if(source.section!=='shiftReports')fail('INVALID_COMMAND',field+'source.section','Укажите исходный дефект смены');payload.source={section:'shiftReports',id:commandId(source.id,field+'source.id')};}
-        if(p.downtime!==undefined){const downtime=commandObject(p.downtime,field+'downtime');if(downtime.mode==='interval'){keys(downtime,['mode','from','to'],field+'downtime');const interval:Extract<RepairDowntime,{mode:'interval'}>={mode:'interval',from:commandTime(downtime.from,field+'downtime.from')};if(downtime.to!==undefined){interval.to=commandTime(downtime.to,field+'downtime.to');if(Date.parse(interval.to)<Date.parse(interval.from))fail('INVALID_COMMAND',field+'downtime.to','Конец простоя раньше начала');}payload.downtime=interval;}else if(downtime.mode==='none'){keys(downtime,['mode','basis'],field+'downtime');payload.downtime={mode:'none',basis:costText(downtime.basis,field+'downtime.basis')};}else fail('INVALID_COMMAND',field+'downtime.mode','Укажите фактический простой либо работу без простоя с основанием');}
+        if(p.downtime!==undefined){const downtime=commandObject(p.downtime,field+'downtime');if(downtime.mode==='interval'){keys(downtime,['mode','from','to'],field+'downtime');const interval:Extract<RepairDowntime,{mode:'interval'}>={mode:'interval',from:commandTime(downtime.from,field+'downtime.from')};if(downtime.to!==undefined){interval.to=commandTime(downtime.to,field+'downtime.to');const offset=/(?:Z|[+-]\d{2}:\d{2})$/;if(offset.test(interval.to)===offset.test(interval.from)&&Date.parse(interval.to+(offset.test(interval.to)?'':'Z'))<Date.parse(interval.from+(offset.test(interval.from)?'':'Z')))fail('INVALID_COMMAND',field+'downtime.to','Конец простоя раньше начала');}payload.downtime=interval;}else if(downtime.mode==='none'){keys(downtime,['mode','basis'],field+'downtime');payload.downtime={mode:'none',basis:costText(downtime.basis,field+'downtime.basis')};}else fail('INVALID_COMMAND',field+'downtime.mode','Укажите фактический простой либо работу без простоя с основанием');}
         result={action:'saveOrder',payload,reason,reviewFingerprint:fingerprint};if(input.orderId!==undefined)result.orderId=commandId(input.orderId,path+'orderId');
       }else{
         keys(input,['action','orderId','reason','reviewFingerprint'],'command.input');if(input.action!=='approve'&&input.action!=='start'&&input.action!=='cancel')fail('INVALID_COMMAND',path+'action','Действие с ремонтным заказом не поддерживается');result={action:input.action,orderId:commandId(input.orderId,path+'orderId'),reason,reviewFingerprint:fingerprint};

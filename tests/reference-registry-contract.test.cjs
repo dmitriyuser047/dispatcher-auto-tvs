@@ -12,7 +12,7 @@ test('each registered reference resolves a real typed-zero target through its de
   else if(relation.kind==='assetRef'){const[prefix,name]=Object.entries(relation.targets)[0];section=name;value=prefix+':0';}
   else if(relation.kind==='discriminator'){const[selector,name]=Object.entries(relation.targets)[0];section=name;put(source,relation.selector,relation.prefix?selector+':asset':selector);}
   else if(relation.kind==='lookup'){section=relation.target;value='700599991111';target[relation.targetField]=value;}
-  else if(relation.kind==='historical'){section='vehicles';put(source,relation.selector,section);}
+  else if(relation.kind==='historical'){section=relation.target||'vehicles';if(relation.selector)put(source,relation.selector,section);}
   else assert.fail('A new reference kind needs an independent contract fixture: '+relation.id);
   put(source,relation.field,value);db[relation.from].push(source);db[section].push(target);
   const before=JSON.stringify(db),report=graph.inspect(db,{today:'2026-10-22'}),refs=report.references.filter(ref=>ref.relationId===relation.id&&ref.rowId===source.id);

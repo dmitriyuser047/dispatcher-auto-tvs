@@ -39,7 +39,7 @@ const _sync = { enabled: false, revs: {}, synced: {}, databaseToken:null, access
 
 function syncSessionStamp() {
   return JSON.stringify([typeof dispatcherContext === 'function' ? dispatcherContext().identity : _sync.databaseToken,
-    _sync.access?.user?.id, _sync.access?.user?.role, _sync.access?.readable, _sync.access?.writable, _sync.access?.fieldPermissions, _sync.access?.periodActions, _sync.access?.fuelActions, _sync.access?.procurementActions, _sync.access?.costActions, _sync.access?.repairActions]);
+    _sync.access?.user?.id, _sync.access?.user?.role, _sync.access?.readable, _sync.access?.writable, _sync.access?.fieldPermissions, _sync.access?.periodActions, _sync.access?.fuelActions, _sync.access?.procurementActions, _sync.access?.costActions, _sync.access?.repairActions, _sync.access?.calendarActions]);
 }
 function syncEnsureSession(stamp) {
   if (stamp !== syncSessionStamp()) throw Object.assign(new Error('База или права пользователя изменились во время операции. Обновите данные перед повтором.'),{code:'SESSION_CHANGED'});
@@ -183,6 +183,9 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
     syncEnsureSession(stamp);
     const payload = { base: {}, sections: {}, ...(options?.operation ? {operation:options.operation} : {}), ...(_sync.databaseToken ? {databaseToken:_sync.databaseToken} : {}) };
     changed.forEach(n => { payload.base[n] = _sync.revs[n] || 0; payload.sections[n] = d[n] || []; });
+    // A concurrently changed business calendar must invalidate a reviewed wall
+    // time even when the caller is not writing the calendar section itself.
+    if(changed.some(name=>name==='dispatchJobs'||name==='workOrders'))payload.base.appMeta=_sync.revs.appMeta||0;
     const res = await window.electronAPI.writeSections(JSON.stringify(payload));
     syncEnsureSession(stamp);
     if (res && (res.databaseToken != null || res.ok || res.conflicts || res.databaseChanged)) syncAssertDatabase(res);
@@ -219,6 +222,8 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
       return true;
     }
     if (!res || !res.conflicts) { if (res && res.error) throw new Error(res.error); return false; }
+    if(res.conflicts.includes('appMeta')&&changed.some(name=>name==='dispatchJobs'||name==='workOrders'))
+      throw Object.assign(new Error('Учётный календарь изменился после проверки. Обновите данные и явно проверьте интервал заново.'),{code:'CALENDAR_CHANGED'});
     if (options && options.noMerge) throw new Error('База изменена другим пользователем. Обновите данные и проверьте строки заново.');
     // Кто-то успел поменять эти разделы — сливаем и пробуем снова
     for (const n of res.conflicts) {

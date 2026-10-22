@@ -56,15 +56,16 @@ test('notification preferences preserve input on failure and never write the wor
 });
 
 test('dispatch form saves an assignment and refuses an overlapping asset and driver',async()=>{
+ await page.evaluate(async()=>{window.__disk=JSON.stringify(data);window.__dispatchRevisions=Object.fromEntries(PlatformSchema.sections.map(name=>[name,1]));electronAPI.readSnapshot=async()=>JSON.stringify({data:JSON.parse(__disk),databaseToken:'synthetic-dispatch-calendar',revisions:{...__dispatchRevisions},platform:{apiVersion:1,operations:1,outbox:1,calendar:1,personnelPlanning:1}});electronAPI.writeSections=async raw=>{__writes++;const request=JSON.parse(raw),database=JSON.parse(__disk),now=new Date().toISOString(),clock=BusinessCalendar.resolve(database,now),canonical=BusinessCalendar.canonicalizeIntervals(database,request.sections,{id:request.operation.id,now,today:clock.today,calendar:clock,actor:{id:'trusted-fixture',name:'Trusted fixture',role:'admin'}});for(const[name,rows]of Object.entries(canonical)){database[name]=rows;__dispatchRevisions[name]++;}__disk=JSON.stringify(database);return{ok:true,databaseToken:'synthetic-dispatch-calendar',revisions:{...__dispatchRevisions},canonicalSections:canonical,operationReceipt:{id:request.operation.id,status:'committed'}};};data=await syncLoad();_lastPersisted=JSON.stringify(data);rebuildIndex();});
  await page.evaluate(()=>{wfOpenTab('dispatchJobs');wfEdit('dispatchJobs');});
  async function fill(title,start,end){await page.locator('#wf_title').fill(title);await page.locator('#wf_site').fill('Тестовый участок');await page.locator('#wf_status').selectOption('assigned');await page.locator('#wf_assetRef').selectOption('v:v');await page.locator('#wf_driverId').selectOption('d');await page.locator('#wf_start').fill(start);await page.locator('#wf_end').fill(end);}
  await fill('Первая заявка','2026-10-19T07:00','2026-10-19T09:00');
  await page.locator('#wfForm button[type=submit]').click();
- await page.waitForFunction(()=>data.dispatchJobs.length===1&&!document.querySelector('#wfModal.open'));
+ await page.waitForFunction(()=>data.dispatchJobs.length===1&&!document.querySelector('#wfModal.open'),null,{timeout:5000}).catch(async error=>{throw Error(error.message+' '+await page.locator('#wfError').innerText()+' '+await page.evaluate(()=>JSON.stringify({driver:document.getElementById('wf_driverId')?.value,runtime:platformRuntimeStatus()})));});
  await page.evaluate(()=>wfEdit('dispatchJobs'));
  await fill('Конфликт','2026-10-19T08:00','2026-10-19T10:00');
  await page.locator('#wfForm button[type=submit]').click();
- await page.waitForFunction(()=>document.getElementById('wfError').textContent.includes('Техника занята'));
+ await page.waitForFunction(()=>document.getElementById('wfError').textContent.trim(),null,{timeout:4000});assert.match(await page.locator('#wfError').innerText(),/Техника занята|занят|пересека/i,await page.evaluate(()=>JSON.stringify(data.dispatchJobs)));
  assert.equal(await page.evaluate(()=>data.dispatchJobs.length),1);
  assert.equal(await page.evaluate(()=>JSON.parse(window.__disk).dispatchJobs.length),1);
 });

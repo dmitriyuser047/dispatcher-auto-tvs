@@ -47,10 +47,8 @@ function dxOverviewSiteLabel(value) { return value === '__without_site' ? 'Бе�
 
 function dxOverviewDayJobs(date) {
   if (!dxOverviewCanRead('dispatchJobs')) return [];
-  const from = new Date(date + 'T00:00:00'), until = new Date(from);
-  until.setDate(until.getDate() + 1);
-  return (data.dispatchJobs || []).filter(job => !job.archived &&
-    new Date(job.start).getTime() < until.getTime() && new Date(job.end).getTime() > from.getTime());
+  const bounds=dxJobDayBounds(date);if(bounds.status!=='known')return [];
+  return (data.dispatchJobs||[]).filter(job=>{if(job.archived)return false;const window=dxJobWindow(job);return window.status==='known'&&window.from<bounds.end&&window.to>bounds.start;});
 }
 
 function dxOverviewAssets(date) {
@@ -68,10 +66,10 @@ function dxOverviewAssets(date) {
 function dxOverviewFleetState(asset, jobs, date) {
   const linked = jobs.filter(job => job.assetRef === asset.ref && ['assigned', 'started'].includes(job.status));
   const status = String(asset.context.status || asset.row.status || '').trim();
-  const repair = dxOverviewCanRead('workOrders') && (data.workOrders || []).some(order =>
-    !order.archived && order.assetRef === asset.ref && order.downtime?.mode!=='none' && ['approved', 'repairing'].includes(order.status) &&
-    (!order.downtimeFrom || order.downtimeFrom.slice(0, 10) <= date) &&
-    (!order.downtimeTo || order.downtimeTo.slice(0, 10) >= date));
+  const orders=dxOverviewCanRead('workOrders')?(data.workOrders||[]).filter(order=>!order.archived&&order.assetRef===asset.ref&&order.downtime?.mode!=='none'&&['approved','repairing'].includes(order.status)):[],bounds=dxJobDayBounds(date);
+  const repair=orders.some(order=>{if(bounds.status!=='known')return false;const from=BusinessCalendar.timeAt(data,'workOrders',order,'downtimeFrom'),to=BusinessCalendar.timeAt(data,'workOrders',order,'downtimeTo');return from.status==='known'&&(to.status==='known'||to.status==='missing')&&Date.parse(from.instant)<bounds.end&&(to.status==='missing'||Date.parse(to.instant)>bounds.start);});
+  const uncertain=orders.some(order=>{const from=BusinessCalendar.timeAt(data,'workOrders',order,'downtimeFrom'),to=BusinessCalendar.timeAt(data,'workOrders',order,'downtimeTo');return from.status!=='known'||to.status==='unknown';});
+  if(uncertain&&!repair)return{label:'Проверить время',tone:'is-warning',detail:'Часовой пояс или начало простоя не подтверждены',rank:1};
   if (repair || /ремонт|дтп|списан|продан/i.test(status)) return { label: 'Проверить статус', tone: 'is-danger', detail: repair ? 'Есть незакрытый ремонтный заказ' : status, rank: 0 };
   const document = dxOverviewCanRead('assetDocuments') && (data.assetDocuments || []).find(row =>
     !row.archived && row.mandatory && row.assetRef === asset.ref && row.expires && row.expires < date);
@@ -96,7 +94,7 @@ function dxOverviewOpenAsset(ref) {
   const vehicle = ref.startsWith('v:');
   if (!dxOverviewCanRead(vehicle ? 'vehicles' : 'generators')) return;
   switchSection(vehicle ? 'vehicles' : 'generators');
-  if (vehicle) selectVehicle(ref.slice(2)); else openGeneratorDetail(ref.slice(2));
+  if (vehicle) selectVehicle(wfAsset(ref)?.id); else openGeneratorDetail(wfAsset(ref)?.id);
 }
 
 function dxOverviewOpenJob(id) {
@@ -105,8 +103,8 @@ function dxOverviewOpenJob(id) {
 }
 
 function dxOverviewMoveDate(delta) {
-  const date = new Date((dxOverviewDate || wfToday()) + 'T12:00:00'); date.setDate(date.getDate() + delta);
-  dxOverviewDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const date = new Date((dxOverviewDate || wfToday()) + 'T12:00:00Z'); date.setUTCDate(date.getUTCDate() + delta);
+  dxOverviewDate = date.toISOString().slice(0,10);
   renderDispatchOverview();
 }
 
@@ -119,8 +117,9 @@ function renderDispatchOverview() {
   const matchesSite = value => !dxOverviewSite || value === dxOverviewSite;
   const jobs = allJobs.filter(job => matchesSite(dxOverviewSiteKey(job.site)));
   const assets = allAssets.filter(asset => matchesSite(asset.site));
+  const unknownJobs=dxOverviewCanRead('dispatchJobs')?(data.dispatchJobs||[]).filter(job=>!job.archived&&dxJobWindow(job).status!=='known'&&matchesSite(dxOverviewSiteKey(job.site))):[];
   const active = jobs.filter(job => ['new', 'assigned', 'started'].includes(job.status));
-  const assigned = active.filter(job => job.assetRef && job.driverId).length;
+  const assigned = active.filter(job => job.assetRef && EntityIdentity.presentId(job.driverId)).length;
   const completed = jobs.filter(job => ['done', 'confirmed'].includes(job.status)).length;
   const confirmed = jobs.filter(job => job.status === 'confirmed').length;
   const started = active.filter(job => job.status === 'started').length;
@@ -139,12 +138,11 @@ function renderDispatchOverview() {
   const jobMetric = value => canReadJobs ? value : '—';
   const empty = (icon, title, text, action = '') => `<div class="dx-empty">${xpIcon(icon, 30)}<strong>${title}</strong><span>${text}</span>${action}</div>`;
   const scheduleHtml = schedule.slice(0, 6).map(job => {
-    const firstDay = String(job.start || '').slice(0, 10) === date;
-    const lastDay = String(job.end || '').slice(0, 10) === date;
+    const interval=dxJobWindow(job),zone=dxJobCalendar().timeZone;const firstDay=BusinessCalendar.dateAt(interval.start,zone)===date,lastDay=BusinessCalendar.dateAt(interval.end,zone)===date;
     const asset = dxJobAsset(job), driver = dxJobDriver(job);
     const detail = [asset?.label || 'Техника не назначена', driver?.name || 'Сотрудник не назначен', job.site].filter(Boolean).join(' · ');
     const tone = job.status === 'started' ? 'is-active' : ['done', 'confirmed'].includes(job.status) ? 'is-good' : dxJobIsLate(job) ? 'is-warning' : '';
-    return `<button type="button" class="dx-schedule-item" onclick="dxOverviewOpenJob(${htmlJs(job.id)})" title="${htmlEsc(dxJobRange(job, true))}"><span class="dx-time">${firstDay ? dxJobTime(job.start) : htmlEsc(new Date(job.start).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }))}<small>${lastDay ? 'до ' + dxJobTime(job.end) : 'до ' + htmlEsc(new Date(job.end).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }))}</small></span><span class="dx-schedule-copy"><strong>${htmlEsc(job.title || 'Заявка')}</strong><span>${htmlEsc(detail)}</span></span><span class="dx-status-pill ${tone}">${htmlEsc(WF_STATUS[job.status] || job.status || 'Без состояния')}</span></button>`;
+    return `<button type="button" class="dx-schedule-item" onclick="dxOverviewOpenJob(${htmlJs(job.id)})" title="${htmlEsc(dxJobRange(job, true))}"><span class="dx-time">${firstDay ? dxJobTime(interval.start) : htmlEsc(dxJobDateLabel(interval.start))}<small>${lastDay ? 'до ' + dxJobTime(interval.end) : 'до ' + htmlEsc(dxJobDateLabel(interval.end))}</small></span><span class="dx-schedule-copy"><strong>${htmlEsc(job.title || 'Заявка')}</strong><span>${htmlEsc(detail)}</span></span><span class="dx-status-pill ${tone}">${htmlEsc(WF_STATUS[job.status] || job.status || 'Без состояния')}</span></button>`;
   }).join('');
   const fleetHtml = fleet.slice(0, 6).map(asset => `<button type="button" class="dx-fleet-item" onclick="dxOverviewOpenAsset(${htmlJs(asset.ref)})"><span class="dx-asset-mark">${xpIcon(asset.icon, 19)}</span><span class="dx-asset-copy"><strong>${htmlEsc(asset.label)}</strong><small title="${htmlEsc(asset.state.detail)}">${htmlEsc(asset.state.detail || dxOverviewSiteLabel(asset.site))}</small></span><span class="dx-asset-state ${asset.state.tone}">${asset.state.label}</span></button>`).join('');
   const sitesHtml = visibleSites.slice(0, 9).map(site => {
@@ -162,7 +160,7 @@ function renderDispatchOverview() {
     <header class="dx-hero"><div class="dx-hero-copy"><div class="dx-kicker">Диспетчерская · Пульт управления</div><h2>Смена под контролем.</h2><p>Заявки, техника и выполнение работ — собраны в одном месте. Откройте задание и переходите к следующему действию.</p></div><div class="dx-hero-actions">${dxOverviewCanWrite('dispatchJobs') ? `<button type="button" class="dx-primary-action" onclick="dxOverviewNewJob()">${xpIcon('calendar', 17)} Новая заявка</button>` : ''}<button type="button" class="dx-secondary-action" onclick="xpToggleFocus()" title="Режим фокуса · F8">${xpIcon('expand', 17)} Режим фокуса</button></div><div class="dx-hero-bottom"><span class="dx-shift-title"><strong>Сводка из рабочих записей</strong></span><span class="dx-mode-tag">${dxOverviewSite ? htmlEsc(dxOverviewSiteLabel(dxOverviewSite)) : 'Все объекты'}</span><span class="dx-date">${htmlEsc(selected.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))}</span></div></header>
     <div class="dx-overview-tabs">${wfTabsHtml(WF_DISPATCH_TABS)}</div>
     <div class="dx-overview-controls"><div class="dx-date-nav"><button type="button" class="btn btn-ghost btn-sm" onclick="dxOverviewMoveDate(-1)" aria-label="Предыдущий день">‹</button><input id="dxOverviewDate" type="date" value="${htmlEsc(date)}" aria-label="День сводки"><button type="button" class="btn btn-ghost btn-sm" onclick="dxOverviewMoveDate(1)" aria-label="Следующий день">›</button><button type="button" class="btn btn-ghost btn-sm" id="dxOverviewToday">Сегодня</button></div><select id="dxOverviewSite" aria-label="Объект сводки"><option value="">Все объекты</option>${sites.map(site => `<option value="${htmlEsc(site)}" ${site === dxOverviewSite ? 'selected' : ''}>${htmlEsc(dxOverviewSiteLabel(site))}</option>`).join('')}</select></div>
-    <div class="home-kpis dx-metrics" aria-label="Сводка по выбранному дню и объекту"><article class="dx-metric"><span class="dx-metric-label">Активные заявки</span><strong class="dx-metric-value">${jobMetric(active.length)}</strong><span class="dx-metric-note">${canReadJobs ? `${started} в работе · ${active.length - started} ожидают` : 'Доступ к заявкам ограничен'}</span></article><article class="dx-metric${canReadJobs && assigned < active.length ? ' is-warning' : ''}"><span class="dx-metric-label">Ресурсы назначены</span><strong class="dx-metric-value">${jobMetric(assigned)}<small>${canReadJobs ? '/ ' + active.length : ''}</small></strong><span class="dx-metric-note">указаны техника и сотрудник</span></article><article class="dx-metric"><span class="dx-metric-label">Работы завершены</span><strong class="dx-metric-value">${jobMetric(completed)}</strong><span class="dx-metric-note">${canReadJobs ? `${confirmed} с подтверждением результата` : 'Доступ к заявкам ограничен'}</span></article><article class="dx-metric"><span class="dx-metric-label">Техника по учёту</span><strong class="dx-metric-value">${canReadFleet ? assets.length : '—'}</strong><span class="dx-metric-note">${canReadFleet ? `${vehicleCount} ТС · ${generatorCount} ДЭС · без архива` : 'Доступ к карточкам ограничен'}</span></article></div>
+    <p class="wf-note">Часовой пояс просмотра: ${htmlEsc(dxJobCalendar().timeZone)}.</p>${dxJobUnknownHtml(unknownJobs)}<div class="home-kpis dx-metrics" aria-label="Сводка по выбранному дню и объекту"><article class="dx-metric"><span class="dx-metric-label">Активные заявки</span><strong class="dx-metric-value">${jobMetric(active.length)}</strong><span class="dx-metric-note">${canReadJobs ? `${started} в работе · ${active.length - started} ожидают` : 'Доступ к заявкам ограничен'}</span></article><article class="dx-metric${canReadJobs && assigned < active.length ? ' is-warning' : ''}"><span class="dx-metric-label">Ресурсы назначены</span><strong class="dx-metric-value">${jobMetric(assigned)}<small>${canReadJobs ? '/ ' + active.length : ''}</small></strong><span class="dx-metric-note">указаны техника и сотрудник</span></article><article class="dx-metric"><span class="dx-metric-label">Работы завершены</span><strong class="dx-metric-value">${jobMetric(completed)}</strong><span class="dx-metric-note">${canReadJobs ? `${confirmed} с подтверждением результата` : 'Доступ к заявкам ограничен'}</span></article><article class="dx-metric"><span class="dx-metric-label">Техника по учёту</span><strong class="dx-metric-value">${canReadFleet ? assets.length : '—'}</strong><span class="dx-metric-note">${canReadFleet ? `${vehicleCount} ТС · ${generatorCount} ДЭС · без архива` : 'Доступ к карточкам ограничен'}</span></article></div>
     <div class="dx-main-grid"><section class="dx-panel"><header class="dx-panel-heading"><div><h3 class="dx-panel-title">План на день</h3><p class="dx-panel-subtitle">Сначала текущие и незавершённые задания</p></div>${canReadJobs ? `<button type="button" class="dx-panel-action" onclick="dxOverviewOpenJobs('timeline')">Лента дня ${xpIcon('arrow', 15)}</button>` : ''}</header>${scheduleHtml ? `<div class="dx-schedule-list">${scheduleHtml}</div>${schedule.length > 6 ? `<div class="dx-panel-footer"><button type="button" class="dx-panel-action" onclick="dxOverviewOpenJobs('board')">Все ${schedule.length} заявок ${xpIcon('arrow', 15)}</button></div>` : ''}` : empty('calendar', canReadJobs ? 'День пока не расписан' : 'Заявки недоступны', canReadJobs ? 'Создайте заявку, выберите технику и назначьте сотрудника.' : 'Доступ определяется вашей сетевой ролью.', dxOverviewCanWrite('dispatchJobs') ? '<button type="button" class="dx-panel-action" onclick="dxOverviewNewJob()">Создать первую заявку →</button>' : '')}</section>
     <section class="dx-panel"><header class="dx-panel-heading"><div><h3 class="dx-panel-title">Парк и назначения</h3><p class="dx-panel-subtitle">Состояния по карточкам и рабочим записям</p></div>${dxOverviewCanRead('assetAssignments') ? `<button type="button" class="dx-panel-action" onclick="wfOpenTab('assetAssignments')">Назначения ${xpIcon('arrow', 15)}</button>` : ''}</header>${fleetHtml ? `<div class="dx-fleet-list">${fleetHtml}</div><div class="dx-panel-footer"><span class="dx-overview-caption">${fleet.length > 6 ? `Показано 6 из ${fleet.length}. ` : ''}Откройте карточку для проверки состояния и истории.</span></div>` : empty('car', canReadFleet ? 'Нет техники для выбранного объекта' : 'Карточки техники недоступны', canReadFleet ? 'Проверьте объект в карточках и периоды назначений.' : 'Доступ определяется вашей сетевой ролью.')}</section></div>
     <section class="dx-panel"><header class="dx-panel-heading"><div><h3 class="dx-panel-title">Работа по объектам</h3><p class="dx-panel-subtitle">Заявки выбранного дня и закреплённая техника</p></div>${dxOverviewSite ? '<button type="button" class="dx-panel-action" onclick="dxOverviewSetSite(\'\')">Все объекты →</button>' : `<span class="dx-chip">${sites.length} объектов</span>`}</header>${sitesHtml ? `<div class="dx-site-grid">${sitesHtml}</div>${visibleSites.length > 9 ? `<div class="dx-panel-footer"><span class="dx-overview-caption">Показаны первые 9 объектов. Выберите нужный объект в фильтре сводки.</span></div>` : ''}` : empty('grid', 'Объекты ещё не указаны', 'Укажите объект в карточке техники, назначении или заявке.')}</section>
@@ -175,5 +173,5 @@ function renderDispatchOverview() {
   document.getElementById('dxOverviewSite').addEventListener('change', event => dxOverviewSetSite(event.target.value));
   renderOpsCenter();
   const attention = document.querySelector('#opsCenter .ops-panel-head p');
-  if (attention) attention.textContent = 'Проверки на ' + new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) + ' и ближайшие события';
+  if (attention) attention.textContent = 'Проверки на ' + new Date(wfToday()+'T12:00:00Z').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', timeZone:'UTC' }) + ' и ближайшие события';
 }

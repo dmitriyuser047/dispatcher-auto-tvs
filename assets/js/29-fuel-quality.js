@@ -55,9 +55,9 @@ function fqSourceLabel(source) {
 let fqComparison = null, fqComparisonOpen = '';
 function fqCompareInit() {
   if (fqComparison) return fqComparison;
-  const month = fpCmpMonth || fpCmpMonths()[0] || new Date().toISOString().slice(0, 7);
+  const month = fpCmpMonth || fpCmpMonths()[0] || BusinessCalendar.resolve(data,new Date().toISOString()).today.slice(0,7);
   const current = gsmMonthRange(month), previous = gsmMonthRange(fpPrevMonth(month));
-  const now = new Date(), today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  const today = BusinessCalendar.resolve(data,new Date().toISOString()).today;
   if (today.startsWith(month)) current.to = today;
   fqComparison = { aFrom: previous.from, aTo: previous.to, bFrom: current.from, bTo: current.to, equalDays: true, sameFleet: true, group: 'vehicle' };
   return fqComparison;
@@ -77,7 +77,7 @@ function fqCompareSet(field, value) {
 }
 function fqComparePreset(kind) {
   const state = fqCompareInit(), month = state.bFrom.slice(0, 7), b = gsmMonthRange(month);
-  const now = new Date(), today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  const today = BusinessCalendar.resolve(data,new Date().toISOString()).today;
   if (today.startsWith(month)) b.to = today;
   const a = kind === 'year' ? gsmMonthRange((Number(month.slice(0, 4)) - 1) + month.slice(4)) : gsmMonthRange(fpPrevMonth(month));
   Object.assign(state, { aFrom: a.from, aTo: a.to, bFrom: b.from, bTo: b.to, equalDays: true });

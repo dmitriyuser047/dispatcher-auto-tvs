@@ -25,7 +25,7 @@ function tankOperationSummary(section,payload,options={}){
  const existing=options.existing===true,balances=[from,to].filter(Boolean).map(row=>{const stock=tankStockAt(row.id,date,true,snapshot);if(stock.balance==null)return row.name+': '+tankStockLabel(stock);const after=qty==null||existing?null:DecimalCore.toNumberExact(row===from?DecimalCore.sub(stock.balance,qty):DecimalCore.add(stock.balance,qty));return row.name+': '+(existing?'расчёт до действия ':'доступно ')+precisionFormat(stock.balance)+' л'+(after===null?'':' → после операции '+precisionFormat(after)+' л');});
  return source+' → '+recipient+' · '+precisionFormat(section==='tankIncomes'?payload.amount:payload.qty)+' л. Расчёт на конец '+fmtDate(date)+'. '+balances.join('; ')+(existing?'. При исправлении или отмене прежняя версия учитывается отдельно; новое количество не прибавляется повторно.':'')+'. Физический остаток ёмкости не зависит от расхода получателя.';
 }
-function tankFuelToday(){return new Date().toISOString().slice(0,10);}
+function tankFuelToday(){return BusinessCalendar.resolve(data,new Date().toISOString()).today;}
 function tankFuelContextStamp(){return JSON.stringify([wfCommandContextStamp(),typeof _sync==='undefined'?null:_sync.access?.fuelActions??null]);}
 function tankFuelApi(){if(typeof FuelOperations==='undefined'||FuelOperations.apiVersion!==1)throw Error('Не загружены правила замеров и отмены топлива');return FuelOperations;}
 function tankFuelSupported(){return typeof _sync!=='undefined'&&_sync.platform?.fuelOperations===1&&typeof platformExecuteCommand==='function';}

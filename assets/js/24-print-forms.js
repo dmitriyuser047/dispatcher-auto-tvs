@@ -29,7 +29,7 @@ function renderPrintFormsSection() {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
             <div>
               <label style="font-size:12px;color:var(--text3);font-weight:600">Дата выезда</label>
-              <input type="date" id="pfDate" value="${new Date().toISOString().slice(0,10)}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
+              <input type="date" id="pfDate" value="${BusinessCalendar.resolve(data,new Date().toISOString()).today}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
             </div>
             <div>
               <label style="font-size:12px;color:var(--text3);font-weight:600">Маршрут</label>
@@ -55,7 +55,7 @@ function renderPrintFormsSection() {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
             <div>
               <label style="font-size:12px;color:var(--text3);font-weight:600">Дата</label>
-              <input type="date" id="pfFuelDate" value="${new Date().toISOString().slice(0,10)}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
+              <input type="date" id="pfFuelDate" value="${BusinessCalendar.resolve(data,new Date().toISOString()).today}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
             </div>
             <div>
               <label style="font-size:12px;color:var(--text3);font-weight:600">Объём (л)</label>
@@ -90,7 +90,7 @@ function renderPrintFormsSection() {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
             <div>
               <label style="font-size:12px;color:var(--text3);font-weight:600">Дата</label>
-              <input type="date" id="pfActDate" value="${new Date().toISOString().slice(0,10)}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
+              <input type="date" id="pfActDate" value="${BusinessCalendar.resolve(data,new Date().toISOString()).today}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--input-bg);color:var(--text);margin-top:4px;box-sizing:border-box">
             </div>
             <div>
               <label style="font-size:12px;color:var(--text3);font-weight:600">Номер акта</label>
@@ -117,7 +117,7 @@ function generateWaybill() {
   if (!vid) { alert('Выберите транспортное средство'); return; }
   const v = data.vehicles.find(x=>x.id===vid);
   if (!v) return;
-  const date = document.getElementById('pfDate').value || new Date().toISOString().slice(0,10);
+  const date = document.getElementById('pfDate').value || BusinessCalendar.resolve(data,new Date().toISOString()).today;
   const route = document.getElementById('pfRoute').value.trim() || '—';
   const fuelLabel = {diesel:'Дизельное',gasoline:'Бензин',gas:'Газ'}[v.fuel]||v.fuel||'—';
   const org = v.org || 'ООО «Технрайз Велл Сервис»';
@@ -171,7 +171,7 @@ function generateFuelRequest() {
   if (!vid) { alert('Выберите транспортное средство'); return; }
   const v = data.vehicles.find(x=>x.id===vid);
   if (!v) return;
-  const date = document.getElementById('pfFuelDate').value || new Date().toISOString().slice(0,10);
+  const date = document.getElementById('pfFuelDate').value || BusinessCalendar.resolve(data,new Date().toISOString()).today;
   const amount = document.getElementById('pfFuelAmount').value || '___';
   const fuelType = document.getElementById('pfFuelType').value;
   const org = v.org || 'ООО «Технрайз Велл Сервис»';
@@ -220,7 +220,7 @@ function generateActPdf() {
   if (!vid) { alert('Выберите транспортное средство'); return; }
   const v = data.vehicles.find(x=>x.id===vid);
   if (!v) return;
-  const date = document.getElementById('pfActDate').value || new Date().toISOString().slice(0,10);
+  const date = document.getElementById('pfActDate').value || BusinessCalendar.resolve(data,new Date().toISOString()).today;
   const actNum = document.getElementById('pfActNumber').value.trim() || '___';
   const desc = document.getElementById('pfActDesc').value.trim() || '—';
   const sum = document.getElementById('pfActSum').value || '0';

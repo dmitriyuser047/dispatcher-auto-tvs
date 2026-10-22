@@ -68,12 +68,12 @@ test('procurement workspace detects an in-place stock edit and default plan date
     const tank = data.tanks[0]; tank.balanceInit = 20;
     renderProcurementSection();
     const changed = dispatcherQuery('procurement', options);
-    const oldToday = wfToday;
+    const oldToday = dispatcherLocalDate;
     let dayOne, dayTwo;
     try {
-      wfToday = () => '2026-10-20'; dayOne = dispatcherQuery('procurement');
-      wfToday = () => '2026-10-21'; dayTwo = dispatcherQuery('procurement');
-    } finally { wfToday = oldToday; }
+      dispatcherLocalDate = () => '2026-10-20'; dayOne = dispatcherQuery('procurement');
+      dispatcherLocalDate = () => '2026-10-21'; dayTwo = dispatcherQuery('procurement');
+    } finally { dispatcherLocalDate = oldToday; }
     return { before:first[0].stock, after:changed[0].stock, need:changed[0].suggestedQty,
       sameTank:tank === data.tanks[0], dates:[dayOne[0].recent.to, dayTwo[0].recent.to], writes:window.__writes };
   });

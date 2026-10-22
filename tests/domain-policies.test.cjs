@@ -175,13 +175,13 @@ test('accepted shifts freeze all content and deletion while allowing attachment 
   }
   const deleted=clone(before);deleted.shiftReports=[];fails(()=>check(before,deleted),'DOCUMENT_DELETE_FORBIDDEN');
   const files=clone(before);files.shiftReports[0].attachments=[{id:'proof.pdf'}];files.shiftReports[0].updatedAt=clock.now;assert.equal(check(before,files),true);
-  const missing=db();missing.shiftReports=[{id:'shift',status:'accepted'}];fails(()=>check(db(),missing),'DOCUMENT_ACCEPTANCE_REQUIRED');
+  const missing=db();missing.shiftReports=[{id:'shift',status:'accepted'}];fails(()=>check(db(),missing),'DOCUMENT_PROOF');
   const unrelated=clone(missing);unrelated.vehicles[0].note='Описание';assert.equal(check(missing,unrelated),true);
 });
 
 test('native full and section writes reject overdraw, accepted shift edits and broken links before audit or revision changes',t=>{
   const dir=temp(t),initial=db();initial.shiftReports=[{id:'shift',date:'2026-10-01',assetRef:'v:v',driverId:'d',status:'accepted',acceptedBy:'Принимающий',odoStart:100,odoEnd:150}];
-  storage.writeAll(dir,initial,{principal,now:clock.now});const before=storage.readSnapshot(dir);
+  require('./period-test-support.cjs').seedDatabase(dir,initial);const before=storage.readSnapshot(dir);
   fails(()=>storage.writeSections(dir,payload(dir,{fuelMovements:[move({qty:200})]}),{principal,now:clock.now}),'FUEL_STOCK_DEFICIT');
   const tampered=clone(before.data);tampered.shiftReports[0].odoEnd=999;fails(()=>storage.writeAll(dir,tampered,{principal,now:clock.now}),'DOCUMENT_FROZEN');
   assert.deepEqual(storage.readSnapshot(dir),before);

@@ -70,7 +70,8 @@ test('large procurement search filters the completed plan without losing the inp
 test('procurement reruns a calculation crossing midnight and refreshes local filters on the next day',async()=>{
  await page.evaluate(()=>{
   data.records=Array.from({length:1000},(_,id)=>({id,vehicleId:'async-v',date:'2026-10-01',km:1}));
-  window.__planDay='2026-10-21';wfToday=()=>window.__planDay;window.__planDates=[];
+  window.__planDay='2026-10-21';window.__planDates=[];
+  const NativeDate=Date;window.Date=class extends NativeDate{constructor(...args){super(...(args.length?args:[window.__planDay+'T12:00:00.000Z']));}static now(){return NativeDate.parse(window.__planDay+'T12:00:00.000Z');}};
   const original=dispatcherQueryAsync;let hold=true;
   dispatcherQueryAsync=async(name,options,settings)=>{
    const value=await original(name,options,settings);

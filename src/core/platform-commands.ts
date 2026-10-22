@@ -1,7 +1,7 @@
-import type { AssetTarget, CostActionInput, DocumentActionInput, FuelActionInput, Identifier, JsonRow, JsonValue, MergeCatalogInput, PeriodActionInput, PlatformCommand, ProcurementActionInput, RepairActionInput, SectionRows, createPlatformContracts } from './platform-contracts';
+import type { AssetTarget, CalendarActionInput, CostActionInput, DocumentActionInput, FuelActionInput, Identifier, JsonRow, JsonValue, MergeCatalogInput, PeriodActionInput, PlatformCommand, ProcurementActionInput, RepairActionInput, SectionRows, createPlatformContracts } from './platform-contracts';
 
 export interface CommandActor { id: string; name: string; role: string }
-export interface CommandContext { id: string; now: string; today: string; actor: CommandActor; readable?:string[]; writable?:string[] }
+export interface CommandContext { id: string; now: string; today: string; actor: CommandActor; readable?:string[]; writable?:string[]; calendar?:{version:1;mode:'compatibility'|'configured';timeZone:string;stamp:string} }
 export interface CommandPlan { sections: SectionRows; readSections: string[]; writeSections: string[]; entityIds: Record<string, Identifier> }
 interface PersonnelRules { apiVersion: number; validateChanges(previous: unknown, next: unknown, context?: unknown): unknown }
 interface FuelRules { apiVersion: number; validateChanges(previous: unknown, next: unknown): unknown }
@@ -14,11 +14,14 @@ interface FuelActions {apiVersion:number;dependencies(input:FuelActionInput):str
 interface ProcurementActions {apiVersion:number;dependencies(input:ProcurementActionInput):string[];footprint(input:ProcurementActionInput):string[];plan(database:unknown,input:ProcurementActionInput,context:CommandContext):CommandPlan}
 interface CostActions {apiVersion:number;dependencies(input:CostActionInput):string[];footprint(input:CostActionInput):string[];plan(database:unknown,input:CostActionInput,context:CommandContext):CommandPlan}
 interface RepairActions {apiVersion:number;dependencies(input:RepairActionInput):string[];footprint(input:RepairActionInput):string[];plan(database:unknown,input:RepairActionInput,context:CommandContext):CommandPlan}
+interface CalendarActions {apiVersion:number;dependencies(input:CalendarActionInput):string[];footprint(input:CalendarActionInput):string[];plan(database:unknown,input:CalendarActionInput,context:CommandContext):CommandPlan}
+interface BusinessCalendar {apiVersion:number;context(database:unknown,context:CommandContext):unknown;canonicalizeIntervals(previous:unknown,sections:SectionRows,context:CommandContext,options?:unknown):SectionRows}
+interface PersonnelPlanning {apiVersion:number;dependencies():string[];captureShiftContext(database:unknown,shift:JsonRow,context:CommandContext):{snapshot:JsonRow}}
 type Contracts = ReturnType<typeof createPlatformContracts>;
 interface CommandError extends Error { code: string; status: number; field?: string }
 
 /** Pure semantic actions. Storage still owns ACL, CAS, audit and atomic commit. */
-export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, fuel: FuelRules, fuelEngine: FuelEngine,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions) {
+export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, fuel: FuelRules, fuelEngine: FuelEngine,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions,calendarActions?:CalendarActions,calendar?:BusinessCalendar,planning?:PersonnelPlanning) {
   if (!contracts || contracts.apiVersion !== 1 || !personnel || personnel.apiVersion !== 1 || !fuel || fuel.apiVersion !== 1 || typeof fuelEngine?.parseFuelGrade !== 'function')
     throw new Error('Не загружены общие правила команд платформы');
   function fail(code: string,message: string,field?: string): never {
@@ -41,6 +44,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   function procurementOperations():ProcurementActions {if(!procurementActions||procurementActions.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружен общий движок закупок и поставок');return procurementActions;}
   function costOperations():CostActions {if(!costActions||costActions.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены общие правила себестоимости');return costActions;}
   function repairOperations():RepairActions {if(!repairActions||repairActions.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены общие правила ремонтного процесса');return repairActions;}
+  function calendarOperations():CalendarActions {if(!calendarActions||calendarActions.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила учётного календаря');return calendarActions;}
   function footprint(value: unknown): string[] {
     const command=parseCommand(value);
     if(command.type==='DocumentAction')return documentModule().footprint(command.input);
@@ -49,6 +53,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     if(command.type==='ProcurementAction')return procurementOperations().footprint(command.input);
     if(command.type==='CostAction')return costOperations().footprint(command.input);
     if(command.type==='RepairAction')return repairOperations().footprint(command.input);
+    if(command.type==='CalendarAction')return calendarOperations().footprint(command.input);
     if(command.type==='MergeCatalog'){
       const names=mergeModule().footprint(command.input);
       if(names.includes('auditLog'))fail('INVALID_COMMAND','Исторические ссылки аудита нельзя выбирать для переноса','mutableRefs');
@@ -57,7 +62,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     if(command.type==='IssueFuel')return ['fuelMovements',command.input.target.section==='vehicles'?'records':'genRecords'].sort();
     return [command.type==='AcceptShift'?'shiftReports':'assetAssignments'];
   }
-  function dependencies(value: unknown,_database?: unknown): string[] {
+  function commandDependencies(value: unknown): string[] {
     const command=parseCommand(value);
     if(command.type==='DocumentAction')return documentModule().dependencies(command.input);
     if(command.type==='PeriodAction')return periodModule().dependencies(command.input);
@@ -65,11 +70,13 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     if(command.type==='ProcurementAction')return procurementOperations().dependencies(command.input);
     if(command.type==='CostAction')return costOperations().dependencies(command.input);
     if(command.type==='RepairAction')return repairOperations().dependencies(command.input);
+    if(command.type==='CalendarAction')return calendarOperations().dependencies(command.input);
     if(command.type==='MergeCatalog'){mergeModule();return [...(registry as SectionRegistry).sections].sort();}
     if(command.type==='IssueFuel')return ['tanks','tankIncomes','genRecords','generators','fuelMovements','records','vehicles','assetAssignments','fuelPeriods','fuelWriteoffs','fuelPurchases','monthlyFuel'].sort();
-    if(command.type==='AcceptShift')return ['shiftReports','vehicles','generators','drivers','dispatchJobs'].sort();
-    return ['assetAssignments','drivers','vehicles','generators','fuelPeriods'].sort();
+    if(command.type==='AcceptShift')return [...new Set(['shiftReports','vehicles','generators','drivers','dispatchJobs','assetAssignments',...(planning?.dependencies()||[])])].sort();
+    return [...new Set(['assetAssignments','drivers','vehicles','generators','fuelPeriods',...(planning?.dependencies()||[])])].sort();
   }
+  function dependencies(value:unknown,_database?:unknown):string[]{return [...new Set([...commandDependencies(value),'appMeta'])].sort();}
   function database(value: unknown,names: string[]): SectionRows {
     if(value===null||typeof value!=='object'||Array.isArray(value))fail('INVALID_COMMAND_SOURCE','Для команды нужен снимок базы');
     const source=value as Record<string,unknown>, projection:Record<string,unknown>={};
@@ -117,6 +124,11 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
       fail('INVALID_COMMAND_CONTEXT','Нужны время, дата и автор команды');
     for(const field of ['id','name','role'])if(typeof actor[field]!=='string'||!(actor[field] as string).trim())fail('INVALID_COMMAND_CONTEXT','Некорректный автор команды');
     const result:CommandContext={id,now:checked.now,today:checked.today,actor:{id:actor.id as string,name:actor.name as string,role:actor.role as string}};
+    if(checked.calendar!==undefined){
+      const value=checked.calendar;
+      if(value===null||typeof value!=='object'||Array.isArray(value)||value.version!==1||(value.mode!=='compatibility'&&value.mode!=='configured')||typeof value.timeZone!=='string'||typeof value.stamp!=='string')fail('INVALID_COMMAND_CONTEXT','Некорректный учётный календарь','calendar');
+      result.calendar={version:1,mode:value.mode,timeZone:value.timeZone,stamp:value.stamp};
+    }
     for(const field of ['readable','writable'] as const)if(checked[field]!==undefined){const values=checked[field];if(!Array.isArray(values)||values.some(value=>typeof value!=='string'||!value.trim()))fail('INVALID_COMMAND_CONTEXT','Некорректные полномочия команды',field);result[field]=values.slice() as string[];}
     return result;
   }
@@ -171,6 +183,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
       if(!contracts.identifier(after.jobId))fail('INVALID_SHIFT','Некорректная заявка смены','jobId');find(db,'dispatchJobs',after.jobId);
     }
     if(typeof after.odoStart==='number'&&typeof after.odoEnd==='number'&&after.odoEnd<after.odoStart)fail('INVALID_SHIFT','Конечный одометр меньше начального','odoEnd');
+    if(planning)after.personnelSnapshot=planning.captureShiftContext(db,after,ctx).snapshot;
     after.status='accepted';after.acceptedActor={...ctx.actor};after.acceptedAt=ctx.now;stamp(after,ctx,false);
     const sections:SectionRows={shiftReports:rows(db,'shiftReports').map(row=>row===before?after:row)};
     personnel.validateChanges(db,{...db,...sections},{today:ctx.today,now:ctx.now});
@@ -203,16 +216,21 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   }
   function plan(source:unknown,value:unknown,metadata:unknown):CommandPlan {
     const command=parseCommand(value),ctx=context(metadata),db=database(source,dependencies(command));
-    if(command.type==='DocumentAction')return documentModule().plan(db,command.input,ctx);
-    if(command.type==='PeriodAction')return periodModule().plan(db,command.input,ctx);
-    if(command.type==='FuelAction')return fuelOperations().plan(db,command.input,ctx);
-    if(command.type==='ProcurementAction')return procurementOperations().plan(db,command.input,ctx);
-    if(command.type==='CostAction')return costOperations().plan(db,command.input,ctx);
-    if(command.type==='RepairAction')return repairOperations().plan(db,command.input,ctx);
-    if(command.type==='MergeCatalog')return mergeModule().plan(db,command.input,ctx);
-    if(command.type==='IssueFuel')return issueFuel(db,command,ctx);
-    if(command.type==='AcceptShift')return acceptShift(db,command,ctx);
-    return assignPerson(db,command,ctx);
+    calendar?.context(db,ctx);
+    let result:CommandPlan;
+    if(command.type==='DocumentAction')result=documentModule().plan(db,command.input,ctx);
+    else if(command.type==='PeriodAction')result=periodModule().plan(db,command.input,ctx);
+    else if(command.type==='FuelAction')result=fuelOperations().plan(db,command.input,ctx);
+    else if(command.type==='ProcurementAction')result=procurementOperations().plan(db,command.input,ctx);
+    else if(command.type==='CostAction')result=costOperations().plan(db,command.input,ctx);
+    else if(command.type==='RepairAction')result=repairOperations().plan(db,command.input,ctx);
+    else if(command.type==='CalendarAction')result=calendarOperations().plan(db,command.input,ctx);
+    else if(command.type==='MergeCatalog')result=mergeModule().plan(db,command.input,ctx);
+    else if(command.type==='IssueFuel')result=issueFuel(db,command,ctx);
+    else if(command.type==='AcceptShift')result=acceptShift(db,command,ctx);
+    else result=assignPerson(db,command,ctx);
+    const timeOptions=command.type==='CalendarAction'&&command.input.action==='confirmInterval'?{confirm:command.input.target,reason:command.input.reason}:{};
+    return {...result,sections:calendar?calendar.canonicalizeIntervals(db,result.sections,ctx,timeOptions):result.sections,readSections:dependencies(command)};
   }
   return Object.freeze({apiVersion:1 as const,parseCommand,footprint,dependencies,plan});
 }

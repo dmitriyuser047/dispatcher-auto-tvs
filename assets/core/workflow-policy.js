@@ -1,9 +1,9 @@
 /* Shared dispatch readiness and completion details. No DOM, storage or clock. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.WorkflowPolicy = factory();
-})(typeof globalThis === 'object' ? globalThis : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-planning.js'),() => require('./business-calendar.js'));
+  else root.WorkflowPolicy = factory(() => root.PersonnelPlanning,() => root.BusinessCalendar);
+})(typeof globalThis === 'object' ? globalThis : this, function (getPlanning,getCalendar) {
   'use strict';
   const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
   const rows = (db, section) => Array.isArray(db?.[section]) ? db[section].filter(object) : [];
@@ -20,11 +20,18 @@
     const timestamp = Date.parse(value + 'T00:00:00Z');
     return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0,10) === value ? timestamp : null;
   }
-  function time(value) {
+  function time(value,db,context={},section,row,field) {
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{3})?)?(?:Z|[+-]\d{2}:\d{2})?$/.test(value) || day(value.slice(0,10)) === null ||
         +value.slice(11,13) > 23 || +value.slice(14,16) > 59 || +value.slice(17,19) > 59) return null;
-    const timestamp = Date.parse(value);
+    let calendar;try{calendar=getCalendar();}catch{}let timestamp;
+    if(calendar?.apiVersion===1&&db){try{if(row&&typeof calendar.timeAt==='function'){const parsed=calendar.timeAt(db,section,row,field);if(parsed.status!=='known'||parsed.instant===null)return null;timestamp=Date.parse(parsed.instant);}else{const resolved=calendar.resolve(db,context.now||(context.today?context.today+'T12:00:00.000Z':'2000-01-01T12:00:00.000Z')),parsed=calendar.parseTime(value,{timeZone:resolved.timeZone});timestamp=typeof parsed.instant==='number'?parsed.instant:Date.parse(parsed.instant);}}catch{return null;}}
+    else timestamp = Date.parse(value);
     return Number.isFinite(timestamp) ? timestamp : null;
+  }
+  function workDays(db,job,context) {
+    let calendar;try{calendar=getCalendar();}catch{}
+    if(calendar?.apiVersion===1){try{const saved=calendar.persistedInterval?.(db,'dispatchJobs',job,{fromField:'start',toField:'end'},context);return saved?.status==='known'&&day(saved.fromDate)!==null&&day(saved.toDate)!==null?{from:saved.fromDate,to:saved.toDate}:null;}catch{return null;}}
+    return {from:job.start.slice(0,10),to:job.end.slice(0,10)};
   }
   const tokens = value => [...new Set(String(value || '').toLocaleLowerCase('ru').split(',').map(item => item.trim()).filter(Boolean))].sort();
   const subset = (current, prior) => current.every(value => prior.includes(value));
@@ -49,9 +56,12 @@
     };
     if (canRead(context,'dispatchJobs')) rows(db,'dispatchJobs').forEach((job,index) => {
       if (job.archived || job.deleted || !active.has(job.status)) return;
-      const start = time(job.start), end = time(job.end);
-      if (start === null || end === null || start >= end) return; // Shared schema owns invalid intervals.
-      const startDay = job.start.slice(0,10), endDay = job.end.slice(0,10);
+      if(!canRead(context,'appMeta')){missing(job,index,'appMeta','calendar',[job.start,job.end,job.timeContext||null]);return;}
+      const start = time(job.start,db,context,'dispatchJobs',job,'start'), end = time(job.end,db,context,'dispatchJobs',job,'end');
+      if (start === null || end === null || start >= end) {if(typeof job.start==='string'&&typeof job.end==='string'&&day(job.start.slice(0,10))!==null&&day(job.end.slice(0,10))!==null)add('dispatchJobs',job,index,'WORKFLOW_DISPATCH_CALENDAR_TIME','start/end','Время задания неоднозначно или не существует в рабочем часовом поясе',{kind:'time',binding:[job.start,job.end]});return;}
+      const window=workDays(db,job,context);
+      if(!window){add('dispatchJobs',job,index,'WORKFLOW_DISPATCH_CALENDAR_TIME','start/end','Исторические рабочие даты задания не подтверждены',{kind:'time',binding:[job.start,job.end,job.timeContext??null]});return;}
+      const startDay = window.from, endDay = window.to;
       const section = assetSection(job.assetRef);
       const assetVisible = section && canRead(context,section);
       const matchingEquipment=assetVisible?rows(db,section).filter(row=>String(row.id)===job.assetRef.slice(2)):[];
@@ -74,8 +84,10 @@
       if (!canRead(context,'workOrders')) missing(job,index,'workOrders','repair',[job.assetRef,job.start,job.end]);
       else if (present(job.assetRef)) rows(db,'workOrders').forEach((order,orderIndex) => {
         if (order.assetRef !== job.assetRef || !['approved','repairing'].includes(order.status)) return;
-        const from = time(order.downtimeFrom), to = present(order.downtimeTo) ? time(order.downtimeTo) : Infinity;
-        if (from === null || to === null || from >= end || to <= start) return;
+        if(order.downtime?.mode==='none'||!present(order.downtimeFrom))return;
+        const from = time(order.downtimeFrom,db,context,'workOrders',order,'downtimeFrom'), to = present(order.downtimeTo) ? time(order.downtimeTo,db,context,'workOrders',order,'downtimeTo') : Infinity;
+        if(from===null||to===null){add('dispatchJobs',job,index,'WORKFLOW_DISPATCH_REPAIR_TIME_UNKNOWN','start/end','Время простоя ремонта не подтверждено; отсутствие пересечения не доказано',{kind:'time',binding:[job.assetRef,job.start,job.end,order.id??null,order.downtimeFrom??null,order.downtimeTo??null]},{targetSection:'workOrders',relatedRecordId:order.id??'@'+orderIndex});return;}
+        if (from >= end || to <= start) return;
         add('dispatchJobs',job,index,'WORKFLOW_DISPATCH_REPAIR_DOWNTIME','start/end','Задание пересекается с простоем по ремонту',
           { kind:'interval',binding:[job.assetRef],window:[Math.max(start,from),Math.min(end,to)] },
           { targetSection:'workOrders', relatedRecordId:order.id ?? '@' + orderIndex });
@@ -145,7 +157,12 @@
   function validateChanges(previous, next, context = {}) {
     const before = analyze(previous,context), after = analyze(next,context), issues = [];
     const prior = new Map(before.filter(entry => entry.key).map(entry => [entry.key,entry]));
-    for (const entry of after) if (entry.key && worsened(entry,prior.get(entry.key))) issues.push(entry.issue);
+    const unchangedJob=entry=>{const old=rows(previous,'dispatchJobs').filter(row=>row.id===entry.issue.recordId),current=rows(next,'dispatchJobs').filter(row=>row.id===entry.issue.recordId);return old.length===1&&current.length===1&&['assetRef','driverId','start','end','requirements','personnelRequirements','status','archived','deleted'].every(field=>same(old[0][field],current[0][field]));};
+    for (const entry of after) if (entry.key && worsened(entry,prior.get(entry.key))) {
+      const personnelFact=entry.issue.code==='WORKFLOW_DISPATCH_SKILLS_REQUIRED'||entry.issue.code==='WORKFLOW_DISPATCH_DOCUMENT_EXPIRED'&&entry.evidence.bindings?.some(binding=>binding.startsWith('driver:'));
+      if(personnelFact&&unchangedJob(entry))continue;
+      issues.push(entry.issue);
+    }
     const hiddenKey = entry => JSON.stringify([rowKey(entry.row,entry.index),entry.dependency,entry.rule]);
     const hiddenBefore = new Map(before.filter(entry => entry.unavailable).map(entry => [hiddenKey(entry),entry]));
     const inaccessible = new Set();
@@ -163,7 +180,13 @@
       const error = new Error(issues.slice(0,5).map(issue => issue.message).join('; '));
       error.name = 'WorkflowPolicyError'; error.code = 'WORKFLOW_VIOLATION'; error.issues = issues; error.details = { issues }; throw error;
     }
+    let planning;try{planning=getPlanning();}catch{}if(planning?.apiVersion===1)planning.validateChanges(previous,next,context);else if(rows(next,'drivers').some(row=>Object.hasOwn(row,'personnelPlanning'))||['vehicles','generators','dispatchJobs'].some(section=>rows(next,section).some(row=>Object.hasOwn(row,'personnelRequirements'))))throw Object.assign(Error('Не загружено датированное планирование сотрудников'),{code:'MODULE_UNAVAILABLE'});
     return true;
   }
-  return Object.freeze({ apiVersion:1,inspect,validateChanges });
+  function intervalOverlap(db,first,second,context={}){
+    if(!canRead(context,'appMeta'))return null;
+    const interval=value=>{if(!object(value))return null;const old=rows(db,'dispatchJobs').filter(row=>present(value.id)&&row.id===value.id);if(old.length>1)return null;const persisted=old.length===1&&old[0].start===value.start&&old[0].end===value.end?old[0]:null,start=time(value.start,db,context,persisted?'dispatchJobs':undefined,persisted,'start'),end=time(value.end,db,context,persisted?'dispatchJobs':undefined,persisted,'end');return start!==null&&end!==null&&start<end?[start,end]:null;};
+    const a=interval(first),b=interval(second);return a&&b?a[0]<b[1]&&b[0]<a[1]:null;
+  }
+  return Object.freeze({ apiVersion:1,inspect,validateChanges,intervalOverlap });
 });

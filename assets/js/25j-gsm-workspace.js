@@ -1,4 +1,5 @@
-let gsmOrg = '', gsmFuel = '', gsmActNo = '', gsmActDate = new Date().toISOString().slice(0, 10);
+let gsmOrg = '', gsmFuel = '', gsmActNo = '', gsmActDate = '';
+function gsmActDateValue(){return gsmActDate||BusinessCalendar.resolve(data,new Date().toISOString()).today;}
 let gsmMovementSearch = '', gsmMovementType = '', gsmMovementLimit = 30, gsmMovementLedger = null;
 let gsmBackgroundRequest = null, gsmBackgroundReady = null;
 const GSM_MAIN_VIEWS = [['barrels', 'Бочки и остатки'], ['diagnostics', 'Проверка данных'], ['receipts', 'Выписка'], ['manual', 'Добавить вручную'], ['journal', 'Журнал и остатки'], ['writeoff', 'Списание']];
@@ -10,7 +11,7 @@ function gsmVisible(row) { return (!gsmOrg || gsmOrgKey(row.org) === gsmOrgKey(g
 function gsmVehicle(id) { return (data.vehicles || []).find(v => v.id === id); }
 function gsmBackgroundRequired() { return typeof dispatcherBackgroundNeeded === 'function' && dispatcherBackgroundNeeded(); }
 function gsmBackgroundStamp() {
-  return JSON.stringify([dispatcherAnalysisStamp(),fpMonth,gsmOrgKey(gsmOrg),gsmFuel,gsmActDate,fpView,dispatcherLocalDate()]);
+  return JSON.stringify([dispatcherAnalysisStamp(),fpMonth,gsmOrgKey(gsmOrg),gsmFuel,gsmActDateValue(),fpView,dispatcherLocalDate()]);
 }
 function gsmPreparedWorkspace() {
   return gsmBackgroundReady && gsmBackgroundReady.databaseRef === data && gsmBackgroundReady.stamp === gsmBackgroundStamp() ? gsmBackgroundReady : null;
@@ -37,7 +38,7 @@ function gsmPrepareWorkspaceBackground(months) {
   };
   panel.querySelector('button').onclick=()=>controller.abort();
   const fuel=dispatcherQueryAsync('fuel',gsmMonthRange(fpMonth),{signal:controller.signal});
-  const writeoff=fpView==='writeoff'?dispatcherQueryAsync('writeoff',{...gsmWriteoffScope(),date:gsmActDate},{signal:controller.signal}):Promise.resolve(null);
+  const writeoff=fpView==='writeoff'?dispatcherQueryAsync('writeoff',{...gsmWriteoffScope(),date:gsmActDateValue()},{signal:controller.signal}):Promise.resolve(null);
   const audit=fpView==='diagnostics'?dispatcherQueryAsync('fuelAudit',gsmMonthRange(fpMonth),{signal:controller.signal}):Promise.resolve(null);
   void Promise.all([fuel,writeoff,audit]).then(([ledger,model,auditModel])=>{
     if(!current()){failed(Error('Расчёт устарел'));return;}
@@ -283,7 +284,7 @@ function gsmEditRecord(id) {
   openEditRecord(id);
 }
 function gsmAddReceipt() {
-  openGenericModal('Новая заправка', '<div class="form-row"><div class="form-group"><label>Дата</label><input id="gsm_new_date" type="date" value="' + new Date().toISOString().slice(0, 10) + '"></div>' +
+  openGenericModal('Новая заправка', '<div class="form-row"><div class="form-group"><label>Дата</label><input id="gsm_new_date" type="date" value="' + BusinessCalendar.resolve(data,new Date().toISOString()).today + '"></div>' +
     '<div class="form-group"><label>Машина</label><select id="gsm_new_vehicle">' + fuelImportVehicleOptions('', true) + '</select></div></div>' +
     '<div class="form-row"><div class="form-group"><label>Карта</label><select id="gsm_new_card"><option value="">Без карты</option>' + fcList().filter(c => c.status !== 'blocked'&&!c.archived&&!c.mergedInto).map(c => '<option value="' + fpEsc(c.number) + '">' + fpEsc(fcFormat(c.number) + ' / ' + (c.org || 'по закреплению')) + '</option>').join('') + '</select></div>' +
     '<div class="form-group"><label>Организация (если без карты)</label><input id="gsm_new_org" value="' + fpEsc(gsmOrg) + '"></div></div>' +

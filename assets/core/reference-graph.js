@@ -39,6 +39,7 @@
  const normalizedCard=value=>typeof value==='string'||typeof value==='number'?String(value).replace(/\D/g,'')||String(value).trim().toUpperCase():'';
  function classification(section,row,path,today,genRecords){
   if(historical.has(section))return {classification:'historical',reason:'Историческое свидетельство сохраняется без изменений'};
+  if(section==='drivers'&&/^personnelPlanning\.qualifications\[\d+\]\.documentId$/.test(path))return {classification:'pinned',reason:'Датированный допуск сохраняет явную связь с подтверждающим документом'};
   if(pinned.has(section)||row.archived||row.deleted||row.cancelled)return {classification:'pinned',reason:'Исходный факт или архивная запись сохраняет прежнюю ссылку'};
   let mutable=false;
   if(section==='dispatchJobs')mutable=['new','assigned'].includes(row.status)&&typeof row.start==='string'&&date(row.start.slice(0,10))&&row.start.slice(0,10)>=today&&!row.actualStart&&!row.actualEnd;
@@ -84,7 +85,7 @@
     if(relation.kind==='assetRef'){
      const resolved=identity.resolveAsset(db,entry.value,relation.targets);targetSection=resolved.section;targetId=typeof entry.value==='string'?entry.value.slice(2):entry.value;string=true;
     }else if(relation.kind==='discriminator'){const selector=relation.selectorAligned===true?schema.referenceSelector(row,relation,entry.path):values(row,relation.selector)[0]?.value,key=relation.prefix&&typeof selector==='string'?selector.split(':')[0]:selector;targetSection=relation.targets?.[key];}
-    else if(relation.kind==='historical')targetSection=row[relation.selector];
+    else if(relation.kind==='historical')targetSection=relation.target||(relation.selector?values(row,relation.selector)[0]?.value:undefined);
     else if(relation.kind!=='id'&&relation.kind!=='lookup'){push(ref);addIssue('UNCLASSIFIED_REFERENCE',ref,'Неизвестный вид связи');continue;}
     if(!schema.sections.includes(targetSection)){push(ref);if(relation.unknownPolicy!=='advisory'&&relation.kind!=='historical')addIssue('UNCLASSIFIED_REFERENCE',ref,'Не удалось определить раздел назначения связи');continue;}
     ref.targetSection=targetSection;ref.targetId=targetId;
@@ -112,7 +113,7 @@
     if((key==='recordId'||key==='id'&&['before','after'].includes(path.split('.').at(-1)))&&schema.sections.includes(value.section||row.section))targetSection=value.section||row.section;
     if((key==='assetRef'||/AssetRef$/.test(key))&&typeof child==='string'){const resolved=identity.resolveAsset(db,child);targetSection=resolved.section;targetId=child.slice(2);legacyString=true;}
     if(!targetSection&&/Id$/.test(key)){const lower=key.toLowerCase();targetSection=/vehicle/.test(lower)?'vehicles':/generator/.test(lower)?'generators':/driver|person/.test(lower)?'drivers':/tank/.test(lower)?'tanks':/part/.test(lower)?'parts':/contragent/.test(lower)?'contragents':undefined;}
-    const historicalPath=proof||['snapshot','before','after','sourceSnapshot','fuelSourceSnapshot','sourceTransaction','provenance'].includes(key),knownAlias=path.split('.').at(-1)==='mergedInto'&&key==='id'&&catalogSections.includes(value.section);
+    const historicalPath=proof||['snapshot','personnelSnapshot','timeContext','before','after','sourceSnapshot','fuelSourceSnapshot','sourceTransaction','provenance'].includes(key),knownAlias=path.split('.').at(-1)==='mergedInto'&&key==='id'&&catalogSections.includes(value.section);
     if(!knownPath&&targetSection&&identity.identifier(targetId)){
      const candidates=legacyString?indexes.get(targetSection)?.byString.get(String(targetId))||[]:indexes.get(targetSection)?.byId.get(identity.typedKey(targetSection,targetId))||[];
      const ref={relationId:(knownAlias?'alias:':historicalPath||historical.has(section)?'history:':'unknown:')+section+'.'+current,section,rowId:identity.identifier(row.id)?row.id:null,rowIndex,path:current,field:current,value:child,targetSection,targetId,candidates:candidates.map(candidate=>({section:targetSection,id:candidate.id})),classification:historicalPath||historical.has(section)?'historical':'pinned',mutable:false,reason:knownAlias?'Неизменяемая связь архивного дубля с основной карточкой':historicalPath||historical.has(section)?'Неизменяемая копия исходной связи':'Связь вне реестра требует явного описания перед объединением',unclassified:!knownAlias&&!historicalPath&&!historical.has(section)};

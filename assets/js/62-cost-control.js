@@ -3,7 +3,7 @@ let costControlSession=null;
 const COST_TARGET_LABELS={tanks:'Ёмкость',parts:'Запчасть',vehicles:'Транспорт',generators:'ДЭС'};
 function costActionApi(){if(typeof CostOperations==='undefined'||CostOperations.apiVersion!==1)throw Error('Не загружены общие правила стоимости. Обновите окно.');return CostOperations;}
 function costActionDescriptor(action,target){const result=costActionApi().describe(action,target),descriptor=Array.isArray(result)?result.find(row=>row.action===action):result;if(!descriptor)throw Error('Неизвестное действие стоимости');return descriptor;}
-function costActionToday(){return new Date().toISOString().slice(0,10);}
+function costActionToday(){return BusinessCalendar.resolve(data,new Date().toISOString()).today;}
 function costActionContextStamp(){return JSON.stringify([wfCommandContextStamp(),typeof _sync==='undefined'?null:_sync.access?.costActions??null]);}
 function costActionReadContext(){const readable=platformSessionContext().readable;return Array.isArray(readable)?{readable}:{};}
 function costActionReadable(names){const readable=platformSessionContext().readable;return !Array.isArray(readable)||readable.includes('*')||names.every(name=>readable.includes(name));}

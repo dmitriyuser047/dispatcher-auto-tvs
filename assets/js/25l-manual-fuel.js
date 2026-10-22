@@ -1,7 +1,6 @@
 let gsmManual = null, gsmManualPending = null, gsmManualSaving = false;
 function gsmManualToday() {
-  const d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return BusinessCalendar.resolve(data,new Date().toISOString()).today;
 }
 function gsmManualId() { return Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10); }
 function gsmManualBlank(date) { return { id: gsmManualId(), date: date || '', vehicleId: '', grade: '', cardNo: '', qty: '', sum: '', comment: '' }; }

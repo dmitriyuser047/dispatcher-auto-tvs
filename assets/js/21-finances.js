@@ -12,7 +12,7 @@ let finBudgetDrill = null;
 let finView = 'table'; // 'table' | 'analytics'
 
 function finNumber(value) { if(value==null||typeof value==='string'&&value.trim()==='')return 0;try{return DecimalCore.toNumberExact(DecimalCore.parse(value));}catch{throw Error('Некорректное число в финансовом источнике. Проверьте исходную запись.');} }
-function finToday() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function finToday() { return BusinessCalendar.resolve(data,new Date().toISOString()).today; }
 const finProjectedPayments=new WeakSet();
 function finPayments(){
   if(typeof DocumentEngine!=='undefined'&&typeof DocumentEngine.activeRows==='function'){const rows=DocumentEngine.activeRows(data,'payments');rows.forEach(row=>finProjectedPayments.add(row));return rows;}

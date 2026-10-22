@@ -162,7 +162,7 @@ test('AssignPerson creates one typed personal assignment and validates role and 
   assert.equal(row.id,ctx().id);assert.equal(row.driverId,3);assert.equal(row.assetRef,'v:7');assert.equal(row.from,'2026-10-22');
   assert.equal(row.to,'');assert.equal(row.createdAt,ctx().now);assert.deepEqual(Object.keys(result.sections),['assetAssignments']);
   for(const transform of [source=>{source.drivers[0].employmentStatus='sick';},source=>{source.drivers[0].personnelRoles=['operator'];},source=>{source.drivers[0].archived=true;}]){
-    const source=db();transform(source);assert.throws(()=>commands.plan(source,assign(),ctx()),error=>error.code==='PERSONNEL_VALIDATION');
+    const source=db();transform(source);assert.throws(()=>commands.plan(source,assign(),ctx()),error=>['PERSONNEL_VALIDATION','PERSONNEL_PLANNING_VIOLATION'].includes(error.code));
   }
 });
 
@@ -190,6 +190,8 @@ test('editing an assignment repairs incomplete legacy fields, keeps typed ID and
   const source=db();source.assetAssignments=[{id:17,assetRef:'v:7',driverId:3,from:'',site:'',reason:'',to:'2026-12-01',org:'Historical org'}];
   source.drivers[0].employmentStatus='vacation';source.vehicles[0].archived=true;
   const command=assign();command.input.assignmentId=17;
+  assert.throws(()=>commands.plan(source,command,ctx()),{code:'PERSONNEL_PLANNING_VIOLATION'});
+  source.drivers[0].employmentStatus='active';
   const kept=commands.plan(source,command,ctx()).sections.assetAssignments[0];assert.equal(kept.id,17);assert.equal(kept.to,'2026-12-01');assert.equal(kept.org,'Historical org');
   command.input.to='';const opened=fullPlan(source,command).sections.assetAssignments[0];assert.equal(opened.to,'');assert.equal(opened.site,'Synthetic site');assert.equal(opened.reason,'Synthetic appointment');
 });
@@ -202,9 +204,29 @@ test('pure plan clock, metadata and source boundaries do not execute getters or 
 });
 
 test('browser UMD dependencies execute the same planners as CommonJS without I/O, application state or clock reads',()=>{
-  const browser=vm.createContext({});const files=['platform-contracts','entity-identity','decimal-core','accounting-boundary','fuel-stock','personnel-engine','fuel-engine','fuel-movement-policy','platform-commands'];
+  const browser=vm.createContext({});const files=['platform-contracts','entity-identity','decimal-core','accounting-boundary','business-calendar','personnel-planning','fuel-stock','personnel-engine','fuel-engine','fuel-movement-policy','platform-commands'];
   for(const name of files){const file=path.join(__dirname,'../assets/core',name+'.js');vm.runInContext(fs.readFileSync(file,'utf8'),browser,{filename:file});}
   assert.ok(Object.isFrozen(browser.PlatformCommands));assert.deepEqual(Object.keys(browser.PlatformCommands),Object.keys(commands));
   for(const command of [issue(),issue('generators',9),accept(),assign()])assert.deepEqual(copy(browser.PlatformCommands.plan(db(),command,ctx())),commands.plan(db(),command,ctx()));
   assert.equal(browser.document,undefined);assert.equal(browser.require,undefined);assert.equal(browser.data,undefined);assert.equal(browser.localStorage,undefined);
+});
+
+test('all semantic commands carry the calendar dependency and validate its civil day after midnight',()=>{
+ const calendar=require('../assets/core/business-calendar.js'),operations=require('../assets/core/calendar-operations.js'),source=db(),input={action:'configure',timeZone:'Europe/Moscow',reason:'Explicit synthetic accounting calendar'};
+ const review=operations.preview(source,input,{today:ctx().today}),configured=commands.plan(source,{type:'CalendarAction',version:1,input:{...input,reviewFingerprint:review.fingerprint}},ctx('configure-calendar'));
+ const next={...source,...configured.sections},now='2026-10-22T21:30:00.000Z',clock=calendar.resolve(next,now);
+ assert.equal(clock.today,'2026-10-23');
+ for(const command of [issue(),assign(),accept()]){
+  assert.ok(commands.dependencies(command).includes('appMeta'));
+  assert.throws(()=>commands.plan(next,command,{...ctx(),now,today:'2026-10-22'}),{code:'CALENDAR_DATE_CHANGED'});
+ }
+ const accepted=commands.plan(next,accept(),{...ctx(),now,today:clock.today,calendar:clock}).sections.shiftReports[0];
+ assert.equal(accepted.personnelSnapshot.calendar.timeZone,'Europe/Moscow');assert.equal(accepted.personnelSnapshot.date,'2026-10-21');assert.equal(source.shiftReports[0].personnelSnapshot,undefined);
+});
+
+test('semantic confirmation adds evidence only to the selected typed legacy interval and retains literal values',()=>{
+ const operations=require('../assets/core/calendar-operations.js'),source=db();source.dispatchJobs=[{id:0,title:'Numeric legacy interval',assetRef:'v:7',driverId:3,status:'new',start:'2026-10-22T08:00',end:'2026-10-22T18:00'},{id:'0',title:'Text legacy interval',assetRef:'v:7',driverId:3,status:'new',start:'2026-10-23T08:00',end:'2026-10-23T18:00'}];
+ const input={action:'confirmInterval',target:{section:'dispatchJobs',id:0},reason:'Explicit verified legacy interval'},review=operations.preview(source,input,{today:ctx().today}),before=JSON.stringify(source);
+ assert.equal(review.canApply,true,JSON.stringify(review.issues));const planned=commands.plan(freeze(source),{type:'CalendarAction',version:1,input:{...input,reviewFingerprint:review.fingerprint}},ctx('confirm-interval'));
+ assert.equal(planned.sections.dispatchJobs[0].start,source.dispatchJobs[0].start);assert.ok(planned.sections.dispatchJobs[0].timeContext.fields.start.instant);assert.deepEqual(planned.sections.dispatchJobs[1],source.dispatchJobs[1]);assert.equal(JSON.stringify(source),before);
 });

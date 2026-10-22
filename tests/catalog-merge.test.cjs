@@ -111,7 +111,7 @@ test('unreadable sections fail before reading hidden rows, and getters, malforme
 });
 
 test('actual browser UMDs produce the same complete graph, preview fingerprint and pure plan without DOM, network or storage',()=>{
- const sandbox=vm.createContext({});for(const name of ['platform-schema','entity-identity','platform-contracts','decimal-core','effective-periods','temporal-policy','accounting-boundary','fuel-engine','writeoff-engine','reference-graph','platform-kernel','catalog-merge']){
+ const sandbox=vm.createContext({});for(const name of ['platform-schema','entity-identity','platform-contracts','business-calendar','decimal-core','effective-periods','temporal-policy','accounting-boundary','fuel-engine','writeoff-engine','reference-graph','platform-kernel','catalog-merge']){
   // Kernel is used only for its pure digest API here; its planning dependencies
   // are deliberately absent and must never be called by a catalog planner.
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name+'.js'),'utf8'),sandbox,{filename:name});

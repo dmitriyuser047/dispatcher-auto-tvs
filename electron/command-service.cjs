@@ -42,6 +42,7 @@ function execute(dataDir,input,options={}){
   const costPolicy=command.type==='CostAction'&&command.input.action==='savePolicy';
   if(command.type==='CostAction'&&!access.costActions(principal).includes(command.input.action))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия со стоимостью.',403);
   if(command.type==='RepairAction'&&!access.repairActions(principal).includes(command.input.action))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия с ремонтом.',403);
+  if(command.type==='CalendarAction'&&!access.canCalendarAction(principal,command.input))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия рабочего календаря.',403);
   const dependencies=commands.dependencies(command),footprint=commands.footprint(command);
   if(!Array.isArray(dependencies)||!Array.isArray(footprint)||dependencies.some(name=>!schema.sections.includes(name)||name==='auditLog'&&!catalogMerge)||footprint.some(name=>name==='auditLog'||!dependencies.includes(name)))fail('COMMAND_DEFINITION','Некорректно определены зависимости команды',500);
   requireAccess(principal,'read',dependencies);
@@ -67,7 +68,9 @@ function execute(dataDir,input,options={}){
       const now=options.now||new Date().toISOString();
       if(typeof now!=='string'||!Number.isFinite(Date.parse(now)))fail('INVALID_CLOCK','Некорректное время команды');
       const actor={id:principal.id,name:principal.name,role:principal.role};
-      const planned=commands.plan(snapshot.data,command,{id:envelope.operation.id,now,today:now.slice(0,10),actor});
+      const clock=require('../assets/core/business-calendar.js').resolve(snapshot.data,now);
+      const planned=commands.plan(snapshot.data,command,{id:envelope.operation.id,now,today:clock.today,calendar:clock,actor,
+        readable:schema.sections.filter(name=>permitted(principal,'read',name)),writable:schema.sections.filter(name=>permitted(principal,'write',name))});
       if(!planned||!planned.sections||Object.keys(planned.sections).some(name=>!footprint.includes(name)))fail('COMMAND_DEFINITION','Команда попыталась изменить посторонний раздел',500);
       contracts.validateSections(planned.sections,schema.sections);
       // The shared kernel validates precision with the same trusted intent,

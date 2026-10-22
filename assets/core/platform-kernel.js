@@ -2,9 +2,9 @@
 (function (root, factory) {
   'use strict';
   if (typeof module === 'object' && module.exports)
-    module.exports = factory(require('./platform-schema.js'), require('./platform-integrity.js'), require('./platform-contracts.js'),require('./precision-policy.js'));
-  else root.PlatformKernel = factory(root.PlatformSchema, root.PlatformIntegrity, root.PlatformContracts,root.PrecisionPolicy);
-})(typeof globalThis === 'object' ? globalThis : this, function (schema, integrity, contracts,precision) {
+    module.exports = factory(require('./platform-schema.js'), require('./platform-integrity.js'), require('./platform-contracts.js'),require('./precision-policy.js'),()=>require('./business-calendar.js'));
+  else root.PlatformKernel = factory(root.PlatformSchema, root.PlatformIntegrity, root.PlatformContracts,root.PrecisionPolicy,()=>root.BusinessCalendar);
+})(typeof globalThis === 'object' ? globalThis : this, function (schema, integrity, contracts,precision,getCalendar) {
   'use strict';
   const tag = value => Object.prototype.toString.call(value);
   const plain = value => value != null && tag(value) === '[object Object]';
@@ -127,12 +127,21 @@
     }
     return changes;
   }
+  function canonicalPatch(prior,patch,ctx){
+  const timeFields={dispatchJobs:['start','end','actualStart','actualEnd'],workOrders:['downtimeFrom','downtimeTo','completedAt']};
+    for(const name of Object.keys(timeFields)){for(const source of [prior,patch])if(own(source,name)&&(!Array.isArray(source[name])||source[name].some(row=>!plain(row))))fail('INVALID_SECTION','Раздел должен содержать массив записей: '+name,{section:name});}
+    const timeRisk=Object.keys(timeFields).some(name=>{if(!own(patch,name)||stableSerialize(prior[name]||[])===stableSerialize(patch[name]))return false;const index=new Map(),clockKey=row=>stableSerialize(Object.fromEntries(Object.entries(row).filter(([field])=>!['title','note','description','attachments','updatedAt'].includes(field)))),unchanged=new Map();for(const old of prior[name]||[]){const key=typeof old.id+':'+stableSerialize(old.id),matches=index.get(key)||[];matches.push(old);index.set(key,matches);const clock=clockKey(old);unchanged.set(clock,(unchanged.get(clock)||0)+1);}return patch[name].some(row=>{const matches=index.get(typeof row.id+':'+stableSerialize(row.id))||[],old=matches.length===1?matches[0]:null;if(!old){const key=clockKey(row),remaining=unchanged.get(key)||0;if(remaining){unchanged.set(key,remaining-1);return false;}}return [...timeFields[name],'timeContext'].some(field=>stableSerialize(old?.[field])!==stableSerialize(row[field]));});});
+    if(timeRisk){const calendar=getCalendar?.();if(calendar?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружен рабочий календарь для проверки времени');calendar.assertSuppliedMetadata(prior,patch,ctx);const clock=calendar.resolve(prior,ctx.now||new Date().toISOString());const calendarContext={...ctx,today:ctx.today??clock.today,calendar:ctx.calendar??clock};const command=ctx.commandIntent?.command||ctx.commandIntent,options=command?.type==='CalendarAction'&&command.input?.action==='confirmInterval'?{confirm:command.input.target,reason:command.input.reason}:{};patch=calendar.canonicalizeIntervals(prior,patch,calendarContext,options);}
+    return patch;
+  }
   function prepare(previous, next, context) {
     if (!schema || schema.apiVersion !== 1 || !integrity || integrity.apiVersion !== 1 || contracts?.apiVersion !== 1) fail('MODULE_UNAVAILABLE', 'Не загружены правила платформы');
     if (!plain(previous) || !plain(next)) fail('INVALID_ARGUMENT', 'Источник и изменения должны быть объектами');
     const ctx = validateContext(context);
     if (typeof ctx.id !== 'string' || !ctx.id || ctx.id.length > 200 || !/^[a-z0-9_.:-]+$/i.test(ctx.id)) fail('INVALID_OPERATION_ID', 'Некорректный ID операции');
-    const prior = clone(previous), patch = clone(next), target = { ...prior, ...patch };
+    const prior = clone(previous); let patch = clone(next);
+    const rawTarget={...prior,...patch};patch=canonicalPatch(prior,patch,ctx);
+    const target = { ...prior, ...patch };
     const names = schema.sections;
     for (const name of new Set([...Object.keys(prior), ...Object.keys(patch)])) {
       if (!names.includes(name) && stableSerialize(prior[name]) !== stableSerialize(target[name])) fail('UNKNOWN_SECTION', 'Неизвестный раздел: ' + name, { section:name });
@@ -163,7 +172,7 @@
     if (typeof at !== 'string' || !Number.isFinite(Date.parse(at))) fail('INVALID_TIMESTAMP', 'Некорректное время операции');
     return freeze({ schemaVersion:1, id:ctx.id, identity:ctx.identity, actor:ctx.actor || null, base, changed, sections,
       sourceSnapshot, rowChanges:changed.flatMap(name => rowChanges(name, sourceSnapshot[name], sections[name])),
-      requestDigest:requestDigest({ base, sections }), metadata:{ createdAt:at } });
+      requestDigest:requestDigest({ base, sections:Object.fromEntries(changed.map(name=>[name,rawTarget[name]||[]])) }), metadata:{ createdAt:at } });
   }
   let sequence = 0;
   function newId() {
@@ -191,7 +200,7 @@
       if (value && typeof value.then === 'function') fail('INVALID_CONTEXT', 'Контекст операций должен читаться синхронно');
       return validateContext(value);
     }
-    const accessStamp = ctx => stableSerialize({ readable:ctx.readable, writable:ctx.writable, actor:ctx.actor || null, fieldPermissions:ctx.fieldPermissions || null });
+    const accessStamp = ctx => stableSerialize({ readable:ctx.readable, writable:ctx.writable, actor:ctx.actor || null, fieldPermissions:ctx.fieldPermissions || null,calendar:ctx.calendar||null,today:ctx.today||null });
     function guard(captured) {
       const current = context();
       if (current.identity !== captured.identity) fail('STALE_IDENTITY', 'База или сеанс изменились. Откройте форму заново.');
@@ -249,25 +258,25 @@
         fail('INVALID_PREPARED_PLAN','Разделы подготовленного плана не согласованы');
       try { contracts.validateSections(result.sections,names);contracts.validateSections(result.sourceSnapshot,names);contracts.validateRevisions(result.base,names); }
       catch { fail('INVALID_PREPARED_PLAN','Некорректные разделы или версии подготовленного плана'); }
-      const target={...previous,...next}, changed=[];
+      const rawTarget={...previous,...next},target={...previous,...canonicalPatch(previous,clone(next),captured)}, changed=[];
       for (const name of new Set([...Object.keys(previous),...Object.keys(next)]))
         if (!names.includes(name) && JSON.stringify(previous[name])!==JSON.stringify(target[name]))
           fail('INVALID_PREPARED_PLAN','Подготовленный план изменяет неизвестный раздел');
       for (const name of names) {
         const before=previous[name] || [], after=target[name] || [];
-        if (JSON.stringify(before)!==JSON.stringify(after)) changed.push(name);
+        if (stableSerialize(before)!==stableSerialize(after)) changed.push(name);
       }
       if (JSON.stringify(changed)!==JSON.stringify(result.changed)) fail('INVALID_PREPARED_PLAN','Подготовленный план не соответствует изменениям');
       for (const name of result.changed) {
-        if (result.base[name] !== (captured.revisions?.[name] ?? 0) || JSON.stringify(result.sections[name])!==JSON.stringify(target[name] || []) ||
-            JSON.stringify(result.sourceSnapshot[name])!==JSON.stringify(previous[name] || []))
+        if (result.base[name] !== (captured.revisions?.[name] ?? 0) || stableSerialize(result.sections[name])!==stableSerialize(target[name] || []) ||
+            stableSerialize(result.sourceSnapshot[name])!==stableSerialize(previous[name] || []))
           fail('INVALID_PREPARED_PLAN','Источники или версии подготовленного плана изменились');
       }
       for (const row of result.rowChanges) if (!plain(row) || !result.changed.includes(row.section) || typeof row.key!=='string' ||
           !['create','update','delete'].includes(row.action) || !Array.isArray(row.fields) || row.fields.some(field=>typeof field!=='string') ||
           !(row.before===null||plain(row.before)) || !(row.after===null||plain(row.after)))
         fail('INVALID_PREPARED_PLAN','Некорректные изменения записей подготовленного плана');
-      if (result.requestDigest!==requestDigest({base:result.base,sections:result.sections}))
+      if (result.requestDigest!==requestDigest({base:result.base,sections:Object.fromEntries(result.changed.map(name=>[name,rawTarget[name]||[]]))}))
         fail('INVALID_PREPARED_PLAN','Отпечаток подготовленной операции не совпал');
       return freeze(result);
     }

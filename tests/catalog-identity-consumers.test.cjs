@@ -3,7 +3,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const identity=require('../assets/core/entity-identity.js');
 const source=name=>fs.readFileSync(path.join(__dirname,'../assets/js',name),'utf8');
 function workflows(database){
- const messages=[],dialogs=[];const context=vm.createContext({console,data:structuredClone(database),EntityIdentity:identity,htmlEsc:value=>String(value??''),showToast:message=>messages.push(message),document:{},localStorage:{getItem:()=>null}});
+ const messages=[],dialogs=[];const context=vm.createContext({console,data:structuredClone(database),EntityIdentity:identity,BusinessCalendar:require('../assets/core/business-calendar.js'),htmlEsc:value=>String(value??''),showToast:message=>messages.push(message),document:{},localStorage:{getItem:()=>null}});
  vm.runInContext(source('30-workflows.js'),context);context.wfShowDialog=(title,html)=>dialogs.push({title,html});return {context,messages,dialogs};
 }
 test('loading workflow catalogues keeps numeric zero and textual zero IDs and their existing links unchanged',()=>{

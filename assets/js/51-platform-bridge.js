@@ -8,7 +8,7 @@ function platformPrepareBackgroundStatus(){return {active:_platformPrepareActive
 function platformPrepareAccessStamp(context){
   const list=value=>value==null?null:[...new Set(value)].sort();
   const procurement=context.procurementActions==null?null:{tank:list(context.procurementActions.tank),part:list(context.procurementActions.part)};
-  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fuelActions:list(context.fuelActions),procurementActions:procurement,costActions:list(context.costActions),repairActions:list(context.repairActions),fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
+  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fuelActions:list(context.fuelActions),procurementActions:procurement,costActions:list(context.costActions),repairActions:list(context.repairActions),calendarActions:list(context.calendarActions),calendar:context.calendar||null,fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
 }
 function platformPrepareError(code,message){return Object.assign(Error(message),{name:'PlatformKernelError',code});}
 function platformPrepareGuard(job){
@@ -65,6 +65,7 @@ function platformPrepareInBackground(previous,next,context){
 function platformSessionContext() {
   const base = dispatcherContext(), access = typeof _sync === 'undefined' ? null : _sync.access;
   const user = access?.user;
+  const calendar=typeof BusinessCalendar==='object'?BusinessCalendar.resolve(data,new Date().toISOString()):null;
   return { identity:base.identity, readable:base.readable,
     writable:access && Array.isArray(access.writable) ? access.writable.slice() : undefined,
     periodActions:access && Array.isArray(access.periodActions) ? access.periodActions.slice() : undefined,
@@ -72,10 +73,12 @@ function platformSessionContext() {
     procurementActions:access?.procurementActions?{tank:Array.isArray(access.procurementActions.tank)?access.procurementActions.tank.slice():[],part:Array.isArray(access.procurementActions.part)?access.procurementActions.part.slice():[]}:undefined,
     costActions:access&&Array.isArray(access.costActions)?access.costActions.slice():undefined,
     repairActions:access&&Array.isArray(access.repairActions)?access.repairActions.slice():undefined,
+    calendarActions:access&&Array.isArray(access.calendarActions)?access.calendarActions.slice():undefined,
+    calendar:calendar?{version:calendar.version,mode:calendar.mode,timeZone:calendar.timeZone,stamp:calendar.stamp}:undefined,
     fieldPermissions:access?.fieldPermissions || null,
     actor:user ? { id:user.id, name:user.name || user.id, role:user.role } : { id:'local', name:'Локальный пользователь', role:'admin' },
     revisions:typeof _sync === 'undefined' ? {} : { ..._sync.revs },
-    today:dispatcherLocalDate(),
+    today:calendar?.today||dispatcherLocalDate(),
     blocked:typeof _loadWriteBlocked !== 'undefined' && _loadWriteBlocked };
 }
 function platformRuntime() {
@@ -108,9 +111,12 @@ async function platformExecuteSave(database, options, persist) {
     if(typeof _sync!=='undefined'&&_sync.platform?.needsSchemaUpgrade)throw Object.assign(Error('База открыта только для чтения. В разделе «Состояние программы» создайте отдельную обновлённую копию; исходная база останется прежней.'),{code:'SCHEMA_UPGRADE_REQUIRED'});
     submitted = JSON.stringify(database);
     const previous = platformSaveBaseline();
+    if(['dispatchJobs','workOrders'].some(name=>JSON.stringify(previous[name]||[])!==JSON.stringify(database[name]||[]))&&_sync.platform?.calendar!==1)
+      throw platformPrepareError('UNSUPPORTED_CALENDAR','Подключение не поддерживает проверку учётного календаря. Загрузите данные из совместимой версии программы.');
     const result = await platformRuntime().run({ id:options?.operation?.id, previous, next:database, identity:context.identity,
       options:{ allowLegacy:true, ...(options || {}), requireOperationReceipt:!!_sync.platform?.operations } }, async plan => {
       if (!platformSameSession(context)) throw Object.assign(Error('База или пользователь изменились. Откройте форму заново.'),{code:'SESSION_CHANGED'});
+      if(platformPrepareAccessStamp(platformSessionContext())!==platformPrepareAccessStamp(context))throw platformPrepareError('STALE_ACCESS','Права или учётный календарь изменились. Проверьте форму заново.');
       if (JSON.stringify(database) !== submitted) throw Object.assign(Error('Данные изменились в ожидании сохранения. Повторите проверку формы.'),{code:'STALE_DRAFT'});
       if (typeof _sync !== 'undefined') _sync.lastResult=null;
       const saved = await persist({ ...(options || {}), _platformManaged:true, requireOperationReceipt:!!_sync.platform?.operations, operation:{ id:plan.id } });
@@ -178,6 +184,11 @@ function platformCommandNeedsRepairs(command,source){
   const scope=platformCommandDocumentScope(command,source);if(!scope)return false;
   return scope.section==='workOrders'||scope.section==='partMovements'&&scope.candidates.some(row=>row.workOrderId!==undefined&&row.workOrderId!==null&&row.workOrderId!==''||Object.hasOwn(row,'repairReturn'));
 }
+function platformCommandNeedsPersonnelPlanning(command,source){
+  if(command.type==='AssignPerson'||command.type==='AcceptShift')return true;
+  const scope=platformCommandDocumentScope(command,source);
+  return !!scope&&(scope.section==='shiftReports'||scope.section==='dispatchJobs'&&scope.candidates.some(row=>row.driverId!==undefined&&row.driverId!==null&&row.driverId!==''||Object.hasOwn(row,'personnelRequirements')));
+}
 function platformExecuteCommand(value,options={}){
   let command,id,stamp,signature,entry;
   try{
@@ -222,6 +233,10 @@ function platformExecuteCommand(value,options={}){
           throw platformPrepareError('UNSUPPORTED_COST_ACCOUNTING','Подключение не поддерживает проверенную оценку и распределение затрат. Загрузите данные из совместимой версии программы.');
         if(platformCommandNeedsRepairs(command,source)&&_sync.platform?.repairs!==1)
           throw platformPrepareError('UNSUPPORTED_REPAIRS','Подключение не поддерживает проверенный ремонтный процесс. Загрузите данные из совместимой версии программы.');
+        if(command.type==='CalendarAction'&&_sync.platform?.calendar!==1)
+          throw platformPrepareError('UNSUPPORTED_CALENDAR','Подключение не поддерживает учётный календарь. Загрузите данные из совместимой версии программы.');
+        if(platformCommandNeedsPersonnelPlanning(command,source)&&_sync.platform?.personnelPlanning!==1)
+          throw platformPrepareError('UNSUPPORTED_PERSONNEL_PLANNING','Подключение не поддерживает планирование сотрудников. Загрузите данные из совместимой версии программы.');
         if(names.some(name=>captured[name]!==(_sync.synced[name]||'[]')))
           throw platformPrepareError('UNSAVED_COMMAND_SOURCE','Сначала сохраните или отмените изменения исходных данных команды.');
         const persisted=platformSaveBaseline();
@@ -272,12 +287,14 @@ function platformExecuteCommand(value,options={}){
 }
 async function platformFlushForClose(){
   let ready=typeof frcFlush==='function'?await frcFlush():true;
+  if(typeof personnelPlanningFlush==='function'&&!await personnelPlanningFlush())ready=false;
   if(ready)document.activeElement?.blur();
   while(typeof _pendingSaveOperations!=='undefined'&&_pendingSaveOperations.size){
     const results=await Promise.allSettled([..._pendingSaveOperations]);
     if(results.some(result=>result.status!=='fulfilled'||result.value!==true))ready=false;
   }
   if(typeof frcHasPendingEdits==='function'&&frcHasPendingEdits())ready=false;
+  if(typeof personnelPlanningHasPendingEdits==='function'&&personnelPlanningHasPendingEdits())ready=false;
   return ready;
 }
 if(window.electronAPI?.onPrepareClose)window.electronAPI.onPrepareClose(async nonce=>{

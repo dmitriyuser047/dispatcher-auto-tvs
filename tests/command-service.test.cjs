@@ -77,9 +77,9 @@ for(const format of ['json','sqlite']){
   const full=fixture(t,format),snap=snapshot(full.dir);assert.equal(storage.writeAll(full.dir,{...snap.data,shiftReports:[{...snap.data.shiftReports[0],status:'accepted',acceptedBy:'Full manual approver',acceptedActor:{id:'fake'},acceptedAt:'1999-01-01'}]},{principal:admin,now,base:snap.revisions,requireBase:true}).ok,true);assert.deepEqual(snapshot(full.dir).data.shiftReports[0].acceptedActor,admin);
  });
 
- test(format+' new accepted legacy seeds remain allowed with additive canonical account metadata',t=>{
+ test(format+' raw new accepted seeds are refused while physically existing legacy acceptance remains byte-for-byte historical',t=>{
   const f=fixture(t,format,data=>{data.shiftReports=[];}),before=snapshot(f.dir),legacy={id:'legacy-accepted',title:'Imported accepted shift',date:'2026-09-01',assetRef:'v:v',driverId:'d',status:'accepted',acceptedBy:'Historical business recipient',acceptedActor:{id:'spoofed-import'},acceptedAt:'2000-01-01'};
-  assert.equal(patch(f.dir,{shiftReports:[legacy]}).ok,true);const after=snapshot(f.dir);assert.equal(after.data.shiftReports[0].acceptedBy,legacy.acceptedBy);assert.deepEqual(after.data.shiftReports[0].acceptedActor,admin);assert.equal(after.data.shiftReports[0].acceptedAt,now);assert.deepEqual(after.data.records,before.data.records);
+  assert.throws(()=>patch(f.dir,{shiftReports:[legacy]}),{code:'SHIFT_ACCEPTANCE_COMMAND'});assert.deepEqual(snapshot(f.dir),before);require('./period-test-support.cjs').seedSections(f.dir,{shiftReports:[legacy]});assert.equal(patch(f.dir,{opsTasks:[{id:'unrelated',title:'Unrelated safe update',status:'open'}]}).ok,true);const after=snapshot(f.dir);assert.deepEqual(after.data.shiftReports[0],legacy);assert.deepEqual(after.data.records,before.data.records);
  });
 
  test(format+' AssignPerson atomically closes the old assignment without changing either person or asset',t=>{

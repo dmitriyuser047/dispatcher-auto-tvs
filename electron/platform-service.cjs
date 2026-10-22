@@ -65,7 +65,7 @@ function assertAuditPrefix(previous, sections, actor) {
   if (!Array.isArray(received) || !unchanged(previous.auditLog || []) && !unchanged(prefix))
     fail('AUDIT_IMMUTABLE', 'Сохранённую историю нельзя изменять или удалять. Обновите данные.', 403);
 }
-function canonicalShiftAcceptance(previous,sections,actor,at) {
+function canonicalShiftAcceptance(previous,sections,actor,at,context) {
   if(!Object.hasOwn(sections,'shiftReports'))return sections;
   const old=new Map();
   for(const row of previous.shiftReports || []){const key=typeof row.id+':'+JSON.stringify(row.id);if(!old.has(key))old.set(key,[]);old.get(key).push(row);}
@@ -74,9 +74,16 @@ function canonicalShiftAcceptance(previous,sections,actor,at) {
     if(row.status==='accepted'&&matches.some(item=>item.status!=='accepted')) {
       if(matches.length!==1)fail('SHIFT_ACCEPTANCE_AMBIGUOUS','Нельзя принять сменную форму с неоднозначным ID. Сначала проверьте её историю.',409);
       if(before.status!=='sent')fail('SHIFT_ACCEPTANCE_TRANSITION','Принять можно только отправленную сменную форму.',409);
-      return {...row,acceptedActor:{...actor},acceptedAt:at};
+      const accepted={...row,acceptedActor:{...actor},acceptedAt:at};
+      accepted.personnelSnapshot=require('../assets/core/personnel-planning.js').captureShiftContext({...previous,...sections},accepted,context).snapshot;
+      return accepted;
     }
-    if(row.status==='accepted'&&!matches.length)return {...row,acceptedActor:{...actor},acceptedAt:at};
+    if(row.status==='accepted'&&!matches.length){
+      if(context.commandIntent?.command?.type!=='DocumentAction')fail('SHIFT_ACCEPTANCE_COMMAND','Новую принятую смену оформляйте проверенным действием документа.',403);
+      const accepted={...row,acceptedActor:{...actor},acceptedAt:at};
+      accepted.personnelSnapshot=require('../assets/core/personnel-planning.js').captureShiftContext({...previous,...sections},accepted,context).snapshot;
+      return accepted;
+    }
     // An accepted historical row remains immutable, including its old metadata.
     // Unaccepted rows cannot manufacture approval metadata in advance.
     if(row.status!=='accepted'&&['acceptedActor','acceptedAt'].some(field=>JSON.stringify(row[field])!==JSON.stringify(before?.[field])))
@@ -104,16 +111,21 @@ function prepareTransaction(previous, supplied, options = {}) {
   }
   const at = options.now || new Date().toISOString();
   if (!Number.isFinite(Date.parse(at))) fail('INVALID_CLOCK', 'Некорректное время операции');
-  sections=canonicalShiftAcceptance(previous,sections,actor,at);
+  const id = info?.id || 'backend:' + crypto.randomUUID();
+  const calendar=require('../assets/core/business-calendar.js'),clock=calendar.resolve(previous,at);
+  const commandProof=['MergeCatalog','AcceptShift','DocumentAction','PeriodAction','FuelAction','ProcurementAction','CostAction','RepairAction','CalendarAction'].includes(options.commandIntent?.command?.type)
+    ? {commandIntent:contracts().parseCommandEnvelope(options.commandIntent,registry)} : {};
+  const temporalContext={id,now:at,today:clock.today,calendar:clock,actor,...commandProof};
+  calendar.assertSuppliedMetadata(previous,sections,temporalContext);
+  const calendarInput=commandProof.commandIntent?.command?.type==='CalendarAction'?commandProof.commandIntent.command.input:null;
+  sections=calendar.canonicalizeIntervals(previous,sections,temporalContext,calendarInput?.action==='confirmInterval'?{confirm:calendarInput.target,reason:calendarInput.reason}:{});
+  sections=canonicalShiftAcceptance(previous,sections,actor,at,temporalContext);
   sections=require('../assets/core/temporal-policy.js').canonicalizeOrigins(previous,sections);
   if (options.prepareSections) sections = options.prepareSections(sections);
-  const id = info?.id || 'backend:' + crypto.randomUUID();
   // This proof is derived from the semantic execution option, never a section
   // request field. Raw/full writes cannot authorize their own catalog aliases.
-  const commandProof=['MergeCatalog','DocumentAction','PeriodAction','FuelAction','ProcurementAction','CostAction','RepairAction'].includes(options.commandIntent?.command?.type)
-    ? {commandIntent:contracts().parseCommandEnvelope(options.commandIntent,registry)} : {};
   const plan = kernel().prepare(previous, sections, { id, identity:options.databaseToken || 'local-storage', actor,
-    revisions:options.revisions || {}, now:at,today:at.slice(0,10),...commandProof,
+    revisions:options.revisions || {}, now:at,today:clock.today,calendar:clock,...commandProof,
     readable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'read', name)),
     writable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'write', name)||name==='fuelPeriods'&&periodCommand||name===costTarget&&costCommand) });
   const changes = (plan.rowChanges || []).filter(row => row.section !== 'auditLog');

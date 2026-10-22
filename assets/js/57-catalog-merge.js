@@ -1,7 +1,7 @@
 // Catalog merge is a reviewed command. Historical facts never move implicitly.
 const CATALOG_MERGE_SECTIONS=['vehicles','generators','tanks','drivers','parts','contragents','fuelCards'];
 let catalogMergeSession=null;
-function catalogMergeToday(){return new Date().toISOString().slice(0,10);}
+function catalogMergeToday(){return BusinessCalendar.resolve(data,new Date().toISOString()).today;}
 function catalogMergeContext(){return platformSessionContext();}
 function catalogMergeReadable(context=catalogMergeContext()){
  return !Array.isArray(context.readable)||context.readable.includes('*')||PlatformSchema.sections.every(name=>context.readable.includes(name));

@@ -56,6 +56,9 @@
   for(const section of ['payments','budget','repairs','vehicleTo','toRecords','workOrders'])direct(section,'contragentId','contragents');
   direct('partMovements','partId','parts');direct('partMovements','workOrderId','workOrders');direct('workOrders','repeatOf','workOrders');direct('workOrders','repairId','repairs');direct('workOrders','vehicleToId','vehicleTo');direct('workOrders','toRecordId','toRecords');direct('shiftReports','jobId','dispatchJobs');direct('dispatchJobs','partRequirements[].partId','parts');
   direct('workOrders','defectSource.id','shiftReports');direct('partMovements','repairReturn.issueId','partMovements');
+  direct('drivers','personnelPlanning.qualifications[].documentId','assetDocuments');
+  for(const [field,target]of [['employee.id','drivers'],['assignment.id','assetAssignments'],['assignment.driverId','drivers'],['job.root.id','dispatchJobs'],['job.current.id','dispatchJobs']])relations.push({id:'shiftReports.personnelSnapshot.'+field,from:'shiftReports',field:'personnelSnapshot.'+field,kind:'historical',target,optional:true,strength:'historical'});
+  relations.push({id:'shiftReports.personnelSnapshot.target.id',from:'shiftReports',field:'personnelSnapshot.target.id',kind:'historical',selector:'personnelSnapshot.target.section',optional:true,strength:'historical'});
   for(const field of ['fromTankId','toTankId'])direct('fuelMovements',field,'tanks');
   for(const field of ['originalMovementId','reversedBy'])direct('fuelMovements',field,'fuelMovements');
   relations.push({id:'fuelMovements.measurement.target.id',from:'fuelMovements',field:'measurement.target.id',kind:'discriminator',selector:'measurement.target.section',targets:{tanks:'tanks'},optional:true,archivePolicy:'existing'});
