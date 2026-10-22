@@ -38,6 +38,9 @@ function respond(res, status, value) {
   res.end(JSON.stringify(value));
 }
 function readable(principal, section) { return access.authorize(principal, 'read', section); }
+function observedWriteRequest(payload,dataDir,token){
+  try{const id=payload?.operation?.id;require('./diagnostic-boundary.cjs').record({phase:'host-received',code:'pending',...(typeof id==='string'&&/^[a-zA-Z0-9._:-]{1,200}$/.test(id)?{operationId:id}:{}),databaseToken:token??storage.databaseToken(dataDir),backend:'remote'});}catch{}
+}
 function visibleAudit(rows, principal) { return require('./platform-service.cjs').visibleAudit(rows,principal); }
 function filteredData(all, principal) {
   return Object.fromEntries(storage.SECTIONS.map(name => [name, !readable(principal, name) ? [] : require('./platform-service.cjs').visibleRows(name,all[name],principal)]));
@@ -83,6 +86,7 @@ async function writeRequest(req,res,full,authenticateRequest) {
       const principal = authenticateRequest();
       if (!principal) { respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'}); return; }
       const token = storage.databaseToken(dataDir);
+      observedWriteRequest(payload,dataDir,token);
       if (full && !access.authorize(principal,'replace')) { respond(res,403,{ok:false,error:'Полная замена базы разрешена только администратору'}); return; }
       const supplied = full ? (payload.data || payload) : payload.sections;
       if (!supplied || typeof supplied !== 'object' || Array.isArray(supplied)) throw new Error('Не указаны разделы');
@@ -115,6 +119,7 @@ async function commandRequest(req,res,authenticateRequest) {
         // its role changed. Only this current principal owns the command.
         const principal=authenticateRequest();
         if(!principal){respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'});return;}
+        observedWriteRequest(envelope,dataDir);
         const result=storage.executeCommand(dataDir,envelope,{principal,...writerContext(req),now:new Date().toISOString(),beforeCommit:backup || undefined});
         respond(res,result.ok?200:409,result);
       });

@@ -1,0 +1,8 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),boundary=require('../electron/diagnostic-boundary.cjs');
+test('diagnostics observes only the outer confirmed synchronous commit without changing its exact return',()=>{
+ const events=[],dispose=boundary.configure(value=>events.push(value));try{const result={ok:true,operationReceipt:{id:'original-id',digest:'PRIVATE-DIGEST',status:'committed'},canonicalSections:{records:[{note:'PRIVATE-BUSINESS'}]}};assert.equal(boundary.withCommit({operation:{id:'original-id'},secrets:'PRIVATE'},'original-token','json',()=>boundary.withCommit({operation:{id:'original-id'}},'original-token','json',()=>result)),result);assert.deepEqual(events,[{operationId:'original-id',databaseToken:'original-token',backend:'json',phase:'commit-started',code:'pending'},{operationId:'original-id',databaseToken:'original-token',backend:'json',phase:'commit-finished',code:'committed'}]);assert.doesNotMatch(JSON.stringify(events),/PRIVATE/);}finally{dispose();}
+});
+test('lost acknowledgement stays unknown and an observer failure never changes business success or error',()=>{
+ const events=[],dispose=boundary.configure(value=>events.push(value)),error=Error('PRIVATE error and path');try{assert.throws(()=>boundary.withCommit({operation:{id:'lost'}},'token','sqlite',()=>{throw error;}),value=>value===error);assert.equal(events.at(-1).code,'unknown');assert.doesNotMatch(JSON.stringify(events),/PRIVATE/);}finally{dispose();}const stop=boundary.configure(()=>{throw Error('observer unavailable');});try{const result={ok:true,operationReceipt:{status:'replayed'}};assert.equal(boundary.withCommit({},'token','json',()=>result),result);}finally{stop();}
+});

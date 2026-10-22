@@ -3,8 +3,12 @@
 // The coordinator never chooses a database or principal. Main supplies a freshly
 // verified context, transport and receipt lookup; the durable store is local to
 // this application's profile and contains the exact request sent to the backend.
-function createOperationRecovery({outbox,send,lookup,onWarning=()=>{}}){
+function createOperationRecovery({outbox,send,lookup,onWarning=()=>{},onEvent}){
   if(!outbox||typeof send!=='function'||typeof lookup!=='function')throw Error('Нужны очередь, транспорт и проверка результата операции');
+  function observed(context,operationId,phase,code){
+    if(typeof onEvent!=='function'||typeof operationId!=='string'||!/^[a-zA-Z0-9._:-]{1,200}$/.test(operationId)||typeof context.databaseToken!=='string'||!context.databaseToken)return;
+    try{const result=onEvent(Object.freeze({phase,code,operationId,databaseToken:context.databaseToken,backend:['json','sqlite','remote','local'].includes(context.backend)?context.backend:context.client?'remote':'local'}));if(result&&typeof result.catch==='function')result.catch(()=>{});}catch{}
+  }
   function outcome(context,id,value){
     try{return outbox.updateOutcome(context.scope,id,value);}
     catch(error){try{onWarning(error.code||'OUTBOX_OUTCOME');}catch{}return null;}
@@ -15,27 +19,33 @@ function createOperationRecovery({outbox,send,lookup,onWarning=()=>{}}){
     const id=payload.operation.id;
     if(response?.databaseChanged||response?.databaseToken&&response.databaseToken!==context.databaseToken){
       outcome(context,id,{status:'rejected',code:'DATABASE_CHANGED'});
+      observed(context,id,'ack-received','conflict');
       return {ok:false,databaseChanged:true,code:'DATABASE_CHANGED',error:'База изменилась. Загрузите её заново перед повтором.'};
     }
     if(response?.ok===true){
       if(response.databaseToken!==context.databaseToken||!matchesReceipt(response.operationReceipt,id,requestDigest)){
         outcome(context,id,{status:'unknown',code:'ACK_REQUIRED'});
+        observed(context,id,'ack-received','unknown');
         return {ok:false,queued:true,code:'ACK_REQUIRED',error:'Ответ не подтвердил операцию. Её запрос сохранён в очереди для проверки.'};
       }
       const updated=outcome(context,id,{status:'committed',receipt:response.operationReceipt});
-      if(updated?.status==='unknown')return {ok:false,queued:true,code:'ACK_MISMATCH',error:'Ответ не совпал с сохранённым запросом. Проверьте результат операции.'};
+      if(updated?.status==='unknown'){observed(context,id,'ack-received','unknown');return {ok:false,queued:true,code:'ACK_MISMATCH',error:'Ответ не совпал с сохранённым запросом. Проверьте результат операции.'};}
+      observed(context,id,'ack-received',updated?.status==='committed'?response.operationReceipt.status:'unknown');
       return response;
     }
     if(Array.isArray(response?.conflicts))outcome(context,id,{status:'conflict',code:'REVISION_CONFLICT'});
     else if(response?.unsupported)outcome(context,id,{status:'rejected',code:'UNSUPPORTED_PROTOCOL'});
     else outcome(context,id,{status:'unknown',code:response?.code||'UNCONFIRMED'});
+    observed(context,id,'ack-received',Array.isArray(response?.conflicts)?'conflict':'unknown');
     return response||{ok:false,queued:true,error:'Ответ не получен. Запрос сохранён для проверки.',code:'UNCONFIRMED'};
   }
   async function sendSaved(context,payload,json,requestDigest){
+    observed(context,payload.operation.id,'transport-sent','pending');
     try{return settle(context,payload,await send(context,json),requestDigest);}
     catch(error){
       const definitive=error.definitive===true||error.status>=400&&error.status<500&&error.status!==408||Array.isArray(error.issues)||Array.isArray(error.details?.issues);
       outcome(context,payload.operation.id,{status:definitive?'rejected':'unknown',code:error.code||'TRANSPORT_FAILED'});
+      observed(context,payload.operation.id,'ack-received',definitive?'denied':'unknown');
       return errorResult(error,!definitive);
     }
   }
@@ -53,6 +63,7 @@ function createOperationRecovery({outbox,send,lookup,onWarning=()=>{}}){
       const unresolved=outbox.list(context.scope).some(row=>row.id!==payload.operation.id&&['pending','unknown'].includes(row.status)&&row.sections.some(name=>sections.has(name)));
       if(unresolved)return {ok:false,queued:false,needsReload:true,code:'PENDING_OPERATION',error:'В этом разделе есть операция с неподтверждённым результатом. Откройте «Состояние программы» и проверьте её перед новым сохранением.'};
       outbox.stage(context.scope,payload,{supportsOperations:true});
+      observed(context,payload.operation.id,'outbox-persisted','pending');
       const stored=outbox.getForRetry(context.scope,payload.operation.id);
       return await sendSaved(context,payload,stored.json??JSON.stringify(payload),stored.requestDigest);
     }catch(error){return errorResult(error,false);}
@@ -60,17 +71,19 @@ function createOperationRecovery({outbox,send,lookup,onWarning=()=>{}}){
   async function reconcile(context,id){
     const stored=outbox.getForRetry(context.scope,id);
     if(!stored)throw Error('Операция не найдена в очереди этой базы и учётной записи');
-    if(stored.metadata.status==='committed')return {ok:true,committed:true,operationReceipt:stored.receipt};
-    const result=await lookup(context,id,stored.requestDigest);
-    if(result?.databaseToken!==context.databaseToken)throw Object.assign(Error('База изменилась. Очередь не применялась.'),{code:'DATABASE_CHANGED'});
-    if(result.ok!==true)throw Object.assign(Error('Сервер не подтвердил результат проверки'),{code:'LOOKUP_UNCONFIRMED'});
-    if(!result.operationReceipt)return {ok:true,committed:false,status:stored.metadata.status};
+    if(stored.metadata.status==='committed'){observed(context,id,'recovery-looked-up',matchesReceipt(stored.receipt,id,stored.requestDigest)?'committed':'unknown');return {ok:true,committed:true,operationReceipt:stored.receipt};}
+    let result;try{result=await lookup(context,id,stored.requestDigest);}catch(error){observed(context,id,'recovery-looked-up','unknown');throw error;}
+    if(result?.databaseToken!==context.databaseToken){observed(context,id,'recovery-looked-up','unknown');throw Object.assign(Error('База изменилась. Очередь не применялась.'),{code:'DATABASE_CHANGED'});}
+    if(result.ok!==true){observed(context,id,'recovery-looked-up','unknown');throw Object.assign(Error('Сервер не подтвердил результат проверки'),{code:'LOOKUP_UNCONFIRMED'});}
+    if(!result.operationReceipt){observed(context,id,'recovery-looked-up','not-found');return {ok:true,committed:false,status:stored.metadata.status};}
     if(!matchesReceipt(result.operationReceipt,id,stored.requestDigest)){
       outcome(context,id,{status:'unknown',code:'ACK_MISMATCH'});
+      observed(context,id,'recovery-looked-up','unknown');
       throw Object.assign(Error('Подтверждение не совпало с запросом'),{code:'ACK_MISMATCH'});
     }
     const updated=outcome(context,id,{status:'committed',receipt:result.operationReceipt});
-    if(updated?.status==='unknown')throw Object.assign(Error('Подтверждение не совпало с запросом'),{code:'ACK_MISMATCH'});
+    if(updated?.status==='unknown'){observed(context,id,'recovery-looked-up','unknown');throw Object.assign(Error('Подтверждение не совпало с запросом'),{code:'ACK_MISMATCH'});}
+    observed(context,id,'recovery-looked-up',updated?.status==='committed'?'committed':'unknown');
     return {ok:true,committed:true,operationReceipt:result.operationReceipt};
   }
   async function retry(context,id){

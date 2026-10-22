@@ -84,6 +84,23 @@ function renderPlatformSystem(calculatedIntegrity) {
   platformRenderRecoveryPanel();
   platformRenderDataBrowser();
   platformRenderHistory();
+  platformRenderOperationalDiagnostics();
+}
+function platformRenderOperationalDiagnostics(){
+  if(!window.electronAPI?.getOperationDiagnostics||platformSessionContext().actor?.role!=='admin')return;
+  const workspace=document.querySelector('.platform-workspace');if(!workspace)return;
+  const panel=document.createElement('section');panel.id='platformOperationalDiagnostics';
+  panel.innerHTML='<h3>Техническая диагностика</h3><p class="platform-note">Этапы прохождения операций. Пакет для поддержки содержит обезличенный технический журнал без записей базы и ключей доступа.</p><p role="status"></p><form class="platform-filters"><label>ID операции<input name="operationId" maxlength="200" required></label><button type="submit" class="btn btn-ghost">Показать этапы</button></form><ol></ol><button type="button" class="btn btn-ghost" data-support-export>Пакет для поддержки</button>';
+  workspace.append(panel);const stamp=syncSessionStamp(),status=panel.querySelector('[role=status]'),rows=panel.querySelector('ol'),form=panel.querySelector('form');let sequence=0;
+  const current=()=>panel.isConnected&&stamp===syncSessionStamp();
+  async function load(query){const request=++sequence;let result;try{result=await electronAPI.getOperationDiagnostics(query);}catch{result=null;}if(!current()||request!==sequence)return;rows.replaceChildren();
+    if(!result?.ok){status.textContent='Техническая диагностика недоступна.';return;}
+    status.textContent=query?'Найдено этапов: '+(result.events?.length||0)+(result.truncated?' · показаны последние 200':''):'Сохранено технических событий: '+result.eventCount+'. Журнал ограничен '+result.limits.files+' файлами.';
+    const labels={'ui-prepared':'Запрос подготовлен','outbox-persisted':'Запрос сохранён в очереди','transport-sent':'Запрос отправлен','host-received':'Запрос получен основной базой','commit-started':'Начата проверка сохранения','commit-finished':'Завершена обработка сохранения','ack-received':'Получен ответ','recovery-looked-up':'Проверено подтверждение'},codes={prepared:'подготовлено',pending:'ожидается результат',committed:'сохранено',replayed:'подтверждён прежний результат',conflict:'данные изменились',denied:'отказ',unknown:'результат не подтверждён','not-found':'подтверждение не найдено',failed:'ошибка'};
+    for(const event of result.events||[]){const item=document.createElement('li');item.textContent=[event.at,labels[event.phase]||'Техническое событие',codes[event.code]||'Статус недоступен'].join(' · ');rows.append(item);}
+  }
+  form.onsubmit=event=>{event.preventDefault();void load({operationId:form.elements.operationId.value.trim()});};
+  const button=panel.querySelector('[data-support-export]');button.onclick=async()=>{button.disabled=true;try{const result=await electronAPI.exportOperationSupport();if(current())status.textContent=result?.ok?'Пакет диагностики сохранён.':result?.cancelled?'Сохранение отменено.':'Не удалось сохранить пакет диагностики.';}catch{if(current())status.textContent='Не удалось сохранить пакет диагностики.';}finally{if(current())button.disabled=false;}};void load();
 }
 function platformRenderHistory(){
   const readable=platformSessionContext().readable||PlatformSchema.sections;

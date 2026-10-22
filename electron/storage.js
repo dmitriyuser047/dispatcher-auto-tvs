@@ -394,6 +394,7 @@ function writeAll(dataDir, data, options = {}) {
   if (options.databaseToken != null && options.databaseToken !== databaseToken(dataDir)) throw new Error('База данных изменилась. Заново откройте её перед сохранением.');
   if (!data || !Array.isArray(data.vehicles) || !Array.isArray(data.records)) throw new Error('Неполная база: нужны vehicles и records');
   SECTIONS.forEach(n => { if (n in data) validateRows(n, data[n]); });
+  const historyInputSections=Object.keys(data);
   const previous = readAll(dataDir);
   const revisions = readRevisions(dataDir);
   const platform = require('./platform-service.cjs'), token = databaseToken(dataDir);
@@ -462,7 +463,7 @@ function writeAll(dataDir, data, options = {}) {
     changed.push(name);
   });
 
-  const history=sections.auditLog?platform.prepareHistoryCommit(dataDir,previous,sections,revisions,{...options,historyInputSections:Object.keys(data)}):{sections};
+  const history=sections.auditLog?platform.prepareHistoryCommit(dataDir,previous,sections,revisions,{...options,historyInputSections}):{sections};
   if(changed.length&&options.beforeCommit!==undefined){if(typeof options.beforeCommit!=='function')throw Error('Ожидалась синхронная подготовка записи');const result=options.beforeCommit();if(result&&typeof result.then==='function')throw Error('Подготовка записи должна быть синхронной');}
   if(changed.length||history.nextOperationState)commitSections(dataDir, history.sections, revisions,history);
   return platform.filteredResult({ ok:true, changed, revisions, databaseToken:token, canonicalSections:history.sections,
@@ -610,14 +611,16 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
 module.exports = {
   SECTIONS, sectionsDir, sectionFile, revisionsFile,schemaVersion,descriptor,assertWritable,assertWriteCompatibility,hasWriteCompatibility,encodeRevisions:storageFormat.encodeRevisions,
   databaseToken, withDatabaseLock, validateRows, prepareWriteoffSections,createJson,
-  executeCommand:(dataDir,envelope,options)=>require('./command-service.cjs').execute(dataDir,envelope,options),
+  executeCommand:(dataDir,envelope,options)=>require('./diagnostic-boundary.cjs').withCommit(envelope,envelope?.databaseToken,sqliteBackend(dataDir)?'sqlite':'json',()=>require('./command-service.cjs').execute(dataDir,envelope,options)),
   commitPrintArtifact,
   isDatabaseLockHeld:dataDir=>heldLocks.has(canonicalDirectory(dataDir)),
   ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot,readOperation,archiveHistory }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, physical => {
     dataDir=physical;
     const sqlite = sqliteBackend(dataDir), action = () => {try{return operation(dataDir,...args);}catch(error){const principal=name==='readSnapshot'?args[0]?.principal:name==='readOperation'?args[1]:args[1]?.principal;throw require('./access-control').publicError(error,principal);}};
     const writing=['writeAll','writeSections','archiveHistory'].includes(name),nested=sqlite?.inTransaction(dataDir),readOnly=!writing||schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||args[1]?.requireWriterSchema===true&&args[1]?.writerSchemaVersion!==storageFormat.SCHEMA_VERSION||writing&&!hasWriteCompatibility(dataDir,args[1]);
-    const result=!sqlite||['isSplit','migrate'].includes(name)?action():sqlite.transaction(dataDir,action,{readOnly});
+    const commit=()=>!sqlite||['isSplit','migrate'].includes(name)?action():sqlite.transaction(dataDir,action,{readOnly});
+    const payload=name==='writeAll'?{operation:args[1]?.operation}:args[0];
+    const result=writing&&!nested&&name!=='archiveHistory'?require('./diagnostic-boundary.cjs').withCommit(payload,payload?.databaseToken||args[1]?.databaseToken,sqlite?'sqlite':'json',commit):commit();
     if(writing&&!nested&&!readOnly&&!result?.replayed)require('./document-archive.cjs').recover(dataDir,undefined,args[1]);
     return result;
   })])),

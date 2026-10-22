@@ -1,5 +1,15 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+async function invokeOperation(channel,json){
+  try{
+    const payload=typeof json==='string'?JSON.parse(json):json,operation=payload&&Object.getOwnPropertyDescriptor(payload,'operation')?.value,id=operation&&Object.getOwnPropertyDescriptor(operation,'id')?.value;
+    if(typeof id==='string'&&/^[a-zA-Z0-9._:-]{1,200}$/.test(id)){
+      let timer;try{await Promise.race([ipcRenderer.invoke('operation-phase',{phase:'ui-prepared',operationId:id}),new Promise(resolve=>{timer=setTimeout(resolve,250);})]);}finally{if(timer!==undefined)clearTimeout(timer);}
+    }
+  }catch{}
+  return ipcRenderer.invoke(channel,json);
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   readData:       ()        => ipcRenderer.invoke('read-data'),
   writeData:      (json)    => ipcRenderer.invoke('write-data', json),
@@ -10,8 +20,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   queryHistory:   query     => ipcRenderer.invoke('query-history',query),
   documentPrint:  payload   => ipcRenderer.invoke('document-print', payload),
   importSource:   payload   => ipcRenderer.invoke('import-source', payload),
-  writeSections:  (json)    => ipcRenderer.invoke('write-sections', json),
-  executeCommand:(json)    => ipcRenderer.invoke('execute-command', json),
+  writeSections:  (json)    => invokeOperation('write-sections', json),
+  executeCommand:(json)    => invokeOperation('execute-command', json),
+  getOperationDiagnostics:query=>ipcRenderer.invoke('get-operation-diagnostics',query),
+  exportOperationSupport:()=>ipcRenderer.invoke('export-operation-support'),
   getPendingOperations:()=>ipcRenderer.invoke('get-pending-operations'),
   reconcileOperation:id=>ipcRenderer.invoke('reconcile-operation',id),
   retryOperation:id=>ipcRenderer.invoke('retry-operation',id),

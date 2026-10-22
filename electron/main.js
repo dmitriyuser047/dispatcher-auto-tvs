@@ -17,6 +17,13 @@ const requestedProfile = app.commandLine.getSwitchValue('user-data-dir');
 if (requestedProfile) app.setPath('userData', path.resolve(requestedProfile));
 else app.setPath('userData', path.join(app.getPath('appData'), 'dispetcherizaciya-avto'));
 
+const diagnosticBoundary=require('./diagnostic-boundary.cjs');
+let operationalDiagnostics=null,diagnosticScheduled=false;
+const diagnosticQueue=[];
+function diagnostics(){return operationalDiagnostics??=require('./operation-diagnostics.cjs').createOperationDiagnostics({directory:path.join(app.getPath('userData'),'operation-diagnostics')});}
+function flushDiagnostics(all=false){diagnosticScheduled=false;let remaining=all?256:4;while(remaining--&&diagnosticQueue.length)diagnostics().record(diagnosticQueue.shift());if(diagnosticQueue.length){diagnosticScheduled=true;setImmediate(flushDiagnostics);}}
+diagnosticBoundary.configure(event=>{if(diagnosticQueue.length>=256)diagnosticQueue.shift();diagnosticQueue.push(event);if(!diagnosticScheduled){diagnosticScheduled=true;setImmediate(flushDiagnostics);}});
+
 // Storage transactions belong to one application process at a time.
 if (!app.requestSingleInstanceLock()) app.exit(0);
 app.on('second-instance', () => {
@@ -256,12 +263,14 @@ function operationRecovery(){
   if(!recoveryService){
     const outbox=require('./command-outbox.cjs').createCommandOutbox({rootDir:path.join(app.getPath('userData'),'pending-operations'),maxEntries:128,maxPayloadBytes:64*1024*1024,maxTotalBytes:256*1024*1024});
     recoveryService=require('./operation-recovery.cjs').createOperationRecovery({outbox,
+      onEvent:diagnosticBoundary.record,
       send:async(context,json)=>{
         assertOperationContext(context);
         const payload=JSON.parse(json),command=Object.hasOwn(payload,'command');
         if(command&&!context.supportsCommands)throw Object.assign(Error('Подключение не поддерживает атомарные команды'),{code:'UNSUPPORTED_COMMANDS',definitive:true});
         if(context.client){if(networkConfigError)throw Error(networkConfigError);const proof=await mainWriteSessions().remoteOptions(context);assertOperationContext(context);return command?server.postCommands(context.host,context.port,json,proof):server.postSections(context.host,context.port,json,proof);}
         const proof=mainWriteSessions().localOptions(context);
+        diagnosticBoundary.record({phase:'host-received',code:'pending',operationId:payload.operation?.id,databaseToken:context.databaseToken,backend:'local'});
         if(command)return storage.executeCommand(context.directory,payload,{principal:context.principal,...proof,beforeCommit:()=>{ensureDirs();createDailyBackup();}});
         return storage.writeSections(context.directory,payload,{principal:context.principal,...proof,beforeCommit:()=>{ensureDirs();createDailyBackup();}});
       },
@@ -640,6 +649,24 @@ app.whenReady().then(() => {
       if(result?.databaseToken!==context.databaseToken)throw Object.assign(Error('База изменилась. Загрузите историю заново.'),{code:'CURSOR_STALE'});
       return result;
     }catch(error){return {ok:false,code:error.code||'HISTORY_FAILED',error:error.message};}
+  });
+
+  ipcMain.handle('operation-phase',(event,value)=>{
+    try{const context=readableOperationContext(event);if(!value||Object.keys(value).some(key=>!['phase','operationId'].includes(key))||value.phase!=='ui-prepared')return {ok:false};
+      const operation=require('../assets/core/platform-contracts.js').validateOperation({id:value.operationId});
+      diagnosticBoundary.record({phase:'ui-prepared',code:'prepared',operationId:operation.id,databaseToken:context.databaseToken,backend:context.client?'remote':'local'});return {ok:true};
+    }catch{return {ok:false};}
+  });
+  async function diagnosticsContext(event){const context=await verifiedOperationContext(event);if(!require('./operation-evidence.cjs').isGloballyUnrestricted(context.principal))throw Object.assign(Error('Техническая диагностика доступна администратору без ограничений доступа.'),{code:'ACCESS_DENIED'});return context;}
+  ipcMain.handle('get-operation-diagnostics',async(event,query)=>{
+    try{const context=await diagnosticsContext(event);assertOperationContext(context);flushDiagnostics(true);return diagnostics().inspect(query);}
+    catch(error){return {ok:false,code:error.code||'DIAGNOSTICS_UNAVAILABLE'};}
+  });
+  ipcMain.handle('export-operation-support',async event=>{
+    try{const file=await captureFileContext(event);if(!require('./operation-evidence.cjs').isGloballyUnrestricted(file.operation.principal))return {ok:false,code:'ACCESS_DENIED',error:'Пакет диагностики доступен администратору без ограничений доступа.'};
+      const result=await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender),{title:'Сохранить техническую диагностику',defaultPath:'TVS-support-'+new Date().toISOString().slice(0,10)+'.zip',filters:[{name:'ZIP',extensions:['zip']}]});await assertFileContext(file);if(result.canceled||!result.filePath)return {ok:false,cancelled:true};
+      flushDiagnostics(true);return diagnostics().exportSupport({targetPath:result.filePath,assertCurrent:()=>assertFileContextSync(file)});
+    }catch(error){return {ok:false,code:error.code||'DIAGNOSTICS_UNAVAILABLE',error:'Не удалось сохранить пакет диагностики.'};}
   });
 
   ipcMain.handle('write-sections', async (_event, jsonStr) => {
