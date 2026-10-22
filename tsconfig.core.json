@@ -2,7 +2,9 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "CommonJS",
-    "lib": ["ES2020"],
+    "lib": [
+      "ES2020"
+    ],
     "types": [],
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -20,5 +22,30 @@
     "rootDir": "src/core",
     "outDir": ".typed-core-build"
   },
-  "files": ["src/core/financial-recognition.ts", "src/core/platform-contracts.ts", "src/core/platform-commands.ts", "src/core/accounting-boundary.ts", "src/core/decimal-core.ts", "src/core/effective-periods.ts", "src/core/entity-identity.ts", "src/core/document-engine.ts", "src/core/period-policy.ts", "src/core/fuel-stock.ts", "src/core/fuel-operations.ts", "src/core/inventory-stock.ts", "src/core/procurement-operations.ts", "src/core/cost-valuation.ts", "src/core/cost-operations.ts", "src/core/repair-process.ts", "src/core/repair-operations.ts", "src/core/business-calendar.ts", "src/core/calendar-operations.ts", "src/core/personnel-planning.ts", "src/core/document-print.ts", "src/core/import-engine.ts"]
+  "files": [
+    "src/core/financial-recognition.ts",
+    "src/core/platform-contracts.ts",
+    "src/core/platform-commands.ts",
+    "src/core/accounting-boundary.ts",
+    "src/core/decimal-core.ts",
+    "src/core/effective-periods.ts",
+    "src/core/entity-identity.ts",
+    "src/core/document-engine.ts",
+    "src/core/period-policy.ts",
+    "src/core/fuel-stock.ts",
+    "src/core/fuel-operations.ts",
+    "src/core/inventory-stock.ts",
+    "src/core/procurement-operations.ts",
+    "src/core/cost-valuation.ts",
+    "src/core/cost-operations.ts",
+    "src/core/repair-process.ts",
+    "src/core/repair-operations.ts",
+    "src/core/business-calendar.ts",
+    "src/core/calendar-operations.ts",
+    "src/core/personnel-planning.ts",
+    "src/core/document-print.ts",
+    "src/core/import-engine.ts",
+    "src/core/access-policy.ts",
+    "src/core/access-scope.ts"
+  ]
 }

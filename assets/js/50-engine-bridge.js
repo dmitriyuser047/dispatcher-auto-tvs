@@ -23,6 +23,7 @@ function dispatcherContext() {
       sync && sync.databaseToken || null,
       access && access.user && access.user.id || null,
       access && access.user && access.user.role || null,
+      access && access.policyStamp || null,
       settings ? [settings.networkMode, settings.activeUser, profile && profile.dataDir,
         settings.remoteProtocol, settings.remoteHost, settings.remotePort] : null
     ]),

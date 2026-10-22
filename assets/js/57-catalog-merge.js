@@ -4,7 +4,15 @@ let catalogMergeSession=null;
 function catalogMergeToday(){return BusinessCalendar.resolve(data,new Date().toISOString()).today;}
 function catalogMergeContext(){return platformSessionContext();}
 function catalogMergeReadable(context=catalogMergeContext()){
- return !Array.isArray(context.readable)||context.readable.includes('*')||PlatformSchema.sections.every(name=>context.readable.includes(name));
+ if(Array.isArray(context.readable)&&!context.readable.includes('*')&&!PlatformSchema.sections.every(name=>context.readable.includes(name)))return false;
+ const policy=context.accessPolicy;if(!policy)return true;
+ const allows=(values,action)=>values===undefined||Array.isArray(values)&&(values.includes('*')||values.includes(action));
+ // A catalog review inventories the complete database. An owned subset or
+ // hidden business fields cannot produce that global review in the browser.
+ return Array.isArray(policy.grants)&&policy.grants.some(grant=>grant.org?.any===true&&grant.site?.any===true&&allows(grant.actions,'read'))&&PlatformSchema.sections.every(name=>{
+  const rule=policy.sections?.[name],fields=rule?.readFields,ceiling=context.readFields?.[name];
+  return allows(rule?.actions,'read')&&(fields===undefined||Array.isArray(fields)&&fields.includes('*'))&&(ceiling===undefined||Array.isArray(ceiling)&&ceiling.includes('*'));
+ });
 }
 function catalogMergeWritable(names,context=catalogMergeContext()){
  return !context.blocked&&context.actor?.role==='admin'&&(!Array.isArray(context.writable)||context.writable.includes('*')||(names.length?names.every(name=>context.writable.includes(name)):CATALOG_MERGE_SECTIONS.some(name=>context.writable.includes(name))));

@@ -43,13 +43,9 @@ function matchesRow(row,query){
 }
 function scopeOf(principal,section){
   if(!plain(principal)||!Object.hasOwn(access.ROLES,principal.role)||typeof principal.id!=='string'||!principal.id||principal.id.length>500)fail('ACCESS_DENIED','Не подтверждена учётная запись',403);
-  let readable=schema.sections.filter(name=>access.authorize(principal,'read',name));
-  if(principal.readable!==undefined){
-    if(!Array.isArray(principal.readable)||principal.readable.some(name=>!schema.sections.includes(name)))fail('ACCESS_DENIED','Не подтверждены права чтения',403);
-    readable=readable.filter(name=>principal.readable.includes(name));
-  }
-  if(!readable.includes(section))fail('ACCESS_DENIED','Раздел недоступен для вашей роли',403);
-  return sha(kernel.stableSerialize({id:principal.id,role:principal.role,readable}));
+  const normalized=require('./access-context.cjs').normalizePrincipal(principal);
+  if(!access.authorize(normalized,'read',section))fail('ACCESS_DENIED','Раздел недоступен для вашей роли',403);
+  return sha(kernel.stableSerialize({id:normalized.id,policyStamp:normalized.policyStamp}));
 }
 function filterHash(query){const {cursor,...selection}=query;return sha(kernel.stableSerialize(selection));}
 function cursorFor(binding,position){
@@ -71,6 +67,7 @@ function cursorPosition(cursor,binding){
 }
 function queryRows(dataDir,input,principal){
   const query=normalizeQuery(input),scope=scopeOf(principal,query.section);
+  if(require('./access-context.cjs').hasNarrowing(principal)){const normalized=require('./access-context.cjs').normalizePrincipal(principal),masks=[normalized.readFields?.[query.section],normalized.accessPolicy?.sections?.[query.section]?.readFields].filter(Array.isArray),can=field=>masks.every(fields=>fields.includes(field));const dateField=['fuelPeriods','monthlyFuel'].includes(query.section)?'month':'date',assetFields=schema.relations.filter(ref=>ref.from===query.section&&(['vehicleId','generatorId'].includes(ref.field)||ref.field==='assetRef')).map(ref=>ref.field);if((query.from||query.to)&&!can(dateField)||query.assetRef&&!(assetFields.length?assetFields:['assetRef','vehicleId','generatorId']).every(can))fail('QUERY_FIELD_ACCESS','Фильтр использует недоступное поле.',403);}
   // Audit contains historical nested financial data. The old snapshot path has
   // its own visibility policy; this indexed endpoint must not pretend that a
   // generic text index or a COUNT over raw audit rows is an authorised query.
@@ -79,25 +76,33 @@ function queryRows(dataDir,input,principal){
   return storage.withDatabaseLock(dataDir,()=>{
     const sql=sqlite.exists(dataDir);
     const action=()=>{
-      let revision,databaseToken,jsonRows;
+      let revision,databaseToken,jsonRows,database;
+      const scoped=require('./access-context.cjs').hasNarrowing(principal);
       if(sql){revision=sqlite.readRevisions(dataDir)[query.section];databaseToken=storage.databaseToken(dataDir);}
       else{const section=storage.readSection(dataDir,query.section);revision=section.rev;databaseToken=section.databaseToken;jsonRows=section.rows;}
+      if(scoped){database=storage.readAll(dataDir);jsonRows=database[query.section]||[];}
+      const scopedContext=scoped?require('./access-context.cjs').create(database,database,principal):null;
       const binding={databaseToken,section:query.section,revision,filter:filterHash(query),scope},afterPosition=cursorPosition(query.cursor,binding);
       if(query.assetRef){
         const section={v:'vehicles',g:'generators',t:'tanks'}[query.assetRef[0]],ambiguous=sql?sqlite.countLegacyAssetReferences(dataDir,section,query.assetRef.slice(2))>1:identity.resolveAsset({[section]:storage.readSection(dataDir,section).rows},query.assetRef).status==='ambiguous';
+        if(scoped){const target=identity.resolveAsset(database,query.assetRef);if(target.status!=='known'||!scopedContext.permits(target.section,'read',target.row))fail('ACCESS_DENIED','Недостаточно прав для выбранной ссылки.',403);}
         if(ambiguous)fail('QUERY_ASSET_AMBIGUOUS','Ссылка на технику неоднозначна. Проверьте ID карточек.');
       }
       let rows,positions,total,hasMore;
-      if(sql){
+      if(sql&&!scoped){
         const page=sqlite.queryRows(dataDir,{section:query.section,limit:query.limit,from:query.from,to:query.to,assetRef:query.assetRef,search:query.search,afterPosition});
         ({rows,positions,total,hasMore}=page);
       }else{
-        const matching=[];jsonRows.forEach((row,position)=>{if(matchesRow(row,query))matching.push({row,position});});total=matching.length;
+        const matching=[];jsonRows.forEach((original,position)=>{
+          const row=scoped?require('./platform-service.cjs').visibleRows(query.section,[original],principal,database,scopedContext)[0]:original;
+          if(!row)return;
+          if(matchesRow(row,query))matching.push({row,position});
+        });total=matching.length;
         const candidates=matching.filter(entry=>entry.position>afterPosition),page=candidates.slice(0,query.limit);
         rows=page.map(entry=>entry.row);positions=page.map(entry=>entry.position);hasMore=candidates.length>query.limit;
       }
-      rows=require('./platform-service.cjs').visibleRows(query.section,rows,principal);
-      return {ok:true,section:query.section,revision,databaseToken,rows,total,nextCursor:hasMore?cursorFor(binding,positions.at(-1)):null,backend:sql?'sqlite':'json'};
+      if(!scoped)rows=require('./platform-service.cjs').visibleRows(query.section,rows,principal,database);
+      return {ok:true,section:query.section,revision,databaseToken,policyStamp:require('./access-context.cjs').policyStamp(principal),rows,total,nextCursor:hasMore?cursorFor(binding,positions.at(-1)):null,backend:sql?'sqlite':'json'};
     };
     return sql?sqlite.transaction(dataDir,action,{readOnly:true}):action();
   });

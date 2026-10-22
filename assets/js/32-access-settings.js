@@ -37,16 +37,18 @@ async function acOpenUsers() {
     if (settings.networkMode === 'client') { showToast('Управление доступом выполняется на компьютере-сервере'); return; }
     const users = settings.serverUsers || [];
     openGenericModal('Сетевые учётные записи', `<p style="font-size:13px;color:var(--text3)">Каждому сотруднику выдаётся свой токен. После создания первой учётной записи общий ключ перестаёт давать доступ к серверу. Создайте администратора и передайте сотрудникам их токены.</p>
-      <div style="padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;font-size:12px">После изменения доступа перезапустите сетевой сервер в настройках. Уже сохранённые данные сотрудников остаются в базе.</div>
+      <div style="padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;font-size:12px">Сервер проверяет актуальные права при каждом запросе. После изменения прав сотруднику нужно заново загрузить данные.</div>
       <div style="max-height:42vh;overflow:auto">${users.map(u => `<div class="ac-user-row" data-user-id="${htmlEsc(u.id)}" style="padding:12px 0;border-bottom:1px solid var(--border)">
         <div class="form-row"><div class="form-group"><label>Имя сотрудника</label><input class="ac-user-name" maxlength="120" value="${htmlEsc(u.name || '')}"></div>
         <div class="form-group"><label>Роль</label><select class="ac-user-role">${acRoleOptions(u.role)}</select></div>
         <div class="form-group"><label>Действует до (необязательно)</label><input class="ac-user-expiry" type="date" value="${u.expiresAt ? htmlEsc(String(u.expiresAt).slice(0,10)) : ''}"></div></div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label style="font-size:12px"><input class="ac-user-enabled" type="checkbox" style="width:auto"${u.enabled !== false ? ' checked' : ''}> Доступ разрешён</label><button class="btn btn-primary btn-sm" onclick="acUpdateUser(${htmlJs(u.id)})">Сохранить права</button><button class="btn btn-ghost btn-sm" onclick="acRotateUserToken(${htmlJs(u.id)})">Заменить токен</button><span style="font-size:11px;color:var(--text3)">${u.rotatedAt || u.createdAt ? 'Выдан: ' + htmlEsc(new Date(u.rotatedAt || u.createdAt).toLocaleDateString('ru-RU')) : ''}</span></div>
+        <p style="font-size:12px">${typeof acPolicySummary==='function'?htmlEsc(acPolicySummary(u.accessPolicy)):'Права по роли'}</p><button class="btn btn-ghost btn-sm ac-policy-button" data-policy-user="${htmlEsc(u.id)}">Организации, объекты, действия и поля</button>
       </div>`).join('') || '<p style="color:var(--text3)">Учётных записей пока нет.</p>'}</div>
       <div style="margin-top:16px"><strong style="font-size:14px">Новая учётная запись</strong><div class="form-row" style="margin-top:8px"><div class="form-group"><label>Имя сотрудника</label><input id="acNewName" maxlength="120" placeholder="Иванов Иван"></div><div class="form-group"><label>Роль</label><select id="acNewRole">${acRoleOptions(users.length ? 'dispatcher' : 'admin')}</select></div></div><button class="btn btn-primary btn-sm" onclick="acCreateUser()">Создать и выдать токен</button></div>
       <details style="font-size:12px;margin-top:16px"><summary>Что разрешено каждой роли</summary>${Object.entries(AC_ROLE_HELP).map(([role,help]) => `<p><strong>${htmlEsc(AC_ROLE_LABELS[role])}.</strong> ${htmlEsc(help)}</p>`).join('')}</details>
       <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn btn-ghost" onclick="closeModal('genericModal')">Закрыть</button></div>`,980);
+    document.querySelectorAll('[data-policy-user]').forEach(button=>button.onclick=()=>acOpenUserPolicy(button.dataset.policyUser));
   } catch (error) { showToast('Не удалось открыть учётные записи: ' + error.message); }
 }
 
@@ -88,7 +90,7 @@ async function acUpdateUser(id) {
       if (!user) throw new Error('Учётная запись уже удалена');
       Object.assign(user,{name,role,enabled,expiresAt:expiry ? expiry + 'T23:59:59.999+03:00' : null});
     });
-    showToast('Права сохранены. Перезапустите сетевой сервер.');
+    showToast('Права сохранены. Сотруднику нужно заново загрузить данные.');
     await acOpenUsers();
   } catch (error) { showToast(error.message); }
 }
@@ -107,7 +109,7 @@ async function acCreateUser() {
 }
 
 async function acRotateUserToken(id) {
-  if (!await confirmAction('Заменить персональный токен? Старый перестанет работать после перезапуска сервера. Сотруднику нужно передать новый.')) return;
+  if (!await confirmAction('Заменить персональный токен? Старый перестанет работать сразу после сохранения. Сотруднику нужно передать новый.')) return;
   try {
     const issued = await acGenerateToken();
     let name = '';
@@ -123,7 +125,7 @@ async function acRotateUserToken(id) {
 }
 
 function acShowToken(name,token) {
-  openGenericModal('Персональный токен · ' + name, '<p>Скопируйте токен и передайте сотруднику для поля «Ключ сети» на его компьютере. После закрытия этого окна посмотреть токен повторно нельзя; при утрате выдайте новый.</p><input id="acIssuedToken" readonly autocomplete="off" style="font-family:monospace;width:100%;padding:10px"><p style="font-size:12px;color:var(--text3)">Перезапустите сетевой сервер, чтобы применить учётные записи.</p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-primary" onclick="acCopyToken()">Скопировать</button><button class="btn btn-ghost" onclick="acForgetToken()">Закрыть</button></div>',760);
+  openGenericModal('Персональный токен · ' + name, '<p>Скопируйте токен и передайте сотруднику для поля «Ключ сети» на его компьютере. После закрытия этого окна посмотреть токен повторно нельзя; при утрате выдайте новый.</p><input id="acIssuedToken" readonly autocomplete="off" style="font-family:monospace;width:100%;padding:10px"><p style="font-size:12px;color:var(--text3)">Токен действует после сохранения учётной записи.</p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-primary" onclick="acCopyToken()">Скопировать</button><button class="btn btn-ghost" onclick="acForgetToken()">Закрыть</button></div>',760);
   const input = document.getElementById('acIssuedToken');
   input.value = token;
   input.focus(); input.select();

@@ -7,6 +7,7 @@ const access = require('./access-control');
 const kernel = () => require('../assets/core/platform-kernel.js');
 const schema = () => require('../assets/core/platform-schema.js');
 const contracts = () => require('../assets/core/platform-contracts.js');
+const accessContext = () => require('./access-context.cjs');
 
 function fail(code, message, status) {
   const error = new Error(message); error.code = code; error.status = status || 400; throw error;
@@ -16,21 +17,66 @@ function principalOf(principal) {
   if (!access.ROLES[value.role]) fail('ACCESS_DENIED', 'Не определена действующая роль пользователя', 403);
   return { id:String(value.id || 'local-profile'), name:String(value.name || 'Локальный пользователь'), role:value.role };
 }
-function visibleAudit(rows, principal) {
+function visibleAudit(rows, principal, database) {
+  const db=database||{auditLog:rows||[]}, scoped=accessContext().hasNarrowing(principal), context=accessContext().create(db,db,{...principal,id:principal?.id||'legacy-role-check'});
   return (rows || []).filter(row => row && typeof row.section === 'string' && require('./document-access.cjs').permitted(principal, 'read', row.section) &&
     (!(row.printCapture||row.printArtifact)||Array.isArray(row.archiveReadSections)&&row.archiveReadSections.every(name=>require('./document-access.cjs').permitted(principal,'read',name)))&&
     (!row.importReadSections||row.importReadSections.every(name=>require('./document-access.cjs').permitted(principal,'read',name)))&&
-    (row.type !== 'transaction' || Array.isArray(row.changedSections) && row.changedSections.every(name => require('./document-access.cjs').permitted(principal, 'read', name)))&&require('./document-access.cjs').auditAccess(principal,row)&&require('./period-access.cjs').auditAccess(principal,row)).map(row=>require('./period-access.cjs').visibleAuditRow(row,principal));
+    (row.type !== 'transaction' || Array.isArray(row.changedSections) && row.changedSections.every(name => require('./document-access.cjs').permitted(principal, 'read', name)))&&require('./document-access.cjs').auditAccess(principal,row)&&require('./period-access.cjs').auditAccess(principal,row))
+    .filter(row=>!scoped||auditRowAllowed(row,principal,db,context)).map(row=>{
+      let result=require('./period-access.cjs').visibleAuditRow(row,principal);
+      if(row.type==='transaction'){const {archiveScope,...publicRow}=result;return publicRow;}
+      const project=(value,phase)=>value?context.projectRows(row.section,[value],phase)[0]:undefined;
+      const before=project(result.before,'before'),after=project(result.after,'after');
+      const fields=Array.isArray(row.fields)?row.fields.filter(field=>(before&&Object.hasOwn(before,field))||(after&&Object.hasOwn(after,field))):row.fields;
+      return {...result,...(row.before?{before}:{}),...(row.after?{after}:{}),...(fields?{fields}:{})};
+    });
 }
-function visibleRows(name,rows,principal){return name==='auditLog'?visibleAudit(rows,principal):name==='fuelPeriods'?require('./period-access.cjs').visibleRows(rows,principal):require('./document-access.cjs').visibleRows(name,rows,principal);}
-function filteredResult(result,principal){if(!principal)return result;const out={...result};if(out.canonicalSections)out.canonicalSections=Object.fromEntries(Object.entries(out.canonicalSections).filter(([name])=>require('./document-access.cjs').permitted(principal,'read',name)).map(([name,rows])=>[name,visibleRows(name,rows,principal)]));return out;}
-function findReceipt(rows,query,principal,token){
+function auditRowAllowed(row,principal,db,context=accessContext().create(db,db,principal)) {
+  if(row.type==='transaction') {
+    if(row.printCapture||row.printArtifact||row.archiveSeals?.length){const proof=row.archiveScope;if(proof?.version!==1||!Array.isArray(proof.rows)||!proof.rows.length)return false;const frozen=Object.fromEntries(schema().sections.map(name=>[name,proof.rows.filter(item=>item.section===name).map(item=>item.row)])),ctx=accessContext().create(frozen,frozen,principal);if(!proof.rows.every(item=>ctx.permits(item.section,'read',item.row)&&kernel().stableSerialize(ctx.projectRows(item.section,[item.row])[0])===kernel().stableSerialize(item.row)))return false;if(row.changedSections?.every(name=>name==='appMeta'))return true;}
+    const changes=(db.auditLog||[]).filter(value=>value?.source==='platform'&&value.operationId===row.operationId&&value.type!=='transaction');
+    if(!changes.length)return !row.changedSections?.length;
+    return changes.every(value=>auditRowAllowed(value,principal,db,context));
+  }
+  const values=[['before',row.before],['after',row.after]].filter(([,value])=>value);
+  return values.length>0&&values.every(([phase,value])=>context.permits(row.section,'read',value,phase));
+}
+function visibleRows(name,rows,principal,database,preparedContext){
+  const db=database||{[name]:rows||[]};
+  if(name==='auditLog')return visibleAudit(rows,principal,db);
+  const legacy=name==='fuelPeriods'?require('./period-access.cjs').visibleRows(rows,principal):require('./document-access.cjs').visibleRows(name,rows,principal);
+  return (preparedContext||accessContext().create(db,db,{...principal,id:principal?.id||'legacy-role-check'})).projectRows(name,legacy);
+}
+function scopeViews(database,revisions,principal,names=Object.keys(database)) {
+  if(!accessContext().hasNarrowing(principal))return {};
+  const policyStamp=accessContext().policyStamp(principal);
+  return Object.fromEntries(names.filter(name=>schema().sections.includes(name)&&require('./document-access.cjs').permitted(principal,'read',name)).map(name=>[name,{version:1,policyStamp,revision:revisions?.[name]||0,visibleFingerprint:'sha256:'+crypto.createHash('sha256').update(kernel().stableSerialize(visibleRows(name,database[name],principal,database))).digest('hex')}]));
+}
+function assertScopeViews(previous,sections,options={}) {
+  if(!accessContext().hasNarrowing(options.principal)||options.commandIntent)return;
+  const expected=scopeViews(previous,options.revisions,options.principal,Object.keys(sections));
+  for(const name of Object.keys(sections)){
+    if(name==='auditLog')continue;
+    const witness=options.scopeViews?.[name],trusted=expected[name];
+    if(!trusted||!witness||kernel().stableSerialize(witness)!==kernel().stableSerialize(trusted)||options.base?.[name]!==trusted.revision)
+      fail('SCOPE_VIEW_REQUIRED','Загрузите полный доступный раздел перед сохранением: данные или права изменились.',428);
+  }
+}
+function filteredResult(result,principal,database){
+  if(!principal)return result;
+  const out={...result},db=database||out.canonicalSections||{};
+  if(out.revisions)out.revisions=Object.fromEntries(Object.entries(out.revisions).filter(([name])=>require('./document-access.cjs').permitted(principal,'read',name)));
+  if(out.canonicalSections){out.scopeViews=scopeViews(db,out.revisions,principal,Object.keys(out.canonicalSections));out.canonicalSections=Object.fromEntries(Object.entries(out.canonicalSections).filter(([name])=>require('./document-access.cjs').permitted(principal,'read',name)).map(([name,rows])=>[name,visibleRows(name,rows,principal,db)]));}
+  return out;
+}
+function findReceipt(rows,query,principal,token,database){
   const operation=contracts().validateOperation(query),actor=principalOf(principal);
   const receipt=(rows||[]).find(row=>row?.source==='platform'&&row.type==='transaction'&&row.operationId===operation.id&&
     (!row.importReadSections||row.importReadSections.every(name=>require('./document-access.cjs').permitted(principal||actor,'read',name)))&&row.actorId===actor.id&&row.actorRole===actor.role&&row.databaseToken===token&&row.requestDigest===operation.digest&&
     (!(row.printCapture||row.printArtifact)||Array.isArray(row.archiveReadSections)&&row.archiveReadSections.every(name=>require('./document-access.cjs').permitted(principal||actor,'read',name)))&&
     Array.isArray(row.changedSections)&&row.changedSections.every(name=>require('./document-access.cjs').permitted(principal||actor,'read',name))&&require('./document-access.cjs').auditAccess(principal||actor,row)&&require('./period-access.cjs').auditAccess(principal||actor,row));
-  return receipt ? {id:operation.id,digest:receipt.requestDigest,status:'committed',at:receipt.at} : null;
+  return receipt && (!accessContext().hasNarrowing(principal)||auditRowAllowed(receipt,principal,database||{auditLog:rows})) ? {id:operation.id,digest:receipt.requestDigest,status:'committed',at:receipt.at} : null;
 }
 function operationInfo(previous, sections, options = {}) {
   if (!options.operation) return null;
@@ -39,7 +85,7 @@ function operationInfo(previous, sections, options = {}) {
   // commandIntent is a trusted internal option, never accepted from the raw
   // sections/full-write transport. Generated rows and server clocks must not
   // change the identity of a semantic command or prevent its receipt replay.
-  const digest = kernel().requestDigest(options.commandIntent || { base:options.base || {}, sections });
+  const digest = kernel().requestDigest(options.commandIntent || { base:options.base || {}, sections,...(options.scopeViews?{scopeViews:options.scopeViews}:{}) });
   if (operation.digest != null && operation.digest !== digest) fail('OPERATION_DIGEST', 'Состав операции изменился после подготовки', 409);
   const receipt = (previous.auditLog || []).find(row => row.source === 'platform' && row.type === 'transaction' && row.operationId === operation.id);
   if (receipt && (receipt.requestDigest !== digest || receipt.actorId !== actor.id || receipt.actorRole !== actor.role || receipt.databaseToken !== options.databaseToken))
@@ -48,11 +94,12 @@ function operationInfo(previous, sections, options = {}) {
 }
 function replayResult(previous, revisions, token, info, names) {
   if (!info?.receipt) return null;
+  if(accessContext().hasNarrowing(info.principal)&&!auditRowAllowed(info.receipt,info.principal,previous))fail('ACCESS_DENIED','Недостаточно текущих прав для результата операции.',403);
   if(info.receipt.importReadSections?.some(name=>!require('./document-access.cjs').permitted(info.principal||info.actor,'read',name)))fail('ACCESS_DENIED','Нет доступа ко всему исходному файлу импорта',403);
   const canonicalSections = {};
   for (const name of new Set([...names, 'auditLog'])) {
-    if (!access.authorize(info.actor, 'read', name)) continue;
-    canonicalSections[name] = visibleRows(name,previous[name],info.actor);
+    if (!access.authorize(info.principal||info.actor, 'read', name)) continue;
+    canonicalSections[name] = previous[name]||[];
   }
   const archive=info.receipt.printCapture?info.receipt.archiveSeals?.[0]:null;
   if(archive&&Array.isArray(info.receipt.archiveReadSections)&&info.receipt.archiveReadSections.some(name=>!require('./document-access.cjs').permitted(info.principal||info.actor,'read',name)))fail('ACCESS_DENIED','Недостаточно прав для печатного снимка',403);
@@ -99,24 +146,51 @@ function canonicalShiftAcceptance(previous,sections,actor,at,context) {
   });
   return {...sections,shiftReports:rows};
 }
+function assertScopeSnapshots(previous,sections,commandIntent){
+  const key=row=>typeof row.id+':'+JSON.stringify(row.id),stable=kernel().stableSerialize;
+  const inputHasProof=value=>!!value&&typeof value==='object'&&(Object.hasOwn(value,'scopeSnapshot')||Object.values(value).some(inputHasProof));
+  if(commandIntent&&inputHasProof(commandIntent.command?.input))fail('ACCESS_SCOPE_IMMUTABLE','Принадлежность проведённой записи формируется программой.',403);
+  for(const [name,rows]of Object.entries(sections)){
+    if(name==='auditLog')continue;const before=previous[name]||[];
+    for(const row of rows){const matches=before.filter(value=>key(value)===key(row)),old=matches.length===1?matches[0]:null;
+      if(old&&stable(old.scopeSnapshot)!==stable(row.scopeSnapshot)||!old&&row.scopeSnapshot!==undefined&&(!commandIntent||!before.some(value=>stable(value.scopeSnapshot)===stable(row.scopeSnapshot))))fail('ACCESS_SCOPE_IMMUTABLE','Сохранённую принадлежность записи нельзя менять или задавать вручную.',403);
+    }
+  }
+}
+function stampPostingScopes(previous,plan,context){
+  const next={...previous,...plan.sections},requests=require('../assets/core/document-print.js').postingRequests(previous,next),sections={...plan.sections},stamped=new Map();
+  for(const request of requests){const name=request.source.section,id=request.source.id,rows=sections[name];if(!rows)continue;const matches=rows.filter(row=>row.id===id);if(matches.length!==1||matches[0].scopeSnapshot!==undefined)continue;
+    const row=matches[0],snapshot=require('../assets/core/access-scope.js').capture(next,name,row,{now:context.now,actor:context.actor});
+    if(snapshot.complete!==true)continue;
+    const after={...row,scopeSnapshot:snapshot};sections[name]=rows.map(value=>value===row?after:value);next[name]=sections[name];stamped.set(name+'|'+typeof id+':'+JSON.stringify(id),after);
+  }
+  if(!stamped.size)return plan;
+  const rowChanges=plan.rowChanges.map(change=>{const after=stamped.get(change.section+'|'+typeof change.recordId+':'+JSON.stringify(change.recordId));return after?{...change,after,fields:[...new Set([...change.fields,'scopeSnapshot'])].sort()}:change;});
+  return {...plan,sections,rowChanges};
+}
 function prepareTransaction(previous, supplied, options = {}) {
-  const registry = schema().sections, actor = principalOf(options.principal);
+  const registry = schema().sections, principal=accessContext().normalizePrincipal(options.principal||{id:'local-profile',name:'Локальный пользователь',role:'admin'}), actor = principalOf(principal);
+  options={...options,principal};
   contracts().validateSections(supplied,registry);
   const info = operationInfo(previous, supplied, { ...options, principal:options.principal||actor });
   if (info?.receipt) return { replayed:true, operation:info };
+  assertScopeViews(previous,supplied,options);
   require('./document-archive.cjs').assertHead(previous,{...previous,...supplied});
   assertAuditPrefix(previous, supplied, options.principal||actor);
   // Client-generated audit suffixes are hints, never persisted as trusted facts.
-  let sections = require('./period-access.cjs').mergePeriods(previous,require('./document-access.cjs').mergeDrafts(previous,Object.fromEntries(Object.entries(supplied).filter(([name]) => name !== 'auditLog')),options.principal||actor),options.principal||actor);
+  const scoped=accessContext().create(previous,previous,principal);
+  const merged=Object.fromEntries(Object.entries(supplied).map(([name,rows])=>[name,name==='auditLog'||options.commandIntent||!accessContext().hasNarrowing(principal)?rows:scoped.mergeVisibleChanges(name,rows)]));
+  let sections = require('./period-access.cjs').mergePeriods(previous,require('./document-access.cjs').mergeDrafts(previous,Object.fromEntries(Object.entries(merged).filter(([name]) => name !== 'auditLog')),options.principal||actor),options.principal||actor);
   const periodCommand=options.commandIntent?.command?.type==='PeriodAction'&&require('./period-access.cjs').canManage(options.principal||actor,options.commandIntent.command.input?.scope);
   const costCommand=options.commandIntent?.command?.type==='CostAction'&&options.commandIntent.command.input?.action==='savePolicy'&&access.costActions(options.principal||actor).includes('savePolicy');
   const costTarget=costCommand?options.commandIntent.command.input.target?.section:null;
   for (const [name, rows] of Object.entries(sections)) {
     if (JSON.stringify(previous[name] || []) === JSON.stringify(rows)) continue;
-    if (!access.authorize(actor, 'write', name)&&!(name==='fuelPeriods'&&periodCommand)&&!(name===costTarget&&costCommand)) fail('ACCESS_DENIED', 'Роль не разрешает изменение раздела: ' + name, 403);
+    if (!access.authorize(principal, 'write', name)&&!(name==='fuelPeriods'&&periodCommand)&&!(name===costTarget&&costCommand)) fail('ACCESS_DENIED', 'Роль не разрешает изменение раздела: ' + name, 403);
     try { access.validateAssetChanges(actor, name, previous[name] || [], rows); }
     catch (error) { fail('ACCESS_DENIED', error.message, 403); }
   }
+  assertScopeSnapshots(previous,sections,options.commandIntent);
   const at = options.now || new Date().toISOString();
   if (!Number.isFinite(Date.parse(at))) fail('INVALID_CLOCK', 'Некорректное время операции');
   const id = info?.id || 'backend:' + crypto.randomUUID();
@@ -133,16 +207,20 @@ function prepareTransaction(previous, supplied, options = {}) {
   if (options.prepareSections) sections = options.prepareSections(sections);
   // This proof is derived from the semantic execution option, never a section
   // request field. Raw/full writes cannot authorize their own catalog aliases.
-  const plan = kernel().prepare(previous, sections, { id, identity:options.databaseToken || 'local-storage', actor,
+  let plan = kernel().prepare(previous, sections, { id, identity:options.databaseToken || 'local-storage', actor,
     revisions:options.revisions || {}, now:at,today:clock.today,calendar:clock,...commandProof,...importProof,
     readable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'read', name)),
     writable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'write', name)||name==='fuelPeriods'&&periodCommand||name===costTarget&&costCommand) });
+  plan=stampPostingScopes(previous,plan,{now:at,actor});
+  const finalAccess=accessContext().create(previous,{...previous,...plan.sections},principal,{writableOverrides:[...(periodCommand?['fuelPeriods']:[]),...(costTarget?[costTarget]:[])],...(costTarget?{writeFields:{[costTarget]:['costProfile']}}:{})});
+  if(accessContext().hasNarrowing(principal))for(const [name,rows] of Object.entries(plan.sections))if(name!=='auditLog')finalAccess.validateChanges(name,rows.map(row=>{const old=(previous[name]||[]).find(value=>value.id===row.id);if(!old?.scopeSnapshot&&row.scopeSnapshot){const {scopeSnapshot,...business}=row;return business;}return row;}));
+  require('./attachment-access.cjs').validateChanges(options.dataDir,previous,{...previous,...plan.sections},{principal,databaseToken:options.databaseToken});
   const changes = (plan.rowChanges || []).filter(row => row.section !== 'auditLog');
   const result = { ...plan.sections };
   delete result.auditLog;
   const changed = Object.keys(result);
   if (!changed.length && !info) return { sections:{}, plan, operationReceipt:null };
-  const digest = info?.digest || kernel().requestDigest({ base:options.base || {}, sections:supplied });
+  const digest = info?.digest || kernel().requestDigest({ base:options.base || {}, sections:supplied,...(options.scopeViews?{scopeViews:options.scopeViews}:{}) });
   const entries = changes.map(row => ({ id:'audit_' + crypto.randomUUID(), at, actor:actor.name, actorId:actor.id, actorRole:actor.role,
     source:'platform', operationId:id, section:row.section, recordId:String(row.recordId ?? row.key), action:row.action,
     fields:row.fields, before:row.before, after:row.after,...(importProof.importSource?{importReadSections:importProof.importSource.sourceScopes||importProof.importSource.sections}:{} ) }));
@@ -158,4 +236,4 @@ function prepareTransaction(previous, supplied, options = {}) {
   return { sections:result, plan, operationReceipt:{ id, digest, status:'committed', at } };
 }
 
-module.exports = { prepareTransaction, operationInfo, replayResult, visibleAudit,visibleRows,filteredResult,findReceipt };
+module.exports = { prepareTransaction, operationInfo, replayResult, visibleAudit,visibleRows,filteredResult,findReceipt,scopeViews,assertScopeViews,auditRowAllowed };

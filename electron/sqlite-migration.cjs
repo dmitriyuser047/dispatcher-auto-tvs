@@ -184,7 +184,7 @@ function copyManaged(source,stage,manifest,data) {
 }
 function verifyDatabase(stage,source) {
   const data = sqlite.readAll(stage), revisions = sqlite.readRevisions(stage), inspected = sqlite.inspect(stage);
-  require('./document-archive.cjs').validateState(stage,data);require('./import-source.cjs').validateState(stage,data);
+  require('./document-archive.cjs').validateState(stage,data);require('./import-source.cjs').validateState(stage,data);require('./attachment-access.cjs').validateManaged(data,name=>fs.readFileSync(path.join(stage,...name.split('/'))));
   if (!inspected.ok || !Array.isArray(inspected.integrity) || inspected.integrity.length !== 1 || inspected.integrity[0] !== 'ok' ||
       !Array.isArray(inspected.foreignKeyErrors) || inspected.foreignKeyErrors.length)
     fail('MIGRATION_SQLITE_INTEGRITY','Проверка целостности SQLite не пройдена');

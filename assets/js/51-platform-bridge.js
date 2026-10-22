@@ -8,7 +8,7 @@ function platformPrepareBackgroundStatus(){return {active:_platformPrepareActive
 function platformPrepareAccessStamp(context){
   const list=value=>value==null?null:[...new Set(value)].sort();
   const procurement=context.procurementActions==null?null:{tank:list(context.procurementActions.tank),part:list(context.procurementActions.part)};
-  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fuelActions:list(context.fuelActions),procurementActions:procurement,costActions:list(context.costActions),repairActions:list(context.repairActions),calendarActions:list(context.calendarActions),printActions:list(context.printActions),importActions:list(context.importActions),calendar:context.calendar||null,fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
+  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,policyStamp:context.policyStamp||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fuelActions:list(context.fuelActions),procurementActions:procurement,costActions:list(context.costActions),repairActions:list(context.repairActions),calendarActions:list(context.calendarActions),printActions:list(context.printActions),importActions:list(context.importActions),calendar:context.calendar||null,fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
 }
 function platformPrepareError(code,message){return Object.assign(Error(message),{name:'PlatformKernelError',code});}
 function platformPrepareGuard(job){
@@ -67,6 +67,8 @@ function platformSessionContext() {
   const user = access?.user;
   const calendar=typeof BusinessCalendar==='object'?BusinessCalendar.resolve(data,new Date().toISOString()):null;
   return { identity:base.identity, readable:base.readable,
+    ...(access?.policyStamp ? {policyStamp:access.policyStamp}:{}),
+    ...(access?.accessPolicy ? {accessPolicy:JSON.parse(JSON.stringify(access.accessPolicy))}:{}),
     writable:access && Array.isArray(access.writable) ? access.writable.slice() : undefined,
     periodActions:access && Array.isArray(access.periodActions) ? access.periodActions.slice() : undefined,
     fuelActions:access && Array.isArray(access.fuelActions) ? access.fuelActions.slice() : undefined,
@@ -159,6 +161,7 @@ function platformApplyPrintArchiveAck(result,captured){
     if(PlatformKernel.stableSerialize(ordinary(canonical.appMeta))!==PlatformKernel.stableSerialize(ordinary(data.appMeta||[])))throw Error('Настройки базы изменились на другом компьютере.');
     const baseline=platformSaveBaseline();
     for(const name of names){const rows=JSON.parse(JSON.stringify(canonical[name]));data[name]=rows;baseline[name]=JSON.parse(JSON.stringify(rows));_sync.synced[name]=JSON.stringify(rows);_sync.revs[name]=result.revisions[name];}
+    if(typeof syncInstallScopeViews==='function')syncInstallScopeViews(result,names);
     _lastPersisted=JSON.stringify(baseline);scheduleLocalBackup(_lastPersisted);return {ok:true};
   }catch(error){
     _sync.needRefresh=[...new Set([...(_sync.needRefresh||[]),'appMeta','auditLog'])];
@@ -286,7 +289,7 @@ function platformExecuteCommand(value,options={}){
         if(response.databaseToken!==envelope.databaseToken||receipt?.id!==id||receipt.digest!==envelope.operation.digest||!['committed','replayed'].includes(receipt.status))
           return platformCommandFailure('ACK_REQUIRED','Ответ не подтвердил именно эту команду. Проверьте её в очереди операций.',{unknown:true,queued:true});
         acknowledged=true;guard();
-        let canonical=response.canonicalSections,revisions=response.revisions;
+        let canonical=response.canonicalSections,revisions=response.revisions,scopeResponse=response;
         const archiveExtra=response.archiveHeadChanged===true&&_sync.platform?.documentPrint===1?['appMeta']:[];
         const requiredWrites=[...new Set([...writes,...archiveExtra])];
         const expected=[...new Set([...writes,...archiveExtra,'auditLog'])];
@@ -295,7 +298,7 @@ function platformExecuteCommand(value,options={}){
           const snapshot=typeof raw==='string'?JSON.parse(raw):raw;
           syncAssertDatabase(snapshot);guard();
           if(JSON.stringify(snapshot?.access||null)!==JSON.stringify(_sync.access||null))throw platformPrepareError('STALE_ACCESS','Права изменились. Загрузите базу заново.');
-          canonical=Object.fromEntries(expected.filter(name=>Array.isArray(snapshot?.data?.[name])).map(name=>[name,snapshot.data[name]]));revisions=snapshot?.revisions;
+          canonical=Object.fromEntries(expected.filter(name=>Array.isArray(snapshot?.data?.[name])).map(name=>[name,snapshot.data[name]]));revisions=snapshot?.revisions;scopeResponse=snapshot;
         }
         if(!canonical||Object.keys(canonical).some(name=>!expected.includes(name))||requiredWrites.some(name=>!Array.isArray(canonical[name]))||Object.keys(canonical).some(name=>!Number.isSafeInteger(revisions?.[name])||revisions[name]<0))
           throw platformPrepareError('CANONICAL_ACK_REQUIRED','Операция сохранена, но её данные не удалось подтвердить. Загрузите базу заново.');
@@ -306,6 +309,7 @@ function platformExecuteCommand(value,options={}){
           const copy=JSON.parse(JSON.stringify(rows));source[name]=copy;persisted[name]=JSON.parse(JSON.stringify(rows));
           _sync.synced[name]=JSON.stringify(rows);_sync.revs[name]=revisions[name];
         }
+        if(typeof syncInstallScopeViews==='function')syncInstallScopeViews(scopeResponse,Object.keys(canonical));
         _lastPersisted=JSON.stringify(persisted);scheduleLocalBackup(_lastPersisted);_sync.lastResult=response;
         rebuildIndex();dispatcherInvalidate();_platformLastError=null;
         return {...response,ok:true,canonicalSections:canonical,revisions};
@@ -322,6 +326,7 @@ async function platformFlushForClose(){
   let ready=typeof frcFlush==='function'?await frcFlush():true;
   if(typeof personnelPlanningFlush==='function'&&!await personnelPlanningFlush())ready=false;
   if(typeof documentPrintFlush==='function'&&!await documentPrintFlush())ready=false;
+  if(typeof accessPolicyFlush==='function'&&!await accessPolicyFlush())ready=false;
   if(typeof reviewedImportFlush==='function'&&!await reviewedImportFlush())ready=false;
   if(typeof reestrImportFlush==='function'&&!await reestrImportFlush())ready=false;
   if(ready)document.activeElement?.blur();

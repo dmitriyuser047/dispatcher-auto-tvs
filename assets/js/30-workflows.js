@@ -8,6 +8,7 @@ function wfToday() { return BusinessCalendar.resolve(data,new Date().toISOString
 function wfHash(s) { let h=2166136261; for(let i=0;i<s.length;i++) h=Math.imul(h^s.charCodeAt(i),16777619); return (h>>>0).toString(16); }
 function wfInitData(d) {
   WF_SECTIONS.forEach(n=>{if(!Array.isArray(d[n])) d[n]=[];});
+  if(typeof _sync!=='undefined'&&_sync.platform?.scopedAccess)return;
   // Детерминированные ключи нужны старым строкам реестра для совместной работы.
   for(const section of ['reestrRows','budget',...WF_SECTIONS]) {
     const seen=new Map(); (d[section]||[]).forEach(r=>{ if(!r || typeof r!=='object' || r.id!==undefined&&r.id!==null&&r.id!=='') return; const h=wfHash(JSON.stringify(r)); const n=seen.get(h)||0; seen.set(h,n+1); r.id='legacy_'+section+'_'+h+'_'+n; });

@@ -33,7 +33,8 @@ function filteredRevisions(revisions, principal) {
   return Object.fromEntries(storage.SECTIONS.map(name => [name, readable(principal, name) ? revisions[name] || 0 : 0]));
 }
 function publicAccess(principal) {
-  return { user:{ id:principal.id, name:principal.name, role:principal.role, legacy:!!principal.legacy }, readable:storage.SECTIONS.filter(n => readable(principal,n)), writable:storage.SECTIONS.filter(n => access.authorize(principal,'write',n)), fieldPermissions:access.fieldPermissions(principal),periodActions:require('./period-access.cjs').actions(principal),fuelActions:access.fuelActions(principal),procurementActions:access.procurementActions(principal),costActions:access.costActions(principal),repairActions:access.repairActions(principal),calendarActions:access.calendarActions(principal),printActions:access.printActions(principal),importActions:access.importActions(principal) };
+  const normalized=require('./access-context.cjs').normalizePrincipal(principal);
+  return { policyStamp:normalized.policyStamp,...(normalized.accessPolicy!==undefined?{accessPolicy:normalized.accessPolicy}:{}),user:{ id:principal.id, name:principal.name, role:principal.role, legacy:!!principal.legacy }, readable:storage.SECTIONS.filter(n => readable(principal,n)), writable:storage.SECTIONS.filter(n => access.authorize(principal,'write',n)), fieldPermissions:access.fieldPermissions(principal),periodActions:require('./period-access.cjs').actions(principal),fuelActions:access.fuelActions(principal),procurementActions:access.procurementActions(principal),costActions:access.costActions(principal),repairActions:access.repairActions(principal),calendarActions:access.calendarActions(principal),printActions:access.printActions(principal),importActions:access.importActions(principal) };
 }
 
 function readBody(req,limit=MAX_BODY) {
@@ -80,12 +81,10 @@ async function writeRequest(req,res,full,authenticateRequest) {
       if (payload.databaseToken !== token) { respond(res,409,{ok:false,databaseChanged:true,databaseToken:token,error:'База данных на сервере изменилась. Заново откройте её перед сохранением.'}); return; }
       const writeContext = { principal, now:new Date().toISOString(),beforeCommit:backup||undefined };
       const result = full
-        ? storage.writeAll(dataDir,sections,{databaseToken:payload.databaseToken,operation:payload.operation,base:payload.base,requireBase:true,...writeContext})
-        : storage.writeSections(dataDir,{base:payload.base || {},sections,databaseToken:payload.databaseToken,operation:payload.operation},writeContext);
+        ? storage.writeAll(dataDir,sections,{databaseToken:payload.databaseToken,operation:payload.operation,scopeViews:payload.scopeViews,base:payload.base,requireBase:true,...writeContext})
+        : storage.writeSections(dataDir,{base:payload.base || {},sections,databaseToken:payload.databaseToken,operation:payload.operation,scopeViews:payload.scopeViews},writeContext);
       result.databaseToken = token;
       if (result.revisions) result.revisions = filteredRevisions(result.revisions,principal);
-      if (result.canonicalSections) result.canonicalSections = Object.fromEntries(Object.entries(result.canonicalSections)
-        .filter(([name]) => readable(principal,name)).map(([name,rows]) => [name,require('./platform-service.cjs').visibleRows(name,rows,principal)]));
       respond(res,result.ok ? 200 : 409,result);
       });
     } finally { _writeLock = false; }
@@ -167,13 +166,12 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls,renderPd
         const name = sectionMatch[1];
         if (!storage.SECTIONS.includes(name)) { respond(res,404,{ok:false,error:'Неизвестный раздел'}); return; }
         if (!readable(principal,name)) { respond(res,200,{name,rev:0,rows:[],databaseToken:storage.databaseToken(_dataDir)}); return; }
-        const section = storage.readSection(_dataDir,name);
-        section.rows = require('./platform-service.cjs').visibleRows(name,section.rows,principal);
+        const section = storage.readSection(_dataDir,name,{principal});
         respond(res,200,section); return;
       }
       if (req.url === '/api/data' || req.url === '/api/snapshot') {
-        const snapshot = storage.readSnapshot(_dataDir), all = filteredData(snapshot.data,principal);
-        respond(res,200,req.url === '/api/data' ? all : {data:all,revisions:filteredRevisions(snapshot.revisions,principal),databaseToken:snapshot.databaseToken,access:publicAccess(principal),platform:snapshot.platform}); return;
+        const snapshot = storage.readSnapshot(_dataDir,{principal});
+        respond(res,200,req.url === '/api/data' ? snapshot.data : {...snapshot,access:publicAccess(principal)}); return;
       }
       respond(res,404,{ok:false,error:'Неизвестный запрос'});
     } catch (e) { respond(res,500,{ok:false,error:e.message}); }

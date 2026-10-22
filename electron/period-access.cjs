@@ -22,7 +22,7 @@ function canManage(principal,scope){
  const narrowed=principal?.writable;
  if(!SCOPES.includes(scope)||!ROLES[scope].includes(principal?.role)||!canRead(principal,scope)||narrowed&&!narrowed.includes('*')&&!narrowed.includes('fuelPeriods'))return false;
  const reads=require('../assets/core/period-policy.js').describe(scope).readSections;
- return Array.isArray(reads)&&reads.every(name=>permitted(principal,'read',name));
+ return ['period:close','period:reopen'].some(action=>access.actionAvailable(principal,action,'fuelPeriods'))&&Array.isArray(reads)&&reads.every(name=>permitted(principal,'read',name));
 }
 function actions(principal){return SCOPES.filter(scope=>canManage(principal,scope));}
 function events(row){return Array.isArray(row?.closureEvents?.events)?row.closureEvents.events:[];}

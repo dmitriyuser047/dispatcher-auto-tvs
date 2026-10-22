@@ -127,7 +127,7 @@ function createCommandOutbox(configuration={}){
     const json=JSON.stringify(payload);
     if(Buffer.byteLength(json)>maxPayloadBytes)fail('OUTBOX_PAYLOAD_LIMIT','Операция превышает предел локальной очереди');
     const command=Object.hasOwn(payload,'command');
-    const allowed=command?['protocolVersion','base','command','databaseToken','operation']:['base','sections','databaseToken','operation'];
+    const allowed=command?['protocolVersion','base','command','databaseToken','operation']:['base','sections','scopeViews','databaseToken','operation'];
     if(Object.keys(payload).some(key=>!allowed.includes(key)))fail('OUTBOX_PAYLOAD','Неожиданные поля запроса сохранения');
     let parsed;try{parsed=command?contracts.parseCommandEnvelope(payload,schema.sections):contracts.parseSectionWrite(payload,schema.sections);}catch{fail('OUTBOX_PAYLOAD','Некорректный запрос сохранения в очереди');}
     if(!parsed.operation||typeof parsed.databaseToken!=='string'||!parsed.databaseToken)fail('OUTBOX_PROTOCOL','Нужны ID операции и идентификатор базы');

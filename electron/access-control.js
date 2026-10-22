@@ -54,7 +54,8 @@ function normalizeServerUsers(users) {
     const expiresAt = user.expiresAt ? String(user.expiresAt) : null;
     if (expiresAt && !Number.isFinite(Date.parse(expiresAt))) throw new Error('Некорректный срок действия токена');
     ids.add(id); hashes.add(tokenHash);
-    return { id, name, role, enabled:user.enabled !== false, tokenHash,
+    const restrictions = require('./access-context.cjs').normalizePrincipal({ ...user, id, name, role });
+    return { id, name, role, ...(restrictions.accessPolicy !== undefined ? {accessPolicy:restrictions.accessPolicy}:{}), ...Object.fromEntries(['readable','writable'].filter(key=>restrictions[key]!==undefined).map(key=>[key,restrictions[key]])), enabled:user.enabled !== false, tokenHash,
       createdAt:typeof user.createdAt === 'string' ? user.createdAt : null,
       rotatedAt:typeof user.rotatedAt === 'string' ? user.rotatedAt : null, expiresAt };
   });
@@ -81,7 +82,8 @@ function authenticate(token, settings = {}, options = {}) {
       const equal = constantTimeHashEqual(supplied, user?.tokenHash);
       if (equal && user.enabled !== false && Object.hasOwn(ROLES,user.role) && (!user.expiresAt || Date.parse(user.expiresAt) > Date.now())) match = user;
     }
-    return match ? Object.freeze({ id:String(match.id), name:String(match.name), role:match.role, legacy:false }) : null;
+    if (!match) return null;
+    try { return Object.freeze(require('./access-context.cjs').normalizePrincipal({...match,id:String(match.id),name:String(match.name),role:match.role,legacy:false})); } catch { return null; }
   }
   // Existing installations continue to connect until personal accounts are
   // configured. A configured server never falls back to its old shared key.
@@ -91,18 +93,28 @@ function authenticate(token, settings = {}, options = {}) {
 }
 
 /** Sections must also be checked against storage.SECTIONS by the HTTP handler. */
-function authorize(principal, action, section) {
+function authorizeRole(principal, action, section) {
   if (!principal || !Object.hasOwn(ROLES,principal.role)) return false;
   const role = principal.role;
   if (action === 'ping') return true;
   if (action === 'admin' || action === 'replace') return role === 'admin';
   if (typeof section !== 'string' || !/^[a-zA-Z]+$/.test(section)) return false;
-  if(section==='documentDrafts'&&['read','write'].includes(action))return ['shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords','tankIncomes'].some(name=>authorize(principal,action,name));
+  if(section==='documentDrafts'&&['read','write'].includes(action))return ['shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords','tankIncomes'].some(name=>authorizeRole(principal,action,name));
   if (action === 'read') return !FINANCIAL_SECTIONS.includes(section) || ['admin','accountant','viewer'].includes(role);
   // The HTTP handler MUST enforce append-only history, ignoring client authors.
   if ((action === 'append' || action === 'write') && section === 'auditLog') return true;
   if (action !== 'write') return false;
   return role === 'admin' || ROLES[role].write.includes(section);
+}
+
+function authorize(principal,action,section) {
+  if(['ping','admin','replace'].includes(action)){
+    if(!authorizeRole(principal,action,section))return false;
+    const normalized=require('./access-context.cjs').normalizePrincipal(principal);
+    return action!=='replace'||!require('./access-context.cjs').hasNarrowing(normalized)&&!['readable','writable'].some(field=>normalized[field]&&!normalized[field].includes('*'));
+  }
+  if(!require('./access-context.cjs').hasPolicy(principal)){const list=principal?.[action==='read'?'readable':'writable'];return authorizeRole(principal,action,section)&&(!list||list.includes('*')||list.includes(section));}
+  return require('./access-context.cjs').sectionAllowed(principal,action,section);
 }
 
 const MECHANIC_ASSET_FIELDS = Object.freeze({
@@ -114,7 +126,7 @@ const MECHANIC_ASSET_FIELDS = Object.freeze({
 function validateAssetChanges(principal, section, previous, next) {
   if (principal?.role !== 'mechanic' || !Object.hasOwn(MECHANIC_ASSET_FIELDS,section)) return;
   if (!Array.isArray(previous) || !Array.isArray(next) || previous.length !== next.length) throw new Error('Механик может изменять регламенты ТО существующей техники; добавление и удаление карточек разрешены диспетчеру');
-  const key = (row,index) => row && typeof row === 'object' && !Array.isArray(row) ? row.id != null ? 'id:' + String(row.id) : 'row:' + index : null;
+  const key = (row,index) => row && typeof row === 'object' && !Array.isArray(row) ? row.id != null ? 'id:' + typeof row.id + ':' + JSON.stringify(row.id) : 'row:' + index : null;
   const oldRows = new Map(previous.map((row,index) => [key(row,index),row]));
   const seen = new Set(), allowed = new Set(MECHANIC_ASSET_FIELDS[section]);
   for (let index=0;index<next.length;index++) {
@@ -142,26 +154,27 @@ function validateAssetChanges(principal, section, previous, next) {
 function fieldPermissions(principal) {
   return principal?.role === 'mechanic' ? MECHANIC_ASSET_FIELDS : {};
 }
+function actionAvailable(principal,action,section){if(!require('./access-context.cjs').hasPolicy(principal)&&principal?.actions===undefined)return true;try{return require('./access-context.cjs').sectionAllowed(principal,action,section);}catch{return false;}}
 function fuelActions(principal) {
   const narrowed=principal?.writable;
   return authorize(principal,'write','fuelMovements')&&(!narrowed||narrowed.includes('*')||narrowed.includes('fuelMovements'))
-    ? ['measure','applyDifference','voidMeasurement','reverseLegacyTransfer'] : [];
+    ? ['measure','applyDifference','voidMeasurement','reverseLegacyTransfer'].filter(action=>actionAvailable(principal,'fuel:'+action,'fuelMovements')) : [];
 }
 function procurementActions(principal) {
   const narrowed=principal?.writable;
   const writable=name=>authorize(principal,'write',name)&&(!narrowed||narrowed.includes('*')||narrowed.includes(name));
   const planning=writable('procurementOrders');
-  return Object.fromEntries(['tank','part'].map(kind=>[kind,!planning?[]:['saveOrder','activateLegacy','cancelRemaining',...(writable(kind==='tank'?'fuelMovements':'partMovements')?['supplierReturn']:[])]]));
+  return Object.fromEntries(['tank','part'].map(kind=>[kind,!planning?[]:['saveOrder','activateLegacy','cancelRemaining',...(writable(kind==='tank'?'fuelMovements':'partMovements')?['supplierReturn']:[])].filter(action=>actionAvailable(principal,'procurement:'+action,action==='supplierReturn'?(kind==='tank'?'fuelMovements':'partMovements'):'procurementOrders'))]));
 }
 function costActions(principal) {
   if(!['admin','accountant'].includes(principal?.role))return [];
   const narrowed=principal?.writable,writable=name=>authorize(principal,'write',name)&&(!narrowed||narrowed.includes('*')||narrowed.includes(name));
-  return [...(writable('costProfiles')?['savePolicy']:[]),...(writable('costEntries')?['saveAllocation']:[])];
+  return [...(writable('costProfiles')?['savePolicy']:[]),...(writable('costEntries')?['saveAllocation']:[])].filter(action=>actionAvailable(principal,'cost:'+action,action==='savePolicy'?'costProfiles':'costEntries'));
 }
 function repairActions(principal) {
   const narrowed=principal?.writable;
   return ['admin','mechanic'].includes(principal?.role)&&authorize(principal,'write','workOrders')&&(!narrowed||narrowed.includes('*')||narrowed.includes('workOrders'))
-    ? ['saveOrder','approve','start','cancel'] : [];
+    ? ['saveOrder','approve','start','cancel'].filter(action=>actionAvailable(principal,'repair:'+action,'workOrders')) : [];
 }
 function calendarActions(principal) {
   const narrowed=principal?.writable,readable=principal?.readable;
@@ -169,7 +182,7 @@ function calendarActions(principal) {
   if(!can('read','appMeta'))return [];
   const configure=principal?.role==='admin'&&can('write','appMeta');
   const confirm=(['admin','dispatcher'].includes(principal?.role)&&can('write','dispatchJobs')&&can('read','dispatchJobs'))||(['admin','mechanic'].includes(principal?.role)&&can('write','workOrders')&&can('read','workOrders'));
-  return [...(configure?['configure']:[]),...(confirm?['confirmInterval']:[])];
+  return [...(configure&&actionAvailable(principal,'calendar:configure','appMeta')?['configure']:[]),...(confirm&&['dispatchJobs','workOrders'].some(name=>can('write',name)&&actionAvailable(principal,'calendar:confirmInterval',name))?['confirmInterval']:[])];
 }
 function canCalendarAction(principal,input) {
   if(!calendarActions(principal).includes(input?.action))return false;
@@ -179,9 +192,16 @@ function canCalendarAction(principal,input) {
 }
 
 function publicUser(user) {
-  return { id:user.id, name:user.name, role:user.role, enabled:user.enabled !== false,
+  const normalized=require('./access-context.cjs').normalizePrincipal(user);
+  return { id:user.id, name:user.name, role:user.role, ...(normalized.accessPolicy!==undefined?{accessPolicy:normalized.accessPolicy}:{}), ...Object.fromEntries(['readable','writable'].filter(key=>normalized[key]!==undefined).map(key=>[key,normalized[key]])), policyStamp:normalized.policyStamp, enabled:user.enabled !== false,
     createdAt:user.createdAt || null, rotatedAt:user.rotatedAt || null, expiresAt:user.expiresAt || null };
 }
-function printActions(principal){const narrowed=principal?.readable,can=name=>authorize(principal,'read',name)&&(!narrowed||narrowed.includes('*')||narrowed.includes(name));return can('appMeta')&&['vehicles','shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords','tankIncomes'].some(can)?['capture']:[];}
+function printActions(principal){const narrowed=principal?.readable,can=name=>authorize(principal,'read',name)&&(!narrowed||narrowed.includes('*')||narrowed.includes(name));return can('appMeta')&&['vehicles','shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords','tankIncomes'].some(name=>can(name)&&actionAvailable(principal,'print:capture',name))?['capture']:[];}
 
-module.exports = { ROLES, FINANCIAL_SECTIONS, hashToken, issueToken, normalizeServerUsers, authenticate, authorize, publicUser, validateAssetChanges, fieldPermissions,fuelActions,procurementActions,costActions,repairActions,calendarActions,canCalendarAction,printActions,importActions:principal=>require('./import-source.cjs').actions(principal) };
+function publicError(error,principal){
+  const context=require('./access-context.cjs');if(!(context.hasNarrowing||context.hasPolicy)(principal))return error;
+  const safe=['SCOPE_VIEW_REQUIRED','CURSOR_INVALID','CURSOR_STALE','QUERY_FIELD_ACCESS','ACCESS_DENIED'].includes(error?.code)?error.message:'Операция не выполнена: проверьте доступные данные и текущие права.';
+  return Object.assign(new Error(safe),{code:error?.code||'OPERATION_FAILED',status:error?.status||400});
+}
+const POLICY_ACTIONS=Object.freeze(['read','create','update','delete','document:saveDraft','document:postDraft','document:discardDraft','document:post','document:void','document:reverse','document:settle','fuel:issue','fuel:measure','fuel:applyDifference','fuel:voidMeasurement','fuel:reverseLegacyTransfer','procurement:saveOrder','procurement:activateLegacy','procurement:cancelRemaining','procurement:supplierReturn','cost:savePolicy','cost:saveAllocation','repair:saveOrder','repair:approve','repair:start','repair:cancel','calendar:configure','calendar:confirmInterval','period:close','period:reopen','shift:accept','assignment:save','catalog:merge','print:capture','print:export',...['glonass','fuel-statement','section-data','vehicles','catalog','personnel','registry','provider-totals'].map(profile=>'import:'+profile)]);
+module.exports = { POLICY_ACTIONS,actionAvailable,publicError, ROLES, FINANCIAL_SECTIONS, hashToken, issueToken, normalizeServerUsers, authenticate, authorize, authorizeRole, publicUser, validateAssetChanges, fieldPermissions,fuelActions,procurementActions,costActions,repairActions,calendarActions,canCalendarAction,printActions,importActions:principal=>require('./import-source.cjs').actions(principal) };

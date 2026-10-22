@@ -28,6 +28,14 @@
  function registrySnapshot(value){
   if(!plain(value))fail('INVALID_GRAPH','Нужны разделы базы');const result={};
   for(const name of schema.sections){const descriptor=Object.getOwnPropertyDescriptor(value,name);if(descriptor?.get||descriptor?.set)fail('INVALID_GRAPH','Исполняемый раздел базы недопустим');result[name]=descriptor?.value??[];}
+  // The backend's immutable print scope proof is never part of the public
+  // catalog review. Keep every business audit field and historical reference;
+  // storage and the command planner still retain the original full rows.
+  if(Array.isArray(result.auditLog))result.auditLog=result.auditLog.map(row=>{
+   if(!plain(row)||Object.getOwnPropertyDescriptor(row,'type')?.value!=='transaction'||!own(row,'archiveScope'))return row;
+   const descriptors=Object.getOwnPropertyDescriptors(row);delete descriptors.archiveScope;
+   return Object.create(Object.getPrototypeOf(row),descriptors);
+  });
   return result;
  }
  function physicalBlock(db,request,source){

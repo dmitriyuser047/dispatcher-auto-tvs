@@ -1,0 +1,8 @@
+#acpForm [hidden]{display:none!important}
+#acpForm input[type=checkbox]{width:auto}
+#acpForm .acp-grant>label{display:inline-flex;flex-direction:column;gap:5px;margin:8px;max-width:100%}
+#acpForm .acp-grant>label input:not([type=checkbox]){min-width:160px;max-width:100%}
+#acpForm .acp-section{padding:12px;margin:9px 0}
+#acpForm .acp-section summary{cursor:pointer;font-weight:600;margin-bottom:8px}
+#acpForm [data-acp-rule-body]>p{margin:12px 0 6px}
+#acpError{color:var(--red);white-space:pre-wrap}

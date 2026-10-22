@@ -3,38 +3,32 @@ const { dialog, shell, BrowserWindow } = require('electron');
 const backup = require('./backup-service.cjs');
 const SAFE_EXT = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.txt', '.csv', '.xlsx', '.xls', '.docx', '.odt', '.ods']);
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
-function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir, getPrincipal }) {
+function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir, getPrincipal, getContext, assertContext }) {
     const local = () => { if (isClientMode())
         throw Error('Файлы и резервный пакет создаются на компьютере с основной базой.'); };
-    const filePath = id => { if (!/^[a-f0-9]{64}\.[a-z0-9]{1,6}$/.test(id))
-        throw Error('Неверный ID файла'); return path.join(getDataDir(), 'attachments', id); };
-    ipcMain.handle('add-attachment', async (event) => { try {
+    const attachments=require('./attachment-access.cjs');
+    ipcMain.handle('add-attachment', async (event, origin) => { try {
         local();
+        const context=getContext?.(event),dir=path.resolve(getDataDir()),principal=getPrincipal?.(event);
+        const captured=attachments.capture(dir,origin,{principal});
         const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), { title: 'Добавить документ', properties: ['openFile'], filters: [{ name: 'Документы', extensions: [...SAFE_EXT].map(x => x.slice(1)) }] });
         if (r.canceled)
             return { ok: false, canceled: true };
         const source = r.filePaths[0], ext = path.extname(source).toLowerCase();
         if (!SAFE_EXT.has(ext))
             throw Error('Неподдерживаемый тип документа');
-        if (fs.statSync(source).size > 25 * 1024 * 1024)
-            throw Error('Файл больше 25 МБ');
-        const b = fs.readFileSync(source), hash = sha(b), id = hash + ext, dest = filePath(id);
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-        if (!fs.existsSync(dest))
-            fs.writeFileSync(dest, b, { flag: 'wx' });
-        return { ok: true, file: { id, name: path.basename(source), size: b.length, sha256: hash, addedAt: new Date().toISOString() } };
+        local();if(context)assertContext(context);if(path.resolve(getDataDir())!==dir)throw Error('Профиль базы изменился');
+        const file=attachments.add(dir,captured,source,{principal:getPrincipal?.(event)});
+        return {ok:true,file,databaseToken:captured.databaseToken};
     }
     catch (e) {
         return { ok: false, error: e.message };
     } });
-    ipcMain.handle('open-attachment', async (_event, id) => { try {
+    ipcMain.handle('open-attachment', async (event, origin) => { try {
         local();
-        const p = filePath(id);
+        const {path:p}=attachments.inspect(getDataDir(),origin,{principal:getPrincipal?.(event)});
         if (!SAFE_EXT.has(path.extname(p)))
             throw Error('Неподдерживаемый тип');
-        const b = fs.readFileSync(p);
-        if (sha(b) !== id.slice(0, 64))
-            throw Error('Контрольная сумма документа не совпала');
         const err = await shell.openPath(p);
         if (err)
             throw Error(err);

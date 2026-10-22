@@ -22,11 +22,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   getDataPath:    ()        => ipcRenderer.invoke('get-data-path'),
   getDataIdentity:()        => ipcRenderer.invoke('get-data-identity'),
+  getDataCacheContext:()    => ipcRenderer.invoke('get-data-cache-context'),
   getDataHealth:  ()        => ipcRenderer.invoke('get-data-health'),
   inspectSchemaUpgrade:payload=>ipcRenderer.invoke('inspect-schema-upgrade',payload),
   upgradeSchemaCopy:payload=>ipcRenderer.invoke('upgrade-schema-copy',payload),
-  addAttachment:  ()        => ipcRenderer.invoke('add-attachment'),
-  openAttachment:(id)      => ipcRenderer.invoke('open-attachment',id),
+  addAttachment:  origin    => ipcRenderer.invoke('add-attachment',origin),
+  openAttachment: origin    => ipcRenderer.invoke('open-attachment',origin),
   archiveImportSource:(payload) => ipcRenderer.invoke('archive-import-source',payload),
   createBackupPackage:()=>ipcRenderer.invoke('create-backup-package'),
   verifyBackupPackage:()=>ipcRenderer.invoke('verify-backup-package'),
@@ -38,6 +39,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Настройки / пользователи
   getSettings:       ()          => ipcRenderer.invoke('get-settings'),
+  getAccessCatalog:  ()          => ipcRenderer.invoke('get-access-catalog'),
   getTheme:          ()          => ipcRenderer.invoke('get-theme'),
   setTheme:          (theme)     => ipcRenderer.invoke('set-theme', theme),
   onThemeChanged:    (cb)        => ipcRenderer.on('workspace-theme-changed', (_event, theme) => cb(theme)),

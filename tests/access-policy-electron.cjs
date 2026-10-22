@@ -1,0 +1,28 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{createRequire}=require('node:module');
+const storage=require('../electron/storage'),sqlite=require('../electron/sqlite-storage.cjs'),server=require('../electron/server'),access=require('../electron/access-control'),root=path.resolve(__dirname,'..');
+let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
+test('hidden Electron client carries full-view witnesses and current scoped rights through real IPC and HTTP for JSON and SQLite',{timeout:240000},async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-access-native-'));let app;
+ t.after(async()=>{if(app){await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(window=>window.destroy())).catch(()=>{});await app.close().catch(()=>{});}await server.stop();assert.equal(path.dirname(path.resolve(dir)),path.resolve(os.tmpdir()));assert.match(path.basename(dir),/^tvs-access-native-/);fs.rmSync(dir,{recursive:true,force:true});});
+ for(const backend of ['json','sqlite']){
+  const database=path.join(dir,backend),profile=path.join(dir,'profile-'+backend),data=Object.fromEntries(storage.SECTIONS.map(name=>[name,[]]));
+  data.vehicles=[{id:0,plate:'SYNTHETIC A',org:'А',site:'Север',secret:'PRIVATE-FIELD'},{id:'0',plate:'PRIVATE-B',org:'Б',site:'Юг'},{id:'last',plate:'SYNTHETIC LAST',org:'А',site:'Север'}];data.appMeta=[{id:'meta',toPlanInit:'synthetic'}];
+  if(backend==='sqlite')sqlite.create(database,{data});else require('./period-test-support.cjs').seedDatabase(database,data);
+  const key=access.issueToken(),account={id:'synthetic-account',name:'Synthetic scoped account',role:'dispatcher',enabled:true,tokenHash:key.tokenHash,accessPolicy:{version:1,grants:[{org:'А',site:'Север'}],sections:{vehicles:{readFields:['id','plate','org','site','notes'],writeFields:['notes']}}}};
+  const owner=access.issueToken(),settings={serverAccessConfigured:true,serverUsers:[{id:'owner',name:'Synthetic owner',role:'admin',enabled:true,tokenHash:owner.tokenHash},account]};
+  const started=await server.start({port:0,dataDir:database,settings:()=>settings});assert.equal(started.ok,true);fs.mkdirSync(profile);
+  fs.writeFileSync(path.join(profile,'settings.json'),JSON.stringify({users:[{name:'Synthetic network profile',dataDir:database}],activeUser:0,networkMode:'client',remoteHost:'127.0.0.1',remotePort:started.port,serverPort:started.port,networkKey:key.token,remoteProtocol:'http:'}));
+  const bootstrap=path.join(dir,'bootstrap-'+backend+'.cjs');fs.writeFileSync(bootstrap,`const Module=require('node:module'),load=Module._load,electron=load('electron',module,false);const HiddenWindow=new Proxy(electron.BrowserWindow,{construct(Target,args){const win=new Target({...args[0],show:false});win.show=()=>{};win.showInactive=()=>{};return win;}});Module._load=function(request,parent,isMain){return request==='electron'?{...electron,BrowserWindow:HiddenWindow}:load.apply(this,arguments);};electron.app.setAppPath(${JSON.stringify(root)});require(${JSON.stringify(path.join(root,'electron/main.js'))});`);
+  const packaged=process.env.TVS_PACKAGED_EXE;app=await pw._electron.launch({executablePath:packaged||require('electron'),args:packaged?['--user-data-dir='+profile,'--tvs-test-hidden']:[bootstrap,'--user-data-dir='+profile,'--tvs-test-hidden'],cwd:root});const page=await app.firstWindow(),errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.waitForFunction(()=>typeof data!=='undefined'&&data.vehicles?.length===2&&_sync.access?.accessPolicy?.version===1);
+  const first=await page.evaluate(async()=>{const query=await window.electronAPI.queryRows({section:'vehicles',limit:1});const before=JSON.stringify(data);data.vehicles[0].notes='Native scoped edit';const saved=await saveData(data);return {saved,before,query,rows:data.vehicles,view:_sync.scopeViews.vehicles,error:platformRuntimeStatus().lastError};});
+  assert.equal(first.saved,true,JSON.stringify(first));assert.equal(first.query.total,2);assert.equal(first.query.scopeViews,undefined);assert.equal(first.rows[0].notes,'Native scoped edit');assert.doesNotMatch(JSON.stringify(first),/PRIVATE/);assert.equal(first.view.policyStamp.length,71);
+  const actual=storage.readAll(database);assert.equal(actual.vehicles[0].secret,'PRIVATE-FIELD');assert.equal(actual.vehicles[1].plate,'PRIVATE-B');assert.deepEqual(actual.vehicles.map(row=>row.id),[0,'0','last']);
+  account.accessPolicy={version:1,grants:[{org:'Б',site:'Юг'}],sections:{vehicles:{readFields:['id','plate','org','site','notes'],writeFields:['notes']}}};
+  const refused=await page.evaluate(async()=>{data.vehicles[0].notes='Stale rights';return await saveData(data);});assert.equal(refused,false);assert.equal(storage.readAll(database).vehicles[0].notes,'Native scoped edit');
+  const reloaded=await page.evaluate(async()=>{data=await loadData();rebuildIndex();return {rows:data.vehicles,stamp:_sync.access.policyStamp,views:_sync.scopeViews};});assert.deepEqual(reloaded.rows.map(row=>row.id),['0']);assert.equal(reloaded.rows[0].plate,'PRIVATE-B');assert.notEqual(reloaded.stamp,first.view.policyStamp);assert.ok(reloaded.views.vehicles);
+  assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().some(window=>window.isVisible())),false);assert.deepEqual(errors,[]);
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(window=>window.destroy()));await app.close();app=null;await server.stop();
+ }
+});

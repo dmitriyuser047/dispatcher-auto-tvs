@@ -35,12 +35,26 @@ const SYNC_NAMES = {
 };
 const SYNC_POLL_MS = 20000;
 
-const _sync = { enabled: false, revs: {}, synced: {}, databaseToken:null, access:null, platform:null, lastResult:null, chain: Promise.resolve(), polling: null, needRefresh: [] };
+const _sync = { enabled: false, revs: {}, synced: {}, scopeViews: {}, databaseToken:null, access:null, platform:null, lastResult:null, chain: Promise.resolve(), polling: null, needRefresh: [] };
 
 function syncSessionStamp() {
   return JSON.stringify([typeof dispatcherContext === 'function' ? dispatcherContext().identity : _sync.databaseToken,
-    _sync.access?.user?.id, _sync.access?.user?.role, _sync.access?.readable, _sync.access?.writable, _sync.access?.fieldPermissions, _sync.access?.periodActions, _sync.access?.fuelActions, _sync.access?.procurementActions, _sync.access?.costActions, _sync.access?.repairActions, _sync.access?.calendarActions, _sync.access?.printActions, _sync.access?.importActions]);
+    _sync.access?.user?.id, _sync.access?.user?.role, _sync.access?.policyStamp, _sync.access?.readable, _sync.access?.writable, _sync.access?.fieldPermissions, _sync.access?.periodActions, _sync.access?.fuelActions, _sync.access?.procurementActions, _sync.access?.costActions, _sync.access?.repairActions, _sync.access?.calendarActions, _sync.access?.printActions, _sync.access?.importActions]);
 }
+
+// Only a full canonical projection supplies a write witness. Query pages never
+// become the baseline of a replacement save.
+function syncInstallScopeViews(response,names) {
+  if(!response?.scopeViews)return;
+  _sync.scopeViews ||= {};
+  for(const name of names){
+    const view=response.scopeViews[name];
+    if(view && view.version===1 && view.policyStamp===_sync.access?.policyStamp && view.revision===_sync.revs[name] && /^sha256:[a-f0-9]{64}$/.test(view.visibleFingerprint))
+      _sync.scopeViews[name]=JSON.parse(JSON.stringify(view));
+    else delete _sync.scopeViews[name];
+  }
+}
+
 function syncEnsureSession(stamp) {
   if (stamp !== syncSessionStamp()) throw Object.assign(new Error('База или права пользователя изменились во время операции. Обновите данные перед повтором.'),{code:'SESSION_CHANGED'});
 }
@@ -135,10 +149,12 @@ async function syncLoad() {
   _sync.enabled = false;
   _sync.revs = {};
   _sync.synced = {};
+  _sync.scopeViews = JSON.parse(JSON.stringify(snap.scopeViews || {}));
   _sync.databaseToken = typeof snap.databaseToken === 'string' ? snap.databaseToken : null;
   _sync.access=snap.access||null;
   _sync.platform=snap.platform?.apiVersion === 1 ? { ...snap.platform } : null;
-  if(typeof wfInitData==='function')wfInitData(snap.data);
+  if(snap.readOnly||snap.platform?.legacyReadOnly){_loadWriteBlocked=true;_sync.platform={...(_sync.platform||{}),legacyReadOnly:1,scopedAccess:1};}
+  if((typeof _loadWriteBlocked==='undefined'||!_loadWriteBlocked)&&typeof wfInitData==='function')wfInitData(snap.data);
   if (snap.revisions) {
     _sync.enabled = true;
     _sync.revs = Object.assign({}, snap.revisions);
@@ -153,13 +169,13 @@ function syncSave(d, options) {
   const stamp=syncSessionStamp();
   const p = _sync.chain.then(async () => {
     syncEnsureSession(stamp);
-    const revs = { ..._sync.revs }, synced = { ..._sync.synced };
+    const revs = { ..._sync.revs }, synced = { ..._sync.synced }, scopeViews = { ...(_sync.scopeViews || {}) };
     let saved = false;
     try { saved = await syncSaveNow(d, options, stamp); return saved; }
     finally {
       // A failed merge must not turn the old form into a new change relative
       // to a newer server baseline when the user retries the same operation.
-      if (!saved && stamp === syncSessionStamp()) { _sync.revs = revs; _sync.synced = synced; }
+      if (!saved && stamp === syncSessionStamp()) { _sync.revs = revs; _sync.synced = synced; _sync.scopeViews = scopeViews; }
     }
   });
   _sync.chain = p.catch(() => false);
@@ -183,6 +199,14 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
     syncEnsureSession(stamp);
     const payload = { base: {}, sections: {}, ...(options?.operation ? {operation:options.operation} : {}), ...(_sync.databaseToken ? {databaseToken:_sync.databaseToken} : {}) };
     changed.forEach(n => { payload.base[n] = _sync.revs[n] || 0; payload.sections[n] = d[n] || []; });
+    if (_sync.access?.accessPolicy) {
+      if (_sync.platform?.scopedAccess !== 1) throw Error('Сервер не поддерживает безопасное сохранение ограниченного представления');
+      payload.scopeViews = Object.fromEntries(changed.map(name => {
+        const view=_sync.scopeViews?.[name];
+        if(!view || view.policyStamp!==_sync.access.policyStamp) throw Error('Загрузите полное представление раздела перед сохранением');
+        return [name,view];
+      }));
+    }
     // A concurrently changed business calendar must invalidate a reviewed wall
     // time even when the caller is not writing the calendar section itself.
     if(changed.some(name=>name==='dispatchJobs'||name==='workOrders'))payload.base.appMeta=_sync.revs.appMeta||0;
@@ -190,6 +214,7 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
     syncEnsureSession(stamp);
     if (res && (res.databaseToken != null || res.ok || res.conflicts || res.databaseChanged)) syncAssertDatabase(res);
     if (res && res.unsupported) {
+      if (_sync.access?.accessPolicy) throw Error('Сервер не поддерживает безопасное сохранение ограниченных данных');
       if (options?.requireOperationReceipt) throw new Error('Хранилище перестало поддерживать подтверждение операций. Загрузите базу заново перед сохранением.');
       if (requiredCanonical.length) throw new Error('Сервер не поддерживает подтверждённое сохранение актов. Обновите сервер перед проведением или аннулированием.');
       // Сервер старой версии — сохраняем по-старому, целиком
@@ -213,6 +238,7 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
       // next document must never mutate its earlier historical snapshot.
       const canonical=Object.fromEntries(Object.entries(res.canonicalSections||{}).map(([name,rows])=>[name,JSON.parse(JSON.stringify(rows))]));
       Object.entries(canonical).forEach(([name,rows])=>{d[name]=rows;_sync.synced[name]=JSON.stringify(rows);if(res.revisions&&name in res.revisions)_sync.revs[name]=res.revisions[name];});
+      syncInstallScopeViews(res, Object.keys(canonical));
       _sync.lastResult=res;
       if (mergedNames.size) {
         rebuildIndex();
@@ -236,6 +262,7 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
       syncEnsureSession(stamp);
       _sync.synced[n] = JSON.stringify(remote.rows || []);
       _sync.revs[n] = remote.rev || 0;
+      syncInstallScopeViews(remote,[n]);
       mergedNames.add(n);
     }
     if (mergedNames.has('reestrRows') && typeof reestrRows !== 'undefined') reestrRows = d.reestrRows;
@@ -247,6 +274,29 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
 
 // Подтянуть чужие изменения
 async function syncPoll() {
+  const accessStamp=syncSessionStamp();
+  if(window.electronAPI?.getDataCacheContext){
+    try{
+      const current=await window.electronAPI.getDataCacheContext();
+      if(accessStamp!==syncSessionStamp())return;
+      if(current?.mode==='client'){
+        if(current.legacy){_loadWriteBlocked=true;return;}
+        if(!/^sha256:[a-f0-9]{64}$/.test(current.policyStamp||'')||current.access?.policyStamp!==current.policyStamp)throw Object.assign(Error('Права сервера не подтверждены'),{code:'ACCESS_UNVERIFIED'});
+        if(current.policyStamp!==_sync.access?.policyStamp||current.databaseToken!==_sync.databaseToken||_loadWriteBlocked||!_sync.enabled){
+          syncClearAccessView('Права изменились. Загружаются доступные данные.');
+          const fresh=await loadData();data=fresh;
+          if(typeof reestrRows!=='undefined')reestrRows=data.reestrRows||[];
+          rebuildIndex();syncRefreshView(SYNC_SECTIONS);return;
+        }
+      }
+    }catch(error){
+      if(accessStamp!==syncSessionStamp())return;
+      if(error.code==='DB_BUSY'&&typeof _dataCacheContext!=='undefined'&&_dataCacheContext?.mode==='local'){console.warn('[sync access] '+error.message);return;}
+      _loadWriteBlocked=true;localCacheKey=null;_sync.enabled=false;_sync.scopeViews={};
+      if(error.code==='ACCESS_REVOKED'||[401,403].includes(error.status))syncClearAccessView('Доступ к серверу отозван. Данные скрыты.');
+      console.warn('[sync access] '+error.message);return;
+    }
+  }
   if (!_sync.enabled || !window.electronAPI.getRevisions) return;
   const stamp=syncSessionStamp();
   if (document.querySelector('.modal-overlay.open')) return;
@@ -278,6 +328,7 @@ async function syncPoll() {
       }
       _sync.synced[n] = JSON.stringify(remote.rows || []);
       _sync.revs[n] = remote.rev || 0;
+      syncInstallScopeViews(remote,[n]);
       got.push(n);
     }
     if (!got.length) return;
@@ -286,6 +337,19 @@ async function syncPoll() {
     showToast('Обновлено другим пользователем: ' + got.map(n => SYNC_NAMES[n] || n).join(', '));
     syncRefreshView(got);
   }).catch(e => { console.warn('[sync] ' + (e && e.message)); if (e?.databaseChanged) showToast(e.message); });
+}
+
+function syncClearAccessView(message){
+  _loadWriteBlocked=true;_sync.enabled=false;_sync.revs={};_sync.synced={};_sync.scopeViews={};_sync.lastResult=null;_sync.needRefresh=[];
+  _sync.access=null;_sync.databaseToken=null;_lastPersisted=null;localCacheKey=null;
+  if(typeof _lsTimer!=='undefined'&&_lsTimer){clearTimeout(_lsTimer);_lsTimer=null;_lsPending=null;}
+  data=Object.fromEntries(SYNC_SECTIONS.map(name=>[name,[]]));
+  if(typeof reestrRows!=='undefined')reestrRows=[];
+  document.querySelectorAll?.('.modal-overlay.open').forEach(modal=>modal.classList.remove('open'));
+  const host=document.getElementById?.('mainContent');if(host){host.replaceChildren();const note=document.createElement('p');note.textContent=message;host.append(note);}
+  rebuildIndex();
+  for(const action of [typeof populateOrgSelect==='function'?populateOrgSelect:null,typeof renderVehicleList==='function'?renderVehicleList:null])if(action)action();
+  showToast(message);
 }
 
 // Перерисовать текущий экран, но не мешать вводу: если открыто окно или

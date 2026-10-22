@@ -68,6 +68,7 @@ function configureNetwork(s){
 try{configureNetwork(settings);}catch(e){networkConfigError=e.message;server.configureTransport({protocol:'https:'});console.error('[network] '+e.message);}
 
 const dataBindings = new Map();
+const dataReadGenerations=new Map();
 const saveBarriers=new Map(),approvedCloseWindows=new Set();
 function finishSaveBarrier(senderId,ready){
   const pending=saveBarriers.get(senderId);if(!pending)return;
@@ -98,6 +99,46 @@ function assertDataBinding(event, token) {
   if (settings.networkMode !== 'client' && binding.databaseToken !== storage.databaseToken(getDataDir())) throw new Error('База изменилась. Загрузите её заново.');
   return binding;
 }
+function validPublicAccess(access) {
+  return !!access&&typeof access==='object'&&typeof access.user?.id==='string'&&!!access.user.id&&['admin','dispatcher','mechanic','accountant','viewer'].includes(access.user?.role)&&
+    /^sha256:[a-f0-9]{64}$/.test(access.policyStamp||'')&&['readable','writable'].every(field=>Array.isArray(access[field])&&access[field].every(name=>storage.SECTIONS.includes(name)));
+}
+function legacyPing(ping) { return ping?.ok===true&&ping.sections!==true&&!ping.access&&!ping.platform?.scopedAccess; }
+function readonlyLegacyAccess(){return {user:{id:'legacy-readonly',name:'Старый сервер · только просмотр',role:'viewer'},readable:storage.SECTIONS.slice(),writable:[],fieldPermissions:{},periodActions:[],fuelActions:[],procurementActions:{tank:[],part:[]},costActions:[],repairActions:[],calendarActions:[],printActions:[],importActions:[]};}
+function invalidateDataBinding(event){dataBindings.delete(event.sender.id);notificationService?.invalidate();}
+function beginDataRead(event){const generation=(dataReadGenerations.get(event.sender.id)||0)+1;dataReadGenerations.set(event.sender.id,generation);return generation;}
+function assertDataRead(event,generation,identity){if(dataReadGenerations.get(event.sender.id)!==generation||identity!==settingsIdentity())throw Object.assign(Error('База или права изменились во время чтения'),{code:'SESSION_CHANGED'});}
+async function readRemoteSnapshot(event){
+  const identity=settingsIdentity(),generation=beginDataRead(event),host=settings.remoteHost,port=settings.remotePort||3377;
+  try{
+    let snapshot,provenLegacy=false;
+    try{snapshot=await server.getJson(host,port,'/api/snapshot',15000);}
+    catch(error){
+      if(![404,405].includes(error.status))throw error;
+      const ping=await server.getJson(host,port,'/api/ping',5000);
+      if(!legacyPing(ping))throw Object.assign(Error('Сервер не подтвердил безопасный старый протокол чтения'),{code:'ACCESS_UNVERIFIED'});
+      provenLegacy=true;
+      snapshot={data:JSON.parse(await server.fetchData(host,port)),databaseToken:ping.databaseToken||null,revisions:null,access:readonlyLegacyAccess(),readOnly:true,platform:{legacyReadOnly:1,scopedAccess:1}};
+    }
+    assertDataRead(event,generation,identity);
+    if(!snapshot?.data||!Array.isArray(snapshot.data.vehicles)||!Array.isArray(snapshot.data.records)||!provenLegacy&&(!validPublicAccess(snapshot.access)||typeof snapshot.databaseToken!=='string'||!snapshot.databaseToken))throw Object.assign(Error('Сервер не подтвердил актуальные права снимка'),{code:'ACCESS_UNVERIFIED'});
+    bindData(event,snapshot.databaseToken,snapshot.access,snapshot.revisions,snapshot.platform);return {snapshot,generation,identity};
+  }catch(error){assertDataRead(event,generation,identity);invalidateDataBinding(event);throw error;}
+}
+async function freshDataCacheContext(event){
+  const identity=settingsIdentity(),generation=beginDataRead(event);
+  if(!(settings.networkMode==='client'&&settings.remoteHost)){const token=storage.databaseToken(getDataDir());return {version:1,mode:'local',identity:identity+':'+token,databaseToken:token,access:null,policyStamp:null};}
+  try{
+    if(networkConfigError)throw Error(networkConfigError);
+    const ping=await server.getJson(settings.remoteHost,settings.remotePort||3377,'/api/ping',5000);
+    assertDataRead(event,generation,identity);
+    const previous=dataBindings.get(event.sender.id);
+    if(legacyPing(ping)&&previous?.platform?.legacyReadOnly===1)return {version:1,mode:'client',identity:identity+':'+(ping.databaseToken||'legacy'),databaseToken:ping.databaseToken||null,access:readonlyLegacyAccess(),policyStamp:null,readOnly:true,legacy:true};
+    if(!ping?.ok||typeof ping.databaseToken!=='string'||!ping.databaseToken||!validPublicAccess(ping.access))throw Object.assign(Error('Актуальные права сервера не подтверждены'),{code:'ACCESS_UNVERIFIED'});
+    if(!previous||previous.identity!==identity||previous.databaseToken!==ping.databaseToken||JSON.stringify(previous.notificationAccess)!==JSON.stringify(ping.access))bindData(event,ping.databaseToken,ping.access,null,previous?.platform||{apiVersion:1,scopedAccess:1});
+    return {version:1,mode:'client',identity:identity+':'+ping.databaseToken,databaseToken:ping.databaseToken,access:ping.access,policyStamp:ping.access.policyStamp};
+  }catch(error){assertDataRead(event,generation,identity);invalidateDataBinding(event);throw Object.assign(new Error([401,403].includes(error.status)?'Доступ к серверу отозван':'Не удалось подтвердить текущие права сервера'),{code:[401,403].includes(error.status)?'ACCESS_REVOKED':error.code||'ACCESS_UNVERIFIED',status:error.status||0});}
+}
 let recoveryService=null;
 let documentPrintRenderer=null;
 function renderArchivedDocumentPdf(snapshot){
@@ -112,7 +153,7 @@ function readImportOriginal(filename){
   return {name:path.basename(filename),bytes};
 }
 function capturedOperationContext(event,binding=assertDataBinding(event)){
-  const client=settings.networkMode==='client',principal=client?binding.notificationAccess?.user:{id:'local-profile',name:getActiveUser().name||'Локальный пользователь',role:'admin'};
+  const client=settings.networkMode==='client',principal=client?(binding.notificationAccess?.user?{...binding.notificationAccess.user,...(binding.notificationAccess?.accessPolicy?{accessPolicy:binding.notificationAccess.accessPolicy}:{}),...(binding.notificationAccess?.readable?{readable:binding.notificationAccess.readable}:{}),...(binding.notificationAccess?.writable?{writable:binding.notificationAccess.writable}:{}),...(binding.notificationAccess?.policyStamp?{policyStamp:binding.notificationAccess.policyStamp}:{})}:null):{id:'local-profile',name:getActiveUser().name||'Локальный пользователь',role:'admin'};
   const identity=settingsIdentity(),scope=require('node:crypto').createHash('sha256').update(JSON.stringify([
     identity,binding.databaseToken,client?null:settings.activeUser,principal?.id,principal?.role,binding.notificationAccess||'local-admin'
   ])).digest('hex');
@@ -196,7 +237,7 @@ app.on('web-contents-created', (_event, contents) => {
   contents.setWindowOpenHandler(() => ({ action:'deny' }));
   contents.on('will-navigate', (event, url) => { if (url !== contents.getURL()) event.preventDefault(); });
   contents.on('will-attach-webview', event => event.preventDefault());
-  contents.once('destroyed', () => dataBindings.delete(contents.id));
+  contents.once('destroyed', () => {dataBindings.delete(contents.id);dataReadGenerations.delete(contents.id);});
 });
 
 function getActiveUser() {
@@ -321,7 +362,7 @@ app.whenReady().then(() => {
     if(!pending||payload?.nonce!==pending.nonce||typeof payload.ready!=='boolean')return false;
     finishSaveBarrier(event.sender.id,payload.ready);return true;
   });
-  require('./artifacts').register({ipcMain,getDataDir,isClientMode,getSettings:()=>settings,knowledgeDir:()=>path.join(getDataDir(),'reestr-knowledge'),getPrincipal:event=>capturedOperationContext(event).principal});
+  require('./artifacts').register({ipcMain,getDataDir,isClientMode,getSettings:()=>settings,knowledgeDir:()=>path.join(getDataDir(),'reestr-knowledge'),getPrincipal:event=>capturedOperationContext(event).principal,getContext:capturedOperationContext,assertContext:assertOperationContext});
   if (settings.networkMode !== 'client') ensureDirs();
 
   // Экспорт сводок/актов (XLSX) идёт через обычную загрузку браузера —
@@ -392,12 +433,8 @@ app.whenReady().then(() => {
     if (isClientMode()) {
       if(networkConfigError)return null;
       try {
-        let snapshot;
-        try { snapshot = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/snapshot', 15000); }
-        catch { snapshot = { data:JSON.parse(await server.fetchData(settings.remoteHost, settings.remotePort || 3377)) }; }
-        if (identity !== settingsIdentity()) throw new Error('База переключена во время чтения');
-        bindData(event, snapshot.databaseToken, snapshot.access, snapshot.revisions, snapshot.platform);
-        return JSON.stringify(snapshot.data);
+        const read=await readRemoteSnapshot(event);assertDataRead(event,read.generation,read.identity);
+        return JSON.stringify(read.snapshot.data);
       } catch (e) {
         return null;
       }
@@ -422,9 +459,10 @@ app.whenReady().then(() => {
     const identity = settingsIdentity();
     if (isClientMode()) {
       if(networkConfigError)return false;
+      if(binding.platform?.legacyReadOnly)return false;
       try {
         const body = binding.databaseToken ? { databaseToken:binding.databaseToken, data, base:payload.base ?? binding.revisions,
-          ...(payload.operation ? {operation:payload.operation} : {}) } : data;
+          ...(payload.operation ? {operation:payload.operation} : {}),...(payload.scopeViews?{scopeViews:payload.scopeViews}:{}) } : data;
         const res = await server.postData(settings.remoteHost, settings.remotePort || 3377, JSON.stringify(body));
         if (identity !== settingsIdentity() || !res?.ok) return false;
         binding.revisions = res.revisions && { ...res.revisions };
@@ -437,7 +475,7 @@ app.whenReady().then(() => {
     createDailyBackup();
     try {
       const res = storage.writeAll(getDataDir(), data, { databaseToken:binding.databaseToken, operation:payload.operation,
-        base:payload.base ?? binding.revisions, requireBase:true,
+        base:payload.base ?? binding.revisions, scopeViews:payload.scopeViews, requireBase:true,
         principal:{ id:'local-profile', name:getActiveUser().name || 'Локальный пользователь', role:'admin' } });
       if (!res.ok) return false;
       binding.revisions = { ...res.revisions };
@@ -456,22 +494,11 @@ app.whenReady().then(() => {
     const identity = settingsIdentity();
     if (isClientMode()) {
       if(networkConfigError)return null;
-      const host = settings.remoteHost, port = settings.remotePort || 3377;
       try {
-        const snapshot = await server.getJson(host, port, '/api/snapshot', 15000);
-        if (identity !== settingsIdentity()) return null;
-        bindData(event, snapshot.databaseToken, snapshot.access, snapshot.revisions, snapshot.platform);
-        return JSON.stringify(snapshot);
+        const read=await readRemoteSnapshot(event);assertDataRead(event,read.generation,read.identity);
+        return JSON.stringify(read.snapshot);
       }
-      catch (e) {
-        try {
-          const data = JSON.parse(await server.fetchData(host, port));
-          if (identity !== settingsIdentity()) return null;
-          bindData(event, null);
-          return JSON.stringify({ data, revisions:null });
-        }
-        catch { return null; }
-      }
+      catch { return null; }
     }
     try {
       const dir = getDataDir();
@@ -621,6 +648,7 @@ app.whenReady().then(() => {
     if (identity !== settingsIdentity() || !ping?.ok) throw new Error('База переключена или недоступна. Повторите действие.');
     return identity + ':' + (ping.databaseToken || 'legacy');
   });
+  ipcMain.handle('get-data-cache-context',event=>freshDataCacheContext(event));
   ipcMain.handle('choose-certificate',async(event)=>{const r=await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender),{title:'Сертификат или ключ PEM',properties:['openFile'],filters:[{name:'PEM / CRT / KEY',extensions:['pem','crt','key']}]});return r.canceled?null:r.filePaths[0];});
 
   ipcMain.handle('get-data-health', async () => {
@@ -660,6 +688,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('get-settings', () => settings);
+  ipcMain.handle('get-access-catalog',()=>({actions:require('./access-control').POLICY_ACTIONS.slice(),sections:storage.SECTIONS.slice()}));
   ipcMain.handle('get-theme', () => settings.uiTheme || null);
   ipcMain.handle('set-theme', async (_event, theme) => {
     if (!['light','dark'].includes(theme)) throw new Error('Неизвестная тема');

@@ -109,6 +109,7 @@ function autoDateSep(el) {
 // ─── DATA ───────────────────────────────────────────────
 const STORAGE_KEY = 'fuel_tracker_v1';
 let localCacheKey=STORAGE_KEY;
+let _dataCacheContext=null;
 let _loadWriteBlocked = false;
 let _lastPersisted = null;
 function validDatabase(value) {
@@ -120,30 +121,57 @@ function validDatabase(value) {
 async function loadData() {
   let d = null;
   _loadWriteBlocked = false;
-  if (typeof _sync !== 'undefined') { _sync.enabled=false; _sync.revs={}; _sync.synced={}; _sync.databaseToken=null; _sync.access=null; _sync.platform=null; _sync.lastResult=null; }
+  if (typeof _sync !== 'undefined') { _sync.enabled=false; _sync.revs={}; _sync.synced={}; _sync.scopeViews={}; _sync.databaseToken=null; _sync.access=null; _sync.platform=null; _sync.lastResult=null; }
   localCacheKey = window.electronAPI ? null : STORAGE_KEY;
   // Снимок с версиями разделов — для синхронизации нескольких пользователей
   if (typeof syncLoad === 'function') {
     try { d = await syncLoad(); } catch (e) { console.warn('[loadData] снимок: ' + e.message); }
   }
-  if (!d && window.electronAPI) {
+  if (!d && window.electronAPI && !window.electronAPI.getDataCacheContext) {
     try { const raw = await window.electronAPI.readData(); if (raw) d = JSON.parse(raw); } catch {}
   }
   // Bind the cache to the live served database as well as endpoint/account.
   // A replacement folder behind an unchanged host must not inherit its cache.
   if (window.electronAPI) { try {
     let identity;
-    if (window.electronAPI.getDataIdentity) identity = await window.electronAPI.getDataIdentity();
+    if(window.electronAPI.getDataCacheContext){
+      let current=await window.electronAPI.getDataCacheContext();
+      const valid=value=>value?.version===1&&['local','client'].includes(value.mode)&&typeof value.identity==='string'&&value.identity&&
+        (value.mode==='local'||value.legacy===true&&value.readOnly===true||/^sha256:[a-f0-9]{64}$/.test(value.policyStamp||'')&&value.access?.policyStamp===value.policyStamp&&typeof value.databaseToken==='string'&&value.databaseToken);
+      if(!valid(current))throw Error('Текущие права кеша не подтверждены');
+      if(!current.legacy&&d&&(_sync.databaseToken!==current.databaseToken||current.mode==='client'&&_sync.access?.policyStamp!==current.policyStamp)){
+        // A permission change between snapshot and ping invalidates the rows.
+        // One new snapshot is allowed; old rows are never assigned new grants.
+        d=null;_sync.enabled=false;_sync.scopeViews={};
+        if(typeof syncLoad==='function')d=await syncLoad();
+        current=await window.electronAPI.getDataCacheContext();
+        if(!valid(current)||!d||_sync.databaseToken!==current.databaseToken||current.mode==='client'&&_sync.access?.policyStamp!==current.policyStamp)throw Error('Права изменились во время загрузки. Повторите чтение базы');
+      }
+      _dataCacheContext=current;
+      if(current.mode==='client'){
+        if(typeof _sync!=='undefined'){
+          _sync.access=current.access;_sync.databaseToken=current.databaseToken;
+          _sync.platform={...(_sync.platform||{}),scopedAccess:1,...(current.legacy?{legacyReadOnly:1}:{})};
+        }
+        if(current.readOnly)_loadWriteBlocked=true;
+        if(current.legacy){localCacheKey=null;_loadWriteBlocked=true;identity=null;}
+        else identity=current.identity+':access:'+current.policyStamp;
+      }else identity=current.identity;
+    }
+    else if (window.electronAPI.getDataIdentity) identity = await window.electronAPI.getDataIdentity();
     else if (window.electronAPI.getSettings) {
       const s=await window.electronAPI.getSettings(), profile=(s.users||[])[s.activeUser||0]||{};
       if (s.networkMode==='client' && !d) throw Error('Сервер недоступен; принадлежность кеша не подтверждена');
       identity=JSON.stringify(s.networkMode==='client'?['client',s.remoteProtocol||'http:',s.remoteHost,s.remotePort,s.networkKey,s.remoteCa||null]:['local',profile.dataDir])+':'+(typeof _sync!=='undefined'&&_sync.databaseToken||'legacy');
     }
-    if (typeof identity!=='string' || !identity) throw Error('База не определена');
-    if (typeof _sync!=='undefined' && _sync.databaseToken && !identity.endsWith(':'+_sync.databaseToken)) { _loadWriteBlocked=true; throw Error('База переключена во время загрузки. Откройте программу заново.'); }
-    const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(identity));
-    localCacheKey=STORAGE_KEY+':'+Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
-  } catch(error) { localCacheKey=null; console.warn('[cache] '+error.message); } }
+    if(identity!==null){
+      if (typeof identity!=='string' || !identity) throw Error('База не определена');
+      if (!window.electronAPI.getDataCacheContext&&typeof _sync!=='undefined' && _sync.databaseToken && !identity.endsWith(':'+_sync.databaseToken)) { _loadWriteBlocked=true; throw Error('База переключена во время загрузки. Откройте программу заново.'); }
+      if(!window.electronAPI.getDataCacheContext&&typeof _sync!=='undefined'&&_sync.access?.policyStamp)identity+=':access:'+_sync.access.policyStamp;
+      const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(identity));
+      localCacheKey=STORAGE_KEY+':'+Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+    }
+  } catch(error) { localCacheKey=null;_dataCacheContext=null;if(window.electronAPI.getDataCacheContext){d=null;_loadWriteBlocked=true;if(typeof _sync!=='undefined'){_sync.enabled=false;_sync.access=null;_sync.scopeViews={};_sync.synced={};_sync.revs={};}} console.warn('[cache] '+error.message); } }
   if (d && !validDatabase(d)) d = null;
   if (!d && window.electronAPI) {
     _loadWriteBlocked = true;
@@ -177,14 +205,14 @@ async function loadData() {
     const month=String(row.date||row.month||'').slice(0,7);
     return /^\d{4}-\d{2}$/.test(month)&&month<=lastClosedFuelMonth&&cashCardKey(row.fuelCardNum||row.cardNo||row.cardNumber)==='НАЛИЧКА';
   });
-  if (!_loadWriteBlocked&&!cashTouchesClosedHistory&&(typeof _sync==='undefined'||!_sync.access||_sync.access.writable.includes('fuelCards'))&&!d.fuelCards.some(c => /наличк/i.test(c.number) || /наличк/i.test(c.provider)))
+  if (!_loadWriteBlocked&&!cashTouchesClosedHistory&&(typeof _sync==='undefined'||!_sync.platform?.scopedAccess)&&(typeof _sync==='undefined'||!_sync.access||_sync.access.writable.includes('fuelCards'))&&!d.fuelCards.some(c => /наличк/i.test(c.number) || /наличк/i.test(c.provider)))
     d.fuelCards.push({ id: 'fc_cash', number: 'НАЛИЧКА', provider: 'Наличка', org: '', status: 'active', limit: null, assignments: [], note: 'Для учёта наличных закупок топлива' });
   if (!d.fuelPeriods)   d.fuelPeriods   = [];
   if (!d.fuelWriteoffs)  d.fuelWriteoffs  = [];
   if (!d.monthlyFuel)   d.monthlyFuel   = [];
   if (!d.appMeta)       d.appMeta       = [];
   if (typeof PlatformSchema !== 'undefined') PlatformSchema.sections.forEach(name => { if (!d[name]) d[name]=[]; });
-  if (typeof wfInitData === 'function') wfInitData(d);
+  if (!_loadWriteBlocked&&typeof wfInitData === 'function') wfInitData(d);
   _lastPersisted = JSON.stringify(d);
   return d;
 }
@@ -196,7 +224,7 @@ async function loadData() {
 // Повторные вызовы схлопываются — пишется только последнее состояние.
 let _lsPending = null, _lsTimer = null;
 function scheduleLocalBackup(json) {
-  if(!localCacheKey)return;
+  if(!localCacheKey||_loadWriteBlocked)return;
   _lsPending = {key:localCacheKey,json};
   if (_lsTimer) return;
   _lsTimer = setTimeout(() => {

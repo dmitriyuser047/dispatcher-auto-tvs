@@ -6,7 +6,8 @@ export type JsonRow = { [field: string]: JsonValue };
 export type SectionRows = Record<string, JsonRow[]>;
 export type Revisions = Record<string, number>;
 export interface OperationDescriptor { id: string; digest?: string }
-export interface SectionWrite { base: Revisions; sections: SectionRows; operation?: OperationDescriptor; databaseToken?: string }
+export interface ScopeView {version:1;policyStamp:string;revision:number;visibleFingerprint:string}
+export interface SectionWrite { base: Revisions; sections: SectionRows; operation?: OperationDescriptor; databaseToken?: string; scopeViews?:Record<string,ScopeView> }
 export interface AssetTarget { section: 'vehicles' | 'generators'; id: Identifier }
 export interface IssueFuelInput { tankId: Identifier; target: AssetTarget; date: string; qty: number; reason: string; legacyOverlapConfirmed?: boolean }
 export interface AcceptShiftChanges {
@@ -158,6 +159,16 @@ export function createPlatformContracts() {
   function parseSectionWrite(value: unknown, registry: readonly string[]): SectionWrite {
     if (!object(value)) fail('INVALID_SECTIONS', '', 'Неверный запрос сохранения');
     const result: SectionWrite = { base: validateRevisions(value.base, registry), sections: validateSections(value.sections, registry) };
+    if (value.scopeViews !== undefined) {
+      const views=commandObject(commandJson(value.scopeViews,'scopeViews'),'scopeViews'),names=new Set(registry),selected:Record<string,ScopeView>={};
+      for(const [name,input] of Object.entries(views)){
+        if(!names.has(name))fail('INVALID_SCOPE_VIEW','scopeViews.'+name,'Неизвестный раздел подтверждённого представления');
+        const view=commandObject(input,'scopeViews.'+name);keys(view,['version','policyStamp','revision','visibleFingerprint'],'scopeViews.'+name);
+        if(view.version!==1||typeof view.policyStamp!=='string'||!/^sha256:[a-f0-9]{64}$/.test(view.policyStamp)||typeof view.visibleFingerprint!=='string'||!/^sha256:[a-f0-9]{64}$/.test(view.visibleFingerprint)||typeof view.revision!=='number'||!Number.isSafeInteger(view.revision)||view.revision<0)
+          fail('INVALID_SCOPE_VIEW','scopeViews.'+name,'Некорректное подтверждение полного представления');
+        selected[name]={version:1,policyStamp:view.policyStamp,revision:view.revision,visibleFingerprint:view.visibleFingerprint};
+      }result.scopeViews=selected;
+    }
     if (value.operation !== undefined) result.operation = validateOperation(value.operation);
     if (value.databaseToken !== undefined) {
       if (typeof value.databaseToken !== 'string' || !value.databaseToken) fail('INVALID_DATABASE_TOKEN', 'databaseToken', 'Неверная идентичность базы');

@@ -91,7 +91,7 @@
     }
     if (!plain(payload) || !plain(payload.base || {}) || !plain(payload.sections || {})) fail('INVALID_ARGUMENT', 'Для отпечатка нужны разделы и версии');
     const omitAudit = object => Object.fromEntries(Object.entries(object).filter(([name]) => name !== 'auditLog'));
-    return 'sha256:' + sha256(stableSerialize({ base:omitAudit(payload.base || {}), sections:omitAudit(payload.sections || {}) }));
+    return 'sha256:' + sha256(stableSerialize({ base:omitAudit(payload.base || {}), sections:omitAudit(payload.sections || {}), ...(own(payload,'scopeViews')?{scopeViews:payload.scopeViews}:{}) }));
   }
   function accessList(value, name) {
     if (value == null) return null;
