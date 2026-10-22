@@ -66,7 +66,9 @@ function wfDispatchProblems(job,old) {
 }
 function wfTankBalanceAt(id,date=wfToday()){return tankStockAt(id,date).balance;}
 
-function wfPartStock(id,date=wfToday()) { return (data.partMovements||[]).filter(r=>r.partId===id&&!r.cancelled&&!r.deleted&&r.date<=date).reduce((s,r)=>s+(r.kind==='receipt'||r.kind==='return'?1:-1)*(Number(r.qty)||0),0); }
+let wfPartStockContext=null;
+function wfPartStockWithSnapshot(action){const previous=wfPartStockContext;try{const readable=platformSessionContext().readable;if(Array.isArray(readable)&&!readable.includes('*')&&!InventoryStock.readSections.every(name=>readable.includes(name)))throw Error('Недостаточно доступа для расчёта склада запчастей');wfPartStockContext=InventoryStock.project(data,{to:wfToday()});return action();}finally{wfPartStockContext=previous;}}
+function wfPartStock(id,date=wfToday(),snapshot=wfPartStockContext) { if(typeof InventoryStock==='undefined')throw Error('Не загружено общее ядро склада запчастей');return InventoryStock.at(snapshot||InventoryStock.project(data,{partIds:[id],to:date}),{section:'parts',id},date).balance; }
 function wfValidDate(value,withTime=false) {
   if(typeof value!=='string'||!(withTime?/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/:/^\d{4}-\d{2}-\d{2}$/).test(value))return false;
   const d=new Date(value.slice(0,10)+'T12:00:00Z');
@@ -122,7 +124,7 @@ function wfValidate(section,row,old,options={}) {
   }
   if(section==='partMovements') {
     if(!(row.qty>0))throw Error('Количество должно быть больше нуля');
-    if(['issue','writeoff'].includes(row.kind)&&wfPartStock(row.partId,row.date)<row.qty)throw Error('Недостаточно остатка на складе на дату операции');
+    if(['issue','writeoff'].includes(row.kind)){const stock=wfPartStock(row.partId,row.date);if(stock===null)throw Error('Остаток склада недостоверен. Исправьте источники перед выдачей.');if(stock<row.qty)throw Error('Недостаточно остатка на складе на дату операции');}
     if(old)throw Error('Изменение проведённого движения не допускается. Оформите возврат.');
   }
   if(section==='workOrders') {

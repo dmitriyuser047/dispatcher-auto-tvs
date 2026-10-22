@@ -108,7 +108,7 @@ function prepareTransaction(previous, supplied, options = {}) {
   const id = info?.id || 'backend:' + crypto.randomUUID();
   // This proof is derived from the semantic execution option, never a section
   // request field. Raw/full writes cannot authorize their own catalog aliases.
-  const commandProof=['MergeCatalog','DocumentAction','PeriodAction','FuelAction'].includes(options.commandIntent?.command?.type)
+  const commandProof=['MergeCatalog','DocumentAction','PeriodAction','FuelAction','ProcurementAction'].includes(options.commandIntent?.command?.type)
     ? {commandIntent:contracts().parseCommandEnvelope(options.commandIntent,registry)} : {};
   const plan = kernel().prepare(previous, sections, { id, identity:options.databaseToken || 'local-storage', actor,
     revisions:options.revisions || {}, now:at,today:at.slice(0,10),...commandProof,

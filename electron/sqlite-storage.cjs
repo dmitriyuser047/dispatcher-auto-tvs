@@ -204,7 +204,7 @@ function references(data,graph){
       if(relation.kind==='assetRef'){
         const match=typeof targetId==='string'&&targetId.match(/^([vgt]):(.+)$/);targetSection=match&&relation.targets[match[1]];targetId=match&&match[2];string=true;
       }else if(relation.kind==='discriminator'){
-        let selector=values(entry.row,relation.selector)[0]?.value;if(relation.prefix&&typeof selector==='string')selector=selector.split(':')[0];targetSection=relation.targets[selector];
+        let selector=relation.selectorAligned===true?schema.referenceSelector(entry.row,relation,value.path):values(entry.row,relation.selector)[0]?.value;if(relation.prefix&&typeof selector==='string')selector=selector.split(':')[0];targetSection=relation.targets[selector];
         if(!targetSection&&relation.unknownPolicy==='advisory')continue;
       }
       if(!targetSection||!scalarId(targetId)){addIssue(entry,relation,value.path,'reference-invalid');continue;}

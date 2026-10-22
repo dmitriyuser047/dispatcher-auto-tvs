@@ -7,7 +7,8 @@ const _platformPrepareQueue=[],PLATFORM_PREPARE_LIMIT=8,PLATFORM_PREPARE_CHARACT
 function platformPrepareBackgroundStatus(){return {active:_platformPrepareActive?1:0,queued:_platformPrepareQueue.length,limit:PLATFORM_PREPARE_LIMIT};}
 function platformPrepareAccessStamp(context){
   const list=value=>value==null?null:[...new Set(value)].sort();
-  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fuelActions:list(context.fuelActions),fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
+  const procurement=context.procurementActions==null?null:{tank:list(context.procurementActions.tank),part:list(context.procurementActions.part)};
+  return PlatformKernel.stableSerialize({identity:context.identity,actor:context.actor||null,readable:list(context.readable),writable:list(context.writable),periodActions:list(context.periodActions),fuelActions:list(context.fuelActions),procurementActions:procurement,fieldPermissions:context.fieldPermissions||null,blocked:!!context.blocked});
 }
 function platformPrepareError(code,message){return Object.assign(Error(message),{name:'PlatformKernelError',code});}
 function platformPrepareGuard(job){
@@ -68,6 +69,7 @@ function platformSessionContext() {
     writable:access && Array.isArray(access.writable) ? access.writable.slice() : undefined,
     periodActions:access && Array.isArray(access.periodActions) ? access.periodActions.slice() : undefined,
     fuelActions:access && Array.isArray(access.fuelActions) ? access.fuelActions.slice() : undefined,
+    procurementActions:access?.procurementActions?{tank:Array.isArray(access.procurementActions.tank)?access.procurementActions.tank.slice():[],part:Array.isArray(access.procurementActions.part)?access.procurementActions.part.slice():[]}:undefined,
     fieldPermissions:access?.fieldPermissions || null,
     actor:user ? { id:user.id, name:user.name || user.id, role:user.role } : { id:'local', name:'Локальный пользователь', role:'admin' },
     revisions:typeof _sync === 'undefined' ? {} : { ..._sync.revs },
@@ -137,6 +139,20 @@ function platformCompactCommandResult(result){
   if(result.operationReceipt)retained.operationReceipt=Object.fromEntries(['id','digest','status','at'].filter(key=>Object.hasOwn(result.operationReceipt,key)).map(key=>[key,result.operationReceipt[key]]));
   return retained;
 }
+function platformCommandNeedsProcurement(command,source){
+  if(command.type==='ProcurementAction')return true;
+  if(command.type!=='DocumentAction'||!['tankIncomes','fuelMovements','partMovements'].includes(command.input.section))return false;
+  const input=command.input,section=input.section,list=source[section]||[],candidates=[];
+  if(input.payload)candidates.push(input.payload);
+  const draft=input.draftId===undefined?null:(source.documentDrafts||[]).find(row=>row.id===input.draftId&&row.section===section);
+  if(draft?.payload)candidates.push(draft.payload);
+  const ids=new Set(),pending=[input.id,input.correctionOf?.id,draft?.correctionOf?.id].filter(value=>value!==undefined);
+  while(pending.length&&ids.size<128){
+    const id=pending.pop(),key=JSON.stringify(id);if(ids.has(key))continue;ids.add(key);
+    for(const row of list.filter(row=>row.id===id)){candidates.push(row);if(row.lifecycle?.correctionOf?.section===section)pending.push(row.lifecycle.correctionOf.id);}
+  }
+  return candidates.some(row=>Object.hasOwn(row,'procurementReceipt')||Object.hasOwn(row,'procurementReturn'))||(source.procurementOrders||[]).some(order=>order.procurement?.receiptRefs?.some(ref=>ref.section===section&&ids.has(JSON.stringify(ref.id))));
+}
 function platformExecuteCommand(value,options={}){
   let command,id,stamp,signature,entry;
   try{
@@ -175,6 +191,8 @@ function platformExecuteCommand(value,options={}){
           throw platformPrepareError('UNSUPPORTED_PERIODS','Подключение не поддерживает проверенное закрытие периодов. Загрузите данные из совместимой версии программы.');
         if((command.type==='FuelAction'||command.type==='DocumentAction'&&command.input.section==='tankIncomes')&&_sync.platform?.fuelOperations!==1)
           throw platformPrepareError('UNSUPPORTED_FUEL_OPERATIONS','Подключение не поддерживает проверенные операции с ёмкостями. Загрузите данные из совместимой версии программы.');
+        if(platformCommandNeedsProcurement(command,source)&&_sync.platform?.procurement!==1)
+          throw platformPrepareError('UNSUPPORTED_PROCUREMENT','Подключение не поддерживает связанные закупки и поставки. Загрузите данные из совместимой версии программы.');
         if(names.some(name=>captured[name]!==(_sync.synced[name]||'[]')))
           throw platformPrepareError('UNSAVED_COMMAND_SOURCE','Сначала сохраните или отмените изменения исходных данных команды.');
         const persisted=platformSaveBaseline();

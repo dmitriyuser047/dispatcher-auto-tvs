@@ -6,7 +6,7 @@
   const present=value=>value!==undefined&&value!==null&&String(value).trim()!=='';
   const key=value=>typeof value+':'+String(value);
   const metadata=new Set(['attachments','updatedAt']);
-  const inversePart={receipt:'writeoff',issue:'return',writeoff:'return',return:'issue'};
+  const inversePart={receipt:'writeoff',issue:'return',writeoff:'return',return:'issue',supplierReturn:'return'};
   function stable(value){if(value===undefined)return 'undefined';if(value===null||typeof value!=='object')return JSON.stringify(value);return Array.isArray(value)?'['+value.map(stable).join(',')+']':'{'+Object.keys(value).sort().map(name=>JSON.stringify(name)+':'+stable(value[name])).join(',')+'}';}
   const number=value=>typeof value==='number'&&Number.isFinite(value)?value:typeof value==='string'&&value.trim()&&Number.isFinite(Number(value))?Number(value):NaN;
   const sameQty=(a,b)=>Number.isFinite(number(a))&&Number.isFinite(number(b))&&number(a)===number(b);

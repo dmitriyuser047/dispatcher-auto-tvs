@@ -46,7 +46,7 @@
   else if(section==='workOrders')mutable=row.status==='new'&&!row.actualCost&&!row.downtimeFrom&&!row.downtimeTo;
   else if(section==='opsTasks')mutable=row.status==='open';
   else if(section==='shiftReports')mutable=row.status==='prepared'&&date(row.date)&&row.date>=today;
-  else if(section==='procurementOrders')mutable=row.status==='draft'&&!(row.receivedQty>0)&&!(row.stockPostedQty>0);
+  else if(section==='procurementOrders')mutable=row.procurement?.mode!=='linked'&&row.status==='draft'&&!(row.receivedQty>0)&&!(row.stockPostedQty>0);
   else if(section==='procurementRules')mutable=true;
   else if(section==='generators'){
    if(path==='tankId'&&genRecords?.some(record=>record.generatorId===row.id&&!own(record,'tankId')))return {classification:'pinned',reason:'Старые записи ДЭС наследуют эту ёмкость: изменение привязки переподчинит историю',implicitTankHistory:true};
@@ -83,7 +83,7 @@
     if(entry.shape||!identity.identifier(entry.value)){push(ref);addIssue('INVALID_REFERENCE',ref,'Некорректная структура или тип идентификатора связи');continue;}
     if(relation.kind==='assetRef'){
      const resolved=identity.resolveAsset(db,entry.value,relation.targets);targetSection=resolved.section;targetId=typeof entry.value==='string'?entry.value.slice(2):entry.value;string=true;
-    }else if(relation.kind==='discriminator'){const selector=values(row,relation.selector)[0]?.value,key=relation.prefix&&typeof selector==='string'?selector.split(':')[0]:selector;targetSection=relation.targets?.[key];}
+    }else if(relation.kind==='discriminator'){const selector=relation.selectorAligned===true?schema.referenceSelector(row,relation,entry.path):values(row,relation.selector)[0]?.value,key=relation.prefix&&typeof selector==='string'?selector.split(':')[0]:selector;targetSection=relation.targets?.[key];}
     else if(relation.kind==='historical')targetSection=row[relation.selector];
     else if(relation.kind!=='id'&&relation.kind!=='lookup'){push(ref);addIssue('UNCLASSIFIED_REFERENCE',ref,'Неизвестный вид связи');continue;}
     if(!schema.sections.includes(targetSection)){push(ref);if(relation.unknownPolicy!=='advisory'&&relation.kind!=='historical')addIssue('UNCLASSIFIED_REFERENCE',ref,'Не удалось определить раздел назначения связи');continue;}

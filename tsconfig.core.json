@@ -20,5 +20,5 @@
     "rootDir": "src/core",
     "outDir": ".typed-core-build"
   },
-  "files": ["src/core/financial-recognition.ts", "src/core/platform-contracts.ts", "src/core/platform-commands.ts", "src/core/accounting-boundary.ts", "src/core/decimal-core.ts", "src/core/effective-periods.ts", "src/core/entity-identity.ts", "src/core/document-engine.ts", "src/core/period-policy.ts", "src/core/fuel-stock.ts", "src/core/fuel-operations.ts"]
+  "files": ["src/core/financial-recognition.ts", "src/core/platform-contracts.ts", "src/core/platform-commands.ts", "src/core/accounting-boundary.ts", "src/core/decimal-core.ts", "src/core/effective-periods.ts", "src/core/entity-identity.ts", "src/core/document-engine.ts", "src/core/period-policy.ts", "src/core/fuel-stock.ts", "src/core/fuel-operations.ts", "src/core/inventory-stock.ts", "src/core/procurement-operations.ts"]
 }

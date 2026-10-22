@@ -66,6 +66,13 @@
   for(const [section,field]of [['vehicles','fuelcard'],['records','fuelCardNum'],['fuelPurchases','cardNo'],['monthlyFuel','cardNumber']])relations.push({id:section+'.'+field,from:section,field,kind:'lookup',target:'fuelCards',targetField:'number',normalize:'card',optional:true,strength:'advisory'});
   for(const section of ['payments','costEntries'])relations.push({id:section+'.sourceId',from:section,field:'sourceId',kind:'discriminator',selector:'source',targets:{repair:'repairs',to:'vehicleTo',vehicleTo:'vehicleTo',toRecord:'toRecords',workOrder:'workOrders',fuelPurchase:'fuelPurchases'},unknownPolicy:'advisory',optional:true,archivePolicy:'existing'});
   for(const section of ['procurementOrders','procurementRules'])relations.push({id:section+'.itemId',from:section,field:'itemId',kind:'discriminator',selector:'kind',targets:{tank:'tanks',part:'parts'},optional:true,archivePolicy:'existing'});
+  const receiptTargets={tankIncomes:'tankIncomes',fuelMovements:'fuelMovements',partMovements:'partMovements'};
+  for(const section of Object.keys(receiptTargets))direct(section,'procurementReceipt.orderId','procurementOrders');
+  for(const section of ['fuelMovements','partMovements']){
+    direct(section,'procurementReturn.orderId','procurementOrders');
+    relations.push({id:section+'.procurementReturn.receipt.id',from:section,field:'procurementReturn.receipt.id',kind:'discriminator',selector:'procurementReturn.receipt.section',targets:receiptTargets,optional:true,archivePolicy:'existing'});
+  }
+  relations.push({id:'procurementOrders.procurement.receiptRefs[].id',from:'procurementOrders',field:'procurement.receiptRefs[].id',kind:'discriminator',selector:'procurement.receiptRefs[].section',selectorAligned:true,targets:receiptTargets,optional:true,archivePolicy:'existing'});
   direct('glonassTrips','importId','glonassImports');direct('glonassTrips','importIds[]','glonassImports');direct('glonassTrips','supersededBy','glonassImports');direct('records','glonassProvenance.importId','glonassImports');direct('records','glonassProvenance.rawIds[]','glonassTrips');
   const documentTargets=Object.fromEntries(['shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords','tankIncomes'].map(name=>[name,name]));
   for(const section of Object.keys(documentTargets))relations.push({id:section+'.lifecycle.correctionOf.id',from:section,field:'lifecycle.correctionOf.id',kind:'discriminator',selector:'lifecycle.correctionOf.section',targets:documentTargets,optional:true,archivePolicy:'existing'});
@@ -74,10 +81,24 @@
   for(const [field,target]of [['vehicleId','vehicles'],['generatorId','generators'],['driverId','drivers'],['partId','parts'],['fromTankId','tanks'],['toTankId','tanks'],['tankId','tanks'],['counterTankId','tanks'],['workOrderId','workOrders'],['jobId','dispatchJobs'],['contragentId','contragents'],['repeatOf','workOrders'],['repairId','repairs'],['vehicleToId','vehicleTo'],['toRecordId','toRecords']])direct('documentDrafts','payload.'+field,target);
   relations.push({id:'documentDrafts.payload.sourceId',from:'documentDrafts',field:'payload.sourceId',kind:'discriminator',selector:'payload.source',targets:{repair:'repairs',to:'vehicleTo',vehicleTo:'vehicleTo',toRecord:'toRecords',workOrder:'workOrders',fuelPurchase:'fuelPurchases'},unknownPolicy:'advisory',optional:true,archivePolicy:'existing'});
   direct('documentDrafts','payload.partRequirements[].partId','parts');
+  direct('documentDrafts','payload.procurementReceipt.orderId','procurementOrders');
   // Audit and posted-document source snapshots intentionally refer to historical
   // rows, including deleted ones. They are evidence, not live foreign keys.
   relations.push({id:'auditLog.recordId',from:'auditLog',field:'recordId',kind:'historical',selector:'section',optional:true,strength:'historical'});
+  // Array discriminators belong to the same concrete element as their ID.
+  // Missing, malformed or differently aligned paths never select element zero.
+  function referenceSelector(row,relation,path){
+    if(relation?.selectorAligned!==true||typeof relation.field!=='string'||typeof relation.selector!=='string'||typeof path!=='string')return undefined;
+    const fields=relation.field.split('[]'),selectors=relation.selector.split('[]');
+    if(fields.length<2||fields.length!==selectors.length)return undefined;
+    for(let i=0;i<fields.length-1;i++)if(fields.slice(0,i+1).join('[]')!==selectors.slice(0,i+1).join('[]'))return undefined;
+    const escape=value=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const match=new RegExp('^'+fields.map(escape).join('\\[(0|[1-9]\\d*)\\]')+'$').exec(path);if(!match)return undefined;
+    let position=1;const concrete=relation.selector.replace(/\[\]/g,()=>'.'+match[position++]);
+    let value=row;for(const key of concrete.split('.')){if(!key||['__proto__','constructor','prototype'].includes(key)||value===null||typeof value!=='object')return undefined;const descriptor=Object.getOwnPropertyDescriptor(value,key);if(!descriptor||!descriptor.enumerable||descriptor.get||descriptor.set)return undefined;value=descriptor.value;}
+    return value;
+  }
   function freeze(value){if(value&&typeof value==='object'&&!Object.isFrozen(value)){Object.values(value).forEach(freeze);Object.freeze(value);}return value;}
   function describe(){return JSON.parse(JSON.stringify({apiVersion:1,sections,modules,descriptors,relations}));}
-  return freeze({apiVersion:1,sections,modules,descriptors,relations,describe});
+  return freeze({apiVersion:1,sections,modules,descriptors,relations,referenceSelector,describe});
 });

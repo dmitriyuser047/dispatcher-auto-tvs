@@ -48,12 +48,12 @@
     return {issues,counts:{error:issues.filter(issue=>issue.severity==='error').length,warning:0,total:issues.length}};
   }
   function aliasIndexes(db){const result={};for(const section of catalogs){const typed=new Set(),text=new Set(),numbers=new Set();for(const row of rows(db,section))if(own(row,'mergedInto')){typed.add(key(row.id));text.add(String(row.id));if(section==='fuelCards')numbers.add(card(row.number));}result[section]={typed,text,numbers};}return result;}
-  function aliasTargets(indexes,relation,row,value){
+  function aliasTargets(indexes,relation,row,value,path){
     let section=relation.target,expected=value,byString=false;
     if(relation.kind==='assetRef'){
       const match=typeof value==='string'&&value.match(/^([vgt]):(.+)$/);if(!match)return false;section=relation.targets[match[1]];expected=match[2];byString=true;
     }else if(relation.kind==='discriminator'){
-      let selector=values(row,relation.selector)[0]?.value;if(relation.prefix&&typeof selector==='string')selector=selector.split(':')[0];section=relation.targets[selector];
+      let selector=relation.selectorAligned===true?schema.referenceSelector(row,relation,path):values(row,relation.selector)[0]?.value;if(relation.prefix&&typeof selector==='string')selector=selector.split(':')[0];section=relation.targets[selector];
     }
     if(!catalogs.includes(section))return false;
     const index=indexes[section];return relation.kind==='lookup'?index.numbers.has(card(value)):byString?index.text.has(expected):index.typed.has(key(expected));
@@ -105,7 +105,7 @@
     const today=typeof context.today==='string'?context.today:typeof context.now==='string'?context.now.slice(0,10):new Date().toISOString().slice(0,10);
     for(const relation of schema.relations){if(relation.kind==='historical')continue;const prior=oldRows[relation.from];
       for(const [index,before]of rows(previous,relation.from).entries()){
-        const protectedLink=values(before,relation.field).some(entry=>aliasTargets(priorAliases,relation,before,entry.value)&&graph.classify(relation.from,before,entry.path,today,previous).classification!=='mutable');
+        const protectedLink=values(before,relation.field).some(entry=>aliasTargets(priorAliases,relation,before,entry.value,entry.path)&&graph.classify(relation.from,before,entry.path,today,previous).classification!=='mutable');
         if(!protectedLink)continue;
         const matches=nextRows[relation.from].get(rowKey(relation.from,before,index))||[];
         if(matches.some(row=>stable(row)===stable(before)))continue;
@@ -113,7 +113,7 @@
         add(relation.from,before,'CATALOG_ALIAS_HISTORY_FROZEN',relation.field,'Историческую ссылку на дубль нельзя удалить или перепривязать к основной карточке; исходный факт сохраняется');
       }
       for(const [index,row]of rows(next,relation.from).entries()){
-        if(!values(row,relation.field).some(entry=>aliasTargets(indexes,relation,row,entry.value)))continue;
+        if(!values(row,relation.field).some(entry=>aliasTargets(indexes,relation,row,entry.value,entry.path)))continue;
         if(prior.exact.has(stable(row)))continue;
         const matches=prior.byId.get(rowKey(relation.from,row,index))||[];
         if(matches.length===1&&(descriptiveOnly(matches[0],row)||assignmentNarrows(relation.from,matches[0],row)))continue;

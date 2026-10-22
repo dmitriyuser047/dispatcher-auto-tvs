@@ -61,7 +61,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
       ...(saved?{}:{failure:platformRuntimeStatus().lastError,syncResult:_sync.lastResult}) };
   });
   assert.equal(first.saved, true,JSON.stringify(first));
-  assert.deepEqual(first.platform, {apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:2,documentDrafts:1,periods:1,fuelOperations:1,needsSchemaUpgrade:false});
+  assert.deepEqual(first.platform, {apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:2,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,needsSchemaUpgrade:false});
   assert.equal(first.operationReceipt?.status, 'committed'); assert.ok(first.operationReceipt.id);
   assert.equal(storage.readAll(dataA).records[0].id, 'native-journal');
   assert.match(first.token, /^[a-f0-9]{64}$/);
@@ -125,8 +125,11 @@ test('hidden Electron application persists synthetic journals, isolates registry
     data.costProfiles.push({id:'native-profile',assetRef:'v:A',salaryRate:5,fuelRate:10,fuelPrice:60});
     data.parts.push({id:'native-part',name:'Synthetic filter',unit:'шт'});
     data.procurementRules.push({id:'native-rule',kind:'part',itemId:'native-part',leadDays:3,reserveQty:2,coverDays:7,expectedDaily:null});
-    data.procurementOrders.push({id:'native-order',kind:'part',itemId:'native-part',supplier:'Synthetic supplier',quantity:10,receivedQty:2,stockPostedQty:0,deliveryDate:'2026-10-20',status:'partial',note:''});
     const saved=await saveData(data);
+    const operationReceipt=_sync.lastResult?.operationReceipt;
+    const input={action:'saveOrder',payload:{kind:'part',itemId:'native-part',supplier:'Synthetic supplier',quantity:10,deliveryDate:'2026-10-20',status:'ordered',note:''},reason:'Synthetic native reviewed purchase order'};
+    const review=ProcurementOperations.preview(data,input,{today:wfToday()});
+    const order=await platformExecuteCommand({type:'ProcurementAction',version:1,input:{...input,reviewFingerprint:review.fingerprint}},{operationId:'native-order'});
     switchSection('costs');switchSection('procurement');
     const state=await window.electronAPI.getNotificationSettings();
     const preferences={...state.preferences,enabled:true,quietEnabled:false};
@@ -134,14 +137,15 @@ test('hidden Electron application persists synthetic journals, isolates registry
     const probe=await window.electronAPI.testNotification({key:state.key});
     const stale=await window.electronAPI.saveNotificationSettings({key:'0'.repeat(64),preferences});
     await openNotificationSettings();const modal=!!document.querySelector('#notificationsModal.open');document.getElementById('notificationsModal')?.remove();
-    return {saved,state,enabled,probe,stale,modal,operationReceipt:_sync.lastResult?.operationReceipt};
+    return {saved:saved&&order.ok,state,enabled,probe,stale,modal,operationReceipt,orderReceipt:order.operationReceipt};
   });
   assert.equal(features.saved,true);assert.equal(features.state.ok,true);assert.equal(features.state.preferences.enabled,false);
   assert.equal(features.state.supported,false);assert.equal(features.enabled.preferences.enabled,true);assert.equal(features.probe.ok,false);assert.equal(features.probe.code,'test-mode');assert.equal(features.stale.ok,false);assert.equal(features.modal,true);
   const featureData=storage.readAll(dataA);
-  assert.equal(featureData.costEntries[0].amount,1000);assert.equal(featureData.costProfiles[0].salaryRate,5);assert.equal(featureData.procurementOrders[0].receivedQty,2);assert.equal(featureData.procurementRules[0].reserveQty,2);assert.deepEqual(featureData.partMovements,[]);
+  assert.equal(featureData.costEntries[0].amount,1000);assert.equal(featureData.costProfiles[0].salaryRate,5);assert.equal(featureData.procurementOrders[0].receivedQty,0);assert.equal(featureData.procurementOrders[0].procurement.mode,'linked');assert.equal(featureData.procurementRules[0].reserveQty,2);assert.deepEqual(featureData.partMovements,[]);
   assert.equal(features.operationReceipt?.status,'committed');
-  for(const section of ['costEntries','costProfiles','parts','procurementRules','procurementOrders']){
+  assert.equal(features.orderReceipt?.status,'committed');assert.ok(featureData.auditLog.some(row=>row.section==='procurementOrders'&&row.operationId===features.orderReceipt.id));
+  for(const section of ['costEntries','costProfiles','parts','procurementRules']){
     const event=featureData.auditLog.find(row=>row.section===section&&row.operationId===features.operationReceipt.id);
     assert.ok(event,section);assert.equal(event.actorId,'local-profile');assert.equal(event.actor,'Test A');assert.equal(event.actorRole,'admin');assert.equal(event.source,'platform');
   }

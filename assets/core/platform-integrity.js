@@ -49,14 +49,14 @@
     for(const section of schema.sections){const byId=new Map(),byString=new Map();rowsOf(db,section).forEach((row,index)=>{if(!plain(row)||!scalarId(row.id))return;const key=idKey(row.id),text=String(row.id);if(!byId.has(key))byId.set(key,[]);byId.get(key).push({row,index});if(!byString.has(text))byString.set(text,[]);byString.get(text).push({row,index});});indexes[section]={byId,byString};}
     return indexes;
   }
-  function relationTarget(relation,row,value){
+  function relationTarget(relation,row,value,path){
     if(relation.kind==='historical')return null;
     if(relation.kind==='assetRef'){
       if(typeof value!=='string'||!/^([vgt]):(.+)$/.test(value))return {invalid:true};
       const [,prefix,id]=value.match(/^([vgt]):(.+)$/),section=relation.targets[prefix];return section?{section,id,string:true}:{invalid:true};
     }
     if(relation.kind==='discriminator'){
-      const selector=fieldValue(row,relation.selector),key=relation.prefix&&typeof selector==='string'?selector.split(':')[0]:selector,section=relation.targets[key];
+      const selector=relation.selectorAligned===true?schema.referenceSelector(row,relation,path):fieldValue(row,relation.selector),key=relation.prefix&&typeof selector==='string'?selector.split(':')[0]:selector,section=relation.targets[key];
       return section?{section,id:value}:relation.unknownPolicy==='advisory'?{unknown:true}:{invalid:true};
     }
     return {section:relation.target,id:value,lookup:relation.kind==='lookup'};
@@ -122,7 +122,7 @@
         for(const entry of values(row,relation.field)){
           if(entry.shape){add(relation.from,row,index,'invalid-reference-container',entry.path,'Повреждена структура связи',{relationId:relation.id,value:entry.value});continue;}
           if(!present(entry.value))continue;
-          const target=relationTarget(relation,row,entry.value),severity=relation.strength==='advisory'?'warning':'error';
+          const target=relationTarget(relation,row,entry.value,entry.path),severity=relation.strength==='advisory'?'warning':'error';
           if(!target)continue;
           if(target.unknown){add(relation.from,row,index,'reference-unrecognized-source',entry.path,'Источник связи относится к внешней или неизвестной системе',{severity:'warning',relationId:relation.id,value:entry.value});continue;}
           if(target.invalid||!scalarId(target.id)){add(relation.from,row,index,'invalid-reference',entry.path,'Некорректный идентификатор связанной записи',{severity,relationId:relation.id,value:entry.value});continue;}

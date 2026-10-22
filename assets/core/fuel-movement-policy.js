@@ -67,11 +67,12 @@
       const qty=number(row.qty),from=present(row.fromTankId),to=present(row.toTankId);
       if(!(qty>0))add('fuelMovements',row,'FUEL_QUANTITY','qty','Количество топлива должно быть больше нуля',[row.qty]);
       if(!dateValid(row.date))add('fuelMovements',row,'FUEL_DATE','date','Укажите действительную дату движения топлива',[row.date]);
-      if(!['receipt','return','issue','transfer','adjustment'].includes(row.kind))add('fuelMovements',row,'FUEL_KIND','kind','Неизвестный вид движения топлива',[row.kind]);
-      const direction=row.kind==='transfer'?from&&to&&row.fromTankId!==row.toTankId:['receipt','return'].includes(row.kind)?!from&&to:row.kind==='issue'?from&&!to:row.kind==='adjustment'?row.originalMovementId?(from||to)&&(!from||!to||row.fromTankId!==row.toTankId):from!==to:false;
+      if(!['receipt','return','issue','transfer','adjustment','supplierReturn'].includes(row.kind))add('fuelMovements',row,'FUEL_KIND','kind','Неизвестный вид движения топлива',[row.kind]);
+      const direction=row.kind==='transfer'?from&&to&&row.fromTankId!==row.toTankId:['receipt','return'].includes(row.kind)?!from&&to:['issue','supplierReturn'].includes(row.kind)?from&&!to:row.kind==='adjustment'?row.originalMovementId?(from||to)&&(!from||!to||row.fromTankId!==row.toTankId):from!==to:false;
       if(!direction)add('fuelMovements',row,'FUEL_DIRECTION','fromTankId/toTankId','Проверьте направление: приход в ёмкость, выдача из ёмкости, перемещение между двумя разными ёмкостями',[row.kind,row.fromTankId,row.toTankId]);
       if(!present(row.reason))add('fuelMovements',row,'FUEL_REASON','reason','Укажите документ или основание движения топлива',[row.reason]);
       if(row.kind==='return'&&present(row.assetRef))add('fuelMovements',row,'FUEL_ASSET_RETURN','assetRef','Возврат из бака техники требует отдельного поддерживаемого документа; обычный возврат считается внешним',[row.kind,row.assetRef]);
+      if(row.kind==='supplierReturn'&&present(row.assetRef))add('fuelMovements',row,'FUEL_SUPPLIER_RETURN_ASSET','assetRef','Возврат поставщику выводит топливо из ёмкости и не создаёт приход в технику',[row.kind,row.assetRef]);
       if(row.kind==='issue'&&present(row.assetRef)&&!(typeof row.assetRef==='string'&&/^[vg]:.+$/.test(row.assetRef)))add('fuelMovements',row,'FUEL_ISSUE_ASSET','assetRef','Выдачу можно связать с транспортом или ДЭС; для ёмкости используйте перемещение',[row.kind,row.assetRef]);
       if(!canRead(context,'tanks'))continue;
       const source=find(db,'tanks',row.fromTankId),target=find(db,'tanks',row.toTankId);

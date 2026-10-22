@@ -35,6 +35,14 @@ export type FuelActionInput =
   | {action:'applyDifference';measurementId:Identifier;reason:string;reviewFingerprint:string}
   | {action:'voidMeasurement';measurementId:Identifier;reason:string;reviewFingerprint:string}
   | {action:'reverseLegacyTransfer';outId:Identifier;inId:Identifier;reason:string;reviewFingerprint:string};
+export type ProcurementKind='tank'|'part';
+export interface ProcurementReceiptReference {section:'tankIncomes'|'fuelMovements'|'partMovements';id:Identifier}
+export interface ProcurementOrderPayload {kind:ProcurementKind;itemId:Identifier;supplier:string;quantity:number;deliveryDate:string;status:'draft'|'ordered';note:string}
+export type ProcurementActionInput =
+  | {action:'saveOrder';orderId?:Identifier;payload:ProcurementOrderPayload;reason:string;reviewFingerprint:string}
+  | {action:'activateLegacy';kind:ProcurementKind;orderId:Identifier;receiptRefs:ProcurementReceiptReference[];reason:string;reviewFingerprint:string}
+  | {action:'cancelRemaining';kind:ProcurementKind;orderId:Identifier;reason:string;reviewFingerprint:string}
+  | {action:'supplierReturn';kind:ProcurementKind;orderId:Identifier;receipt:ProcurementReceiptReference;qty:number;date:string;reason:string;reviewFingerprint:string};
 export type DocumentActionInput =
   | {action:'saveDraft';section:DocumentSection;draftId?:Identifier;payload:JsonRow;correctionOf?:DocumentReference;reason?:string}
   | {action:'postDraft';section:DocumentSection;draftId:Identifier;reviewFingerprint:string}
@@ -49,7 +57,8 @@ export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelI
   | { type: 'MergeCatalog'; version: 1; input: MergeCatalogInput }
   | { type: 'DocumentAction'; version: 1; input: DocumentActionInput }
   | { type: 'PeriodAction'; version: 1; input: PeriodActionInput }
-  | { type: 'FuelAction'; version: 1; input: FuelActionInput };
+  | { type: 'FuelAction'; version: 1; input: FuelActionInput }
+  | { type: 'ProcurementAction'; version: 1; input: ProcurementActionInput };
 export interface CommandEnvelope { protocolVersion: 1; databaseToken: string; operation: OperationDescriptor; base: Revisions; command: PlatformCommand }
 export interface ContractError extends Error { code: string; field: string; status: number }
 
@@ -184,6 +193,12 @@ export function createPlatformContracts() {
   function reviewFingerprint(value:unknown,field:string):string {
     if(typeof value!=='string'||!/^sha256:[a-f0-9]{64}$/.test(value))fail('INVALID_COMMAND',field,'Нужен отпечаток просмотренного документа');return value;
   }
+  function procurementKind(value:unknown,field:string):ProcurementKind {if(value!=='tank'&&value!=='part')fail('INVALID_COMMAND',field,'Выберите топливо или складскую номенклатуру');return value;}
+  function procurementReceipt(value:unknown,kind:ProcurementKind,field:string):ProcurementReceiptReference {
+    const reference=commandObject(value,field);keys(reference,['section','id'],field);
+    if(kind==='part'?reference.section!=='partMovements':reference.section!=='tankIncomes'&&reference.section!=='fuelMovements')fail('INVALID_COMMAND',field+'.section','Вид прихода не соответствует заказу');
+    return {section:reference.section as ProcurementReceiptReference['section'],id:commandId(reference.id,field+'.id')};
+  }
   function validateCommand(value: unknown): PlatformCommand {
     const row = commandObject(commandJson(value,'command'),'command'); keys(row,['type','version','input'],'command');
     if (row.version !== 1) fail('COMMAND_VERSION', 'command.version', 'Версия команды не поддерживается');
@@ -243,6 +258,33 @@ export function createPlatformContracts() {
       const result:MergeCatalogInput={section:input.section as CatalogSection,sourceId:commandId(input.sourceId,path+'sourceId'),targetId:commandId(input.targetId,path+'targetId'),reason:commandText(input.reason,path+'reason',true),mutableRefs,reviewFingerprint:input.reviewFingerprint};
       if(result.sourceId===result.targetId)fail('INVALID_COMMAND',path+'targetId','Нельзя объединить карточку с самой собой');
       return {type:'MergeCatalog',version:1,input:result};
+    }
+    if(row.type==='ProcurementAction'){
+      const reason=commandText(input.reason,path+'reason',true,2000);if(reason.trim().length<3)fail('INVALID_COMMAND',path+'reason','Укажите основание от 3 до 2000 знаков');
+      const fingerprint=reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint');let result:ProcurementActionInput;
+      if(input.action==='saveOrder'){
+        keys(input,['action','orderId','payload','reason','reviewFingerprint'],'command.input');const payload=commandObject(input.payload,path+'payload');keys(payload,['kind','itemId','supplier','quantity','deliveryDate','status','note'],path+'payload');
+        const kind=procurementKind(payload.kind,path+'payload.kind');
+        if(typeof payload.quantity!=='number'||!Number.isFinite(payload.quantity)||payload.quantity<=0||payload.quantity>1000000000000)fail('INVALID_COMMAND',path+'payload.quantity','Укажите положительное количество заказа');
+        if(payload.status!=='draft'&&payload.status!=='ordered')fail('INVALID_COMMAND',path+'payload.status','Исполнение заказа вычисляется по проведённым приходам');
+        result={action:'saveOrder',payload:{kind,itemId:commandId(payload.itemId,path+'payload.itemId'),supplier:commandText(payload.supplier,path+'payload.supplier',false,300),quantity:payload.quantity,deliveryDate:commandDate(payload.deliveryDate,path+'payload.deliveryDate'),status:payload.status,note:commandText(payload.note,path+'payload.note',false,4000)},reason,reviewFingerprint:fingerprint};
+        if(input.orderId!==undefined)result.orderId=commandId(input.orderId,path+'orderId');
+      }else{
+        const kind=procurementKind(input.kind,path+'kind'),orderId=commandId(input.orderId,path+'orderId');
+        if(input.action==='activateLegacy'){
+          keys(input,['action','kind','orderId','receiptRefs','reason','reviewFingerprint'],'command.input');
+          if(!Array.isArray(input.receiptRefs)||input.receiptRefs.length>1000)fail('INVALID_COMMAND',path+'receiptRefs','Выберите не более 1000 конкретных приходов');
+          const seen=new Set<string>(),receiptRefs=input.receiptRefs.map((value,index)=>{const reference=procurementReceipt(value,kind,path+'receiptRefs.'+index),key=JSON.stringify([reference.section,reference.id]);if(seen.has(key))fail('INVALID_COMMAND',path+'receiptRefs.'+index,'Приход выбран повторно');seen.add(key);return reference;});
+          result={action:'activateLegacy',kind,orderId,receiptRefs,reason,reviewFingerprint:fingerprint};
+        }else if(input.action==='cancelRemaining'){
+          keys(input,['action','kind','orderId','reason','reviewFingerprint'],'command.input');result={action:'cancelRemaining',kind,orderId,reason,reviewFingerprint:fingerprint};
+        }else if(input.action==='supplierReturn'){
+          keys(input,['action','kind','orderId','receipt','qty','date','reason','reviewFingerprint'],'command.input');
+          if(typeof input.qty!=='number'||!Number.isFinite(input.qty)||input.qty<=0||input.qty>1000000000000)fail('INVALID_COMMAND',path+'qty','Укажите положительное количество возврата');
+          result={action:'supplierReturn',kind,orderId,receipt:procurementReceipt(input.receipt,kind,path+'receipt'),qty:input.qty,date:commandDate(input.date,path+'date'),reason,reviewFingerprint:fingerprint};
+        }else return fail('INVALID_COMMAND',path+'action','Неизвестное действие с закупкой');
+      }
+      return {type:'ProcurementAction',version:1,input:result};
     }
     if(row.type==='FuelAction'){
       const reason=commandText(input.reason,path+'reason',true,2000);

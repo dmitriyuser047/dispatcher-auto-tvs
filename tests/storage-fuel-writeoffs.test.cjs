@@ -117,10 +117,12 @@ test('unrelated cost and procurement saves preserve posted acts without recalcul
   try {
     const result = save(dir, {
       costEntries:[{ id:'independent-cost',assetRef:'v:v',date:'2026-10-21',kind:'expense',amount:10,title:'Synthetic expense',independent:true }],
-      parts:[{ id:'part',name:'Synthetic part' }],
-      procurementOrders:[{ id:'order',kind:'part',itemId:'part',supplier:'Synthetic supplier',quantity:1,receivedQty:0,stockPostedQty:0,deliveryDate:'2026-10-22',status:'ordered',note:'' }]
+      parts:[{ id:'part',name:'Synthetic part' }]
     });
     assert.equal(result.ok, true); assert.equal(recalculations, 0);
+    const operations=require('../assets/core/procurement-operations'),commands=require('../assets/core/platform-commands'),snapshot=storage.readSnapshot(dir),input={action:'saveOrder',payload:{kind:'part',itemId:'part',supplier:'Synthetic supplier',quantity:1,deliveryDate:'2026-10-22',status:'ordered',note:''},reason:'Explicit reviewed independent procurement'},review=operations.preview(snapshot.data,input,{today:'2026-10-22'}),command={type:'ProcurementAction',version:1,input:{...input,reviewFingerprint:review.fingerprint}};
+    const planned=storage.executeCommand(dir,{protocolVersion:1,databaseToken:snapshot.databaseToken,base:Object.fromEntries(commands.dependencies(command).map(name=>[name,snapshot.revisions[name]])),operation:{id:'order'},command},{principal:{id:'procurement-admin',name:'Synthetic administrator',role:'admin'},now:'2026-10-22T12:00:00.000Z'});
+    assert.equal(planned.ok,true);assert.equal(recalculations,0);
   } finally { engineModule.exports = original; }
   const current = storage.readAll(dir);
   assert.deepEqual(current.fuelWriteoffs, [doc]); assert.deepEqual(current.records, before.records);

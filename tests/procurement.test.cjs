@@ -114,6 +114,6 @@ test('fuel forecasts preserve numeric zero separately from textual zero and igno
 });
 test('one fuel planning run shares one owned stock projection across all tanks',()=>{
  const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),actual=require('../assets/core/fuel-stock.js');let projects=0;
- const sandbox=vm.createContext({AccountingBoundary:require('../assets/core/accounting-boundary.js'),DecimalCore:require('../assets/core/decimal-core.js'),FuelStock:{...actual,project(...args){projects++;return actual.project(...args);}}});vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/js/47-procurement-engine.js'),'utf8'),sandbox);
+ const sandbox=vm.createContext({AccountingBoundary:require('../assets/core/accounting-boundary.js'),DecimalCore:require('../assets/core/decimal-core.js'),EntityIdentity:require('../assets/core/entity-identity.js'),InventoryStock:require('../assets/core/inventory-stock.js'),FuelStock:{...actual,project(...args){projects++;return actual.project(...args);}}});vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/js/47-procurement-engine.js'),'utf8'),sandbox);
  const db=fixture();for(let i=0;i<4;i++)db.tanks.push({id:'other-'+i,name:'Other '+i,balanceInit:10});assert.equal(sandbox.ProcurementEngine.plan(db,{date:DATE}).filter(row=>row.kind==='tank').length,5);assert.equal(projects,1);
 });

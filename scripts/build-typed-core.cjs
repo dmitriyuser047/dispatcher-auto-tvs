@@ -17,6 +17,7 @@ const ENTRIES=Object.freeze([
     {path:'./fuel-movement-policy.js',global:'FuelMovementPolicy',lazy:true},
     {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true},
     {path:'./fuel-operations.js',global:'FuelOperations',lazy:true},
+    {path:'./procurement-operations.js',global:'ProcurementOperations',lazy:true},
   ]}),
   Object.freeze({source:'src/core/period-policy.ts',output:'assets/core/period-policy.js',global:'PeriodPolicy',factory:'createPeriodPolicy',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./platform-schema.js',global:'PlatformSchema'},
@@ -37,6 +38,17 @@ const ENTRIES=Object.freeze([
     {path:'./fuel-movement-policy.js',global:'FuelMovementPolicy',lazy:true}, {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true},
     {path:'./document-engine.js',global:'DocumentEngine',lazy:true},
   ]}),
+  Object.freeze({source:'src/core/inventory-stock.ts',output:'assets/core/inventory-stock.js',global:'InventoryStock',factory:'createInventoryStock',dependencies:[
+    {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./entity-identity.js',global:'EntityIdentity'},
+    {path:'./decimal-core.js',global:'DecimalCore'}, {path:'./document-engine.js',global:'DocumentEngine',lazy:true},
+  ]}),
+  Object.freeze({source:'src/core/procurement-operations.ts',output:'assets/core/procurement-operations.js',global:'ProcurementOperations',factory:'createProcurementOperations',dependencies:[
+    {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./platform-schema.js',global:'PlatformSchema'},
+    {path:'./entity-identity.js',global:'EntityIdentity'}, {path:'./decimal-core.js',global:'DecimalCore'},
+    {path:'./inventory-stock.js',global:'InventoryStock',lazy:true}, {path:'./fuel-stock.js',global:'FuelStock',lazy:true},
+    {path:'./document-engine.js',global:'DocumentEngine',lazy:true}, {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
+    {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true},
+  ]}),
   Object.freeze({source:'src/core/platform-commands.ts',output:'assets/core/platform-commands.js',global:'PlatformCommands',factory:'createPlatformCommands',dependencies:[
     {path:'./platform-contracts.js',global:'PlatformContracts'}, {path:'./personnel-engine.js',global:'TvsPersonnelEngine'},
     {path:'./fuel-movement-policy.js',global:'FuelMovementPolicy'}, {path:'./fuel-engine.js',global:'TvsFuelEngine'},
@@ -44,6 +56,7 @@ const ENTRIES=Object.freeze([
     {path:'./document-engine.js',global:'DocumentEngine'},
     {path:'./period-policy.js',global:'PeriodPolicy'},
     {path:'./fuel-operations.js',global:'FuelOperations'},
+    {path:'./procurement-operations.js',global:'ProcurementOperations'},
   ]}),
 ]);
 const normalize=text=>text.replace(/\r\n?/g,'\n');

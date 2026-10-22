@@ -168,7 +168,9 @@ function validatePlanningChanges(previous, sections) {
   for (const name of ['costEntries', 'costProfiles']) {
     if (name in sections) require('../assets/js/45-cost-engine.js').validateSection(name, sections[name], next);
   }
-  for (const name of ['procurementOrders', 'procurementRules']) {
+  // Linked orders and their derived fulfillment are protected by the shared
+  // semantic procurement policy. The old UI validator cannot validate them.
+  for (const name of ['procurementRules']) {
     if (!(name in sections)) continue;
     require('../assets/js/47-procurement-engine.js').validateSection(name, sections[name], next);
     const oldRows = new Map((previous[name] || []).map(row => [row.id, row]));
@@ -419,7 +421,7 @@ function readSnapshot(dataDir,options={}) {
   let data = readAll(dataDir);
   if(options.principal)data=Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?require('./platform-service.cjs').visibleRows(name,data[name],options.principal):[]]));
   const version=schemaVersion(dataDir);
-  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:version,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,needsSchemaUpgrade:version<2 } };
+  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:version,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,needsSchemaUpgrade:version<2 } };
 }
 function readOperation(dataDir,query,principal){
   const token=databaseToken(dataDir),audit=readSection(dataDir,'auditLog');

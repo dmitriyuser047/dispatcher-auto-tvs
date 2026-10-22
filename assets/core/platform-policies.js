@@ -1,9 +1,9 @@
 /* Shared dispatch, acceptance and inventory rules from the existing workflows. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'),()=>require('./catalog-policy.js'),()=>require('./entity-identity.js'),()=>require('./period-policy.js'),()=>require('./platform-integrity.js'));
-  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy,()=>root.CatalogPolicy,()=>root.EntityIdentity,()=>root.PeriodPolicy,()=>root.PlatformIntegrity);
-})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal,getCatalog,getIdentity,getPeriods,getIntegrity) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'),()=>require('./catalog-policy.js'),()=>require('./entity-identity.js'),()=>require('./period-policy.js'),()=>require('./platform-integrity.js'),()=>require('./inventory-stock.js'),()=>require('./procurement-operations.js'));
+  else root.PlatformPolicies = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy,()=>root.CatalogPolicy,()=>root.EntityIdentity,()=>root.PeriodPolicy,()=>root.PlatformIntegrity,()=>root.InventoryStock,()=>root.ProcurementOperations);
+})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal,getCatalog,getIdentity,getPeriods,getIntegrity,getInventory,getProcurement) {
   'use strict';
   const rows = (db, section) => Array.isArray(db?.[section]) ? db[section] : [];
   const present = value => value != null && String(value).trim() !== '';
@@ -65,50 +65,11 @@
     // Inspect has always emitted outer -> original inner order -> field order.
     return {intervals:entries,peers:peers.map(set=>[...set].sort((a,b)=>a-b).map(index=>jobs[index]))};
   }
-  function partStockIndex(movements) {
-    const groups=new Map();
-    for(const row of movements){
-      if(row.cancelled||row.deleted||!date(row.date,false)||row.partId!==row.partId)continue;
-      if(!groups.has(row.partId))groups.set(row.partId,{entries:[],safe:true,absolute:0,cache:new Map()});
-      const group=groups.get(row.partId),amount=(['receipt','return'].includes(row.kind)?1:-1)*(Number(row.qty)||0);
-      group.entries.push({date:row.date,amount});group.absolute+=Math.abs(amount);
-      if(!Number.isSafeInteger(amount)||group.absolute>Number.MAX_SAFE_INTEGER)group.safe=false;
-    }
-    return (partId,until)=>{
-      const group=groups.get(partId);if(!group||partId!==partId)return 0;
-      if(!group.safe){
-        // Reordering IEEE-754 additions changes legacy deficits. Decimal/unsafe
-        // inputs retain the exact original left fold, memoized per part/date.
-        if(!group.cache.has(until))group.cache.set(until,group.entries.reduce((sum,entry)=>entry.date<=until?sum+entry.amount:sum,0));
-        return group.cache.get(until);
-      }
-      if(!group.prefix){
-        const ordered=group.entries.slice().sort((a,b)=>a.date.localeCompare(b.date));let total=0;
-        group.prefix=ordered.map(entry=>({date:entry.date,balance:total+=entry.amount}));
-      }
-      let low=0,high=group.prefix.length;while(low<high){const middle=(low+high)>>>1;if(group.prefix[middle].date<=until)low=middle+1;else high=middle;}
-      return low?group.prefix[low-1].balance:0;
-    };
-  }
-  function inspectStock(db,context) {
-    context=context||{};const issues=[];const add=(section,row,code,field,message,proof,extra)=>issues.push({severity:'error',section,recordId:row.id??'',code,field,message,proof,...extra});
-    const clock = new Date(context.now || Date.now());
-    const localDay = Number.isFinite(clock.getTime()) ? `${clock.getFullYear()}-${String(clock.getMonth()+1).padStart(2,'0')}-${String(clock.getDate()).padStart(2,'0')}` : '';
-    const today = date(context.today,false) ? context.today : localDay;
-    const movements = rows(db,'partMovements');
-    const stockAt = partStockIndex(movements);
-    for (const row of movements) {
-      if (!(Number.isFinite(Number(row.qty)) && Number(row.qty) > 0)) add('partMovements',row,'PART_QUANTITY','qty','Количество должно быть больше нуля',[row.qty]);
-      if (!['receipt','return','issue','writeoff'].includes(row.kind)) add('partMovements',row,'PART_KIND','kind','Неизвестный вид складской операции',[row.kind]);
-      if (!present(row.partId) || !rows(db,'parts').some(part => part.id === row.partId)) add('partMovements',row,'PART_REQUIRED','partId','Выберите существующую номенклатуру',[row.partId]);
-      if (row.cancelled || row.deleted || !['issue','writeoff'].includes(row.kind) || !date(row.date,false)) continue;
-      for (const [field,at,label] of [['date',row.date,'на дату операции'],['today',today,'на текущую дату']]) {
-        const balance = stockAt(row.partId,at);
-        if (balance < -1e-9) add('partMovements',row,'PART_STOCK_DEFICIT',field,'Недостаточно остатка на складе ' + label,[row.partId,at],{ partId:row.partId,deficit:-balance });
-      }
-    }
-    return {issues,counts:{error:issues.length,warning:0,total:issues.length}};
-  }
+  function inventoryModule(){const api=getInventory();if(!api||api.apiVersion!==1)throw Object.assign(Error('Не загружено ядро складского запаса'),{code:'MODULE_UNAVAILABLE'});return api;}
+  function inspectStock(db,context){return inventoryModule().inspect(db,context);}
+  function validateStockChanges(previous,next,context){return inventoryModule().validateChanges(previous,next,context);}
+  function validateFuelChanges(previous,next,context){return getFuelMovements().validateChanges(previous,next,context);}
+  function scopePeriods(db,scope){return periodsModule().scopePeriods(db,scope);}
   function inspectFuel(db,context) {return getFuelMovements().inspect(db,context);}
   function periodRowIdentity(section,row,index) {return getIntegrity().rowIdentity(section,row,index);}
   function periodsModule() {const api=getPeriods();if(!api||api.apiVersion!==1){const error=new Error('Не загружены правила закрытия периодов');error.code='MODULE_UNAVAILABLE';throw error;}return api;}
@@ -155,7 +116,7 @@
     const blocking = current.filter(issue => {
       // Personnel uses field/assignment delta semantics below. Its read-only
       // report may show legacy rows and active links that need manual review.
-      if (/^(PERSONNEL_|FUEL_|DOCUMENT_|WORKFLOW_|TEMPORAL_|CATALOG_|PERIOD_)/.test(issue.code)) return false;
+      if (/^(PERSONNEL_|FUEL_|DOCUMENT_|WORKFLOW_|TEMPORAL_|CATALOG_|PERIOD_|PART_|PROCUREMENT_)/.test(issue.code)) return false;
       const before = prior.get(key(issue));
       if (!before) return true;
       if (issue.code === 'PART_STOCK_DEFICIT') return issue.deficit > before.deficit + 1e-9;
@@ -170,6 +131,7 @@
       const error = new Error('Не загружено ядро сотрудников');error.code='MODULE_UNAVAILABLE';throw error;
     }
     personnel.validateChanges(previous,next,context);
+    validateStockChanges(previous,next,context);
     for (const module of [getDocuments(),getFuelMovements(),getWorkflow(),getTemporal(),periodsModule()]) {
       if (!module || module.apiVersion !== 1) {
         const error = new Error('Не загружены правила проведения документов и движения топлива');error.code='MODULE_UNAVAILABLE';throw error;
@@ -177,7 +139,8 @@
       module.validateChanges(previous,next,context);
     }
     const catalog=catalogModule(previous,next);if(catalog)catalog.validateChanges(previous,next,context);
+    const procurement=getProcurement();if(!procurement||procurement.apiVersion!==1)throw Object.assign(Error('Не загружены правила исполнения закупок'),{code:'MODULE_UNAVAILABLE'});procurement.validateChanges(previous,next,context);
     return true;
   }
-  return Object.freeze({ apiVersion:1,inspect,inspectStock,inspectFuel,periodRowIdentity,validatePeriodChanges,validateChanges });
+  return Object.freeze({ apiVersion:1,inspect,inspectStock,inspectFuel,periodRowIdentity,scopePeriods,validatePeriodChanges,validateStockChanges,validateFuelChanges,validateChanges });
 });

@@ -1,4 +1,4 @@
-import type { AssetTarget, DocumentActionInput, FuelActionInput, Identifier, JsonRow, JsonValue, MergeCatalogInput, PeriodActionInput, PlatformCommand, SectionRows, createPlatformContracts } from './platform-contracts';
+import type { AssetTarget, DocumentActionInput, FuelActionInput, Identifier, JsonRow, JsonValue, MergeCatalogInput, PeriodActionInput, PlatformCommand, ProcurementActionInput, SectionRows, createPlatformContracts } from './platform-contracts';
 
 export interface CommandActor { id: string; name: string; role: string }
 export interface CommandContext { id: string; now: string; today: string; actor: CommandActor }
@@ -11,11 +11,12 @@ interface SectionRegistry { sections: readonly string[] }
 interface DocumentActions {apiVersion:number;dependencies(input:DocumentActionInput):string[];footprint(input:DocumentActionInput):string[];plan(database:unknown,input:DocumentActionInput,context:CommandContext):CommandPlan}
 interface PeriodActions {apiVersion:number;dependencies(input:PeriodActionInput):string[];footprint(input:PeriodActionInput):string[];plan(database:unknown,input:PeriodActionInput,context:CommandContext):CommandPlan}
 interface FuelActions {apiVersion:number;dependencies(input:FuelActionInput):string[];footprint(input:FuelActionInput):string[];plan(database:unknown,input:FuelActionInput,context:CommandContext):CommandPlan}
+interface ProcurementActions {apiVersion:number;dependencies(input:ProcurementActionInput):string[];footprint(input:ProcurementActionInput):string[];plan(database:unknown,input:ProcurementActionInput,context:CommandContext):CommandPlan}
 type Contracts = ReturnType<typeof createPlatformContracts>;
 interface CommandError extends Error { code: string; status: number; field?: string }
 
 /** Pure semantic actions. Storage still owns ACL, CAS, audit and atomic commit. */
-export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, fuel: FuelRules, fuelEngine: FuelEngine,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions) {
+export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, fuel: FuelRules, fuelEngine: FuelEngine,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions) {
   if (!contracts || contracts.apiVersion !== 1 || !personnel || personnel.apiVersion !== 1 || !fuel || fuel.apiVersion !== 1 || typeof fuelEngine?.parseFuelGrade !== 'function')
     throw new Error('Не загружены общие правила команд платформы');
   function fail(code: string,message: string,field?: string): never {
@@ -35,11 +36,13 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   function documentModule():DocumentActions {if(!documents||documents.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружен общий движок документов');return documents;}
   function periodModule():PeriodActions {if(!periods||periods.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила закрытия периодов');return periods;}
   function fuelOperations():FuelActions {if(!fuelActions||fuelActions.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружен общий движок операций с топливом');return fuelActions;}
+  function procurementOperations():ProcurementActions {if(!procurementActions||procurementActions.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружен общий движок закупок и поставок');return procurementActions;}
   function footprint(value: unknown): string[] {
     const command=parseCommand(value);
     if(command.type==='DocumentAction')return documentModule().footprint(command.input);
     if(command.type==='PeriodAction')return periodModule().footprint(command.input);
     if(command.type==='FuelAction')return fuelOperations().footprint(command.input);
+    if(command.type==='ProcurementAction')return procurementOperations().footprint(command.input);
     if(command.type==='MergeCatalog'){
       const names=mergeModule().footprint(command.input);
       if(names.includes('auditLog'))fail('INVALID_COMMAND','Исторические ссылки аудита нельзя выбирать для переноса','mutableRefs');
@@ -53,6 +56,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     if(command.type==='DocumentAction')return documentModule().dependencies(command.input);
     if(command.type==='PeriodAction')return periodModule().dependencies(command.input);
     if(command.type==='FuelAction')return fuelOperations().dependencies(command.input);
+    if(command.type==='ProcurementAction')return procurementOperations().dependencies(command.input);
     if(command.type==='MergeCatalog'){mergeModule();return [...(registry as SectionRegistry).sections].sort();}
     if(command.type==='IssueFuel')return ['tanks','tankIncomes','genRecords','generators','fuelMovements','records','vehicles','assetAssignments','fuelPeriods','fuelWriteoffs','fuelPurchases','monthlyFuel'].sort();
     if(command.type==='AcceptShift')return ['shiftReports','vehicles','generators','drivers','dispatchJobs'].sort();
@@ -192,6 +196,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     if(command.type==='DocumentAction')return documentModule().plan(db,command.input,ctx);
     if(command.type==='PeriodAction')return periodModule().plan(db,command.input,ctx);
     if(command.type==='FuelAction')return fuelOperations().plan(db,command.input,ctx);
+    if(command.type==='ProcurementAction')return procurementOperations().plan(db,command.input,ctx);
     if(command.type==='MergeCatalog')return mergeModule().plan(db,command.input,ctx);
     if(command.type==='IssueFuel')return issueFuel(db,command,ctx);
     if(command.type==='AcceptShift')return acceptShift(db,command,ctx);

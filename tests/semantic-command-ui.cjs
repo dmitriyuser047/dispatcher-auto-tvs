@@ -51,6 +51,24 @@ test('the real helper refuses older capabilities without calling either IPC save
  const result=await page.evaluate(async()=>{_sync.platform.commands=0;return{result:await platformExecuteCommand(window.__nativeCommand,{operationId:'unsupported-command'}),requests:window.__nativeRequests.length,raw:window.__nativeRawWrites,movements:data.fuelMovements.length};});assert.equal(result.result.ok,false);assert.equal(result.result.code,'UNSUPPORTED_COMMANDS');assert.match(result.result.message,/совместим|поддержива/);assert.equal(result.requests,0);assert.equal(result.raw,0);assert.equal(result.movements,0);
 });
 
+test('linked receipt drafts, posting and history actions require procurement capability before any IPC',async()=>{
+ const results=await page.evaluate(async()=>{
+  _sync.platform.fuelOperations=1;_sync.platform.procurement=0;
+  data.partMovements.push({id:0,kind:'receipt',partId:0,qty:30,date:'2026-10-01'});
+  data.procurementOrders.push({id:'legacy-linked',procurement:{receiptRefs:[{section:'partMovements',id:0}]}});
+  data.documentDrafts.push({id:'linked-draft',section:'partMovements',payload:{kind:'receipt',partId:0,qty:20,procurementReceipt:{version:1,orderId:'order'}}});
+  const fingerprint='sha256:'+'0'.repeat(64),inputs=[
+   {action:'saveDraft',section:'partMovements',payload:{kind:'receipt',partId:0,qty:20,procurementReceipt:{version:1,orderId:'order'}}},
+   {action:'postDraft',section:'partMovements',draftId:'linked-draft',reviewFingerprint:fingerprint},
+   {action:'reverse',section:'partMovements',id:0,reason:'Synthetic reviewed return',reviewFingerprint:fingerprint},
+   {action:'saveDraft',section:'partMovements',correctionOf:{section:'partMovements',id:0},reason:'Synthetic receipt correction',payload:{kind:'receipt',partId:0,qty:25}}
+  ];
+  const replies=[];for(const[index,input]of inputs.entries())replies.push(await platformExecuteCommand({type:'DocumentAction',version:1,input},{operationId:'unsupported-linked-'+index}));
+  return{replies,requests:__nativeRequests.length,raw:__nativeRawWrites};
+ });
+ assert.equal(results.replies.length,4);for(const reply of results.replies){assert.equal(reply.ok,false);assert.equal(reply.code,'UNSUPPORTED_PROCUREMENT');}assert.equal(results.requests,0);assert.equal(results.raw,0);
+});
+
 test('real helper double calls share one IPC and apply canonical rows and persisted baselines only after ACK',async()=>{
  const before=await page.evaluate(()=>({data:JSON.stringify(data),baseline:_lastPersisted}));await start();await page.evaluate(()=>{window.__nativeDuplicate=platformExecuteCommand(window.__nativeCommand,{operationId:'synthetic-native-command'});});
  assert.deepEqual(await page.evaluate(()=>({data:JSON.stringify(data),baseline:_lastPersisted,requests:window.__nativeRequests.length,raw:window.__nativeRawWrites})),{...before,requests:1,raw:0});await release();
