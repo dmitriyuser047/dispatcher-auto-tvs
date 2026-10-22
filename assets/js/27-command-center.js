@@ -47,9 +47,10 @@ function ccBuildItems(query) {
     addRows(data.drivers,row=>[wfPersonnelMatches(row,'driver')?'Водитель':'',wfPersonnelMatches(row,'operator')?'Оператор ДЭС':''].filter(Boolean).join(' · ')||'Сотрудник','drivers',['name','phone','site'],row=>{if(typeof personnelOpenPerson==='function')personnelOpenPerson(row.id);else wfOpenTab('drivers');});
   }
   ['dispatchJobs','opsTasks','workOrders','assetDocuments','shiftReports'].forEach(section=>{
-    addRows(data[section], typeof WF_TABS!=='undefined'?WF_TABS[section]:section, wfSectionForTab(section),['title','name','number'],row=>{wfOpenTab(section);wfEdit(section,row.id);});
+    const rows=typeof DocumentEngine!=='undefined'&&DocumentEngine.sections.includes(section)?DocumentEngine.activeRows(data,section):data[section];
+    addRows(rows, typeof WF_TABS!=='undefined'?WF_TABS[section]:section, wfSectionForTab(section),['title','name','number'],row=>{wfOpenTab(section);wfEdit(section,row.id);});
   });
-  addRows(data.payments,'Платёж','finances',['contragent','purpose','description'],()=>switchSection('finances'));
+  addRows(typeof finPayments==='function'?finPayments():data.payments,'Платёж','finances',['contragent','purpose','description'],()=>switchSection('finances'));
   addRows(data.reestrRows,'Счёт / реестр','reestr',['supplier','number','invoice','contract'],()=>switchSection('reestr'));
   return items.filter(item => !q || item.score < 3).sort((a, b) => a.score - b.score || a.label.localeCompare(b.label, 'ru')).slice(0, 40);
 }

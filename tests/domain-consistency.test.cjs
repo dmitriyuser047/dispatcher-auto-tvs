@@ -8,12 +8,14 @@ function financeFixture(overrides={}){
   return {vehicles:[{id:'v1',plate:'ТЕСТ',org:'Синтетическая организация'}],generators:[],payments:[],repairs:[],vehicleTo:[],toRecords:[],workOrders:[],...overrides};
 }
 function finances(db,options={}){
-  const calls={save:0,confirm:[],toast:[]};
-  const context=vm.createContext({console,data:clone(db),DomainSources:sources,DecimalCore:require('../assets/core/decimal-core.js'),
+  const calls={save:0,commands:[],confirm:[],toast:[],reviews:[]};
+  let sequence=0;const context=vm.createContext({console,data:{documentDrafts:[],...clone(db)},DomainSources:sources,DecimalCore:require('../assets/core/decimal-core.js'),DocumentEngine:require('../assets/core/document-engine.js'),PlatformKernel:require('../assets/core/platform-kernel.js'),structuredClone,
+    lifecycleReady:()=>{},wfCommandContextStamp:()=> 'synthetic-full-access',__reviews:calls.reviews,
     confirmAction:async text=>{calls.confirm.push(text);return options.confirm!==false;},
     saveData:async()=>{calls.save++;return true;},showToast:text=>calls.toast.push(text)});
   vm.runInContext(read('assets/js/21-finances.js'),context);
-  vm.runInContext('renderFinancesSection=()=>{}',context);
+  context.platformExecuteCommand=async(command,options)=>{calls.commands.push(clone(command));const plan=require('../assets/core/platform-commands.js').plan(context.data,command,{id:options.operationId,now:'2026-10-22T12:00:00.000Z',today:'2026-10-22',actor:{id:'synthetic-admin',name:'Synthetic admin',role:'admin'}});Object.assign(context.data,clone(plan.sections));return{ok:true};};
+  vm.runInContext('renderFinancesSection=()=>{};finImportReview=(discrepancies,excluded)=>__reviews.push({discrepancies,excluded})',context);
   return {context,calls,run:()=>context.importPaymentsFromJournals()};
 }
 function repairAndOrder(){
@@ -43,9 +45,9 @@ test('planned maintenance for 25000 creates no financial expense or payment',asy
 
 test('one repair and its linked accepted work order import 10000 once and repeat is idempotent',async()=>{
   const app=finances(repairAndOrder());await app.run();
-  assert.equal(app.context.data.payments.length,1);assert.equal(app.context.data.payments[0].sum,10000);
-  assert.equal(app.context.data.payments[0].source,'repair');const before=JSON.stringify(app.context.data.payments);
-  await app.run();assert.equal(JSON.stringify(app.context.data.payments),before);assert.equal(app.calls.save,1);
+  assert.equal(app.context.data.payments.length,0);assert.equal(app.context.data.documentDrafts.length,1);assert.equal(app.context.data.documentDrafts[0].payload.sum,10000);
+  assert.equal(app.context.data.documentDrafts[0].payload.source,'repair');const before=JSON.stringify(app.context.data);
+  await app.run();assert.equal(JSON.stringify(app.context.data),before);assert.equal(app.calls.save,0);assert.equal(app.calls.commands.length,1);
 });
 
 test('existing linked duplicate payments stay intact and require visible review',async()=>{
@@ -53,24 +55,20 @@ test('existing linked duplicate payments stay intact and require visible review'
     {id:'p1',source:'repair',sourceId:'repair1',sum:10000,paidAmount:2500,paid:false,note:'Ручная заметка',date:'2026-10-21'},
     {id:'p2',source:'workOrder',sourceId:'order1',sum:10000,paidAmount:10000,paid:true,paidDate:'2026-10-20'}];
   const app=finances(db);await app.run();assert.equal(app.context.data.payments.length,2);
-  for(let i=0;i<2;i++){
-    const actual=clone(app.context.data.payments[i]),review=actual.sourceReview;delete actual.sourceReview;
-    assert.deepEqual(actual,db.payments[i]);assert.equal(review.origin,'financial-recognition');assert.ok(review.message);
-  }
-  const before=JSON.stringify(app.context.data.payments);await app.run();assert.equal(JSON.stringify(app.context.data.payments),before);assert.equal(app.calls.save,1);
+  assert.deepEqual(clone(app.context.data.payments),db.payments);assert.equal(app.calls.commands.length,0);assert.equal(app.calls.save,0);assert.ok(app.calls.reviews[0].excluded.length);
 });
 
 test('a legacy paid work order does not cause a second primary payment to be created',async()=>{
   const db=repairAndOrder();db.payments=[{id:'legacy',source:'workOrder',sourceId:'order1',sum:10000,paid:true,paidAmount:10000}];
   const app=finances(db);await app.run();assert.equal(app.context.data.payments.length,1);
-  assert.equal(app.context.data.payments[0].paidAmount,10000);assert.equal(app.context.data.payments[0].sourceReview.code,'linked-primary');
+  assert.equal(app.context.data.payments[0].paidAmount,10000);assert.equal(app.context.data.documentDrafts.length,0);assert.equal(app.calls.commands.length,0);assert.equal(app.calls.reviews[0].excluded[0].code,'linked-primary');
 });
 
 test('an old payment imported from a plan is reviewed without erasing its money or actual payment',async()=>{
   const db=financeFixture({vehicleTo:[{id:'plan',vehicleId:'v1',date:'2026-11-10',planned:true,cost:25000}],
     payments:[{id:'p',source:'to',sourceId:'plan',sum:25000,paidAmount:5000,paid:false,description:'Ручное описание'}]});
   const app=finances(db);await app.run();assert.equal(app.context.data.payments[0].sum,25000);assert.equal(app.context.data.payments[0].paidAmount,5000);
-  assert.equal(app.context.data.payments[0].description,'Ручное описание');assert.equal(app.context.data.payments[0].sourceReview.code,'planned-source');
+  assert.equal(app.context.data.payments[0].description,'Ручное описание');assert.equal(app.calls.reviews[0].excluded[0].code,'planned-source');assert.equal(app.calls.save,0);
 });
 
 test('source refresh preserves manual amounts, descriptions, dates and partial payment',async()=>{
@@ -79,14 +77,14 @@ test('source refresh preserves manual amounts, descriptions, dates and partial p
     sourceSnapshot:{sum:10000,description:'Замена узла',date:'2026-10-20'}}];
   const app=finances(db);await app.run();const payment=app.context.data.payments[0];
   assert.equal(payment.sum,12500);assert.equal(payment.description,'Мой текст');assert.equal(payment.date,'2026-10-22');
-  assert.equal(payment.paidAmount,2000);assert.equal(payment.paidDate,'2026-10-21');assert.equal(payment.dueDate,'2026-11-01');assert.equal(payment.sourceSnapshot.sum,12000);
+  assert.equal(payment.paidAmount,2000);assert.equal(payment.paidDate,'2026-10-21');assert.equal(payment.dueDate,'2026-11-01');assert.equal(payment.sourceSnapshot.sum,10000);assert.equal(app.calls.reviews[0].discrepancies[0].current,12000);assert.equal(app.calls.commands.length,0);
 });
 
-test('legacy fully paid flag is materialized at its old amount before source amount changes',async()=>{
+test('legacy fully paid source fact stays unchanged while a newer source amount is reported',async()=>{
   const db=repairAndOrder();db.workOrders=[];db.repairs[0].cost=12000;
   db.payments=[{id:'p',source:'repair',sourceId:'repair1',sum:10000,paid:true}];
   const app=finances(db);await app.run();const payment=app.context.data.payments[0];
-  assert.equal(payment.sum,12000);assert.equal(payment.paidAmount,10000);assert.equal(payment.paid,false);
+  assert.deepEqual(clone(payment),db.payments[0]);assert.equal(Object.hasOwn(payment,'paidAmount'),false);assert.equal(app.calls.reviews[0].discrepancies[0].current,12000);
 });
 
 test('cancelled sources, invalid dates and plans do not import; actual generator maintenance uses its primary',async()=>{
@@ -95,11 +93,11 @@ test('cancelled sources, invalid dates and plans do not import; actual generator
     workOrders:[{id:'w',status:'accepted',toRecordId:'done',actualCost:300,downtimeTo:'2026-10-20T12:00'}]});
   const before=JSON.stringify(db),projection=sources.projectFinancialSources(db);assert.equal(JSON.stringify(db),before);
   assert.deepEqual(projection.sources.map(row=>[row.source,row.sourceId,row.assetRef,row.sum]),[['toRecord','done','g:g1',300]]);
-  const app=finances(db);await app.run();assert.equal(app.context.data.payments.length,1);assert.equal(app.context.data.payments[0].sum,300);
+  const app=finances(db);await app.run();assert.equal(app.context.data.payments.length,0);assert.equal(app.context.data.documentDrafts[0].payload.sum,300);
 });
 
 test('rejecting the import preview leaves all application data untouched',async()=>{
-  const db=repairAndOrder(),app=finances(db,{confirm:false});await app.run();assert.deepEqual(clone(app.context.data),db);assert.equal(app.calls.save,0);
+  const db=repairAndOrder(),app=finances(db,{confirm:false});await app.run();assert.deepEqual(clone(app.context.data),{documentDrafts:[],...db});assert.equal(app.calls.save,0);assert.equal(app.calls.commands.length,0);
 });
 
 test('DES act and balance include a new receipt: 100 + 100 - 20 = 180 litres',()=>{

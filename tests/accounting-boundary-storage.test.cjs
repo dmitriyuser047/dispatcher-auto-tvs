@@ -18,7 +18,7 @@ function fixture(t,format,change=()=>{}){
  t.after(()=>{server.stop();assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));assert.ok(path.basename(root).startsWith('tvs-accounting-boundary-'));fs.rmSync(root,{recursive:true,force:true});});
  // Direct fixture creation deliberately preserves old invalid metadata exactly;
  // these are isolated legacy/import snapshots, not ordinary application saves.
- if(format==='sqlite')sqlite.create(dir,{data,revisions});else{fs.mkdirSync(path.join(dir,'sections'),{recursive:true});for(const name of storage.SECTIONS)fs.writeFileSync(storage.sectionFile(dir,name),JSON.stringify(data[name]));fs.writeFileSync(storage.revisionsFile(dir),JSON.stringify(revisions));}
+ if(format==='sqlite')sqlite.create(dir,{data,revisions});else{fs.mkdirSync(path.join(dir,'sections'),{recursive:true});for(const name of storage.SECTIONS)fs.writeFileSync(storage.sectionFile(dir,name),JSON.stringify(data[name]));fs.writeFileSync(storage.revisionsFile(dir),JSON.stringify(storage.encodeRevisions(revisions)));}
  return {root,dir,data};
 }
 const snapshot=dir=>storage.readSnapshot(dir);

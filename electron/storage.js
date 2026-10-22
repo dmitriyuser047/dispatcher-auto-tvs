@@ -25,6 +25,7 @@ const heldLocks = runtimeProcess[Symbol.for('tvs.storage.databaseLocks')] || (ru
 
 // Порядок важен только для читаемости — файлы независимы
 const SECTIONS = require('../assets/core/platform-schema.js').sections.slice();
+const storageFormat=require('./storage-format.cjs');
 
 const REVISIONS_FILE = 'revisions.json';
 // SQLite is opt-in: only an explicitly created database file selects it. A
@@ -39,6 +40,14 @@ function sectionsDir(dataDir) { return path.join(dataDir, 'sections'); }
 function sectionFile(dataDir, name) { return path.join(sectionsDir(dataDir), name + '.json'); }
 function revisionsFile(dataDir) { return path.join(sectionsDir(dataDir), REVISIONS_FILE); }
 function legacyFile(dataDir) { return path.join(dataDir, 'data.json'); }
+function schemaVersion(dataDir){
+  const sql=sqliteBackend(dataDir);if(sql)return sql.schemaVersion(dataDir);
+  if(fs.existsSync(revisionsFile(dataDir)))return storageFormat.decodeRevisions(readJson(revisionsFile(dataDir))).schemaVersion;
+  if(fs.existsSync(sectionFile(dataDir,'documentDrafts')))throw Object.assign(new Error('Повреждены версии новой базы. Восстановите их из копии; автоматическое создание запрещено.'),{code:'STORAGE_REVISIONS'});
+  if(fs.existsSync(legacyFile(dataDir))){const legacy=readJson(legacyFile(dataDir));if(Array.isArray(legacy?.documentDrafts)&&legacy.documentDrafts.length)throw Object.assign(new Error('Неверсионированный файл содержит новые документы. Восстановите его в отдельную базу из резервного пакета; документы не были скрыты или удалены.'),{code:'STORAGE_FORMAT'});}
+  return fs.existsSync(legacyFile(dataDir))||storageFormat.legacySections().some(name=>fs.existsSync(sectionFile(dataDir,name)))?1:storageFormat.SCHEMA_VERSION;
+}
+function assertWritable(dataDir){if(schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION)storageFormat.upgradeRequired();}
 function canonicalDirectory(dataDir) {
   const resolved = fs.realpathSync(path.resolve(dataDir));
   return runtimeProcess.platform === 'win32' ? resolved.toLowerCase() : resolved;
@@ -46,8 +55,8 @@ function canonicalDirectory(dataDir) {
 function databaseToken(dataDir) {
   return withDatabaseLock(dataDir,()=>{
     const sqlite=sqliteBackend(dataDir);
-    const identity=sqlite ? sqlite.readIdentity(dataDir) : require('./database-identity.cjs').readOrCreate(dataDir);
-    return crypto.createHash('sha256').update(JSON.stringify(['tvs-database',canonicalDirectory(dataDir),identity.uuid,identity.generation])).digest('hex');
+    const identity=sqlite ? sqlite.readIdentity(dataDir) : require('./database-identity.cjs').readOrCreate(dataDir,{create:schemaVersion(dataDir)>=storageFormat.SCHEMA_VERSION});
+    return crypto.createHash('sha256').update(JSON.stringify(['tvs-database',canonicalDirectory(dataDir),identity?.uuid??'legacy-readonly',identity?.generation??0])).digest('hex');
   });
 }
 function lockError(file, detail) {
@@ -131,21 +140,19 @@ function readRevisions(dataDir) {
   const sqlite = sqliteBackend(dataDir);
   if (sqlite) return sqlite.readRevisions(dataDir);
   recoverTransaction(dataDir);
-  const revs = readJson(revisionsFile(dataDir));
-  if (!revs || ['vehicles', 'records'].some(n => !Number.isSafeInteger(revs[n]) || revs[n] < 0) ||
-      SECTIONS.some(n => n in revs && (!Number.isSafeInteger(revs[n]) || revs[n] < 0))) throw new Error('Повреждены версии разделов');
-  const added = {};
-  SECTIONS.filter(n => !(n in revs)).forEach(n => {
-    added[n] = fs.existsSync(sectionFile(dataDir, n)) ? readRows(dataDir, n) : [];
-    revs[n] = Date.now();
-  });
-  commitSections(dataDir, added, revs);
-  return revs;
+  if(!fs.existsSync(revisionsFile(dataDir))){if(schemaVersion(dataDir)===1)return Object.fromEntries(SECTIONS.map(name=>[name,0]));migrate(dataDir);}
+  return storageFormat.decodeRevisions(readJson(revisionsFile(dataDir))).revisions;
 }
 
 function readRows(dataDir, name) {
   const sqlite = sqliteBackend(dataDir);
   if (sqlite) return sqlite.readRows(dataDir,name);
+  if(!fs.existsSync(sectionFile(dataDir,name))&&schemaVersion(dataDir)===1){
+    if(name==='documentDrafts')return [];
+    if(!fs.existsSync(revisionsFile(dataDir))){const legacy=readJson(legacyFile(dataDir),null);if(legacy)return Array.isArray(legacy[name])?legacy[name]:[];}
+    const versions=readJson(revisionsFile(dataDir),{});if(!Object.hasOwn(versions,name)&&!['vehicles','records'].includes(name))return [];
+    if(['vehicles','records'].includes(name))throw Error('Неполный набор разделов. Отсутствует '+name+'. Восстановите базу из копии.');
+  }
   const rows = readJson(sectionFile(dataDir, name));
   validateRows(name, rows);
   return rows;
@@ -222,13 +229,12 @@ function recoverTransaction(dataDir) {
   const journal = path.join(sectionsDir(dataDir), '.transaction.json');
   if (!fs.existsSync(journal)) return;
   const tx = readJson(journal);
+  if(tx?.schemaVersion!==storageFormat.SCHEMA_VERSION){const error=new Error('Старая база содержит незавершённое сохранение. Восстановите её прежней версией программы перед созданием обновлённой копии.');error.code='SCHEMA_RECOVERY_REQUIRED';throw error;}
   const object = value => value && typeof value === 'object' && !Array.isArray(value);
   const names = object(tx?.sections) ? Object.keys(tx.sections) : null;
   // Recover using the schema recorded by the interrupted transaction. New
   // optional sections are added by readRevisions only after recovery finishes.
-  const revisionsValid = (value, required) => object(value) &&
-    required.every(name => Object.hasOwn(value, name)) &&
-    Object.values(value).every(revision => Number.isSafeInteger(revision) && revision >= 0);
+  const revisionsValid = value => {try{return storageFormat.decodeRevisions(value).schemaVersion===storageFormat.SCHEMA_VERSION;}catch{return false;}};
   if (!tx || !names || !object(tx.before) ||
       names.some(n => !SECTIONS.includes(n) || !Array.isArray(tx.sections[n]) || !Object.hasOwn(tx.before, n) || tx.before[n] !== null && !Array.isArray(tx.before[n])) ||
       !revisionsValid(tx.revisions, ['vehicles', 'records', ...names]) ||
@@ -254,10 +260,11 @@ function commitSections(dataDir, sections, revisions) {
   const journal = path.join(sectionsDir(dataDir), '.transaction.json');
   const before = Object.fromEntries(changed.map(n => [n, readJson(sectionFile(dataDir, n), null)]));
   const base = readJson(revisionsFile(dataDir), null);
-  writeJsonAtomic(journal, { before, base, sections, revisions });
+  const encoded=storageFormat.encodeRevisions(revisions);
+  writeJsonAtomic(journal, {schemaVersion:storageFormat.SCHEMA_VERSION, before, base, sections, revisions:encoded });
   try {
     changed.forEach(n => writeJsonAtomic(sectionFile(dataDir, n), sections[n]));
-    writeJsonAtomic(revisionsFile(dataDir), revisions);
+    writeJsonAtomic(revisionsFile(dataDir), encoded);
   } catch (e) {
     recoverTransaction(dataDir);
     throw e;
@@ -344,6 +351,7 @@ function migrate(dataDir) {
   if (sqliteBackend(dataDir)) return { migrated:false, reason:'SQLite: явный перенос уже выполнен' };
   recoverTransaction(dataDir);
   if (isSplit(dataDir)) return { migrated: false, reason: 'уже разделено' };
+  if(schemaVersion(dataDir)===1)return {migrated:false,reason:'Старая база доступна только для чтения; обновление выполняется отдельной копией'};
   const legacy = legacyFile(dataDir);
   fs.mkdirSync(sectionsDir(dataDir), { recursive: true });
 
@@ -380,6 +388,7 @@ function readAll(dataDir) {
   readRevisions(dataDir);
   const out = {};
   SECTIONS.forEach(name => { out[name] = readRows(dataDir, name); });
+  require('../assets/core/platform-contracts.js').validateSections(out,SECTIONS);
   return out;
 }
 
@@ -406,7 +415,8 @@ function writeAll(dataDir, data, options = {}) {
   const operation = platform.operationInfo(previous, data, { ...options, databaseToken:token });
   // A confirmed command can be retried after its own commit advanced revisions.
   // Resolve it before CAS, just as writeSections does.
-  if (operation?.receipt) return platform.replayResult(previous, revisions, token, operation, Object.keys(data));
+  if (operation?.receipt) return platform.filteredResult(platform.replayResult(previous, revisions, token, operation, Object.keys(data)),options.principal);
+  assertWritable(dataDir);
   if (options.replace !== true && (options.requireBase || options.base !== undefined)) {
     const base = options.base;
     if (base === undefined) {
@@ -435,7 +445,7 @@ function writeAll(dataDir, data, options = {}) {
       const canonical = prepareWriteoffSections(previous, sections, options);
       validatePlanningChanges(previous, canonical); checkClosedPeriods(previous, canonical); return canonical;
     } });
-  if (prepared.replayed) return platform.replayResult(previous, revisions, token, prepared.operation, Object.keys(data));
+  if (prepared.replayed) return platform.filteredResult(platform.replayResult(previous, revisions, token, prepared.operation, Object.keys(data)),options.principal);
   data = prepared.sections;
   const changed = [];
   const sections = {};
@@ -452,22 +462,26 @@ function writeAll(dataDir, data, options = {}) {
     changed.push(name);
   });
 
+  if(changed.length&&options.beforeCommit!==undefined){if(typeof options.beforeCommit!=='function')throw Error('Ожидалась синхронная подготовка записи');const result=options.beforeCommit();if(result&&typeof result.then==='function')throw Error('Подготовка записи должна быть синхронной');}
   commitSections(dataDir, sections, revisions);
-  return { ok:true, changed, revisions, databaseToken:token, canonicalSections:sections,
-    ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) };
+  return platform.filteredResult({ ok:true, changed, revisions, databaseToken:token, canonicalSections:sections,
+    ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) },options.principal);
 }
 
 /** Один раздел и его версия */
-function readSection(dataDir, name) {
+function readSection(dataDir, name,options={}) {
   if (!SECTIONS.includes(name)) throw new Error('Неизвестный раздел');
   recoverTransaction(dataDir);
   if (!isSplit(dataDir)) migrate(dataDir);
-  return { name, rev: readRevisions(dataDir)[name] || 0, rows: readRows(dataDir, name), databaseToken: databaseToken(dataDir) };
+  const rows=readRows(dataDir,name),visible=options.principal?(require('./document-access.cjs').permitted(options.principal,'read',name)?require('./platform-service.cjs').visibleRows(name,rows,options.principal):[]):rows;
+  return { name, rev: readRevisions(dataDir)[name] || 0, rows: visible, databaseToken: databaseToken(dataDir) };
 }
 
-function readSnapshot(dataDir) {
-  const data = readAll(dataDir);
-  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1 } };
+function readSnapshot(dataDir,options={}) {
+  let data = readAll(dataDir);
+  if(options.principal)data=Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?require('./platform-service.cjs').visibleRows(name,data[name],options.principal):[]]));
+  const version=schemaVersion(dataDir);
+  return { data, revisions: readRevisions(dataDir), databaseToken: databaseToken(dataDir), platform:{ apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:version,documentDrafts:version>=2?1:0,needsSchemaUpgrade:version<2 } };
 }
 function readOperation(dataDir,query,principal){
   const token=databaseToken(dataDir),audit=readSection(dataDir,'auditLog');
@@ -495,7 +509,8 @@ function writeSections(dataDir, payload, options = {}) {
   const platform = require('./platform-service.cjs');
   const context = { ...options, operation:payload?.operation || options.operation, base, revisions, databaseToken:token };
   const operation = platform.operationInfo(previous, sections, context);
-  if (operation?.receipt) return platform.replayResult(previous, revisions, token, operation, names);
+  if (operation?.receipt) return platform.filteredResult(platform.replayResult(previous, revisions, token, operation, names),options.principal);
+  assertWritable(dataDir);
   const conflicts = names.filter(n => (revisions[n] || 0) !== (base[n] || 0));
   if (conflicts.length) return { ok: false, conflicts, revisions, databaseToken: token };
   const prepared = platform.prepareTransaction(previous, sections, { ...context,
@@ -525,12 +540,13 @@ function writeSections(dataDir, payload, options = {}) {
     if (preparedCommit && typeof preparedCommit.then === 'function') throw new Error('Подготовка записи должна быть синхронной');
   }
   commitSections(dataDir, pending, revisions);
-  return { ok: true, changed, revisions, databaseToken: token,
-    canonicalSections:pending, ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) };
+  return platform.filteredResult({ ok: true, changed, revisions, databaseToken: token,
+    canonicalSections:pending, ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) },options.principal);
 }
 
 /** Ежедневная резервная копия: складываем разделы обратно в один файл */
 function makeDailyBackup(dataDir, backupDir, keepDays) {
+  if(schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION)return null;
   if (!isSplit(dataDir)) return null;
   const today = new Date().toISOString().slice(0, 10);
   const dest = path.join(backupDir, 'data_' + today + '.json');
@@ -549,12 +565,12 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
 }
 
 module.exports = {
-  SECTIONS, sectionsDir, sectionFile, revisionsFile,
+  SECTIONS, sectionsDir, sectionFile, revisionsFile,schemaVersion,assertWritable,encodeRevisions:storageFormat.encodeRevisions,
   databaseToken, withDatabaseLock, validateRows, prepareWriteoffSections,
   executeCommand:(dataDir,envelope,options)=>require('./command-service.cjs').execute(dataDir,envelope,options),
   ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot,readOperation }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, () => {
     const sqlite = sqliteBackend(dataDir), action = () => operation(dataDir,...args);
     if (!sqlite || ['isSplit','migrate'].includes(name)) return action();
-    return sqlite.transaction(dataDir,action,{ readOnly:!['writeAll','writeSections'].includes(name) });
+    return sqlite.transaction(dataDir,action,{ readOnly:!['writeAll','writeSections'].includes(name)||sqlite.schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION });
   })])),
 };

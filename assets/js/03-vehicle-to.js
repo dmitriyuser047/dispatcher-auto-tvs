@@ -88,7 +88,7 @@ function renderVehicleToSection(vid, currentOdometer) {
         График ТО
         <span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:10px">${recs.length} записей</span>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="openAddVehicleTo('${vid}')">
+      <button class="btn btn-primary btn-sm" onclick="openAddVehicleTo(${htmlJs(vid)})">
         <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         + Факт ТО
       </button>
@@ -107,30 +107,13 @@ function renderVehicleToSection(vid, currentOdometer) {
   </div>`;
 }
 
-function openAddVehicleTo(vid) {
-  editingVehicleToId = null;
-  document.getElementById('vehicleToModalTitle').textContent = 'Добавить запись ТО';
-  document.getElementById('vehicleToDeleteBtn').style.display = 'none';
-  const now = new Date();
-  document.getElementById('vto_date').value = fmtDate(now.toISOString().split('T')[0]);
-  ['vto_type','vto_next_date','vto_performer','vto_note'].forEach(id => document.getElementById(id).value = '');
-  ['vto_odometer','vto_next_km','vto_cost'].forEach(id => document.getElementById(id).value = '');
-  const v = data.vehicles.find(x => x.id === vid);
-  if (v) {
-    const totalKm = recsFor(vid).reduce((s, r) => s + (r.km || 0), 0);
-    const curOdo = (v.odometer || 0) + totalKm;
-    if (curOdo > 0) document.getElementById('vto_odometer').value = Math.round(curOdo);
-    const last = vehicleToFor(vid).filter(r => !r.planned).slice().sort((a,b) => cmpDateAsc(a.date, b.date)).pop();
-    if (last && last.nextKm) document.getElementById('vto_next_km').value = last.nextKm;
-  }
-  document.getElementById('vehicleToModal').dataset.vid = JSON.stringify(vid);
-  openModal('vehicleToModal');
-}
+function openAddVehicleTo(vid) { return newDocument('vehicleTo',{vehicleId:vid}); }
 
 function openEditVehicleTo(id) {
   const r = (data.vehicleTo || []).find(x => x.id === id);
   if (!r) return;
   if (r.planned) { tssEditRecord(id, 'vehicleTo'); return; }
+  if(typeof DocumentEngine!=='undefined'&&DocumentEngine.state('vehicleTo',r)!=='legacy-live')return lifecycleOpen('vehicleTo',id);
   editingVehicleToId = id;
   document.getElementById('vehicleToModalTitle').textContent = 'Редактировать запись ТО';
   document.getElementById('vehicleToDeleteBtn').style.display = '';
@@ -147,6 +130,7 @@ function openEditVehicleTo(id) {
 }
 
 async function saveVehicleTo() {
+  const protectedRow=(data.vehicleTo||[]).find(row=>row.id===editingVehicleToId);if(protectedRow&&!protectedRow.planned&&typeof DocumentEngine!=='undefined'&&DocumentEngine.state('vehicleTo',protectedRow)!=='legacy-live')return lifecycleOpen('vehicleTo',protectedRow.id);
   let vehicleId;try{vehicleId=JSON.parse(document.getElementById('vehicleToModal').dataset.vid);}catch{showToast('Не удалось определить технику в форме ТО. Откройте запись заново.');return;}
   if(!EntityIdentity.identifier(vehicleId)||(data.vehicles||[]).filter(row=>row.id===vehicleId).length!==1){showToast('Техника в форме ТО не найдена или ID неоднозначен');return;}
   const dateIso = parseDate(document.getElementById('vto_date').value.trim());
@@ -188,6 +172,7 @@ async function saveVehicleTo() {
 }
 
 async function deleteVehicleTo(id) {
+  const protectedRow=(data.vehicleTo||[]).find(row=>row.id===id);if(protectedRow&&!protectedRow.planned&&typeof DocumentEngine!=='undefined'&&DocumentEngine.state('vehicleTo',protectedRow)!=='legacy-live')return lifecycleOpen('vehicleTo',id);
   if (!await confirmAction('Удалить эту запись ТО?')) return;
   data.vehicleTo = (data.vehicleTo || []).filter(r => r.id !== id);
   if (!await saveData(data)) return;

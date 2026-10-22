@@ -27,7 +27,7 @@ function visibleAudit(rows,principal){
 function filteredResult(result,principal){
   const out={...result};
   if(out.revisions)out.revisions=Object.fromEntries(Object.entries(out.revisions).filter(([name])=>permitted(principal,'read',name)));
-  if(out.canonicalSections)out.canonicalSections=Object.fromEntries(Object.entries(out.canonicalSections).filter(([name])=>permitted(principal,'read',name)).map(([name,rows])=>[name,name==='auditLog'?visibleAudit(rows,principal):rows]));
+  if(out.canonicalSections)out.canonicalSections=Object.fromEntries(Object.entries(out.canonicalSections).filter(([name])=>permitted(principal,'read',name)).map(([name,rows])=>[name,name==='auditLog'?visibleAudit(rows,principal):platform.visibleRows(name,rows,principal)]));
   return out;
 }
 function execute(dataDir,input,options={}){
@@ -51,6 +51,7 @@ function execute(dataDir,input,options={}){
         requireAccess(principal,'read',changed);
         return filteredResult(platform.replayResult(snapshot.data,snapshot.revisions,token,info,changed),principal);
       }
+      storage.assertWritable(dataDir);
       requireAccess(principal,'write',footprint);
       const missing=dependencies.filter(name=>!own(envelope.base,name));
       if(missing.length)fail('COMMAND_BASE_REQUIRED','Для команды нужны версии всех её зависимостей: '+missing.join(', '),428);
@@ -71,7 +72,7 @@ function execute(dataDir,input,options={}){
     };
     // Do not split snapshot, dependency checks and business/audit writes across
     // SQLite snapshots. Nested storage calls reuse this write connection.
-    return sqlite.exists(dataDir)?sqlite.transaction(dataDir,action):action();
+    return sqlite.exists(dataDir)?sqlite.transaction(dataDir,action,{readOnly:sqlite.schemaVersion(dataDir)<2}):action();
   });
 }
 module.exports=Object.freeze({execute});

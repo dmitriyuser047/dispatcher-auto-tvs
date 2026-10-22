@@ -19,7 +19,7 @@ function sample(){return {
 };}
 function fixture(t,data=sample()){
  const root=temp(t),json=path.join(root,'json'),sql=path.join(root,'sql'),all=Object.fromEntries(schema.sections.map(section=>[section,data[section]||[]])),revisions=Object.fromEntries(schema.sections.map((section,index)=>[section,index+1]));
- fs.mkdirSync(path.join(json,'sections'),{recursive:true});for(const section of schema.sections)fs.writeFileSync(path.join(json,'sections',section+'.json'),JSON.stringify(all[section]));fs.writeFileSync(path.join(json,'sections','revisions.json'),JSON.stringify(revisions));
+ fs.mkdirSync(path.join(json,'sections'),{recursive:true});for(const section of schema.sections)fs.writeFileSync(path.join(json,'sections',section+'.json'),JSON.stringify(all[section]));fs.writeFileSync(path.join(json,'sections','revisions.json'),JSON.stringify(storage.encodeRevisions(revisions)));
  sqlite.create(sql,{data:all,revisions});return {root,json,sql,all,revisions};
 }
 function rows(dir,request,principal=admin){return query.queryRows(dir,request,principal);}
@@ -103,7 +103,7 @@ test('cursor becomes stale after the selected section changes',t=>{
  for(const dir of [f.json,f.sql]){
   const page=rows(dir,{section:'vehicles',limit:1});const changed=[...f.all.vehicles,{id:'new',plate:'NEW'}];
   if(dir===f.sql)sqlite.commitSections(dir,{vehicles:changed},{...f.revisions,vehicles:f.revisions.vehicles+1});
-  else{fs.writeFileSync(path.join(dir,'sections','vehicles.json'),JSON.stringify(changed));fs.writeFileSync(path.join(dir,'sections','revisions.json'),JSON.stringify({...f.revisions,vehicles:f.revisions.vehicles+1}));}
+  else{fs.writeFileSync(path.join(dir,'sections','vehicles.json'),JSON.stringify(changed));fs.writeFileSync(path.join(dir,'sections','revisions.json'),JSON.stringify(storage.encodeRevisions({...f.revisions,vehicles:f.revisions.vehicles+1})));}
   assert.throws(()=>rows(dir,{section:'vehicles',limit:1,cursor:page.nextCursor}),{code:'CURSOR_STALE',status:409});assert.equal(rows(dir,{section:'vehicles',limit:1}).total,6);
  }
 });
@@ -113,7 +113,7 @@ test('unrelated section changes do not invalidate a stable keyset cursor',t=>{
  for(const dir of [f.json,f.sql]){
   const page=rows(dir,{section:'vehicles',limit:1});
   if(dir===f.sql)sqlite.commitSections(dir,{parts:[{id:'independent'}]},{...f.revisions,parts:f.revisions.parts+1});
-  else fs.writeFileSync(path.join(dir,'sections','revisions.json'),JSON.stringify({...f.revisions,parts:f.revisions.parts+1}));
+  else fs.writeFileSync(path.join(dir,'sections','revisions.json'),JSON.stringify(storage.encodeRevisions({...f.revisions,parts:f.revisions.parts+1})));
   assert.deepEqual(rows(dir,{section:'vehicles',limit:1,cursor:page.nextCursor}).rows,[f.all.vehicles[1]]);
  }
 });

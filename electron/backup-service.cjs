@@ -124,7 +124,9 @@ function sourceSnapshot(source, files) {
         return result;
     }
     if (expected.has('sections')) {
-        const versions = read('sections/revisions.json');
+        const rawVersions = read('sections/revisions.json');
+        let decoded;try{decoded=require('./storage-format.cjs').decodeRevisions(rawVersions);}catch{fail('BACKUP_REVISIONS','Неполные или неподдерживаемые версии JSON базы');}
+        const versions = decoded.revisions;
         if (!plain(versions) || !Object.hasOwn(versions, 'vehicles') || !Object.hasOwn(versions, 'records'))
             fail('BACKUP_REVISIONS', 'Неполные версии JSON базы');
         const data = {};
@@ -132,7 +134,7 @@ function sourceSnapshot(source, files) {
             if (expected.has('sections/' + name + '.json'))
                 data[name] = read('sections/' + name + '.json');
             else {
-                if (Object.hasOwn(versions, name) || ['vehicles', 'records'].includes(name))
+                if (decoded.schemaVersion===2 || Object.hasOwn(rawVersions, name) || ['vehicles', 'records'].includes(name))
                     fail('BACKUP_DATABASE', 'Отсутствует исходный раздел базы');
                 data[name] = [];
             }
@@ -260,9 +262,12 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir } =
     const source = directory(sourceDir), { parent, target } = newTarget(archivePath);
     if (knowledgeDir && fold(explicit(knowledgeDir)) !== fold(path.join(source, 'reestr-knowledge')))
         fail('BACKUP_PATH', 'База знаний должна принадлежать выбранной базе');
-    for (const name of ['sections', ...MANAGED])
-        if (within(path.join(source, name), target))
-            fail('BACKUP_PATH', 'Нельзя сохранить пакет внутри первичных файлов базы');
+    // Publishing a ZIP under a missing primary filename (for example
+    // platform.sqlite in a JSON profile) would change the selected storage
+    // format on the next read. Only the existing, dedicated backup directory
+    // may receive an archive inside the source profile.
+    if (within(source, target) && !within(path.join(source, 'backups'), parent))
+        fail('BACKUP_PATH', 'Внутри базы пакет можно сохранить только в существующую папку backups. Выберите отдельную папку для резервной копии.');
     jsonObject(settings, 'settings');
     let stage, identity, published = false;
     try {
@@ -342,7 +347,7 @@ function restorePackage({ archivePath, targetDir, format, protectedDir } = {}) {
             fs.mkdirSync(path.join(stage, 'sections'));
             for (const name of SECTIONS)
                 writeFile(path.join(stage, 'sections', name + '.json'), Buffer.from(JSON.stringify(checked.data[name])));
-            writeFile(path.join(stage, 'sections/revisions.json'), Buffer.from(JSON.stringify(checked.revisions)));
+            writeFile(path.join(stage, 'sections/revisions.json'), Buffer.from(JSON.stringify(storage.encodeRevisions(checked.revisions))));
         }
         for (const entry of checked.files) {
             if (entry.name === 'database.json')

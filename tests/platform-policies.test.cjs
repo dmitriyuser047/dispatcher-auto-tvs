@@ -29,10 +29,11 @@ test('confirmed work and accepted repairs retain their existing required accepta
   for(const field of ['acceptedBy','result','downtimeTo']) assert.throws(() => policies.validateChanges(before,{...before,workOrders:[{...accepted,[field]:''}]},at));
 });
 
-test('unchanged historical deficiencies do not block descriptive edits or independent valid work', () => {
+test('unchanged historical deficiencies permit attachments and independent work while accepted content stays frozen', () => {
   const before = fixture(); before.workOrders=[{id:'legacy',status:'accepted',result:'Historical'}];
   before.dispatchJobs=[job({id:'legacy-job',driverId:''})];
-  const after=structuredClone(before);after.workOrders[0].note='Clarified description';after.dispatchJobs[0].title='Clarified title';
+  const note=structuredClone(before);note.workOrders[0].note='Clarified description';assert.throws(()=>policies.validateChanges(before,note,at));
+  const after=structuredClone(before);after.workOrders[0].attachments=[{id:'evidence',name:'Подтверждение'}];after.dispatchJobs[0].title='Clarified title';
   assert.equal(policies.validateChanges(before,after,at),true);
   after.workOrders[0].result='';assert.throws(()=>policies.validateChanges(before,after,at));
 });

@@ -1,8 +1,8 @@
 /* Pure document-based operating cost calculation, shared by UI and storage validation. */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(()=>require('../core/decimal-core.js'),()=>require('../core/effective-periods.js'));
-  else root.TvsCostEngine = factory(()=>root.DecimalCore,()=>root.EffectivePeriods);
-})(typeof globalThis === 'object' ? globalThis : this, function (getDecimal,getPeriods) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(()=>require('../core/decimal-core.js'),()=>require('../core/effective-periods.js'),()=>require('../core/document-engine.js'));
+  else root.TvsCostEngine = factory(()=>root.DecimalCore,()=>root.EffectivePeriods,()=>root.DocumentEngine);
+})(typeof globalThis === 'object' ? globalThis : this, function (getDecimal,getPeriods,getDocuments) {
   'use strict';
   const SOURCES = ['vehicles', 'generators', 'records', 'genRecords', 'repairs', 'vehicleTo', 'toRecords', 'workOrders', 'payments', 'fuelPurchases', 'partMovements', 'costEntries', 'costProfiles'];
   const LABELS = { records:'Журнал ТС', genRecords:'Журнал ДЭС', repairs:'Ремонт', vehicleTo:'ТО транспорта', toRecords:'ТО ДЭС', workOrders:'Ремонтный заказ', payments:'Финансы', fuelPurchases:'Покупка ГСМ', costEntries:'Ручная операция', partMovements:'Движение запчастей' };
@@ -31,7 +31,7 @@
   function invoiceKey(entry) {
     return entry.assetRef && entry.invoiceNo && entry.date ? [entry.assetRef, entry.date, norm(entry.invoiceNo), norm(entry.party), entry.party ? '' : String(entry.amount)].join('|') : '';
   }
-  function refOf(row) { return row.assetRef || (row.vehicleId ? 'v:' + row.vehicleId : row.generatorId ? 'g:' + row.generatorId : ''); }
+  function refOf(row) { return row.assetRef || (row.vehicleId!=null&&row.vehicleId!=='' ? 'v:' + row.vehicleId : row.generatorId!=null&&row.generatorId!=='' ? 'g:' + row.generatorId : ''); }
   function checkObject(row) {
     if (!row || typeof row !== 'object' || Array.isArray(row)) throw Error('Операция должна быть объектом');
     const scan = value => {
@@ -126,6 +126,13 @@
     if ((from && !validDate(from)) || (to && !validDate(to)) || (from && to && from > to)) throw Error('Проверьте начало и конец периода');
     const allowed = Array.isArray(options.readable) ? new Set(options.readable) : null;
     const db = Object.fromEntries(SOURCES.map(section => [section, !allowed || allowed.has(section) ? list(database, section) : []]));
+    const documentIdentities=new Map(),documentIssues=[];
+    for(const section of ['repairs','vehicleTo','toRecords','workOrders','payments','partMovements']){
+      if(!db[section].some(row=>own(row,'lifecycle')||own(row,'paymentSettlements')))continue;
+      const engine=getDocuments?.();if(engine?.apiVersion!==1)throw Object.assign(Error('Не загружены правила версий документов'),{code:'MODULE_UNAVAILABLE'});
+      const resolved=engine.resolveSection(db,section);db[section]=resolved.rows;documentIssues.push(...resolved.diagnostics.map(item=>({...item,sourceSection:section})));
+      documentIdentities.set(section,new Map(resolved.identities.map(item=>[item.id,item])));
+    }
     const allAssets = [...db.vehicles.map(row => ({ assetRef:'v:' + row.id, label:[row.plate, row.make].filter(Boolean).join(' · ') || row.id, kind:'vehicle', row })),
       ...db.generators.map(row => ({ assetRef:'g:' + row.id, label:'ДЭС ' + (row.name || row.id), kind:'generator', row }))];
     const knownAssetRefs = new Set(allAssets.map(asset => asset.assetRef));
@@ -159,9 +166,10 @@
       else if (!options.assetRef || entry.assetRef === options.assetRef || !entry.assetRef) exclusions.push(item);
       if (important) issue(entry.assetRef, 'review', message, entry.sourceKey);
     };
-    const sourceEntry = (source, row, fields) => ({ source, sourceKey:source + ':' + (row.id || ''), sourceId:row.id || '', sourceLabel:LABELS[source] || source,
-      party:row.contragentId ? 'id:' + row.contragentId : row.contragent || row.performer || row.supplier || '',
-      assetRef:refOf(row), title:row.title || row.description || row.type || row.category || LABELS[source], invoiceNo:row.invoiceNo || '', kind:'expense', ...fields });
+    const sourceEntry = (source, row, fields) => {const identity=documentIdentities.get(source)?.get(row.id);return { source, sourceKey:source + ':' + (identity?.recognitionKey??row.id??''), sourceId:row.id??'', ...(identity?{rootSourceId:identity.rootId,recognitionKey:identity.recognitionKey}:{}),sourceLabel:LABELS[source] || source,
+      party:row.contragentId!=null&&row.contragentId!=='' ? 'id:' + JSON.stringify(row.contragentId) : row.contragent || row.performer || row.supplier || '',
+      assetRef:refOf(row), title:row.title || row.description || row.type || row.category || LABELS[source], invoiceNo:row.invoiceNo || '', kind:'expense', ...fields };};
+    for(const diagnostic of documentIssues)issue(diagnostic.assetRef||'',diagnostic.code||'document-version',diagnostic.message||'Версии документа требуют сверки',diagnostic.sourceSection+':'+(diagnostic.id??''));
     const add = (entry, primary) => {
       if (!refInScope(entry.assetRef)) return;
       if (!entry.date) { issue(entry.assetRef, 'date', entry.sourceLabel + ': дата не задана или недействительна; запись исключена', entry.sourceKey); return; }
@@ -274,8 +282,9 @@
     for (const row of db.payments.filter(live)) {
       const entry = sourceEntry('payments', row, { date:dateOf(row.date), amount:number(row.sum), category:row.category || 'Прочее' });
       if (!inPeriod(entry.date)) { if (!entry.date) add(entry); continue; }
-      if (row.sourceId && own(sourceSections, row.source)) {
-        const section = sourceSections[row.source], source = db[section].find(item => item.id === row.sourceId && live(item));
+      if (row.sourceId!=null&&row.sourceId!=='' && own(sourceSections, row.source)) {
+        const section = sourceSections[row.source], source = db[section].find(item => (documentIdentities.get(section)?.get(item.id)?.rootId??item.id) === row.sourceId && live(item));
+        if(source){const amount=number(section==='workOrders'?source.actualCost??(source.incurred===true?source.cost:null):source.cost);if(amount!=null&&entry.amount!=null&&differenceExceeds(amount,entry.amount,'0.005'))issue(entry.assetRef,'source-discrepancy','Сумма сохранённого расхода отличается от действующей версии первичного документа; требуется сверка',entry.sourceKey);}
         exclude(entry, source ? 'Связанный платёж: расход учитывается по первичному документу' : 'Источник связанного платежа отсутствует или недоступен; требуется сверка', !source); continue;
       }
       const invoice = entry.invoiceNo && documents.find(item => invoiceKey(item) === invoiceKey(entry));

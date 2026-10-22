@@ -20,7 +20,7 @@ beforeEach(async()=>{
  page=await browser.newPage({viewport:{width:1280,height:900}});errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());
  await page.addInitScript(({database,sections})=>{
   window.__token='synthetic-fuel-accounting-A';window.__disks={[window.__token]:JSON.stringify(database)};window.__revisions={};window.__writes=[];window.__hold=false;window.__mode='ok';window.__canonicalBasis=null;window.__closeReplies=[];
-  window.__snapshot=token=>{const db=JSON.parse(window.__disks[token]),revs=window.__revisions[token]??={};for(const name of sections){db[name]??=[];revs[name]??=1;}return{data:db,revisions:{...revs},databaseToken:token,platform:{apiVersion:1,operations:1,outbox:1,commands:1}};};
+  window.__snapshot=token=>{const db=JSON.parse(window.__disks[token]),revs=window.__revisions[token]??={};for(const name of sections){db[name]??=[];revs[name]??=1;}return{data:db,revisions:{...revs},databaseToken:token,platform:{apiVersion:1,operations:1,outbox:1,commands:1,schemaVersion:2,documentDrafts:1}};};
   window.electronAPI={
    readSnapshot:async()=>JSON.stringify(window.__snapshot(window.__token)),
    writeSections:async raw=>{

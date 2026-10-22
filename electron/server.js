@@ -27,7 +27,7 @@ function respond(res, status, value) {
 function readable(principal, section) { return access.authorize(principal, 'read', section); }
 function visibleAudit(rows, principal) { return require('./platform-service.cjs').visibleAudit(rows,principal); }
 function filteredData(all, principal) {
-  return Object.fromEntries(storage.SECTIONS.map(name => [name, !readable(principal, name) ? [] : name === 'auditLog' ? visibleAudit(all[name], principal) : all[name] || []]));
+  return Object.fromEntries(storage.SECTIONS.map(name => [name, !readable(principal, name) ? [] : require('./platform-service.cjs').visibleRows(name,all[name],principal)]));
 }
 function filteredRevisions(revisions, principal) {
   return Object.fromEntries(storage.SECTIONS.map(name => [name, readable(principal, name) ? revisions[name] || 0 : 0]));
@@ -78,15 +78,14 @@ async function writeRequest(req,res,full,authenticateRequest) {
       if (names.some(name => !storage.SECTIONS.includes(name) || !Array.isArray(sections[name]))) throw new Error('Некорректные разделы');
       if (typeof payload.databaseToken !== 'string' || !payload.databaseToken) { respond(res,428,{ok:false,databaseToken:token,error:'Обновите клиент и заново загрузите базу: для сохранения нужен идентификатор прочитанной базы.'}); return; }
       if (payload.databaseToken !== token) { respond(res,409,{ok:false,databaseChanged:true,databaseToken:token,error:'База данных на сервере изменилась. Заново откройте её перед сохранением.'}); return; }
-      const writeContext = { principal, now:new Date().toISOString() };
-      if (backup) backup();
+      const writeContext = { principal, now:new Date().toISOString(),beforeCommit:backup||undefined };
       const result = full
         ? storage.writeAll(dataDir,sections,{databaseToken:payload.databaseToken,operation:payload.operation,base:payload.base,requireBase:true,...writeContext})
         : storage.writeSections(dataDir,{base:payload.base || {},sections,databaseToken:payload.databaseToken,operation:payload.operation},writeContext);
       result.databaseToken = token;
       if (result.revisions) result.revisions = filteredRevisions(result.revisions,principal);
       if (result.canonicalSections) result.canonicalSections = Object.fromEntries(Object.entries(result.canonicalSections)
-        .filter(([name]) => readable(principal,name)).map(([name,rows]) => [name,name === 'auditLog' ? visibleAudit(rows,principal) : rows]));
+        .filter(([name]) => readable(principal,name)).map(([name,rows]) => [name,require('./platform-service.cjs').visibleRows(name,rows,principal)]));
       respond(res,result.ok ? 200 : 409,result);
       });
     } finally { _writeLock = false; }
@@ -163,7 +162,7 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls}) {
         if (!storage.SECTIONS.includes(name)) { respond(res,404,{ok:false,error:'Неизвестный раздел'}); return; }
         if (!readable(principal,name)) { respond(res,200,{name,rev:0,rows:[],databaseToken:storage.databaseToken(_dataDir)}); return; }
         const section = storage.readSection(_dataDir,name);
-        if (name === 'auditLog') section.rows = visibleAudit(section.rows,principal);
+        section.rows = require('./platform-service.cjs').visibleRows(name,section.rows,principal);
         respond(res,200,section); return;
       }
       if (req.url === '/api/data' || req.url === '/api/snapshot') {

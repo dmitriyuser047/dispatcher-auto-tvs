@@ -192,7 +192,7 @@ function renderGenDetail(g) {
 let editingToId = null;
 
 function toRecsFor(gid) {
-  return (data.toRecords || []).filter(r => r.generatorId === gid)
+  return (typeof DocumentEngine!=='undefined'?DocumentEngine.activeRows(data,'toRecords'):data.toRecords||[]).filter(r => r.generatorId === gid)
     .sort((a, b) => cmpDateAsc(a.date, b.date));
 }
 
@@ -263,7 +263,7 @@ function renderToSection(gid, currentHours) {
         График ТО
         <span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:10px">${recs.length} записей · Текущий счётчик: ${currentHours.toLocaleString('ru',{maximumFractionDigits:1})} мтч</span>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="openAddToRecord('${gid}')">
+      <button class="btn btn-primary btn-sm" onclick="openAddToRecord(${htmlJs(gid)})">
         <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         + ТО
       </button>
@@ -281,30 +281,12 @@ function renderToSection(gid, currentHours) {
   </div>`;
 }
 
-function openAddToRecord(gid) {
-  editingToId = null;
-  document.getElementById('toModalTitle').textContent = 'Добавить запись ТО';
-  const now = new Date();
-  document.getElementById('to_date').value = fmtDate(now.toISOString().split('T')[0]);
-  ['to_type','to_next_date','to_performer','to_note'].forEach(id => document.getElementById(id).value = '');
-  ['to_hours','to_next_hours','to_cost'].forEach(id => document.getElementById(id).value = '');
-  // предзаполнить текущий счётчик из последней записи
-  const g = (data.generators || []).find(x => x.id === gid);
-  if (g) {
-    const last = toRecsFor(gid).pop();
-    const recs = genRecsFor(gid).slice().sort((a,b) => cmpDateAsc(a.date, b.date));
-    const lastRec = recs[recs.length-1];
-    const curH = (g.hoursInit||0) + recs.reduce((s,r)=>s+(r.hours||0),0);
-    document.getElementById('to_hours').value = curH > 0 ? curH.toFixed(1) : '';
-    if (last && last.nextHours) document.getElementById('to_next_hours').value = last.nextHours;
-  }
-  document.getElementById('toModal').dataset.gid = JSON.stringify(gid);
-  openModal('toModal');
-}
+function openAddToRecord(gid) { return newDocument('toRecords',{generatorId:gid}); }
 
 function openEditToRecord(id) {
   const r = (data.toRecords || []).find(x => x.id === id);
   if (!r) return;
+  if(!r.planned&&typeof DocumentEngine!=='undefined'&&DocumentEngine.state('toRecords',r)!=='legacy-live')return lifecycleOpen('toRecords',id);
   editingToId = id;
   document.getElementById('toModalTitle').textContent = 'Редактировать запись ТО';
   document.getElementById('to_date').value       = fmtDate(r.date);
@@ -320,6 +302,7 @@ function openEditToRecord(id) {
 }
 
 async function saveToRecord() {
+  const protectedRow=(data.toRecords||[]).find(row=>row.id===editingToId);if(protectedRow&&!protectedRow.planned&&typeof DocumentEngine!=='undefined'&&DocumentEngine.state('toRecords',protectedRow)!=='legacy-live')return lifecycleOpen('toRecords',protectedRow.id);
   let generatorId;try{generatorId=JSON.parse(document.getElementById('toModal').dataset.gid);}catch{showToast('Не удалось определить ДЭС в форме ТО. Откройте запись заново.');return;}
   if(!EntityIdentity.identifier(generatorId)||(data.generators||[]).filter(row=>row.id===generatorId).length!==1){showToast('ДЭС в форме ТО не найдена или ID неоднозначен');return;}
   const dateIso = parseDate(document.getElementById('to_date').value.trim());
@@ -358,6 +341,7 @@ async function saveToRecord() {
 }
 
 async function deleteToRecord(id) {
+  const protectedRow=(data.toRecords||[]).find(row=>row.id===id);if(protectedRow&&!protectedRow.planned&&typeof DocumentEngine!=='undefined'&&DocumentEngine.state('toRecords',protectedRow)!=='legacy-live')return lifecycleOpen('toRecords',id);
   if (!await confirmAction('Удалить эту запись ТО?')) return;
   data.toRecords = (data.toRecords || []).filter(r => r.id !== id);
   if (!await saveData(data)) return;

@@ -12,7 +12,7 @@ function validate(value){
 }
 // Caller holds the same directory lock used by storage transactions. Identity
 // is separate from accounting rows; reading never repairs an invalid identity.
-function readOrCreate(dataDir){
+function readOrCreate(dataDir,options={}){
   const file=path.join(dataDir,FILE);
   let info;
   try{info=fs.lstatSync(file);}catch(error){if(error.code!=='ENOENT')throw error;}
@@ -22,6 +22,7 @@ function readOrCreate(dataDir){
     let value;try{value=JSON.parse(fs.readFileSync(file,'utf8'));}catch{fail('Не прочитан служебный идентификатор базы');}
     return validate(value);
   }
+  if(options.create===false)return null;
   const identity=validate({format:'tvs-database-identity',version:1,uuid:crypto.randomUUID(),generation:1});
   const fd=fs.openSync(file,'wx',0o600);
   try{fs.writeFileSync(fd,JSON.stringify(identity),'utf8');fs.fsyncSync(fd);}

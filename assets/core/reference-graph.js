@@ -2,7 +2,7 @@
 (function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(require('./platform-schema.js'),require('./entity-identity.js'));else root.ReferenceGraph=factory(root.PlatformSchema,root.EntityIdentity);})(typeof globalThis==='object'?globalThis:this,function(schema,identity){
  'use strict';
  const own=(value,key)=>Object.prototype.hasOwnProperty.call(value,key),catalogSections=Object.freeze(['vehicles','generators','tanks','drivers','parts','contragents','fuelCards']);
- const pinned=new Set(['records','genRecords','toRecords','tankIncomes','vehicleTo','repairs','reestrRows','payments','budget','fuelPurchases','fuelImports','fuelPeriods','monthlyFuel','fuelMovements','partMovements','glonassTrips','glonassImports','costEntries']);
+ const pinned=new Set(['records','genRecords','toRecords','tankIncomes','vehicleTo','repairs','reestrRows','payments','budget','fuelPurchases','fuelImports','fuelPeriods','monthlyFuel','fuelMovements','partMovements','glonassTrips','glonassImports','costEntries','documentDrafts']);
  const historical=new Set(['auditLog','fuelWriteoffs','savedReestrs']);
  const operational=new Set(['dispatchJobs','assetAssignments','workOrders','opsTasks','assetDocuments','shiftReports','procurementOrders','procurementRules','generators','fuelCards','costProfiles','vehicles']);
  const aliases={vehicleId:'vehicles',cardVehicleId:'vehicles',generatorId:'generators',tankId:'tanks',fromTankId:'tanks',toTankId:'tanks',counterTankId:'tanks',driverId:'drivers',personId:'drivers',partId:'parts',contragentId:'contragents'};

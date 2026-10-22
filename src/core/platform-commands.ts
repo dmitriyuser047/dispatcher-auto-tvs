@@ -1,4 +1,4 @@
-import type { AssetTarget, Identifier, JsonRow, JsonValue, MergeCatalogInput, PlatformCommand, SectionRows, createPlatformContracts } from './platform-contracts';
+import type { AssetTarget, DocumentActionInput, Identifier, JsonRow, JsonValue, MergeCatalogInput, PlatformCommand, SectionRows, createPlatformContracts } from './platform-contracts';
 
 export interface CommandActor { id: string; name: string; role: string }
 export interface CommandContext { id: string; now: string; today: string; actor: CommandActor }
@@ -8,11 +8,12 @@ interface FuelRules { apiVersion: number; validateChanges(previous: unknown, nex
 interface FuelEngine { parseFuelGrade(value: unknown): string }
 interface CatalogMerge { apiVersion: number; footprint(input: MergeCatalogInput): string[]; plan(database: unknown,input: MergeCatalogInput,context: CommandContext): CommandPlan }
 interface SectionRegistry { sections: readonly string[] }
+interface DocumentActions {apiVersion:number;dependencies(input:DocumentActionInput):string[];footprint(input:DocumentActionInput):string[];plan(database:unknown,input:DocumentActionInput,context:CommandContext):CommandPlan}
 type Contracts = ReturnType<typeof createPlatformContracts>;
 interface CommandError extends Error { code: string; status: number; field?: string }
 
 /** Pure semantic actions. Storage still owns ACL, CAS, audit and atomic commit. */
-export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, fuel: FuelRules, fuelEngine: FuelEngine,catalog?: CatalogMerge,registry?: SectionRegistry) {
+export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, fuel: FuelRules, fuelEngine: FuelEngine,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions) {
   if (!contracts || contracts.apiVersion !== 1 || !personnel || personnel.apiVersion !== 1 || !fuel || fuel.apiVersion !== 1 || typeof fuelEngine?.parseFuelGrade !== 'function')
     throw new Error('Не загружены общие правила команд платформы');
   function fail(code: string,message: string,field?: string): never {
@@ -29,8 +30,10 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     if(!catalog||catalog.apiVersion!==1||!registry)fail('MODULE_UNAVAILABLE','Не загружены правила управляемого объединения');
     return catalog;
   }
+  function documentModule():DocumentActions {if(!documents||documents.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружен общий движок документов');return documents;}
   function footprint(value: unknown): string[] {
     const command=parseCommand(value);
+    if(command.type==='DocumentAction')return documentModule().footprint(command.input);
     if(command.type==='MergeCatalog'){
       const names=mergeModule().footprint(command.input);
       if(names.includes('auditLog'))fail('INVALID_COMMAND','Исторические ссылки аудита нельзя выбирать для переноса','mutableRefs');
@@ -41,6 +44,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   }
   function dependencies(value: unknown,_database?: unknown): string[] {
     const command=parseCommand(value);
+    if(command.type==='DocumentAction')return documentModule().dependencies(command.input);
     if(command.type==='MergeCatalog'){mergeModule();return [...(registry as SectionRegistry).sections].sort();}
     if(command.type==='IssueFuel')return ['tanks','tankIncomes','genRecords','generators','fuelMovements','records','vehicles','assetAssignments','fuelPeriods','fuelWriteoffs','fuelPurchases','monthlyFuel'].sort();
     if(command.type==='AcceptShift')return ['shiftReports','vehicles','generators','drivers','dispatchJobs'].sort();
@@ -177,6 +181,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   }
   function plan(source:unknown,value:unknown,metadata:unknown):CommandPlan {
     const command=parseCommand(value),ctx=context(metadata),db=database(source,dependencies(command));
+    if(command.type==='DocumentAction')return documentModule().plan(db,command.input,ctx);
     if(command.type==='MergeCatalog')return mergeModule().plan(db,command.input,ctx);
     if(command.type==='IssueFuel')return issueFuel(db,command,ctx);
     if(command.type==='AcceptShift')return acceptShift(db,command,ctx);

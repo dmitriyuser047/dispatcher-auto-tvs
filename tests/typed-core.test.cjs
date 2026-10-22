@@ -10,13 +10,16 @@ const plain=value=>JSON.parse(JSON.stringify(value));
 let compilation;
 const compiled=()=>compilation||(compilation=compileTypedCore());
 function browserAPI(entry){
-  const context=vm.createContext({});
-  for(const dependency of entry.dependencies||[]){
-    const file=path.join(path.dirname(entry.outputPath),dependency.path);
-    vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
+  const context=vm.createContext({}),loaded=new Set(),visiting=new Set(),globals=new Set();
+  function load(item){
+    const filename=path.resolve(item.outputPath);if(loaded.has(filename)||visiting.has(filename))return;visiting.add(filename);
+    const dependencies=item.dependencies||[];
+    function dependency(value){const file=path.resolve(path.dirname(filename),value.path),typed=compiled().artifacts.find(artifact=>path.resolve(artifact.outputPath)===file);if(typed){load(typed);return;}if(loaded.has(file))return;vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});loaded.add(file);globals.add(value.global);}
+    for(const value of dependencies)if(!value.lazy)dependency(value);
+    vm.runInContext(item.artifact,context,{filename:item.output});loaded.add(filename);globals.add(item.global);visiting.delete(filename);
+    for(const value of dependencies)if(value.lazy)dependency(value);
   }
-  vm.runInContext(entry.artifact,context,{filename:entry.output});
-  return {api:context[entry.global],context};
+  load(entry);return {api:context[entry.global],context,globals};
 }
 function probeDiagnostics(text){
   const filename=path.join(ROOT,'__typed_core_contract_probe__.ts');
@@ -50,10 +53,10 @@ test('strict TypeScript is the real source of each UMD artifact with only explic
 test('browser and CommonJS loaders expose identical frozen API without leaking factory globals',()=>{
   const result=compiled();
   for(const entry of result.artifacts){
-    const {api,context}=browserAPI(entry),native=require(entry.outputPath);
+    const {api,context,globals}=browserAPI(entry),native=require(entry.outputPath);
     assert.ok(Object.isFrozen(api));assert.ok(Object.isFrozen(native));assert.equal(api.apiVersion,native.apiVersion);
     assert.deepEqual(Object.keys(api).sort(),Object.keys(native).sort());
-    assert.deepEqual(Object.keys(context),[...(entry.dependencies||[]).map(dependency=>dependency.global),entry.global]);assert.equal(context[entry.factory],undefined);
+    assert.deepEqual(Object.keys(context).sort(),[...globals].sort());assert.equal(context[entry.factory],undefined);
   }
   const entry=result.artifacts.find(value=>value.global==='DomainSources'),{api}=browserAPI(entry),native=require(entry.outputPath);
   const db={repairs:[{id:1,vehicleId:'v',invoiceDate:'2026-10-20',cost:'10000'}],workOrders:[{id:'w',status:'accepted',actualCost:10000,repairId:1}]};

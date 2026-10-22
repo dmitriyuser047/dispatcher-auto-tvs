@@ -51,7 +51,7 @@ function personnelOpenLinks(id) {
   personnelAssignments(id).filter(row => !row.archived && !row.deleted && (!row.to || row.to >= today)).forEach(row => result.push(row));
   for (const section of ['dispatchJobs','shiftReports']) {
     if (!personnelCanRead(section)) continue;
-    (data[section] || []).filter(row => row.driverId === id && !row.archived && !row.deleted &&
+    (typeof DocumentEngine!=='undefined'?DocumentEngine.activeRows(data,section):data[section]||[]).filter(row => row.driverId === id && !row.archived && !row.deleted &&
       !(section === 'dispatchJobs' ? ['done','confirmed','cancelled'] : ['accepted','cancelled']).includes(row.status)).forEach(row => result.push(row));
   }
   return result;
@@ -97,7 +97,8 @@ function personnelCard(row) {
     <div class="personnel-actions">${personnelButton('open','Карточка',row.id)}${!row.archived && personnelCanWrite('assetAssignments') ? personnelButton('assign','Закрепить технику',row.id) : ''}${!row.mergedInto&&personnelCanWrite()&&typeof catalogMergeOpen==='function'&&catalogMergeReadable()&&catalogMergeWritable(['drivers'])?personnelButton('merge','Объединить дубль',row.id):''}</div>
   </article>`;
 }
-function renderPersonnelSection() {
+function renderPersonnelSection(){try{return personnelRenderCurrentSection();}catch(error){const host=document.getElementById('mainContent');if(host)host.innerHTML='<div class="wf-note" role="alert"><h3>Карточки сотрудников недоступны</h3><p>'+htmlEsc(error.message)+'</p><p>Проверьте историю документа и диагностику базы. Неполные итоги не показаны.</p></div>';}}
+function personnelRenderCurrentSection(){
   if (!['drivers','operators'].includes(activeSection)) return;
   const kind = personnelKind(), view = personnelView(kind), title = kind === 'operator' ? 'Операторы ДЭС' : 'Водители';
   const host = document.getElementById('mainContent');
@@ -127,7 +128,7 @@ function personnelRenderDetail(person) {
   const assignments = personnelAssignments(person.id), current = personnelCurrentAssignments(person.id), warnings = personnelWarnings(person);
   const linkWarnings = personnelLinkWarnings(person);
   const documents = personnelCanRead('assetDocuments') ? (data.assetDocuments || []).filter(row => row.driverId === person.id && !row.archived) : [];
-  const shifts = personnelCanRead('shiftReports') ? (data.shiftReports || []).filter(row => row.driverId === person.id && !row.archived).slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || ''))) : [];
+  const shifts = personnelCanRead('shiftReports') ? (typeof DocumentEngine!=='undefined'?DocumentEngine.activeRows(data,'shiftReports'):data.shiftReports||[]).filter(row => row.driverId === person.id && !row.archived).slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || ''))) : [];
   const history = personnelCanRead('auditLog') ? (data.auditLog || []).filter(row => row.section === 'drivers' && row.recordId === String(person.id)).slice(-8).reverse() : [];
   const detail = (label,value) => `<div><dt>${htmlEsc(label)}</dt><dd>${htmlEsc(value || 'Не указано')}</dd></div>`;
   document.getElementById('mainContent').innerHTML = `<div class="personnel-workspace">

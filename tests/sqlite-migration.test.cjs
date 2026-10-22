@@ -73,7 +73,7 @@ function managedFile(sourceDir,directory,bytes,extension) {
 test('explicit split JSON copy preserves all 40 sections, typed IDs, order, values, revisions and legacy audit',t=>{
   const paths=directories(t),expected=split(paths.sourceDir),before=tree(paths.sourceDir);
   const report=migration.migrateCopy(paths);
-  assert.equal(report.ok,true);assert.equal(report.sourceFormat,'split-json');assert.equal(report.sections.length,40);
+  assert.equal(report.ok,true);assert.equal(report.sourceFormat,'split-json');assert.equal(report.sections.length,schema.sections.length);
   assert.deepEqual(sqlite.readAll(paths.targetDir),expected.data);assert.deepEqual(sqlite.readRevisions(paths.targetDir),expected.revisions);
   assert.deepEqual(tree(paths.sourceDir),before);assert.ok(report.legacyIssueCount>0);
   assert.equal(report.sections.find(section=>section.name==='fuelPurchases').revision,0);

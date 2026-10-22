@@ -22,7 +22,7 @@ function create(dir,format,data=initial(),revisions=Object.fromEntries(storage.S
     // must reject the intentional historical orphan, rather than create it.
     fs.mkdirSync(storage.sectionsDir(dir),{recursive:true});
     for(const name of storage.SECTIONS)fs.writeFileSync(storage.sectionFile(dir,name),JSON.stringify(data[name]||[]));
-    fs.writeFileSync(storage.revisionsFile(dir),JSON.stringify(revisions));
+    fs.writeFileSync(storage.revisionsFile(dir),JSON.stringify(storage.encodeRevisions(revisions)));
   }
 }
 function fixture(t,format){const root=temp(t),dir=path.join(root,'database');create(dir,format);return {root,dir};}

@@ -210,6 +210,12 @@ function wfAssignmentInput(row,old,replacesAssignmentId){
 }
 async function wfSave(section,row,state,options={}) {
   const old=(data[section]||[]).find(r=>r.id===row.id);if(state)wfAssertCommandState(state);wfValidate(section,row,old,options);
+  if(section==='workOrders'&&row.status==='accepted'||section==='dispatchJobs'&&row.status==='confirmed'){
+    if(!old)throw Error('Сначала сохраните исходный заказ или заявку. Проведение выполняется после проверки документа.');
+    if(typeof lifecyclePostExisting!=='function'||typeof DocumentEngine==='undefined')throw Error('Не загружен общий движок документов');
+    const descriptor=DocumentEngine.describe(section),payload={};for(const field of descriptor.fields)if(Object.hasOwn(row,field)&&row[field]!==undefined)payload[field]=JSON.parse(JSON.stringify(row[field]));
+    lifecyclePostExisting(section,old.id,payload);return false;
+  }
   let command=null;
   if(section==='fuelMovements'&&row.kind==='issue')command={type:'IssueFuel',version:1,input:{tankId:wfCommandReference('tanks',row.fromTankId,'Из ёмкости'),target:wfCommandTarget(row.assetRef),date:row.date,qty:row.qty,reason:row.reason,...(row.legacyOverlapConfirmed?{legacyOverlapConfirmed:true}:{})}};
   if(section==='assetAssignments')command={type:'AssignPerson',version:1,input:wfAssignmentInput(row,old,options.replacesAssignmentId)};
@@ -250,13 +256,9 @@ function wfReversalCheck(id) {
 }
 async function wfReverseFuelMovement(id,reason) {
   reason=String(reason||'').trim();if(!reason)throw Error('Укажите причину сторно');
-  const {original,linked}=wfReversalCheck(id);
-  const reversal={id:wfId('fuel-reversal'),date:original.date,kind:'adjustment',fromTankId:original.toTankId??'',toTankId:original.fromTankId??'',qty:original.qty,reason,originalMovementId:original.id,assetRef:original.assetRef||'',createdAt:new Date().toISOString(),sourceSnapshot:original.sourceSnapshot||null};
-  original.reversedBy=reversal.id;original.reversedAt=reversal.createdAt;
-  if(linked){linked.originalFuelIssued=linked.fuelIssued;linked.fuelIssued=0;linked.reversalId=reversal.id;linked.reversedAt=reversal.createdAt;}
-  data.fuelMovements.push(reversal);
-  if(!await saveData(data,{noMerge:true}))throw Error('Сторно не записано. Обновите данные и повторите проверку.');
-  closeModal('wfModal');wfTab='fuelMovements';renderWorkflows();showToast('Проведение исходного движения отменено. Оригинал сохранён в истории.');
+  wfReversalCheck(id);
+  if(typeof lifecycleReverseExisting!=='function')throw Error('Не загружена проверка сторно документов');
+  lifecycleReverseExisting('fuelMovements',id,reason);return false;
 }
 function wfCanRestoreDeleted(event) {
   return event?.action==='delete'&&typeof SYNC_SECTIONS!=='undefined'&&SYNC_SECTIONS.includes(event.section)&&event.section!=='auditLog'&&event.before&&typeof event.before==='object'&&!Array.isArray(event.before)&&EntityIdentity.identifier(event.before.id)&&!(data[event.section]||[]).some(r=>r.id===event.before.id);

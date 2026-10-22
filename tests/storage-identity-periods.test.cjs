@@ -35,7 +35,7 @@ test('new assets and cards cannot retroactively resolve closed unresolved fuel r
  const dir=temp(t),db=database();db.fuelPurchases=[{id:'p',date:'2026-09-02',cardNo:'987-654',qty:10}];db.genRecords.push({id:'missing-tank-record',generatorId:'g',tankId:'missing-tank',date:'2026-09-02',fuelIssued:5});
  // Existing legacy corruption is loaded, rather than newly introduced through
  // a validated write. The closed-period guard must still reject a new binding.
- fs.writeFileSync(path.join(dir,'data.json'),JSON.stringify(db));storage.readAll(dir);
+ fs.mkdirSync(storage.sectionsDir(dir));for(const name of storage.SECTIONS)fs.writeFileSync(storage.sectionFile(dir,name),JSON.stringify(db[name]||[]));fs.writeFileSync(storage.revisionsFile(dir),JSON.stringify(storage.encodeRevisions(Object.fromEntries(storage.SECTIONS.map(name=>[name,1])))));storage.readAll(dir);
  for(const [name,row] of [['fuelCards',{id:'new-card',number:'987654',org:'B'}],['vehicles',{id:'new-vehicle',fuelcard:'987654',fuelBalance:0,org:'B'}],['tanks',{id:'missing-tank',balanceInit:0}]]){
   const rows=[...storage.readAll(dir)[name],row];assert.throws(()=>storage.writeSections(dir,{base:storage.readRevisions(dir),sections:{[name]:rows}}),/закрыт/,name);
  }

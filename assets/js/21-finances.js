@@ -13,14 +13,26 @@ let finView = 'table'; // 'table' | 'analytics'
 
 function finNumber(value) { if(value==null||typeof value==='string'&&value.trim()==='')return 0;try{return DecimalCore.toNumberExact(DecimalCore.parse(value));}catch{throw Error('Некорректное число в финансовом источнике. Проверьте исходную запись.');} }
 function finToday() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+const finProjectedPayments=new WeakSet();
+function finPayments(){
+  if(typeof DocumentEngine!=='undefined'&&typeof DocumentEngine.activeRows==='function'){const rows=DocumentEngine.activeRows(data,'payments');rows.forEach(row=>finProjectedPayments.add(row));return rows;}
+  const rows=data.payments||[];if(rows.some(row=>row.lifecycle||row.paymentSettlements))throw Error('Не загружены правила версий и оплат документов');return rows;
+}
+function finEffectivePayment(payment){
+  if(payment&&finProjectedPayments.has(payment))return payment;
+  if(typeof DocumentEngine!=='undefined'&&payment&&payment.id!=null&&(data.payments||[]).some(row=>row.id===payment.id))return DocumentEngine.effectiveRow(data,'payments',payment.id)||payment;
+  return payment;
+}
 function finPaidAmount(payment) {
+  payment=finEffectivePayment(payment);
   return payment.paidAmount !== undefined && payment.paidAmount !== null
     ? Math.max(0, finNumber(payment.paidAmount)) : payment.paid ? Math.max(0, finNumber(payment.sum)) : 0;
 }
 function finAdd(a,b){return DecimalCore.toNumberExact(DecimalCore.add(a,b));}
 function finSum(values){return DecimalCore.toNumberExact(DecimalCore.sum(values));}
 function finMoney(value){return precisionFormat(value,{minimumScale:2});}
-function finDebt(payment) { return Math.max(0,DecimalCore.toNumberExact(DecimalCore.sub(finNumber(payment.sum),finPaidAmount(payment)))); }
+function finDebt(payment) { payment=finEffectivePayment(payment);return Math.max(0,DecimalCore.toNumberExact(DecimalCore.sub(finNumber(payment.sum),finPaidAmount(payment)))); }
+function finOverpaid(payment){payment=finEffectivePayment(payment);return Math.max(0,DecimalCore.toNumberExact(DecimalCore.sub(finPaidAmount(payment),finNumber(payment.sum))));}
 function finOverdue(payment) { return finDebt(payment) > 0.005 && /^\d{4}-\d{2}-\d{2}$/.test(payment.dueDate || '') && payment.dueDate < finToday(); }
 function finNameKey(value) { return String(value || '').trim().toLocaleLowerCase('ru').replace(/ё/g, 'е').replace(/[«»"']/g, '').replace(/\s+/g, ' '); }
 function finResolveContragent(payment) {
@@ -40,8 +52,9 @@ function finPaymentContext(payment) {
 function finPaymentOrg(payment) { return typeof payment.org === 'string' ? payment.org : payment.organization || finPaymentContext(payment).org || ''; }
 function finPaymentObject(payment) { return typeof payment.object === 'string' ? payment.object : finPaymentContext(payment).object || ''; }
 
-function renderFinancesSection() {
-  const payments = data.payments || [];
+function renderFinancesSection(){try{return finRenderCurrentSection();}catch(error){const host=document.getElementById('mainContent');if(host)host.innerHTML='<div class="wf-note" role="alert"><h3>Финансовый расчёт недоступен</h3><p>'+htmlEsc(error.message)+'</p><p>Проверьте историю документа и диагностику базы. Неполные итоги не показаны.</p></div>';}}
+function finRenderCurrentSection(){
+  const payments = finPayments();
   const months = new Set();
   payments.forEach(p => {
     if (p.date) {
@@ -119,7 +132,7 @@ function renderFinancesSection() {
         <td>${htmlEsc(finContragentName(p)||'—')}</td>
         <td>${htmlEsc(vPlate)}</td>
         <td>${htmlEsc(reestrLabel)}</td>
-        <td>${statusBadge}</td>
+        <td>${statusBadge}${finOverpaid(p)>0?'<div style="color:var(--red)">Переплата '+finMoney(finOverpaid(p))+' ₽</div>':''}</td>
       </tr>`;
     }).join('');
 
@@ -147,10 +160,10 @@ function renderFinancesSection() {
         <div style="flex:1"></div>
         <button class="toggle-btn ${finView==='analytics'?'active':''}" onclick="finView=finView==='table'?'analytics':'table';renderFinancesSection()">Аналитика</button>
         <button class="btn btn-ghost btn-sm" onclick="finView='budget';renderFinancesSection()">Бюджет</button>
-        <button class="btn btn-ghost btn-sm" onclick="importPaymentsFromJournals()">Импорт из журналов</button>
+        <button class="btn btn-ghost btn-sm" onclick="documentDraftsOpen('payments')">Черновики</button><button class="btn btn-ghost btn-sm" onclick="importPaymentsFromJournals()">Импорт из журналов</button>
         <button class="btn btn-primary btn-sm" onclick="openAddPayment()">
           <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          + Платёж
+          + Черновик расхода
         </button>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">
@@ -178,7 +191,7 @@ function renderFinancesSection() {
 }
 
 function renderFinancesAnalyticsHtml(allPayments) {
-  const payments = allPayments || data.payments || [];
+  const payments = allPayments || finPayments();
   const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   const vMap = new Map((data.vehicles||[]).map(v=>[v.id,v.plate]));
 
@@ -274,7 +287,7 @@ function finBudgetComparison() {
     return groups.get(group.key);
   };
   (data.budget || []).filter(b => Number(b.year) === budgetYear && (budgetCompareMonth === 'all' || Number(b.month) === Number(budgetCompareMonth)) && finBudgetMatches(b,true)).forEach(b => {const row=get(b,true);row.plan=finAdd(row.plan,finNumber(b.sum));row.hasPlan=true;});
-  (data.payments || []).filter(p => /^\d{4}-\d{2}-\d{2}$/.test(p.date || '') && Number(p.date.slice(0,4)) === budgetYear && (budgetCompareMonth === 'all' || Number(p.date.slice(5,7)) === Number(budgetCompareMonth)) && finBudgetMatches(p,false)).forEach(p => {const row=get(p,false);row.actual=finAdd(row.actual,finNumber(p.sum));row.paid=finAdd(row.paid,finPaidAmount(p));row.debt=finAdd(row.debt,finDebt(p));row.count++;});
+  finPayments().filter(p => /^\d{4}-\d{2}-\d{2}$/.test(p.date || '') && Number(p.date.slice(0,4)) === budgetYear && (budgetCompareMonth === 'all' || Number(p.date.slice(5,7)) === Number(budgetCompareMonth)) && finBudgetMatches(p,false)).forEach(p => {const row=get(p,false);row.actual=finAdd(row.actual,finNumber(p.sum));row.paid=finAdd(row.paid,finPaidAmount(p));row.debt=finAdd(row.debt,finDebt(p));row.count++;});
   return [...groups.values()].sort((a,b) => b.actual-a.actual || a.name.localeCompare(b.name,'ru'));
 }
 function finBudgetAnnual() {
@@ -287,11 +300,11 @@ function finBudgetAnnual() {
   return [...groups.values()].sort((a,b) => a.name.localeCompare(b.name,'ru'));
 }
 function finBudgetScopeOptions(dimension) {
-  const values = new Set([budgetScope[dimension],...(data.budget || []).map(b=>finBudgetValues(b,true)[dimension]),...(data.payments || []).map(p=>finBudgetValues(p,false)[dimension])].filter(Boolean));
+  const values = new Set([budgetScope[dimension],...(data.budget || []).map(b=>finBudgetValues(b,true)[dimension]),...finPayments().map(p=>finBudgetValues(p,false)[dimension])].filter(Boolean));
   return `<option value="">Все: ${FIN_BUDGET_DIMS[dimension].toLocaleLowerCase('ru')}</option>` + [...values].sort((a,b)=>a.localeCompare(b,'ru')).map(value=>`<option value="${htmlEsc(value)}" ${budgetScope[dimension]===value?'selected':''}>${htmlEsc(value)}</option>`).join('');
 }
 function finBudgetSuggestions(dimension) {
-  const values = new Set([...(data.budget || []).map(b=>finBudgetValues(b,true)[dimension]),...(data.payments || []).map(p=>finBudgetValues(p,false)[dimension]),...(dimension==='contragent' ? (data.contragents || []).filter(c=>!c.archived).map(c=>c.name) : dimension==='org' || dimension==='object' ? (data.vehicles || []).map(v=>v[dimension]) : (typeof reestrStatyi!=='undefined'?reestrStatyi:[]).map(s=>s.label))].filter(Boolean));
+  const values = new Set([...(data.budget || []).map(b=>finBudgetValues(b,true)[dimension]),...finPayments().map(p=>finBudgetValues(p,false)[dimension]),...(dimension==='contragent' ? (data.contragents || []).filter(c=>!c.archived).map(c=>c.name) : dimension==='org' || dimension==='object' ? (data.vehicles || []).map(v=>v[dimension]) : (typeof reestrStatyi!=='undefined'?reestrStatyi:[]).map(s=>s.label))].filter(Boolean));
   return [...values].sort((a,b)=>a.localeCompare(b,'ru')).map(value=>`<option value="${htmlEsc(value)}">`).join('');
 }
 function finOpenBudgetPayments(key) {
@@ -427,29 +440,12 @@ function finEnsurePaymentFields(payment = {}) {
   document.getElementById('pay_object_list').innerHTML = finBudgetSuggestions('object');
 }
 
-async function openAddPayment() {
-  editingPaymentId = null;
-  document.getElementById('paymentModal')._paymentEditState=null;
-  document.getElementById('paymentModalTitle').textContent = 'Добавить платёж';
-  document.getElementById('paymentDeleteBtn').style.display = 'none';
-  document.getElementById('pay_date').value = '';
-  document.getElementById('pay_sum').value = '';
-  document.getElementById('pay_description').value = '';
-  document.getElementById('pay_contragent').value = '';
-  document.getElementById('pay_invoice').value = '';
-  document.getElementById('pay_paid').checked = false;
-  document.getElementById('pay_note').value = '';
-  await populatePaymentSelects();
-  selectPayCategory('');
-  document.getElementById('pay_vehicle').value = '';
-  document.getElementById('pay_reestr').value = '';
-  finEnsurePaymentFields();
-  openModal('paymentModal');
-}
+async function openAddPayment() { return newDocument('payments'); }
 
 async function openEditPayment(id) {
   const p = (data.payments||[]).find(x => x.id === id);
   if (!p) return;
+  if(typeof DocumentEngine!=='undefined'&&DocumentEngine.state('payments',p)!=='legacy-live')return lifecycleOpen('payments',id);
   editingPaymentId = id;
   document.getElementById('paymentModalTitle').textContent = 'Редактировать платёж';
   document.getElementById('paymentDeleteBtn').style.display = '';
@@ -465,6 +461,7 @@ async function openEditPayment(id) {
   selectPayCategory(p.category || '');
   document.getElementById('pay_reestr').value = p.reestrNo || '';
   finEnsurePaymentFields(p);
+  ['pay_paid','pay_paid_amount','pay_paid_date'].forEach(key=>{document.getElementById(key).disabled=true;});
   document.getElementById('paymentModal')._paymentEditState={id,fields:finPaymentSourceFields()};
   openModal('paymentModal');
 }
@@ -545,6 +542,8 @@ function selectPayCategory(val) {
 async function savePayment() {
   const dateRaw = document.getElementById('pay_date').value.trim();
   const existing = editingPaymentId==null?null:(data.payments || []).find(p => p.id === editingPaymentId);
+  if(!existing){showToast('Новый расход оформляется через отдельный черновик');return;}
+  if(typeof DocumentEngine==='undefined'||DocumentEngine.state('payments',existing)!=='legacy-live'){showToast('Этот документ изменяется через историю, исправление или дополнительную оплату');return;}
   const paidInput=document.getElementById('pay_paid_amount'),paidUnchanged=existing&&paidInput._precisionInitial!==undefined&&paidInput.value===paidInput._precisionInitial&&!paidInput.validity?.badInput;
   const numeric=precisionRead({sum:['pay_sum',2,'error'],paidAmount:['pay_paid_amount',2,'zero']},existing?{...existing,paidAmount:finPaidAmount(existing)}:null);if(!numeric)return;
   const {sum,paidAmount}=numeric;
@@ -589,6 +588,8 @@ async function savePayment() {
     source: null,
     sourceId: null
   };
+  // Settlement is an append-only document action, never an ordinary edit.
+  for(const key of ['paid','paidAmount','paidDate','paymentSettlements']){if(Object.hasOwn(existing,key))obj[key]=existing[key];else delete obj[key];}
 
   if(partyUnchanged)for(const key of ['contragent','contragentId','contragentAtIssue']){if(Object.hasOwn(existing,key))obj[key]=existing[key];else delete obj[key];}
   if(paidUnchanged&&sum===existing.sum){if(Object.hasOwn(existing,'paidAmount'))obj.paidAmount=existing.paidAmount;else delete obj.paidAmount;}
@@ -611,79 +612,44 @@ async function savePayment() {
 }
 
 async function deletePayment(id) {
-  if (!id) return;
-  if (!await confirmAction('Удалить запись?')) return;
-  data.payments = data.payments.filter(p => p.id !== id);
-  if (!await saveData(data)) return;
-  closeModal('paymentModal');
-  renderFinancesSection();
+  if(id==null||id==='')return;
+  return lifecycleOpen('payments',id);
 }
 
 async function importPaymentsFromJournals() {
-  if(typeof DomainSources==='undefined'||DomainSources.apiVersion!==1){showToast('Модуль признания расходов не загружен. Обновите окно программы.');return;}
-  const draft = JSON.parse(JSON.stringify(data.payments || []));
-  const projection=DomainSources.projectFinancialSources(data);
-  const sources=new Map(projection.sources.map(row=>[row.key,row])),excluded=new Map(projection.excluded.map(row=>[row.key,row])),existingBySource=new Map(),aliasesByPrimary=new Map();
-  let imported = 0, updated = 0, missing = 0, skipped = projection.excluded.filter(row=>row.code==='invalid-source-date').length, preserved = 0, review = 0;
-  const knownSources=['repair','to','toRecord','workOrder'];
-  const keyOf=row=>DomainSources.sourceKey(row.source,row.sourceId);
-  const markReview=(payment,reason)=>{
-    const value={origin:'financial-recognition',code:reason.code,message:reason.message};
-    if(reason.primarySource){value.primarySource=reason.primarySource;value.primarySourceId=reason.primarySourceId;}
-    if(JSON.stringify(payment.sourceReview)!==JSON.stringify(value)){payment.sourceReview=value;review++;}
-  };
-  draft.forEach(p => {
-    if (p.sourceId==null || !knownSources.includes(p.source)) return;
-    const key = keyOf(p);
-    if (!existingBySource.has(key)) existingBySource.set(key, []);
-    existingBySource.get(key).push(p);
-  });
-  projection.excluded.forEach(reason=>{
-    const payments=existingBySource.get(reason.key)||[];
-    payments.forEach(payment=>markReview(payment,reason));
-    if(reason.primaryKey&&payments.length){
-      if(!aliasesByPrimary.has(reason.primaryKey))aliasesByPrimary.set(reason.primaryKey,[]);
-      aliasesByPrimary.get(reason.primaryKey).push(...payments);
+  return finImportDocumentDrafts();
+}
+
+async function finImportDocumentDrafts(){
+  try{
+    lifecycleReady();
+    if(typeof DomainSources==='undefined'||DomainSources.apiVersion!==1)throw Error('Модуль признания расходов не загружен');
+    let database=data;const context=wfCommandContextStamp(),projection=DomainSources.projectFinancialSources(data),keyOf=row=>JSON.stringify([row.source,typeof row.sourceId,row.sourceId]);
+    const known=new Map();for(const row of data.payments||[])if(row.sourceId!=null&&row.source)known.set(keyOf(row),row);
+    const discarded=[];
+    for(const row of data.documentDrafts||[])if(row.section==='payments'&&row.payload?.sourceId!=null&&row.payload?.source){known.set(keyOf(row.payload),row.payload);if(row.status==='discarded')discarded.push({code:'discarded-source-draft',source:row.payload.source,sourceId:row.payload.sourceId,message:'Черновик по источнику '+row.payload.source+' · '+(typeof row.payload.sourceId==='number'?'число ':'строка ')+JSON.stringify(row.payload.sourceId)+' отменён. Повторный массовый импорт его не восстанавливает; исходная запись сохранена в истории.'});}
+    // A prior import may have used its linked work order instead of the primary.
+    // It is still the same obligation; never create another source draft.
+    for(const excluded of projection.excluded||[])if(excluded.primarySource&&excluded.primarySourceId!=null&&known.has(keyOf(excluded)))known.set(keyOf({source:excluded.primarySource,sourceId:excluded.primarySourceId}),known.get(keyOf(excluded)));
+    const incoming=[],discrepancies=[];for(const source of projection.sources){const old=known.get(keyOf(source));if(old){if(DecimalCore.compare(finNumber(old.sum),source.sum)!==0)discrepancies.push({source:source.source,sourceId:source.sourceId,saved:old.sum,current:source.sum});continue;}incoming.push(source);}
+    const excluded=[...(projection.excluded||[]),...discarded];
+    if(!incoming.length){showToast('Новых источников нет. Расхождений сумм: '+discrepancies.length+'. Спорных источников: '+excluded.length+'. Сохранённые расходы и оплаты не изменены.');if(discrepancies.length||excluded.length)finImportReview(discrepancies,excluded);return;}
+    if(!await confirmAction('Создать отдельных черновиков: '+incoming.length+'? Расхождений с сохранёнными суммами: '+discrepancies.length+'. Они не будут перезаписаны. Проведение и оплата выполняются отдельно.'))return;
+    let created=0;
+    for(const source of incoming){
+      if(database!==data||context!==wfCommandContextStamp())throw Error('База или права изменились. Создано черновиков: '+created);
+      const current=DomainSources.projectFinancialSources(data).sources.find(row=>row.source===source.source&&row.sourceId===source.sourceId);if(!current||JSON.stringify(current)!==JSON.stringify(source))throw Error('Источник изменился. Повторите проверку. Создано черновиков: '+created);
+      if((data.payments||[]).some(row=>row.sourceId!=null&&row.source&&keyOf(row)===keyOf(source))||(data.documentDrafts||[]).some(row=>row.section==='payments'&&row.payload?.sourceId!=null&&keyOf(row.payload)===keyOf(source)))continue;
+      const snapshot={date:source.date,sum:source.sum,category:source.category,description:source.description,vehicleId:source.vehicleId,assetRef:source.assetRef,invoiceNo:source.invoiceNo,org:finPaymentOrg(source),object:finPaymentObject(source)};
+      const payload={...snapshot,contragent:'',contragentId:null,note:'',source:source.source,sourceId:source.sourceId,sourceSnapshot:snapshot,sourceMissing:false};
+      const operationId='payment-source-'+PlatformKernel.requestDigest({base:{},sections:{payments:[{context,source:source.source,sourceId:source.sourceId}]}}).replace(/[^a-zA-Z0-9]/g,'');
+      const result=await platformExecuteCommand({type:'DocumentAction',version:1,input:{action:'saveDraft',section:'payments',payload}},{operationId});
+      if(!result.ok)throw Object.assign(Error((result.message||result.error||'Черновик не подтверждён')+'. Создано: '+created),result);database=data;created++;
     }
-  });
-  sources.forEach((incoming, key) => {
-    const matches = existingBySource.get(key) || [];
-    if (matches.length > 1) {
-      skipped++;matches.forEach(p=>markReview(p,{code:'duplicate-source',message:'Несколько платежей связаны с одним первичным документом. Сверьте оплаты перед исправлением.'}));return;
-    }
-    const aliases=aliasesByPrimary.get(key)||[];
-    if(aliases.length){
-      // Never create another obligation or erase an existing paid row merely
-      // because a legacy import used the work order instead of its primary.
-      skipped++;matches.forEach(p=>markReview(p,{code:'duplicate-linked-source',message:'Есть платёж по связанному ремонтному заказу. Сверьте оба документа и фактические оплаты.'}));return;
-    }
-    const snapshot = {date:incoming.date,sum:incoming.sum,category:incoming.category,description:incoming.description,vehicleId:incoming.vehicleId,assetRef:incoming.assetRef,invoiceNo:incoming.invoiceNo,org:finPaymentOrg(incoming),object:finPaymentObject(incoming)};
-    if (!matches.length) {
-      draft.push({ ...snapshot, id: 'pay_' + (globalThis.crypto?.randomUUID?.() || Date.now() + '_' + imported), contragent:'', contragentId:null, reestrNo:null, note:'', paid:incoming.sourcePaid, paidAmount:incoming.sourcePaid ? incoming.sum : 0, paidDate:null, dueDate:null, source:incoming.source, sourceId:incoming.sourceId, sourceSnapshot:snapshot, sourceMissing:false });
-      imported++; return;
-    }
-    const p = matches[0], before = JSON.stringify(p), paidAmount = finPaidAmount(p);
-    Object.keys(snapshot).forEach(field => {
-      // Known manual edits are preserved. For old imports only the source sum
-      // is refreshed until a baseline has been captured.
-      const manual = p.sourceSnapshot ? JSON.stringify(p[field]) !== JSON.stringify(p.sourceSnapshot[field]) : field !== 'sum';
-      if (manual) { if (JSON.stringify(p[field]) !== JSON.stringify(snapshot[field])) preserved++; }
-      else p[field] = snapshot[field];
-    });
-    p.sourceSnapshot = snapshot; p.sourceMissing = false;
-    if(p.sourceReview?.origin==='financial-recognition')delete p.sourceReview;
-    // Materialize legacy full-payment flags before changing the source amount.
-    p.paidAmount = paidAmount; p.paid = paidAmount >= finNumber(p.sum) - 0.005;
-    if (before !== JSON.stringify(p)) updated++;
-  });
-  draft.forEach(p => {
-    if (p.sourceId==null || !knownSources.includes(p.source) || sources.has(keyOf(p)) || excluded.has(keyOf(p))) return;
-    if (!p.sourceMissing) { p.sourceMissing = true; missing++; }
-  });
-  if (!(imported + updated + missing + review)) { showToast('Новых изменений нет' + (skipped ? '. Пропущено спорных записей: ' + skipped : '')); return; }
-  if (!await confirmAction('Добавить расходов: ' + imported + ', обновить: ' + updated + ', пометить отсутствующие источники: ' + missing + ', направить на сверку: '+review+'?\nФактические оплаты, сроки и ручные правки сохраняются. Спорные платежи не удаляются.\nПропущено спорных записей: ' + skipped + '. Сохранено ручных значений: ' + preserved + '.')) return;
-  data.payments = draft;
-  if (!await saveData(data, {noMerge:true})) return;
-  renderFinancesSection(); showToast('Расходы синхронизированы: добавлено ' + imported + ', обновлено ' + updated + ', источников для проверки ' + missing+', расходов для сверки '+review);
+    renderFinancesSection();if(discrepancies.length||excluded.length)finImportReview(discrepancies,excluded);showToast('Создано черновиков: '+created+'. Расхождений для сверки: '+discrepancies.length+'. Сохранённые суммы и оплаты не изменены.');
+  }catch(error){showToast(error.message);}
+}
+function finImportReview(discrepancies,excluded){
+  wfShowDialog('Сверка источников расходов','<div class="wf-form"><p class="wf-wide wf-note">Сохранённые суммы и фактические оплаты не изменены. Для исправления проведённого расхода откройте его историю версий. Спорные источники не создают новое обязательство автоматически.</p>'+(discrepancies.length?'<table class="tbl wf-wide"><thead><tr><th>Источник / ID</th><th>Сохранено, ₽</th><th>Текущая версия, ₽</th></tr></thead><tbody>'+discrepancies.map(row=>'<tr><td>'+htmlEsc(row.source+' · '+JSON.stringify(row.sourceId))+'</td><td>'+htmlEsc(finMoney(row.saved))+'</td><td>'+htmlEsc(finMoney(row.current))+'</td></tr>').join('')+'</tbody></table>':'')+'<ul class="wf-wide">'+excluded.map(issue=>'<li>'+htmlEsc(issue.message||issue.code)+'</li>').join('')+'</ul></div>');
 }
 

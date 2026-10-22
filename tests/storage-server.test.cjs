@@ -31,12 +31,14 @@ test('corrupt or missing working section never becomes empty or writable', t => 
   assert.equal(fs.readFileSync(file, 'utf8'), bad);
   fs.unlinkSync(file); assert.throws(() => storage.readAll(dir), /records/);
 });
-test('loss of revisions preserves newer split data instead of rerunning legacy migration', t => {
+test('loss of schema-2 revisions stops reads and preserves newer split data instead of reconstructing metadata or replaying old legacy data', t => {
   const dir = temp(t), db = database(); storage.writeAll(dir, db);
   fs.writeFileSync(path.join(dir, 'data.json'), JSON.stringify({ ...db, records: [{ id: 'OLD' }] }));
   fs.unlinkSync(storage.revisionsFile(dir));
-  assert.equal(storage.readAll(dir).records[0].id, 'r');
-  assert.ok(storage.readRevisions(dir).records > 1000);
+  const bytes=fs.readFileSync(storage.sectionFile(dir,'records'));
+  assert.throws(()=>storage.readAll(dir),{code:'STORAGE_REVISIONS'});
+  assert.throws(()=>storage.readRevisions(dir),{code:'STORAGE_REVISIONS'});
+  assert.deepEqual(fs.readFileSync(storage.sectionFile(dir,'records')),bytes);assert.equal(JSON.parse(bytes)[0].id,'r');assert.equal(fs.existsSync(storage.revisionsFile(dir)),false);
 });
 test('incomplete split database cannot be replaced by legacy or empty data', t => {
   const dir = temp(t); fs.mkdirSync(storage.sectionsDir(dir));
@@ -79,7 +81,7 @@ test('restart rolls back an interrupted transaction before exposing sections', t
   const dir = temp(t), db = database(); storage.writeAll(dir, db);
   const baseline = storage.readAll(dir);
   const base = storage.readRevisions(dir), revisions = { ...base, vehicles: base.vehicles + 1, records: base.records + 1 };
-  const tx = { before: { vehicles: db.vehicles, records: db.records }, sections: { vehicles: [{ id: 'new-v' }], records: [{ id: 'new-r' }] }, base, revisions };
+  const tx = { schemaVersion:2,before: { vehicles: db.vehicles, records: db.records }, sections: { vehicles: [{ id: 'new-v' }], records: [{ id: 'new-r' }] }, base:storage.encodeRevisions(base), revisions:storage.encodeRevisions(revisions) };
   fs.writeFileSync(path.join(storage.sectionsDir(dir), '.transaction.json'), JSON.stringify(tx));
   fs.writeFileSync(storage.sectionFile(dir, 'vehicles'), JSON.stringify(tx.sections.vehicles));
   assert.deepEqual(storage.readAll(dir), baseline); assert.deepEqual(storage.readRevisions(dir), base);
@@ -87,9 +89,9 @@ test('restart rolls back an interrupted transaction before exposing sections', t
 test('restart finishes a transaction only after its revision commit point', t => {
   const dir = temp(t), db = database(); storage.writeAll(dir, db);
   const base = storage.readRevisions(dir), revisions = { ...base, vehicles: base.vehicles + 1 };
-  const tx = { before: { vehicles: db.vehicles }, sections: { vehicles: [{ id: 'committed' }] }, base, revisions };
+  const tx = { schemaVersion:2,before: { vehicles: db.vehicles }, sections: { vehicles: [{ id: 'committed' }] }, base:storage.encodeRevisions(base), revisions:storage.encodeRevisions(revisions) };
   fs.writeFileSync(path.join(storage.sectionsDir(dir), '.transaction.json'), JSON.stringify(tx));
-  fs.writeFileSync(storage.revisionsFile(dir), JSON.stringify(revisions));
+  fs.writeFileSync(storage.revisionsFile(dir), JSON.stringify(storage.encodeRevisions(revisions)));
   assert.equal(storage.readAll(dir).vehicles[0].id, 'committed');
   assert.deepEqual(storage.readRevisions(dir), revisions);
 });

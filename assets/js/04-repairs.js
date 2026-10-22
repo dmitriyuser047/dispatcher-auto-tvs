@@ -45,7 +45,7 @@ function renderRepairSection(vid) {
         Журнал ремонта
         <span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:10px">${recs.length} записей · ${totalCost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})} ₽ всего${unpaidCost > 0 ? ` · <span style="color:var(--red);font-weight:600">${unpaidCost.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})} ₽ не оплачено</span>` : ''}</span>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="openAddRepair('${vid}')">
+      <button class="btn btn-primary btn-sm" onclick="openAddRepair(${htmlJs(vid)})">
         <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         + Ремонт
       </button>
@@ -78,32 +78,13 @@ function populateRepairVehicleSelect(selEl, presetVid, keepHistorical=false) {
 function openAddRepair(vid) {
   const selected=vid!=null&&vid!==''?vid:selectedVehicleId,vehicle=data.vehicles.find(row=>row.id===selected);
   if(vehicle&&(vehicle.archived||vehicle.mergedInto)){showToast('Для нового ремонта выберите действующую основную карточку техники');return;}
-  editingRepairId = null;
-  document.getElementById('repairModalTitle').textContent = 'Добавить ремонт';
-  document.getElementById('repairDeleteBtn').style.display = 'none';
-  const sel = document.getElementById('rp_vehicle');
-  populateRepairVehicleSelect(sel, vid!=null&&vid!==''?vid:selectedVehicleId);
-  document.getElementById('rp_vehicle_wrap').style.display = vid!=null&&vid!=='' ? 'none' : '';
-  const now = new Date();
-  document.getElementById('rp_invoice_date').value = fmtDate(now.toISOString().split('T')[0]);
-  ['rp_invoice_no','rp_description','rp_note'].forEach(id => document.getElementById(id).value = '');
-  ['rp_cost','rp_mileage'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('rp_paid').checked = false;
-  populateRepairCategorySelect('');
-  // предзаполнить пробег из последней записи по ТС, если известен
-  const presetVid = vid!=null&&vid!==''?vid:selectedVehicleId;
-  const v = presetVid!=null&&presetVid!==''&&data.vehicles.find(x => x.id === presetVid);
-  if (v) {
-    const totalKm = recsFor(v.id).reduce((s, r) => s + (r.km || 0), 0);
-    const curOdo = (v.odometer || 0) + totalKm;
-    if (curOdo > 0) document.getElementById('rp_mileage').value = Math.round(curOdo);
-  }
-  openModal('repairModal');
+  return newDocument('repairs',selected!=null&&selected!==''?{vehicleId:selected}:{});
 }
 
 function openEditRepair(id) {
   const r = (data.repairs || []).find(x => x.id === id);
   if (!r) return;
+  if(typeof DocumentEngine!=='undefined'&&DocumentEngine.state('repairs',r)!=='legacy-live')return lifecycleOpen('repairs',id);
   editingRepairId = id;
   document.getElementById('repairModalTitle').textContent = 'Редактировать ремонт';
   document.getElementById('repairDeleteBtn').style.display = '';
@@ -122,6 +103,7 @@ function openEditRepair(id) {
 }
 
 async function saveRepair() {
+  const protectedRow=(data.repairs||[]).find(row=>row.id===editingRepairId);if(protectedRow&&typeof DocumentEngine!=='undefined'&&DocumentEngine.state('repairs',protectedRow)!=='legacy-live')return lifecycleOpen('repairs',protectedRow.id);
   let vehicleId;try{vehicleId=JSON.parse(document.getElementById('rp_vehicle').selectedOptions[0]?.dataset.typedId);}catch{showFieldError('Выберите технику с подтверждённым ID','rp_vehicle');return;}
   const invoiceDate = parseDate(document.getElementById('rp_invoice_date').value.trim());
   const cost        = parseFloat(document.getElementById('rp_cost').value);
@@ -159,6 +141,7 @@ async function saveRepair() {
 }
 
 async function deleteRepair(id) {
+  const protectedRow=(data.repairs||[]).find(row=>row.id===id);if(protectedRow&&typeof DocumentEngine!=='undefined'&&DocumentEngine.state('repairs',protectedRow)!=='legacy-live')return lifecycleOpen('repairs',id);
   if (!await confirmAction('Удалить эту запись о ремонте?')) return;
   data.repairs = (data.repairs || []).filter(r => r.id !== id);
   if (!await saveData(data)) return;
@@ -171,6 +154,7 @@ async function deleteRepair(id) {
 async function toggleRepairPaid(id) {
   const r = (data.repairs || []).find(x => x.id === id);
   if (!r) return;
+  if(typeof DocumentEngine!=='undefined'&&DocumentEngine.state('repairs',r)!=='legacy-live')return lifecycleOpen('repairs',id);
   r.paid = !r.paid;
   if (!await saveData(data)) return;
   const v = data.vehicles.find(x => x.id === selectedVehicleId);

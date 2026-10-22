@@ -200,6 +200,7 @@ function ensureDirs() {
   const dd = getDataDir();
   const bd = getBackupDir();
   if (!fs.existsSync(dd)) fs.mkdirSync(dd, { recursive: true });
+  if (storage.schemaVersion(dd) < 2) return;
   if (!fs.existsSync(bd)) fs.mkdirSync(bd, { recursive: true });
 }
 
@@ -554,6 +555,17 @@ app.whenReady().then(() => {
   }catch(error){return {ok:false,error:error.message,code:error.code};}});
 
   ipcMain.handle('get-data-path', () => getDataDir());
+  for(const [channel,action]of [['inspect-schema-upgrade','inspect'],['upgrade-schema-copy','copy']])ipcMain.handle(channel,async(event,payload)=>{
+    try{
+      const handlers=require('./schema-upgrade-ipc.cjs').createHandlers({
+        getContext:()=>{const binding=assertDataBinding(event),context=capturedOperationContext(event,binding);return {binding,identity:context.identity,sourceDir:context.directory,role:context.principal?.role,client:context.client};},
+        assertContext:context=>{if(settingsIdentity()!==context.identity||dataBindings.get(event.sender.id)!==context.binding||getDataDir()!==context.sourceDir)throw Object.assign(Error('База или пользователь изменились. Повторите проверку выбранной базы.'),{code:'SESSION_CHANGED'});},
+        inspectSource:input=>require('./schema-upgrade.cjs').inspectSource(input),
+        upgradeCopy:input=>require('./schema-upgrade.cjs').upgradeCopy(input)
+      });
+      return await handlers[action](payload);
+    }catch(error){return {ok:false,code:error.code||'SCHEMA_UPGRADE_FAILED',error:error.message};}
+  });
   ipcMain.handle('get-data-identity', async () => {
     const identity = settingsIdentity();
     if (!isClientMode()) return identity + ':' + storage.databaseToken(getDataDir());

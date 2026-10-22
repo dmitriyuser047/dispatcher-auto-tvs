@@ -29,7 +29,7 @@ beforeEach(async()=>{
   window.__disk=JSON.stringify(seed);window.__writes=0;window.__reject=false;window.__token='personnel-synthetic-db';window.__revisions={};window.__scriptExecuted=false;
   window.electronAPI={readSnapshot:async()=>{
    const db=JSON.parse(window.__disk);for(const name of PlatformSchema.sections){db[name]??=[];window.__revisions[name]??=1;}window.__disk=JSON.stringify(db);
-   return JSON.stringify({data:db,revisions:{...window.__revisions},databaseToken:window.__token,platform:{apiVersion:1,operations:1,outbox:1,commands:1}});
+   return JSON.stringify({data:db,revisions:{...window.__revisions},databaseToken:window.__token,platform:{apiVersion:1,operations:1,outbox:1,commands:1,schemaVersion:2,documentDrafts:1}});
   },writeSections:async raw=>{
    window.__writes++;if(window.__reject)return{ok:false,error:'Synthetic personnel save failure'};
    const request=JSON.parse(raw),db=JSON.parse(window.__disk);

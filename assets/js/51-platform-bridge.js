@@ -99,6 +99,7 @@ async function platformExecuteSave(database, options, persist) {
   let submitted;
   try {
     if (context.blocked) throw Error('Основная база не прочитана. Сначала восстановите подключение или базу.');
+    if(typeof _sync!=='undefined'&&_sync.platform?.needsSchemaUpgrade)throw Object.assign(Error('База открыта только для чтения. В разделе «Состояние программы» создайте отдельную обновлённую копию; исходная база останется прежней.'),{code:'SCHEMA_UPGRADE_REQUIRED'});
     submitted = JSON.stringify(database);
     const previous = platformSaveBaseline();
     const result = await platformRuntime().run({ id:options?.operation?.id, previous, next:database, identity:context.identity,

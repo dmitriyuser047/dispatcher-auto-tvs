@@ -25,7 +25,7 @@ beforeEach(async()=>{
  page=await browser.newPage({viewport:{width:1280,height:900}});errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());
  await page.addInitScript(({database,sections})=>{
   window.__token='synthetic-fuel-accounting-A';window.__disks={[window.__token]:JSON.stringify(database)};window.__revisions={};window.__writes=[];window.__hold=false;window.__mode='ok';window.__canonicalBasis=null;window.__closeReplies=[];
-  window.__snapshot=token=>{const db=JSON.parse(window.__disks[token]),revs=window.__revisions[token]??={};for(const name of sections){db[name]??=[];revs[name]??=1;}return{data:db,revisions:{...revs},databaseToken:token,platform:{apiVersion:1,operations:1,outbox:1,commands:1}};};
+  window.__snapshot=token=>{const db=JSON.parse(window.__disks[token]),revs=window.__revisions[token]??={};for(const name of sections){db[name]??=[];revs[name]??=1;}return{data:db,revisions:{...revs},databaseToken:token,platform:{apiVersion:1,operations:1,outbox:1,commands:1,schemaVersion:2,documentDrafts:1}};};
   window.electronAPI={
    readSnapshot:async()=>JSON.stringify(window.__snapshot(window.__token)),
    writeSections:async raw=>{
@@ -80,7 +80,7 @@ test('journal note edits preserve submillilitre and subcent legacy facts; change
 });
 
 test('generator card zeros and an empty optional maintenance meter do not become null or NaN',async()=>{
- await page.evaluate(async()=>{selectedGeneratorId='g';openEditGenerator('g');document.getElementById('gm_note').value='Only a note';await saveGenerator();openAddToRecord('g');document.getElementById('to_date').value='10.09.2026';document.getElementById('to_type').value='Synthetic TO';document.getElementById('to_hours').value='';await saveToRecord();});
+ await page.evaluate(async()=>{selectedGeneratorId='g';openEditGenerator('g');document.getElementById('gm_note').value='Only a note';await saveGenerator();data.toRecords.push({id:'optional-meter',generatorId:'g',date:'2026-09-10',type:'Synthetic TO'});rebuildIndex();openEditToRecord('optional-meter');document.getElementById('to_date').value='10.09.2026';document.getElementById('to_type').value='Synthetic TO';document.getElementById('to_hours').value='';await saveToRecord();});
  const result=await page.evaluate(()=>({g:data.generators[0],to:data.toRecords[0],writes:window.__writes.length}));assert.equal(result.writes,2);assert.equal(result.g.norm,0);assert.equal(result.g.cost,0);assert.equal(result.to.hours,null);
 });
 
@@ -126,9 +126,10 @@ test('payment note edits preserve source fractional cents and changed money requ
  await page.evaluate(async()=>{document.getElementById('pay_sum').value='1.01';document.getElementById('pay_paid_amount').value='0';await savePayment();});assert.equal(await page.evaluate(()=>data.payments[0].sum),1.01);assert.equal(await page.evaluate(()=>data.payments[0].paidAmount),0);
 });
 
-test('note-only editing a legacy fully paid payment preserves its absent paidAmount and fractional-cent fact',async()=>{
- await page.evaluate(async()=>{await openEditPayment('pay-full');document.getElementById('pay_note').value='Only a note on historical payment';await savePayment();});
- const result=await page.evaluate(()=>({row:data.payments.find(row=>row.id==='pay-full'),written:window.__writes[0]?.sections.payments.find(row=>row.id==='pay-full'),writes:window.__writes.length}));assert.equal(result.writes,1);assert.equal(result.row.sum,0.105);assert.equal(result.row.paid,true);assert.equal(Object.hasOwn(result.row,'paidAmount'),false);assert.equal(Object.hasOwn(result.written,'paidAmount'),false);assert.equal(result.row.note,'Only a note on historical payment');
+test('legacy fully paid fractional-cent facts open lifecycle and cannot be rewritten by retained ordinary save',async()=>{
+ const before=await page.evaluate(()=>JSON.stringify(data.payments.find(row=>row.id==='pay-full')));
+ await page.evaluate(async()=>{await openEditPayment('pay-full');editingPaymentId='pay-full';await savePayment();});
+ assert.equal(await page.locator('#lifecycleForm').count(),1);assert.equal(await page.evaluate(()=>window.__writes.length),0);assert.equal(await page.evaluate(()=>JSON.stringify(data.payments.find(row=>row.id==='pay-full'))),before);
 });
 
 test('financial totals use exact decimal arithmetic and invalid facts are never silently converted to zero',async()=>{

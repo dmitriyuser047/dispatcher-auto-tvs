@@ -74,7 +74,7 @@ function queryRows(dataDir,input,principal){
   // Audit contains historical nested financial data. The old snapshot path has
   // its own visibility policy; this indexed endpoint must not pretend that a
   // generic text index or a COUNT over raw audit rows is an authorised query.
-  if(query.section==='auditLog')fail('QUERY_UNSUPPORTED','Постраничная история пока недоступна. Используйте штатный просмотр истории.');
+  if(['auditLog','documentDrafts'].includes(query.section))fail('QUERY_UNSUPPORTED','Постраничная история и смешанные черновики пока недоступны. Используйте штатный просмотр документов.');
   if(typeof dataDir!=='string'||!dataDir||!fs.statSync(dataDir).isDirectory())fail('QUERY_DATABASE','Каталог базы не найден');
   return storage.withDatabaseLock(dataDir,()=>{
     const sql=sqlite.exists(dataDir);

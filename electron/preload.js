@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getDataPath:    ()        => ipcRenderer.invoke('get-data-path'),
   getDataIdentity:()        => ipcRenderer.invoke('get-data-identity'),
   getDataHealth:  ()        => ipcRenderer.invoke('get-data-health'),
+  inspectSchemaUpgrade:payload=>ipcRenderer.invoke('inspect-schema-upgrade',payload),
+  upgradeSchemaCopy:payload=>ipcRenderer.invoke('upgrade-schema-copy',payload),
   addAttachment:  ()        => ipcRenderer.invoke('add-attachment'),
   openAttachment:(id)      => ipcRenderer.invoke('open-attachment',id),
   archiveImportSource:(payload) => ipcRenderer.invoke('archive-import-source',payload),

@@ -54,10 +54,10 @@ test('reversal checks the exact numeric asset journal and does not skip a zero t
  assert.throws(()=>app.context.wfReversalCheck('transfer'),/недостаточно топлива/);
 });
 
-test('reversal preserves the typed zero tank in its inverse direction',async()=>{
- const app=workflows({vehicles:[],generators:[],tanks:[{id:0,name:'Zero tank'}],fuelMovements:[{id:0,kind:'receipt',toTankId:0,date:'2026-09-01',qty:10}]});let saved;
- app.context.wfTankBalanceAt=()=>20;app.context.saveData=async database=>{saved=structuredClone(database);return true;};app.context.closeModal=()=>{};app.context.renderWorkflows=()=>{};
- await app.context.wfReverseFuelMovement(0,'Duplicate receipt');assert.equal(saved.fuelMovements[1].fromTankId,0);assert.equal(saved.fuelMovements[1].originalMovementId,0);
+test('reversal sends the typed zero source to the common review without changing accounting before confirmation',async()=>{
+ const app=workflows({vehicles:[],generators:[],tanks:[{id:0,name:'Zero tank'}],fuelMovements:[{id:0,kind:'receipt',toTankId:0,date:'2026-09-01',qty:10}]}),before=JSON.stringify(app.context.data);let reviewed;
+ app.context.wfTankBalanceAt=()=>20;app.context.saveData=async()=>{assert.fail('Raw save bypasses lifecycle confirmation');};app.context.lifecycleReverseExisting=(...args)=>{reviewed=args;};
+ await app.context.wfReverseFuelMovement(0,'Duplicate receipt');assert.deepEqual(reviewed,['fuelMovements',0,'Duplicate receipt']);assert.equal(JSON.stringify(app.context.data),before);
 });
 
 test('workflow validation and history restoration treat zero as an actual tank, person and parent reference',()=>{

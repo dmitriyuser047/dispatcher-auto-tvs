@@ -1,5 +1,6 @@
 /** Pure projections of untrusted source snapshots; no storage, DOM or IO. */
 import type { AccountingBoundaryAPI, ResolvedAccountingBoundary } from './accounting-boundary';
+import type { DocumentEngineAPI } from './document-engine';
 export type EntityId = string | number;
 export type ISODate = string & { readonly __isoDate: unique symbol };
 export type SourceKey = `${string}:${string}`;
@@ -25,6 +26,8 @@ export interface FinancialSource {
   object: string | undefined;
   invoiceNo: string;
   sourcePaid: boolean;
+  revisionId?: EntityId;
+  recognitionKey?: string;
 }
 
 interface ExclusionBase {
@@ -68,7 +71,7 @@ type UnknownRow = Record<string, unknown>;
 type IdentifiedRow = UnknownRow & { id: EntityId };
 
 /** The build adapter exposes this frozen API identically in Node and browsers. */
-export function createDomainSources(accounting?: Readonly<AccountingBoundaryAPI>): Readonly<DomainSourcesAPI> {
+export function createDomainSources(accounting?: Readonly<AccountingBoundaryAPI>,getDocuments?:()=>Readonly<DocumentEngineAPI>|undefined): Readonly<DomainSourcesAPI> {
   const isRecord = (value: unknown): value is UnknownRow =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
       && Object.prototype.toString.call(value) === '[object Object]';
@@ -104,6 +107,18 @@ export function createDomainSources(accounting?: Readonly<AccountingBoundaryAPI>
   }
   function projectFinancialSources(database: unknown): FinancialProjection {
     const sources: FinancialSource[] = [], excluded: FinancialExclusion[] = [];
+    const sourceSections:FinancialSection[]=['repairs','vehicleTo','toRecords','workOrders'];
+    const explicit=sourceSections.some(section=>rows(database,section).some(row=>Object.prototype.hasOwnProperty.call(row,'lifecycle')));
+    const documents=explicit?getDocuments?.():undefined;
+    if(explicit&&documents?.apiVersion!==1)throw Object.assign(new Error('Не загружен механизм исправлений документов'),{code:'MODULE_UNAVAILABLE'});
+    const effective=new Map<FinancialSection,UnknownRow[]>(),identities=new Map<string,{rootId:EntityId;revisionId:EntityId;recognitionKey:string}>();
+    const typed=(section:FinancialSection,id:EntityId):string=>JSON.stringify([section,typeof id,id]);
+    if(documents)for(const section of sourceSections){
+      const result=documents.resolveSection(database,section);
+      if(result.diagnostics.length)throw Object.assign(new Error('Цепочка финансового документа требует сверки'),{code:'DOCUMENT_CHAIN',issues:result.diagnostics});
+      effective.set(section,result.rows);
+      for(const item of result.identities)identities.set(typed(section,item.id),{rootId:item.rootId,revisionId:item.id,recognitionKey:item.recognitionKey});
+    }
     const exclude = (source: FinancialSourceKind, row: IdentifiedRow,
       code: Exclude<ExclusionCode, 'linked-primary'>, message: string): void => {
       excluded.push({ source, sourceId: row.id, key: sourceKey(source, row.id), code, message });
@@ -113,31 +128,34 @@ export function createDomainSources(accounting?: Readonly<AccountingBoundaryAPI>
     ];
     const add = (row: UnknownRow, source: FinancialSourceKind, section: FinancialSection): void => {
       if (!identified(row)) return;
+      const revision=identities.get(typed(section,row.id)),rootId=revision?.rootId??row.id;
+      const projectedRow:IdentifiedRow={...row,id:rootId};
       if (!live(row)) {
-        exclude(source, row, 'cancelled-source', 'Источник отменён или удалён. Проверьте ранее импортированный расход.'); return;
+        exclude(source, projectedRow, 'cancelled-source', 'Источник отменён или удалён. Проверьте ранее импортированный расход.'); return;
       }
       if ((source === 'to' || source === 'toRecord') && row.planned) {
-        exclude(source, row, 'planned-source', 'Плановое ТО не является фактическим расходом. Проверьте ранее импортированный платёж.'); return;
+        exclude(source, projectedRow, 'planned-source', 'Плановое ТО не является фактическим расходом. Проверьте ранее импортированный платёж.'); return;
       }
       if (source === 'workOrder' && row.status !== 'accepted') {
-        exclude(source, row, 'unaccepted-source', 'Ремонтный заказ не принят. Проверьте ранее импортированный расход.'); return;
+        exclude(source, projectedRow, 'unaccepted-source', 'Ремонтный заказ не принят. Проверьте ранее импортированный расход.'); return;
       }
       const amount = source === 'workOrder'
         ? number(row.actualCost) ?? (row.incurred === true ? number(row.cost) : null) : number(row.cost);
       if (amount === null || amount <= 0) {
-        exclude(source, row, 'unvalued-source', 'В источнике нет положительной фактической стоимости. Проверьте ранее импортированный расход.'); return;
+        exclude(source, projectedRow, 'unvalued-source', 'В источнике нет положительной фактической стоимости. Проверьте ранее импортированный расход.'); return;
       }
       if (source === 'workOrder') {
         if (links.some(([field]) => row[field] != null && row[field] !== '' && !isEntityId(row[field]))) {
-          exclude(source, row, 'invalid-source-reference', 'У заказа некорректная ссылка на первичный документ. Проверьте связь перед импортом.'); return;
+          exclude(source, projectedRow, 'invalid-source-reference', 'У заказа некорректная ссылка на первичный документ. Проверьте связь перед импортом.'); return;
         }
         const link = links.find(([field]) => optionalId(row[field]) !== null);
         if (link) {
           const [field, primarySource] = link, primarySourceId = optionalId(row[field]);
           if (primarySourceId !== null) {
-            excluded.push({ source, sourceId: row.id, key: sourceKey(source, row.id), code: 'linked-primary',
+            const primarySection=primarySource==='repair'?'repairs':primarySource==='to'?'vehicleTo':'toRecords',primaryRoot=identities.get(typed(primarySection,primarySourceId))?.rootId??primarySourceId;
+            excluded.push({ source, sourceId: rootId, key: sourceKey(source, rootId), code: 'linked-primary',
               message: 'Заказ связан с первичным журналом. Расход учитывается по первичному документу; проверьте ранее импортированный платёж.',
-              primarySource, primarySourceId, primaryKey: sourceKey(primarySource, primarySourceId) });
+              primarySource, primarySourceId:primaryRoot, primaryKey: sourceKey(primarySource, primaryRoot) });
             return;
           }
         }
@@ -146,14 +164,15 @@ export function createDomainSources(accounting?: Readonly<AccountingBoundaryAPI>
         : source === 'workOrder' ? (text(row.downtimeTo) || text(row.completedAt)).slice(0, 10) : row.date;
       const day = date(rawDate);
       if (!day) {
-        exclude(source, row, 'invalid-source-date', 'У источника нет действительной даты фактического расхода. Проверьте дату перед импортом.'); return;
+        exclude(source, projectedRow, 'invalid-source-date', 'У источника нет действительной даты фактического расхода. Проверьте дату перед импортом.'); return;
       }
       const explicitRef = text(row.assetRef);
       const vehicleId = optionalId(row.vehicleId) ?? (explicitRef.startsWith('v:') ? explicitRef.slice(2) : null);
       const generatorId = optionalId(row.generatorId);
       const assetRef = explicitRef || (vehicleId !== null ? 'v:' + vehicleId
         : source === 'toRecord' && generatorId !== null ? 'g:' + generatorId : null);
-      sources.push({ source, sourceId: row.id, sourceSection: section, key: sourceKey(source, row.id), date: day, sum: amount,
+      sources.push({ source, sourceId: rootId, sourceSection: section, key: sourceKey(source, rootId), date: day, sum: amount,
+        ...(revision?{revisionId:revision.revisionId,recognitionKey:revision.recognitionKey}:{}),
         category: source === 'repair' || source === 'workOrder' ? 'Ремонт' : 'ТО',
         description: source === 'repair' ? text(row.description) || 'Ремонт'
           : source === 'workOrder' ? text(row.title) || 'Принятый ремонтный заказ'
@@ -164,7 +183,7 @@ export function createDomainSources(accounting?: Readonly<AccountingBoundaryAPI>
     const sections: readonly (readonly [FinancialSection, FinancialSourceKind])[] = [
       ['repairs', 'repair'], ['vehicleTo', 'to'], ['toRecords', 'toRecord'], ['workOrders', 'workOrder'],
     ];
-    for (const [section, source] of sections) rows(database, section).forEach(row => add(row, source, section));
+    for (const [section, source] of sections) (effective.get(section)||rows(database, section)).forEach(row => add(row, source, section));
     return { sources, excluded };
   }
   function projectTankFlows(database: unknown, tankIds: unknown, options: unknown = {}): TankFlowEntry[] {

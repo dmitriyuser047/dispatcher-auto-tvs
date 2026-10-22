@@ -2,7 +2,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const schema=require('../assets/core/platform-schema.js'),graph=require('../assets/core/reference-graph.js');
 function put(row,path,value){
- const tokens=path.split('.');let owner=row;tokens.forEach((token,index)=>{const array=token.endsWith('[]'),key=array?token.slice(0,-2):token,last=index===tokens.length-1;if(last){owner[key]=array?[value]:value;return;}owner[key]=array?[{}]:{};owner=array?owner[key][0]:owner[key];});
+ const tokens=path.split('.');let owner=row;tokens.forEach((token,index)=>{const array=token.endsWith('[]'),key=array?token.slice(0,-2):token,last=index===tokens.length-1;if(last){owner[key]=array?[value]:value;return;}if(array){if(!Array.isArray(owner[key]))owner[key]=[{}];owner=owner[key][0];}else{if(!owner[key]||typeof owner[key]!=='object')owner[key]={};owner=owner[key];}});
 }
 test('each registered reference resolves a real typed-zero target through its declared path and retains its history classification',()=>{
  const covered=[];

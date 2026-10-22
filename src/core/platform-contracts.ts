@@ -23,10 +23,21 @@ export interface MergeCatalogInput {
   section: CatalogSection; sourceId: Identifier; targetId: Identifier; reason: string;
   mutableRefs: { relationId: string; rowId: Identifier; path: string }[]; reviewFingerprint: string;
 }
+export type DocumentSection = 'shiftReports' | 'workOrders' | 'dispatchJobs' | 'fuelMovements' | 'partMovements' | 'fuelWriteoffs' | 'payments' | 'repairs' | 'vehicleTo' | 'toRecords';
+export interface DocumentReference {section:DocumentSection;id:Identifier}
+export type DocumentActionInput =
+  | {action:'saveDraft';section:DocumentSection;draftId?:Identifier;payload:JsonRow;correctionOf?:DocumentReference;reason?:string}
+  | {action:'postDraft';section:DocumentSection;draftId:Identifier;reviewFingerprint:string}
+  | {action:'discardDraft';section:DocumentSection;draftId:Identifier;reason:string}
+  | {action:'post';section:DocumentSection;id:Identifier;reviewFingerprint:string;reason?:string;payload?:JsonRow}
+  | {action:'void';section:DocumentSection;id:Identifier;reviewFingerprint:string;reason:string}
+  | {action:'reverse';section:'fuelMovements'|'partMovements';id:Identifier;reviewFingerprint:string;reason:string}
+  | {action:'settle';section:'payments';id:Identifier;amount:number;date:string;reason:string;reviewFingerprint:string};
 export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelInput }
   | { type: 'AcceptShift'; version: 1; input: { shiftId: Identifier; changes: AcceptShiftChanges } }
   | { type: 'AssignPerson'; version: 1; input: AssignPersonInput }
-  | { type: 'MergeCatalog'; version: 1; input: MergeCatalogInput };
+  | { type: 'MergeCatalog'; version: 1; input: MergeCatalogInput }
+  | { type: 'DocumentAction'; version: 1; input: DocumentActionInput };
 export interface CommandEnvelope { protocolVersion: 1; databaseToken: string; operation: OperationDescriptor; base: Revisions; command: PlatformCommand }
 export interface ContractError extends Error { code: string; field: string; status: number }
 
@@ -153,6 +164,14 @@ export function createPlatformContracts() {
     if (row.section !== 'vehicles' && row.section !== 'generators') fail('INVALID_COMMAND', field + '.section', 'Выберите транспорт или ДЭС');
     return {section:row.section,id:commandId(row.id,field + '.id')};
   }
+  function documentSection(value:unknown,field:string):DocumentSection {
+    const sections:readonly string[]=['shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords'];
+    if(typeof value!=='string'||!sections.includes(value))fail('INVALID_COMMAND',field,'Выберите поддерживаемый вид документа');
+    return value as DocumentSection;
+  }
+  function reviewFingerprint(value:unknown,field:string):string {
+    if(typeof value!=='string'||!/^sha256:[a-f0-9]{64}$/.test(value))fail('INVALID_COMMAND',field,'Нужен отпечаток просмотренного документа');return value;
+  }
   function validateCommand(value: unknown): PlatformCommand {
     const row = commandObject(commandJson(value,'command'),'command'); keys(row,['type','version','input'],'command');
     if (row.version !== 1) fail('COMMAND_VERSION', 'command.version', 'Версия команды не поддерживается');
@@ -212,6 +231,31 @@ export function createPlatformContracts() {
       const result:MergeCatalogInput={section:input.section as CatalogSection,sourceId:commandId(input.sourceId,path+'sourceId'),targetId:commandId(input.targetId,path+'targetId'),reason:commandText(input.reason,path+'reason',true),mutableRefs,reviewFingerprint:input.reviewFingerprint};
       if(result.sourceId===result.targetId)fail('INVALID_COMMAND',path+'targetId','Нельзя объединить карточку с самой собой');
       return {type:'MergeCatalog',version:1,input:result};
+    }
+    if(row.type==='DocumentAction'){
+      const section=documentSection(input.section,path+'section');let result:DocumentActionInput;
+      if(input.action==='saveDraft'){
+        keys(input,['action','section','draftId','payload','correctionOf','reason'],'command.input');
+        result={action:'saveDraft',section,payload:commandObject(input.payload,path+'payload') as JsonRow};
+        if(input.draftId!==undefined)result.draftId=commandId(input.draftId,path+'draftId');
+        if(input.reason!==undefined)result.reason=commandText(input.reason,path+'reason',false);
+        if(input.correctionOf!==undefined){const reference=commandObject(input.correctionOf,path+'correctionOf');keys(reference,['section','id'],path+'correctionOf');const source=documentSection(reference.section,path+'correctionOf.section');if(source!==section)fail('INVALID_COMMAND',path+'correctionOf.section','Вид исправления должен совпадать с исходным документом');result.correctionOf={section:source,id:commandId(reference.id,path+'correctionOf.id')};}
+      }else if(input.action==='postDraft'){
+        keys(input,['action','section','draftId','reviewFingerprint'],'command.input');result={action:'postDraft',section,draftId:commandId(input.draftId,path+'draftId'),reviewFingerprint:reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint')};
+      }else if(input.action==='discardDraft'){
+        keys(input,['action','section','draftId','reason'],'command.input');result={action:'discardDraft',section,draftId:commandId(input.draftId,path+'draftId'),reason:commandText(input.reason,path+'reason',true)};
+      }else if(input.action==='post'){
+        keys(input,['action','section','id','reviewFingerprint','reason','payload'],'command.input');result={action:'post',section,id:commandId(input.id,path+'id'),reviewFingerprint:reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint')};if(input.reason!==undefined)result.reason=commandText(input.reason,path+'reason',false);if(input.payload!==undefined)result.payload=commandObject(input.payload,path+'payload') as JsonRow;
+      }else if(input.action==='void'||input.action==='reverse'){
+        keys(input,['action','section','id','reviewFingerprint','reason'],'command.input');const id=commandId(input.id,path+'id'),reason=commandText(input.reason,path+'reason',true),fingerprint=reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint');
+        if(input.action==='reverse'){if(section!=='fuelMovements'&&section!=='partMovements')fail('INVALID_COMMAND',path+'section','Сторно доступно для движений топлива и склада');result={action:'reverse',section,id,reason,reviewFingerprint:fingerprint};}
+        else result={action:'void',section,id,reason,reviewFingerprint:fingerprint};
+      }else if(input.action==='settle'){
+        keys(input,['action','section','id','amount','date','reviewFingerprint','reason'],'command.input');if(section!=='payments')fail('INVALID_COMMAND',path+'section','Оплата относится к платёжному документу');
+        if(typeof input.amount!=='number'||!Number.isFinite(input.amount)||input.amount<=0)fail('INVALID_COMMAND',path+'amount','Укажите положительную сумму фактической оплаты');
+        result={action:'settle',section,id:commandId(input.id,path+'id'),amount:input.amount,date:commandDate(input.date,path+'date'),reason:commandText(input.reason,path+'reason',true),reviewFingerprint:reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint')};
+      }else return fail('INVALID_COMMAND',path+'action','Неизвестное действие с документом');
+      return {type:'DocumentAction',version:1,input:result};
     }
     return fail('UNKNOWN_COMMAND','command.type','Неизвестная команда платформы');
   }

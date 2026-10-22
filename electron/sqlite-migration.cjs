@@ -111,16 +111,14 @@ function readSource(source,manifest) {
   };
   let data, revisions, format;
   if (manifest.some(file => file.path === 'sections')) {
-    revisions = read('sections/revisions.json');
-    if (!plain(revisions) || !Object.hasOwn(revisions,'vehicles') || !Object.hasOwn(revisions,'records') ||
-        Object.entries(revisions).some(([name,revision]) => !sections.includes(name) || !Number.isSafeInteger(revision) || revision < 0))
-      fail('MIGRATION_SOURCE_REVISIONS','Повреждены версии исходных разделов');
-    revisions = { ...revisions }; data = {}; format = 'split-json';
+    const rawRevisions=read('sections/revisions.json');let decoded;
+    try{decoded=require('./storage-format.cjs').decodeRevisions(rawRevisions);}catch{fail('MIGRATION_SOURCE_REVISIONS','Повреждены версии исходных разделов');}
+    revisions = decoded.revisions; data = {}; format = 'split-json';
     for (const section of sections) {
       const relative = 'sections/' + section + '.json';
       if (byPath.has(relative)) data[section] = read(relative);
       else {
-        if (Object.hasOwn(revisions,section) || ['vehicles','records'].includes(section)) fail('MIGRATION_SOURCE_INCOMPLETE','Не хватает обязательного файла раздела: ' + section);
+        if (decoded.schemaVersion===2 || Object.hasOwn(rawRevisions,section) || ['vehicles','records'].includes(section)) fail('MIGRATION_SOURCE_INCOMPLETE','Не хватает обязательного файла раздела: ' + section);
         data[section] = [];
       }
       if (!Object.hasOwn(revisions,section)) revisions[section] = 0;

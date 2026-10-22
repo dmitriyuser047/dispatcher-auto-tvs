@@ -29,7 +29,7 @@ beforeEach(async()=>{
  await page.addInitScript(({database,sections})=>{
   window.__disk=JSON.stringify(database);window.__token='synthetic-catalog-merge-A';window.__revisions=Object.fromEntries(sections.map(name=>[name,1]));window.__requests=[];window.__rawWrites=[];window.__hold=false;window.__releases=[];window.__mode='ok';window.__receipts={};window.__commits=0;window.__closeReplies=[];
   window.electronAPI={
-   readSnapshot:async()=>JSON.stringify({data:JSON.parse(window.__disk),databaseToken:window.__token,revisions:{...window.__revisions},platform:{apiVersion:1,operations:1,outbox:1,commands:1}}),
+   readSnapshot:async()=>JSON.stringify({data:JSON.parse(window.__disk),databaseToken:window.__token,revisions:{...window.__revisions},platform:{apiVersion:1,operations:1,outbox:1,commands:1,schemaVersion:2,documentDrafts:1}}),
    writeSections:async raw=>{window.__rawWrites.push(JSON.parse(raw));const request=JSON.parse(raw),db=JSON.parse(window.__disk);for(const[name,rows]of Object.entries(request.sections)){db[name]=rows;window.__revisions[name]++;}window.__disk=JSON.stringify(db);return{ok:true,databaseToken:request.databaseToken,revisions:{...window.__revisions},canonicalSections:request.sections,operationReceipt:{id:request.operation.id,digest:PlatformKernel.requestDigest(request),status:'committed'}};},
    executeCommand:async raw=>{
     window.__requests.push(raw);const request=JSON.parse(raw);if(window.__hold)await new Promise(resolve=>window.__releases.push(resolve));

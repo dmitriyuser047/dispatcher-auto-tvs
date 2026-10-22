@@ -48,15 +48,13 @@ function interruptedLegacyTransaction(dir, committed) {
 }
 
 for (const committed of [false, true]) {
-  test(`production upgrade ${committed ? 'finishes committed' : 'rolls back uncommitted'} legacy transaction before adding new sections`, t => {
+  test(`schema upgrade refuses an interrupted ${committed ? 'committed' : 'uncommitted'} legacy transaction without recovering or adding sections in the source`, t => {
     const dir = temporaryDatabase(t);
     const { original, tx } = interruptedLegacyTransaction(dir, committed);
-    const loaded = storage.readAll(dir);
-    for (const name of LEGACY_SECTIONS) assert.deepEqual(loaded[name], committed && name in tx.sections ? tx.sections[name] : original[name]);
-    for (const name of storage.SECTIONS.filter(name => !LEGACY_SECTIONS.includes(name))) assert.deepEqual(loaded[name], []);
-    const revisions = storage.readRevisions(dir);
-    for (const name of LEGACY_SECTIONS) assert.equal(revisions[name], committed ? tx.revisions[name] : tx.base[name]);
-    assert.equal(fs.existsSync(path.join(storage.sectionsDir(dir), '.transaction.json')), false);
+    const before=new Map(fs.readdirSync(storage.sectionsDir(dir)).map(name=>[name,fs.readFileSync(path.join(storage.sectionsDir(dir),name))]));
+    assert.throws(()=>storage.readAll(dir),{code:'SCHEMA_RECOVERY_REQUIRED'});
+    for(const [name,bytes]of before)assert.deepEqual(fs.readFileSync(path.join(storage.sectionsDir(dir),name)),bytes);
+    assert.deepEqual(fs.readdirSync(storage.sectionsDir(dir)).sort(),[...before.keys()].sort());
   });
 }
 
@@ -82,7 +80,7 @@ test('production migration rejects malformed legacy journals without replacing a
     const journal = path.join(storage.sectionsDir(dir), '.transaction.json');
     fs.writeFileSync(journal, JSON.stringify(tx));
     const before = new Map(fs.readdirSync(storage.sectionsDir(dir)).map(name => [name, fs.readFileSync(path.join(storage.sectionsDir(dir), name))]));
-    assert.throws(() => storage.readAll(dir), /Повреждён журнал сохранения/);
+    assert.throws(() => storage.readAll(dir), {code:'SCHEMA_RECOVERY_REQUIRED'});
     for (const [name, bytes] of before) assert.deepEqual(fs.readFileSync(path.join(storage.sectionsDir(dir), name)), bytes, name);
     assert.deepEqual(fs.readdirSync(storage.sectionsDir(dir)).sort(), [...before.keys()].sort());
   }

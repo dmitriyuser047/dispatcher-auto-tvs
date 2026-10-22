@@ -89,14 +89,14 @@ test('SQLite remains opt-in and ordinary synthetic JSON directories are not conv
 
 test('shared storage reads exact SQLite sections, revisions, typed IDs and 923.537 litre values without JSON shadows',t=>{
   const {dir,initial,revisions}=fixture(t),file=adapter().filename(dir),before=hash(file),guard=assertGuardOnly(dir),snapshot=storage.readSnapshot(dir);
-  assert.deepEqual(snapshot.data,initial);assert.deepEqual(snapshot.revisions,revisions);assert.deepEqual(snapshot.platform,{apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1});
+  assert.deepEqual(snapshot.data,initial);assert.deepEqual(snapshot.revisions,revisions);assert.deepEqual(snapshot.platform,{apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:2,documentDrafts:1,needsSchemaUpgrade:false});
   assert.equal(snapshot.data.vehicles[0].fuelBalance,923.537);assert.equal(typeof snapshot.data.vehicles[0].id,'number');assert.equal(typeof snapshot.data.vehicles[1].id,'string');
   assert.equal(storage.readSection(dir,'records').rows[0].vehicleId,7);assert.equal(storage.readSection(dir,'records').rows[1].vehicleId,'7');
   assert.equal(hash(file),before);assertGuardOnly(dir,guard);
   // Exercise the actual legacy JSON branch with only the synthetic marker:
   // an old client must reject it instead of creating empty business sections.
   const oldClient=temp(t);fs.mkdirSync(storage.sectionsDir(oldClient));fs.writeFileSync(storage.revisionsFile(oldClient),guard);
-  assert.throws(()=>storage.readRevisions(oldClient),/Повреждены версии разделов/);
+  assert.throws(()=>storage.readRevisions(oldClient),{code:'STORAGE_FORMAT'});
   assertGuardOnly(oldClient,guard);
 });
 
@@ -203,8 +203,8 @@ for(const format of ['SQLite','JSON']){
 test('a missing SQLite file leaves its fail-closed marker intact and cannot trigger empty JSON initialization',t=>{
   const {dir}=fixture(t),guard=assertGuardOnly(dir),file=adapter().filename(dir),backup=path.join(dir,'platform.sqlite.synthetic-unavailable');
   assert.equal(path.dirname(file),dir);assert.equal(path.dirname(backup),dir);fs.renameSync(file,backup);
-  assert.throws(()=>storage.readSnapshot(dir),/Повреждены версии разделов/);
-  assert.throws(()=>storage.writeAll(dir,{vehicles:[],records:[]}),/Повреждены версии разделов/);
+  assert.throws(()=>storage.readSnapshot(dir),{code:'STORAGE_FORMAT'});
+  assert.throws(()=>storage.writeAll(dir,{vehicles:[],records:[]}),{code:'STORAGE_FORMAT'});
   assertGuardOnly(dir,guard);assert.equal(fs.existsSync(file),false);assert.equal(fs.existsSync(backup),true);
 });
 

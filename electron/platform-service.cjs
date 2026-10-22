@@ -17,14 +17,16 @@ function principalOf(principal) {
   return { id:String(value.id || 'local-profile'), name:String(value.name || 'Локальный пользователь'), role:value.role };
 }
 function visibleAudit(rows, principal) {
-  return (rows || []).filter(row => row && typeof row.section === 'string' && access.authorize(principal, 'read', row.section) &&
-    (row.type !== 'transaction' || Array.isArray(row.changedSections) && row.changedSections.every(name => access.authorize(principal, 'read', name))));
+  return (rows || []).filter(row => row && typeof row.section === 'string' && require('./document-access.cjs').permitted(principal, 'read', row.section) &&
+    (row.type !== 'transaction' || Array.isArray(row.changedSections) && row.changedSections.every(name => require('./document-access.cjs').permitted(principal, 'read', name)))&&require('./document-access.cjs').auditAccess(principal,row));
 }
+function visibleRows(name,rows,principal){return name==='auditLog'?visibleAudit(rows,principal):require('./document-access.cjs').visibleRows(name,rows,principal);}
+function filteredResult(result,principal){if(!principal)return result;const out={...result};if(out.canonicalSections)out.canonicalSections=Object.fromEntries(Object.entries(out.canonicalSections).filter(([name])=>require('./document-access.cjs').permitted(principal,'read',name)).map(([name,rows])=>[name,visibleRows(name,rows,principal)]));return out;}
 function findReceipt(rows,query,principal,token){
   const operation=contracts().validateOperation(query),actor=principalOf(principal);
   const receipt=(rows||[]).find(row=>row?.source==='platform'&&row.type==='transaction'&&row.operationId===operation.id&&
     row.actorId===actor.id&&row.actorRole===actor.role&&row.databaseToken===token&&row.requestDigest===operation.digest&&
-    Array.isArray(row.changedSections)&&row.changedSections.every(name=>access.authorize(actor,'read',name)));
+    Array.isArray(row.changedSections)&&row.changedSections.every(name=>require('./document-access.cjs').permitted(principal||actor,'read',name))&&require('./document-access.cjs').auditAccess(principal||actor,row));
   return receipt ? {id:operation.id,digest:receipt.requestDigest,status:'committed',at:receipt.at} : null;
 }
 function operationInfo(previous, sections, options = {}) {
@@ -46,7 +48,7 @@ function replayResult(previous, revisions, token, info, names) {
   const canonicalSections = {};
   for (const name of new Set([...names, 'auditLog'])) {
     if (!access.authorize(info.actor, 'read', name)) continue;
-    canonicalSections[name] = name === 'auditLog' ? visibleAudit(previous.auditLog, info.actor) : previous[name] || [];
+    canonicalSections[name] = visibleRows(name,previous[name],info.actor);
   }
   return { ok:true, changed:[], revisions, databaseToken:token, canonicalSections, replayed:true,
     operationReceipt:{ id:info.id, digest:info.digest, status:'replayed', at:info.receipt.at } };
@@ -88,9 +90,9 @@ function prepareTransaction(previous, supplied, options = {}) {
   contracts().validateSections(supplied,registry);
   const info = operationInfo(previous, supplied, { ...options, principal:actor });
   if (info?.receipt) return { replayed:true, operation:info };
-  assertAuditPrefix(previous, supplied, actor);
+  assertAuditPrefix(previous, supplied, options.principal||actor);
   // Client-generated audit suffixes are hints, never persisted as trusted facts.
-  let sections = Object.fromEntries(Object.entries(supplied).filter(([name]) => name !== 'auditLog'));
+  let sections = require('./document-access.cjs').mergeDrafts(previous,Object.fromEntries(Object.entries(supplied).filter(([name]) => name !== 'auditLog')),options.principal||actor);
   for (const [name, rows] of Object.entries(sections)) {
     if (JSON.stringify(previous[name] || []) === JSON.stringify(rows)) continue;
     if (!access.authorize(actor, 'write', name)) fail('ACCESS_DENIED', 'Роль не разрешает изменение раздела: ' + name, 403);
@@ -105,12 +107,12 @@ function prepareTransaction(previous, supplied, options = {}) {
   const id = info?.id || 'backend:' + crypto.randomUUID();
   // This proof is derived from the semantic execution option, never a section
   // request field. Raw/full writes cannot authorize their own catalog aliases.
-  const commandProof=options.commandIntent?.command?.type==='MergeCatalog'
+  const commandProof=['MergeCatalog','DocumentAction'].includes(options.commandIntent?.command?.type)
     ? {commandIntent:contracts().parseCommandEnvelope(options.commandIntent,registry)} : {};
   const plan = kernel().prepare(previous, sections, { id, identity:options.databaseToken || 'local-storage', actor,
-    revisions:options.revisions || {}, now:at,...commandProof,
-    readable:registry.filter(name => access.authorize(actor, 'read', name)),
-    writable:registry.filter(name => access.authorize(actor, 'write', name)) });
+    revisions:options.revisions || {}, now:at,today:at.slice(0,10),...commandProof,
+    readable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'read', name)),
+    writable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'write', name)) });
   const changes = (plan.rowChanges || []).filter(row => row.section !== 'auditLog');
   const result = { ...plan.sections };
   delete result.auditLog;
@@ -125,8 +127,9 @@ function prepareTransaction(previous, supplied, options = {}) {
   const receipt = { id:'operation:' + id, type:'transaction', action:'transaction', source:'platform', section:'auditLog', recordId:id,
     operationId:id, requestDigest:digest, databaseToken:options.databaseToken, at,
     actor:actor.name, actorId:actor.id, actorRole:actor.role, changedSections:changed, revisions };
+  if(changed.includes('documentDrafts'))receipt.changedDocumentSections=require('./document-access.cjs').changedOrigins(previous.documentDrafts,result.documentDrafts);
   result.auditLog = [...(previous.auditLog || []), ...entries, receipt];
   return { sections:result, plan, operationReceipt:{ id, digest, status:'committed', at } };
 }
 
-module.exports = { prepareTransaction, operationInfo, replayResult, visibleAudit,findReceipt };
+module.exports = { prepareTransaction, operationInfo, replayResult, visibleAudit,visibleRows,filteredResult,findReceipt };

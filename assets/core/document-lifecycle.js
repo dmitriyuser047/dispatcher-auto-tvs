@@ -1,5 +1,5 @@
 /* Trusted lifecycle guards for posted movements and accepted shift documents. */
-(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory();else root.DocumentLifecycle=factory();})(typeof globalThis==='object'?globalThis:this,function(){
+(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(()=>require('./document-engine.js'),()=>require('./fuel-movement-policy.js'));else root.DocumentLifecycle=factory(()=>root.DocumentEngine,()=>root.FuelMovementPolicy);})(typeof globalThis==='object'?globalThis:this,function(getEngine,getFuel){
   'use strict';
   const own=(row,key)=>Object.prototype.hasOwnProperty.call(row,key);
   const rows=(db,section)=>Array.isArray(db?.[section])?db[section].filter(row=>row&&typeof row==='object'&&!Array.isArray(row)):[];
@@ -33,15 +33,35 @@
     }
     return {issues,counts:{error:issues.length,warning:0,total:issues.length}};
   }
-  function validateChanges(previous,next) {
+  function validateChanges(previous,next,context={}) {
+    const engine=getEngine(),intent=context.commandIntent?.command||context.commandIntent;
+    if(engine?.apiVersion===1){
+      try{engine.validateChanges(previous,next,context);}
+      catch(error){
+        // Keep the established structured fuel diagnostics for direct policy
+        // callers with non-JSON quantities; the generic boundary still refuses
+        // any other executable/non-finite data before a clone can normalize it.
+        if(error.code==='INVALID_DOCUMENT'){const fuel=getFuel();if(fuel?.apiVersion===1)fuel.validateChanges(previous,next);}
+        if(!Array.isArray(error.issues))error.issues=[{severity:'error',section:'',recordId:'',code:error.code||'DOCUMENT_INVALID',field:'',message:error.message}];
+        error.details={issues:error.issues};error.code='POLICY_VIOLATION';throw error;
+      }
+    }
+    else if(['workOrders','dispatchJobs','payments','repairs','vehicleTo','toRecords','documentDrafts'].some(section=>stable(rows(previous,section))!==stable(rows(next,section)))){
+      const error=new Error('Не загружены общие правила документов');error.code='MODULE_UNAVAILABLE';throw error;
+    }
+    const proven=intent?.type==='DocumentAction'&&engine?.apiVersion===1;
     const issues=[],add=(section,row,code,field,message)=>issues.push({severity:'error',section,recordId:row.id??'',code,field,message});
     for(const section of ['fuelMovements','partMovements','shiftReports']) {
-      const beforeRows=rows(previous,section),afterRows=rows(next,section),beforeById=new Map(beforeRows.map(row=>[key(row.id),row])),afterById=new Map(afterRows.map(row=>[key(row.id),row]));
+      const beforeRows=rows(previous,section),afterRows=rows(next,section);
+      // Existing duplicate IDs must not turn an untouched historical section
+      // into a false edit through Map's last-row lookup. Array order is retained.
+      if(stable(beforeRows)===stable(afterRows))continue;
+      const beforeById=new Map(beforeRows.map(row=>[key(row.id),row])),afterById=new Map(afterRows.map(row=>[key(row.id),row]));
       for(const before of beforeRows) {
         if(section==='shiftReports'&&before.status!=='accepted')continue;
         const after=afterById.get(key(before.id));
         if(!after){add(section,before,'DOCUMENT_DELETE_FORBIDDEN','id','Проведённый документ нельзя удалить. Оформите исправление с сохранением исходника');continue;}
-        if(equalExcept(before,after,metadata))continue;
+        if(equalExcept(before,after,metadata)||proven)continue;
         const allowed=new Set([...metadata,'reversedBy','reversedAt']);
         const isNewReversal=section!=='shiftReports'&&!before.originalMovementId&&!before.reversedBy&&after.reversedBy&&!beforeById.has(key(after.reversedBy))&&
           reversalCheck(next,section,after)&&equalExcept(before,after,allowed);

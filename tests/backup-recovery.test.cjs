@@ -28,13 +28,18 @@ function noStage(parent) { assert.deepEqual(fs.readdirSync(parent).filter(name =
 function managed(paths, directory, bytes, extension) { const hash = sha(bytes), id = hash + extension; fs.mkdirSync(path.join(paths.sourceDir, directory), { recursive: true }); fs.writeFileSync(path.join(paths.sourceDir, directory, id), bytes); return { id, sha256: hash, size: bytes.length, name: 'Synthetic document' + extension }; }
 function rewrite(archivePath, mutate) { const zip = new AdmZip(archivePath), manifest = JSON.parse(zip.getEntry('manifest.json').getData().toString('utf8')); mutate(zip, manifest); zip.updateFile('manifest.json', Buffer.from(JSON.stringify(manifest))); zip.writeZip(archivePath); }
 function replaceMember(zip, manifest, name, bytes) { zip.updateFile(name, bytes); Object.assign(manifest.files.find(row => row.name === name), { size: bytes.length, sha256: sha(bytes) }); }
+for(const kind of ['json','sqlite'])test(kind+' schema-2 backup preserves mixed document drafts and their managed evidence in a separate restored database',t=>{
+ const paths=temp(t),input=data(),evidence=managed(paths,'attachments',Buffer.from('Synthetic draft evidence'),'.txt');input.documentDrafts=[{id:0,section:'payments',status:'draft',payload:{date:'2026-10-20',sum:7.01,description:'Synthetic financial draft',attachments:[evidence]},createdAt:'2026-10-22T12:00:00.000Z',createdBy:{id:'draft-admin',name:'Synthetic administrator',role:'admin'},updatedAt:'2026-10-22T12:00:00.000Z'}];const revisions=Object.fromEntries(schema.sections.map(name=>[name,7]));
+ if(kind==='sqlite'){const attachmentDir=path.join(paths.parent,'evidence');fs.renameSync(path.join(paths.sourceDir,'attachments'),attachmentDir);sqlite.create(paths.sourceDir,{data:input,revisions});fs.renameSync(attachmentDir,path.join(paths.sourceDir,'attachments'));}else{fs.mkdirSync(storage.sectionsDir(paths.sourceDir));for(const name of schema.sections)fs.writeFileSync(storage.sectionFile(paths.sourceDir,name),JSON.stringify(input[name]));fs.writeFileSync(storage.revisionsFile(paths.sourceDir),JSON.stringify(storage.encodeRevisions(revisions)));}
+ const before=businessTree(paths.sourceDir);backup.createPackage(paths);backup.verifyPackage(paths);backup.restorePackage(paths);const restored=storage.readSnapshot(paths.targetDir);assert.equal(restored.platform.schemaVersion,2);assert.deepEqual(restored.data.documentDrafts,input.documentDrafts);assert.equal(restored.revisions.documentDrafts,7);assert.deepEqual(fs.readFileSync(path.join(paths.targetDir,'attachments',evidence.id)),Buffer.from('Synthetic draft evidence'));assert.deepEqual(businessTree(paths.sourceDir),before);
+});
 function service(overrides = {}) { const filename = path.join(__dirname, '../electron/backup-service.cjs'), requireHere = createRequire(filename), exports = { exports: {} }; vm.runInNewContext(fs.readFileSync(filename, 'utf8'), { module: exports, exports: exports.exports, Buffer, process, console, require(name) { return Object.hasOwn(overrides, name) ? overrides[name] : requireHere(name); } }, { filename }); return exports.exports; }
 for (const format of ['json', 'sqlite'])
     test(format + ' backup verifies and restores 40 sections without changing typed, missing or duplicate legacy IDs', t => {
         const paths = temp(t), expected = source(paths, format), before = businessTree(paths.sourceDir), settings = { networkKey: 'SECRET-NETWORK-TOKEN', users: [{ name: 'Synthetic', dataDir: 'Synthetic path' }] };
         const created = backup.createPackage({ ...paths, settings }), verified = backup.verifyPackage(paths);
         assert.equal(created.ok, true);
-        assert.equal(verified.sections.length, 40);
+        assert.equal(verified.sections.length, schema.sections.length);
         assert.equal(verified.sourceFormat, format);
         assert.equal(JSON.stringify(created).includes('SECRET-NETWORK-TOKEN'), false);
         assert.equal(JSON.stringify(verified).includes('networkKey'), false);
@@ -95,6 +100,33 @@ test('existing destination files and directories are never overwritten', t => {
     assert.equal(fs.readFileSync(path.join(paths.targetDir, 'keep.txt'), 'utf8'), 'Keep');
     noStage(paths.parent);
 });
+for (const kind of ['legacy-json', 'sqlite'])
+    test(kind + ' backup rejects reserved profile paths without changing the source and still supports its existing backup directory', t => {
+        const paths = temp(t);
+        if (kind === 'sqlite') source(paths, kind);
+        else {
+            const legacy = require('../electron/storage-format.cjs').legacySections(), input = data();
+            fs.mkdirSync(storage.sectionsDir(paths.sourceDir));
+            for (const name of legacy) fs.writeFileSync(storage.sectionFile(paths.sourceDir, name), JSON.stringify(input[name]));
+            fs.writeFileSync(storage.revisionsFile(paths.sourceDir), JSON.stringify(Object.fromEntries(legacy.map(name => [name, 0]))));
+        }
+        const before = businessTree(paths.sourceDir);
+        for (const name of ['platform.sqlite', 'platform.sqlite-wal', 'platform.sqlite-shm', 'data.json', 'data.json.before-split', 'database-identity.json', '.tvs-database.lock', '.tvs-database.lock.recovery', 'backups', 'ordinary.zip']) {
+            assert.throws(() => backup.createPackage({ ...paths, archivePath: path.join(paths.sourceDir, name) }), error => ['BACKUP_PATH', 'BACKUP_TARGET_EXISTS'].includes(error.code), name);
+            assert.deepEqual(businessTree(paths.sourceDir), before, name);
+        }
+        const snapshot = storage.readSnapshot(paths.sourceDir);
+        assert.equal(snapshot.platform.schemaVersion, kind === 'legacy-json' ? 1 : 2);
+        assert.deepEqual(businessTree(paths.sourceDir), before);
+        fs.mkdirSync(path.join(paths.sourceDir, 'backups'));
+        const archivePath = path.join(paths.sourceDir, 'backups', 'verified.zip');
+        assert.equal(backup.createPackage({ ...paths, archivePath }).ok, true);
+        assert.equal(backup.verifyPackage({ archivePath }).ok, true);
+        assert.deepEqual(businessTree(paths.sourceDir).filter(entry => !entry.name.startsWith('backups')), before);
+        noStage(paths.parent);
+        noStage(path.join(paths.sourceDir, 'backups'));
+    });
+
 test('restore cannot stage inside the protected working directory or over its ancestor', t => {
     const paths = temp(t);
     source(paths);

@@ -20,7 +20,7 @@ function platformHealthSnapshot(calculatedIntegrity) {
   return { inspectedAt:new Date().toISOString(), schemaVersion:PlatformSchema.apiVersion,
     modules:PlatformSchema.describe(), integrity,
     runtime:platformRuntimeStatus(), calculations:dispatcherEngineStats(),
-    storage:{ connected:!_loadWriteBlocked, sectionProtocol:!!_sync.enabled, operationProtocol:!!_sync.platform?.operations, role:context.actor?.role || 'local',
+    storage:{ connected:!_loadWriteBlocked, needsSchemaUpgrade:!!_sync.platform?.needsSchemaUpgrade, sectionProtocol:!!_sync.enabled, operationProtocol:!!_sync.platform?.operations, role:context.actor?.role || 'local',
       readable:context.readable || PlatformSchema.sections, writable:context.writable || PlatformSchema.sections } };
 }
 function platformSystemIssues(report) {
@@ -71,6 +71,10 @@ function renderPlatformSystem(calculatedIntegrity) {
   document.getElementById('platformRefresh').onclick = renderPlatformSystem;
   document.getElementById('platformExport').onclick = platformExportDiagnostics;
   if(mergeAvailable)document.getElementById('platformCatalogMerge').onclick=()=>catalogMergeOpen();
+  const documentActions=document.querySelector('#mainContent .platform-actions'),documentContext=platformSessionContext();
+  if(report.storage.needsSchemaUpgrade){const note=document.createElement('p');note.className='platform-note';note.setAttribute('role','status');note.textContent='Старая база открыта только для чтения. Создайте обновлённую копию в новой папке и проверьте её перед переключением. Исходная база сохраняется.';document.querySelector('#mainContent .platform-heading')?.after(note);const status=document.querySelector('#mainContent .platform-summary article');if(status){status.querySelector('strong').textContent='Только просмотр';status.querySelector('small').textContent='Для изменений нужна отдельная обновлённая копия';}}
+  if(documentActions&&typeof documentDraftsOpen==='function'&&_sync.platform?.documentDrafts===1&&(!Array.isArray(documentContext.readable)||documentContext.readable.includes('*')||documentContext.readable.includes('documentDrafts'))){const button=document.createElement('button');button.type='button';button.className='btn btn-ghost';button.textContent='Черновики документов';button.onclick=()=>documentDraftsOpen();documentActions.append(button);}
+  if(documentActions&&documentContext.actor?.role==='admin'&&typeof lifecycleUpgradeOpen==='function'&&window.electronAPI?.inspectSchemaUpgrade){const button=document.createElement('button');button.type='button';button.className='btn btn-ghost';button.textContent='Обновить копию базы';button.onclick=()=>lifecycleUpgradeOpen();documentActions.append(button);}
   const refreshIssues = () => {
     document.getElementById('platformIssues').innerHTML = renderPlatformIssues(report); platformBindSourceLinks(report);
   };

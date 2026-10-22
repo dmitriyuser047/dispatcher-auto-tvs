@@ -548,14 +548,19 @@ test('retry after a failed conflict merge retains the original baseline and pres
     return { revisionAfterFailure, stayedOpen, km: data.records[0].km, note: data.records[0].note };
   }); assert.deepEqual(out, { revisionAfterFailure: 1, stayedOpen: true, km: 200, note: 'Retried note' });
 });
-test('payments, budget and counterparties are persisted immediately and survive reload', async () => {
-  const out = await page.evaluate(async () => {
-    openAddContragent(); document.getElementById('caName').value = 'Company'; await saveContragent();
-    await openAddPayment(); document.getElementById('pay_date').value = '01.10.2026'; document.getElementById('pay_description').value = 'Payment'; document.getElementById('pay_sum').value = '1234'; await savePayment();
-    finView = 'budget'; renderFinancesSection(); document.getElementById('budg_company').value = 'Company'; document.getElementById('budg_sum').value = '1234'; await addBudgetEntry();
-    data = await loadData(); return { payments: data.payments.length, budget: data.budget.length, contragents: data.contragents.length };
-  }); assert.deepEqual(out, { payments: 1, budget: 1, contragents: 1 });
+test('payment draft is isolated until posting; the posted expense, budget and counterparty survive reload',async()=>{
+ await page.exposeFunction('__paymentDocumentPlan',request=>{try{return{ok:true,...require('../assets/core/platform-commands.js').plan(request.database,request.command,{id:request.operationId,now:new Date().toISOString(),today:new Date().toISOString().slice(0,10),actor:{id:'synthetic-admin',name:'Synthetic admin',role:'admin'}})};}catch(error){return{ok:false,code:error.code,error:error.message};}});
+ await page.evaluate(()=>{
+  const token='synthetic-payment-reload',revisions=Object.fromEntries(PlatformSchema.sections.map(name=>[name,1]));_sync.enabled=true;_sync.databaseToken=token;_sync.platform={apiVersion:1,commands:1,operations:1,outbox:1,schemaVersion:2,documentDrafts:1};_sync.revs={...revisions};for(const name of PlatformSchema.sections)_sync.synced[name]=JSON.stringify(data[name]||[]);_lastPersisted=window.__disk=JSON.stringify(data);
+  window.electronAPI.readSnapshot=async()=>JSON.stringify({data:JSON.parse(window.__disk),databaseToken:token,revisions:{...revisions},platform:_sync.platform});
+  const acknowledge=(request,sections)=>{const db=JSON.parse(window.__disk);for(const[name,rows]of Object.entries(sections)){db[name]=rows;revisions[name]++;}window.__disk=JSON.stringify(db);return{ok:true,databaseToken:token,revisions:{...revisions},canonicalSections:sections,operationReceipt:{id:request.operation.id,digest:request.operation.digest,status:'committed'}};};
+  window.electronAPI.writeSections=async raw=>{const request=JSON.parse(raw);return acknowledge(request,request.sections);};window.electronAPI.executeCommand=async raw=>{const request=JSON.parse(raw),plan=await window.__paymentDocumentPlan({database:JSON.parse(window.__disk),command:request.command,operationId:request.operation.id});return plan.ok?acknowledge(request,plan.sections):plan;};
+ });
+ await page.evaluate(async()=>{openAddContragent();document.getElementById('caName').value='Company';await saveContragent();await openAddPayment();});let form=page.locator('#lifecycleForm');await form.locator('[name="date"]').fill('2026-10-01');await form.locator('[name="description"]').fill('Payment');await form.locator('[name="sum"]').fill('1234');await form.locator('[data-lc-preview]').click();await form.locator('[name="confirm"]').check();await form.locator('[type="submit"]').click();await page.waitForFunction(()=>!!lifecycleSession?.draft);assert.equal(await page.evaluate(()=>data.payments.length),0);assert.equal(await page.evaluate(()=>JSON.parse(window.__disk).documentDrafts.length),1);
+ form=page.locator('#lifecycleForm');await form.locator('[data-lc-preview]').click();await form.locator('[name="confirm"]').check();await form.locator('[type="submit"]').click();await page.waitForFunction(()=>data.payments.length===1);
+ const out=await page.evaluate(async()=>{finView='budget';renderFinancesSection();document.getElementById('budg_company').value='Company';document.getElementById('budg_sum').value='1234';await addBudgetEntry();data=await loadData();return{payments:data.payments.length,paymentSum:data.payments[0].sum,budget:data.budget.length,contragents:data.contragents.length,draftStatus:data.documentDrafts[0].status};});assert.deepEqual(out,{payments:1,paymentSum:1234,budget:1,contragents:1,draftStatus:'posted'});
 });
+
 test('an unrelated save never advances revisions of sections that were not read', async () => {
   const out = await page.evaluate(async () => {
     _sync.enabled = true; _sync.revs = Object.fromEntries(SYNC_SECTIONS.map(n => [n, 1]));

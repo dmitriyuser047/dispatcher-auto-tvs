@@ -268,10 +268,11 @@ let _genBalCache = {};
 function rebuildIndex() {
   if (typeof dispatcherInvalidate === 'function') dispatcherInvalidate();
   const index=(rows,field)=>{const grouped=new Map();for(const row of rows||[]){if(!row||typeof row!=='object')continue;const id=row[field];if(!grouped.has(id))grouped.set(id,[]);grouped.get(id).push(row);}return grouped;};
+  const current=name=>{const rows=data[name]||[];if(!rows.some(row=>row&&Object.hasOwn(row,'lifecycle')))return rows;if(typeof DocumentEngine==='undefined')throw Error('Не загружены правила версий документов');return DocumentEngine.activeRows(data,name);};
   recsByVid = index(data.records,'vehicleId');
   genRecsByGid = index(data.genRecords,'generatorId');
-  vehicleToByVid = index(data.vehicleTo,'vehicleId');
-  repairsByVid = index(data.repairs,'vehicleId');
+  vehicleToByVid = index(current('vehicleTo'),'vehicleId');
+  repairsByVid = index(current('repairs'),'vehicleId');
   _genBalCache = {};
 }
 function recsFor(vid) { return recsByVid.get(vid) || []; }
