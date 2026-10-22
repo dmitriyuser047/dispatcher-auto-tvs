@@ -4,7 +4,7 @@ const backup = require('./backup-service.cjs');
 const safeFile=require('./safe-file.cjs');
 const SAFE_EXT = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.txt', '.csv', '.xlsx', '.xls', '.docx', '.odt', '.ods']);
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
-function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir, getPrincipal, getContext, assertContext }) {
+function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir, getPrincipal, getContext, assertContext, getWriteOptions }) {
     const capture=event=>({sender:event.sender,url:event.sender.getURL(),frame:event.sender.mainFrame,context:getContext?.(event),directory:path.resolve(getDataDir())});
     const current=job=>{if(job.sender.isDestroyed()||job.sender.getURL()!==job.url||job.sender.mainFrame!==job.frame)throw Error('Окно закрыто или изменилось');local();if(job.context)assertContext(job.context);if(path.resolve(getDataDir())!==job.directory)throw Error('Профиль базы изменился');};
     const local = () => { if (isClientMode())
@@ -14,7 +14,7 @@ function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir
         local();
         const job=capture(event);
         const context=getContext?.(event),dir=path.resolve(getDataDir()),principal=getPrincipal?.(event);
-        const captured=attachments.capture(dir,origin,{principal});
+        const captured=attachments.capture(dir,origin,{principal,...getWriteOptions?.(event)});
         const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), { title: 'Добавить документ', properties: ['openFile'], filters: [{ name: 'Документы', extensions: [...SAFE_EXT].map(x => x.slice(1)) }] });
         current(job);
         if (r.canceled)
@@ -23,7 +23,7 @@ function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir
         if (!SAFE_EXT.has(ext))
             throw Error('Неподдерживаемый тип документа');
         local();if(context)assertContext(context);if(path.resolve(getDataDir())!==dir)throw Error('Профиль базы изменился');
-        const file=attachments.add(dir,captured,source,{principal:getPrincipal?.(event)});
+        const file=attachments.add(dir,captured,source,{principal:getPrincipal?.(event),...getWriteOptions?.(event)});
         return {ok:true,file,databaseToken:captured.databaseToken};
     }
     catch (e) {
@@ -47,7 +47,10 @@ function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir
     ipcMain.handle('archive-import-source', async (_event, payload) => { try {
         local();
         const job=capture(_event);
+        const authority={principal:getPrincipal?.(_event),...getWriteOptions?.(_event)};
+        const currentWrite=()=>{current(job);require('./storage').assertWriteCompatibility(job.directory,authority,'controlledImports');};
         require('./storage').assertWritable(getDataDir());
+        currentWrite();
         const actor=getPrincipal?getPrincipal(_event):null;
         if(!actor||!require('./import-source.cjs').actions(actor).length)throw Error('Нет права сохранять источник импорта');
         const original=payload?.bytes;if(!(Array.isArray(original)||original instanceof Uint8Array)||original.length>25*1024*1024||Array.isArray(original)&&original.some(value=>!Number.isInteger(value)||value<0||value>255))throw Error('Нужны исходные байты размером до 25 МБ');
@@ -57,10 +60,10 @@ function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir
         const hash = sha(b), ext = path.extname(String(payload.name || '')).toLowerCase();
         const suffix = /^\.[a-z0-9]{1,6}$/.test(ext) ? ext : '.bin', id = hash + suffix;
         const directory=safeFile.verifiedDirectory(path.join(job.directory,'import-sources'),{create:true});
-        const dest=path.join(directory.path,id);current(job);safeFile.assertDirectory(directory);
-        if (fs.existsSync(dest)){if(!safeFile.readRegularFileSync(dest,{maxBytes:25*1024*1024,assertCurrent:()=>current(job)}).equals(b))throw Error('Контрольная сумма сохранённого исходника не совпала');}
-        else await safeFile.writeRegularFileAtomic(dest,b,{maxBytes:25*1024*1024,assertCurrent:()=>current(job)});
-        current(job);safeFile.assertDirectory(directory);
+        const dest=path.join(directory.path,id);currentWrite();safeFile.assertDirectory(directory);
+        if (fs.existsSync(dest)){if(!safeFile.readRegularFileSync(dest,{maxBytes:25*1024*1024,assertCurrent:currentWrite}).equals(b))throw Error('Контрольная сумма сохранённого исходника не совпала');}
+        else await safeFile.writeRegularFileAtomic(dest,b,{maxBytes:25*1024*1024,assertCurrent:currentWrite});
+        currentWrite();safeFile.assertDirectory(directory);
         return { ok: true, id, sha256: hash, size: b.length, name: path.basename(String(payload.name || 'source')) };
     }
     catch (e) {

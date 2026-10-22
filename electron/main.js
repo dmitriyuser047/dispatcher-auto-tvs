@@ -90,12 +90,14 @@ let notificationService = null;
 const settingsIdentity = () => databaseIdentity(settings);
 function bindData(event, token, access = null, revisions = null, platform = null) {
   const previous=dataBindings.get(event.sender.id);
+  if(previous&&(previous.identity!==settingsIdentity()||previous.databaseToken!==(token||null)||previous.frame!==event.sender.mainFrame||previous.url!==event.sender.getURL()||JSON.stringify(previous.notificationAccess)!==JSON.stringify(access)))invalidateWriteSession(event.sender.id);
   if(previous&&(previous.identity!==settingsIdentity()||previous.databaseToken!==(token||null)||JSON.stringify(previous.notificationAccess)!==JSON.stringify(access)))notificationService?.invalidate();
-  dataBindings.set(event.sender.id, { identity:settingsIdentity(), databaseToken:token || null, notificationAccess:access,
+  dataBindings.set(event.sender.id, { identity:settingsIdentity(), databaseToken:token || null, notificationAccess:access,sender:event.sender,frame:event.sender.mainFrame,url:event.sender.getURL(),
     revisions:revisions && { ...revisions },platform:platform && { ...platform } });
 }
 function assertDataBinding(event, token) {
   const binding = dataBindings.get(event.sender.id);
+  if(!binding?.sender||binding.sender.isDestroyed()||binding.sender.mainFrame!==binding.frame||binding.sender.getURL()!==binding.url)throw Object.assign(Error('Окно изменилось. Загрузите базу заново.'),{code:'SESSION_CHANGED'});
   if (!binding || binding.identity !== settingsIdentity() || token && token !== binding.databaseToken) throw new Error('База переключена. Загрузите выбранную базу заново перед сохранением.');
   if (settings.networkMode !== 'client' && binding.databaseToken !== storage.databaseToken(getDataDir())) throw new Error('База изменилась. Загрузите её заново.');
   return binding;
@@ -106,11 +108,13 @@ function validPublicAccess(access) {
 }
 function legacyPing(ping) { return ping?.ok===true&&ping.sections!==true&&!ping.access&&!ping.platform?.scopedAccess; }
 function readonlyLegacyAccess(){return {user:{id:'legacy-readonly',name:'Старый сервер · только просмотр',role:'viewer'},readable:storage.SECTIONS.slice(),writable:[],fieldPermissions:{},periodActions:[],fuelActions:[],procurementActions:{tank:[],part:[]},costActions:[],repairActions:[],calendarActions:[],printActions:[],importActions:[]};}
-function invalidateDataBinding(event){dataBindings.delete(event.sender.id);notificationService?.invalidate();}
+function invalidateDataBinding(event){dataBindings.delete(event.sender.id);invalidateWriteSession(event.sender.id);notificationService?.invalidate();}
 function beginDataRead(event){const generation=(dataReadGenerations.get(event.sender.id)||0)+1;dataReadGenerations.set(event.sender.id,generation);return generation;}
 function assertDataRead(event,generation,identity){if(dataReadGenerations.get(event.sender.id)!==generation||identity!==settingsIdentity())throw Object.assign(Error('База или права изменились во время чтения'),{code:'SESSION_CHANGED'});}
-async function readRemoteSnapshot(event){
+async function readRemoteSnapshot(event,hello=null){
   const identity=settingsIdentity(),generation=beginDataRead(event),host=settings.remoteHost,port=settings.remotePort||3377;
+  const sender=event.sender,frame=sender.mainFrame,url=sender.getURL();
+  const assertReader=()=>{assertDataRead(event,generation,identity);if(sender.isDestroyed()||sender.mainFrame!==frame||sender.getURL()!==url)throw Object.assign(Error('Окно изменилось во время загрузки'),{code:'SESSION_CHANGED'});};
   try{
     let snapshot,provenLegacy=false;
     try{snapshot=await server.getJson(host,port,'/api/snapshot',15000);}
@@ -121,26 +125,49 @@ async function readRemoteSnapshot(event){
       provenLegacy=true;
       snapshot={data:JSON.parse(await server.fetchData(host,port)),databaseToken:ping.databaseToken||null,revisions:null,access:readonlyLegacyAccess(),readOnly:true,platform:{legacyReadOnly:1,scopedAccess:1}};
     }
-    assertDataRead(event,generation,identity);
+    assertReader();
     if(!snapshot?.data||!Array.isArray(snapshot.data.vehicles)||!Array.isArray(snapshot.data.records)||!provenLegacy&&(!validPublicAccess(snapshot.access)||typeof snapshot.databaseToken!=='string'||!snapshot.databaseToken))throw Object.assign(Error('Сервер не подтвердил актуальные права снимка'),{code:'ACCESS_UNVERIFIED'});
-    bindData(event,snapshot.databaseToken,snapshot.access,snapshot.revisions,snapshot.platform);return {snapshot,generation,identity};
+    let negotiation=null;
+    if(!provenLegacy){try{negotiation=await server.negotiate(host,port,hello);}catch(error){if(![404,405].includes(error.status))throw error;negotiation={ok:true,databaseToken:snapshot.databaseToken,access:snapshot.access,platform:{...snapshot.platform,compatibility:null}};}}
+    assertReader();
+    if(provenLegacy){const chosen=require('../assets/core/platform-compatibility.js').negotiate(hello,null,require('./storage-format.cjs').describe(1));if(!chosen.readCompatible)throw Object.assign(Error('Не подтверждена совместимость чтения клиента'),{code:'READ_COMPATIBILITY_REQUIRED'});snapshot.platform.negotiation=chosen;bindData(event,snapshot.databaseToken,snapshot.access,snapshot.revisions,snapshot.platform);}
+    else bindSnapshotCompatibility(event,snapshot,hello,negotiation);
+    return {snapshot,generation,identity};
   }catch(error){assertDataRead(event,generation,identity);invalidateDataBinding(event);throw error;}
 }
 async function freshDataCacheContext(event){
   const identity=settingsIdentity(),generation=beginDataRead(event);
+  const sender=event.sender,frame=sender.mainFrame,url=sender.getURL();
+  const assertCache=()=>{assertDataRead(event,generation,identity);if(sender.isDestroyed()||sender.mainFrame!==frame||sender.getURL()!==url)throw Object.assign(Error('Окно изменилось во время проверки подключения'),{code:'SESSION_CHANGED'});};
   if(!(settings.networkMode==='client'&&settings.remoteHost)){const token=storage.databaseToken(getDataDir());return {version:1,mode:'local',identity:identity+':'+token,databaseToken:token,access:null,policyStamp:null};}
   try{
     if(networkConfigError)throw Error(networkConfigError);
     const ping=await server.getJson(settings.remoteHost,settings.remotePort||3377,'/api/ping',5000);
-    assertDataRead(event,generation,identity);
+    assertCache();
     const previous=dataBindings.get(event.sender.id);
     if(legacyPing(ping)&&previous?.platform?.legacyReadOnly===1)return {version:1,mode:'client',identity:identity+':'+(ping.databaseToken||'legacy'),databaseToken:ping.databaseToken||null,access:readonlyLegacyAccess(),policyStamp:null,readOnly:true,legacy:true};
     if(!ping?.ok||typeof ping.databaseToken!=='string'||!ping.databaseToken||!validPublicAccess(ping.access))throw Object.assign(Error('Актуальные права сервера не подтверждены'),{code:'ACCESS_UNVERIFIED'});
     if(!previous||previous.identity!==identity||previous.databaseToken!==ping.databaseToken||JSON.stringify(previous.notificationAccess)!==JSON.stringify(ping.access))bindData(event,ping.databaseToken,ping.access,null,previous?.platform||{apiVersion:1,scopedAccess:1});
     return {version:1,mode:'client',identity:identity+':'+ping.databaseToken,databaseToken:ping.databaseToken,access:ping.access,policyStamp:ping.access.policyStamp};
-  }catch(error){assertDataRead(event,generation,identity);invalidateDataBinding(event);throw Object.assign(new Error([401,403].includes(error.status)?'Доступ к серверу отозван':'Не удалось подтвердить текущие права сервера'),{code:[401,403].includes(error.status)?'ACCESS_REVOKED':error.code||'ACCESS_UNVERIFIED',status:error.status||0});}
+  }catch(error){assertCache();invalidateDataBinding(event);throw Object.assign(new Error([401,403].includes(error.status)?'Доступ к серверу отозван':'Не удалось подтвердить текущие права сервера'),{code:[401,403].includes(error.status)?'ACCESS_REVOKED':error.code||'ACCESS_UNVERIFIED',status:error.status||0});}
 }
 let recoveryService=null;
+let writeSessions=null;
+function invalidateWriteSession(senderId){if(typeof writeSessions!=='undefined')writeSessions?.invalidate(senderId);}
+function mainWriteSessions(){
+  if(!writeSessions)writeSessions=require('./write-session.cjs').createWriteSessions({negotiate:server.negotiate,localWriteOptions:server.localWriteOptions,assertContext:assertOperationContext});
+  return writeSessions;
+}
+function bindSnapshotCompatibility(event,snapshot,hello,negotiation=null){
+  const profile=negotiation||{platform:{descriptor:snapshot.platform.descriptor,compatibility:require('../assets/core/platform-compatibility.js').describe().serverProfile}};
+  const readable=require('../assets/core/platform-compatibility.js').negotiate(hello,profile.platform.compatibility,profile.platform.descriptor);
+  if(!readable.readCompatible){invalidateDataBinding(event);throw Object.assign(Error('Клиент не подтвердил совместимость чтения этой базы. Откройте совместимую версию программы.'),{code:'READ_COMPATIBILITY_REQUIRED'});}
+  bindData(event,snapshot.databaseToken,snapshot.access||null,snapshot.revisions,snapshot.platform);
+  const chosen=mainWriteSessions().bind(capturedOperationContext(event),hello,profile);
+  snapshot.platform={...snapshot.platform,compatibility:profile.platform.compatibility,negotiation:chosen};
+  snapshot.readOnly=snapshot.readOnly===true||snapshot.platform.readOnly===true||!chosen.writeCompatible;
+  dataBindings.get(event.sender.id).platform={...snapshot.platform};
+}
 let maintenanceController=null;
 function databaseMaintenance(){
   if(!maintenanceController)maintenanceController=require('./database-maintenance.cjs').createDatabaseMaintenance({
@@ -156,9 +183,9 @@ async function maintenanceContext(event){
   return {file,sourceDir:operation.directory,scope:operation.scope,actor:operation.principal,client:operation.client};
 }
 let documentPrintRenderer=null;
-function renderArchivedDocumentPdf(snapshot){
+function renderArchivedDocumentPdf(snapshot,assertCurrent){
   if(!documentPrintRenderer)documentPrintRenderer=require('./document-print-renderer.cjs').createDocumentPrintRenderer({BrowserWindow,session});
-  return documentPrintRenderer(snapshot);
+  return documentPrintRenderer(snapshot,assertCurrent);
 }
 function readImportOriginal(filename,context){
   const bytes=require('./safe-file.cjs').readRegularFileSync(filename,{maxBytes:25*1024*1024,minBytes:1,assertCurrent:()=>{if(context)assertFileContextSync(context);}});
@@ -199,15 +226,20 @@ function capturedOperationContext(event,binding=assertDataBinding(event)){
   const identity=settingsIdentity(),scope=require('node:crypto').createHash('sha256').update(JSON.stringify([
     identity,binding.databaseToken,client?null:settings.activeUser,principal?.id,principal?.role,binding.notificationAccess||'local-admin'
   ])).digest('hex');
-  return {scope,identity,senderId:event.sender.id,databaseToken:binding.databaseToken,principal,client,
+  return {scope,identity,senderId:event.sender.id,sender:binding.sender,frame:binding.frame,url:binding.url,databaseToken:binding.databaseToken,principal,client,access:binding.notificationAccess,
     directory:getDataDir(),host:settings.remoteHost,port:settings.remotePort||3377,
     supportsOperations:binding.platform?.apiVersion===1&&binding.platform?.operations===1&&binding.platform?.outbox===1&&!!principal,
     supportsCommands:binding.platform?.apiVersion===1&&binding.platform?.commands===1&&!!principal};
 }
 function assertOperationContext(context){
   const binding=dataBindings.get(context.senderId);
-  if(!binding||settingsIdentity()!==context.identity||capturedOperationContext({sender:{id:context.senderId}},binding).scope!==context.scope)
+  if(!binding||!context.sender||context.sender.isDestroyed()||context.sender.mainFrame!==context.frame||context.sender.getURL()!==context.url||binding.sender!==context.sender||binding.frame!==context.frame||settingsIdentity()!==context.identity||capturedOperationContext({sender:{id:context.senderId}},binding).scope!==context.scope)
     throw Object.assign(Error('База или учётная запись изменились. Очередь не применялась.'),{code:'SESSION_CHANGED',definitive:true});
+}
+function readableOperationContext(event){
+  const binding=assertDataBinding(event);
+  if(binding.platform?.negotiation?.readCompatible!==true)throw Object.assign(Error('Сначала подтвердите совместимость чтения этой базы'),{code:'READ_COMPATIBILITY_REQUIRED'});
+  return capturedOperationContext(event,binding);
 }
 async function verifiedOperationContext(event){
   const context=capturedOperationContext(event);
@@ -228,9 +260,10 @@ function operationRecovery(){
         assertOperationContext(context);
         const payload=JSON.parse(json),command=Object.hasOwn(payload,'command');
         if(command&&!context.supportsCommands)throw Object.assign(Error('Подключение не поддерживает атомарные команды'),{code:'UNSUPPORTED_COMMANDS',definitive:true});
-        if(context.client){if(networkConfigError)throw Error(networkConfigError);return command?server.postCommands(context.host,context.port,json):server.postSections(context.host,context.port,json);}
-        if(command)return storage.executeCommand(context.directory,payload,{principal:context.principal,requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION,beforeCommit:()=>{ensureDirs();createDailyBackup();}});
-        return storage.writeSections(context.directory,payload,{principal:context.principal,requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION,beforeCommit:()=>{ensureDirs();createDailyBackup();}});
+        if(context.client){if(networkConfigError)throw Error(networkConfigError);const proof=await mainWriteSessions().remoteOptions(context);assertOperationContext(context);return command?server.postCommands(context.host,context.port,json,proof):server.postSections(context.host,context.port,json,proof);}
+        const proof=mainWriteSessions().localOptions(context);
+        if(command)return storage.executeCommand(context.directory,payload,{principal:context.principal,...proof,beforeCommit:()=>{ensureDirs();createDailyBackup();}});
+        return storage.writeSections(context.directory,payload,{principal:context.principal,...proof,beforeCommit:()=>{ensureDirs();createDailyBackup();}});
       },
       lookup:async(context,id,digest)=>{
         assertOperationContext(context);
@@ -278,7 +311,7 @@ app.on('web-contents-created', (_event, contents) => {
   contents.setWindowOpenHandler(() => ({ action:'deny' }));
   contents.on('will-navigate', (event, url) => { if (url !== contents.getURL()) event.preventDefault(); });
   contents.on('will-attach-webview', event => event.preventDefault());
-  contents.once('destroyed', () => {dataBindings.delete(contents.id);dataReadGenerations.delete(contents.id);});
+  contents.once('destroyed', () => {dataBindings.delete(contents.id);invalidateWriteSession(contents.id);dataReadGenerations.delete(contents.id);});
 });
 
 function getActiveUser() {
@@ -403,7 +436,7 @@ app.whenReady().then(() => {
     if(!pending||payload?.nonce!==pending.nonce||typeof payload.ready!=='boolean')return false;
     finishSaveBarrier(event.sender.id,payload.ready);return true;
   });
-  require('./artifacts').register({ipcMain,getDataDir,isClientMode,getSettings:()=>settings,knowledgeDir:()=>path.join(getDataDir(),'reestr-knowledge'),getPrincipal:event=>capturedOperationContext(event).principal,getContext:capturedOperationContext,assertContext:assertOperationContext});
+  require('./artifacts').register({ipcMain,getDataDir,isClientMode,getSettings:()=>settings,knowledgeDir:()=>path.join(getDataDir(),'reestr-knowledge'),getPrincipal:event=>capturedOperationContext(event).principal,getContext:capturedOperationContext,assertContext:assertOperationContext,getWriteOptions:event=>mainWriteSessions().localOptions(capturedOperationContext(event))});
   if (settings.networkMode !== 'client') ensureDirs();
 
   // Экспорт сводок/актов (XLSX) идёт через обычную загрузку браузера —
@@ -482,7 +515,7 @@ app.whenReady().then(() => {
     }
     try {
       const snapshot = storage.readSnapshot(getDataDir());
-      bindData(event, snapshot.databaseToken, null, snapshot.revisions, snapshot.platform);
+      bindSnapshotCompatibility(event,snapshot,null);
       return JSON.stringify(snapshot.data);
     } catch (e) {
       console.error('[read-data] ' + e.message);
@@ -502,9 +535,11 @@ app.whenReady().then(() => {
       if(networkConfigError)return false;
       if(binding.platform?.legacyReadOnly)return false;
       try {
-        const body = binding.databaseToken ? { databaseToken:binding.databaseToken, data, base:payload.base ?? binding.revisions,
+        const body = binding.databaseToken ? { databaseToken:payload.databaseToken, data, base:payload.base,
           ...(payload.operation ? {operation:payload.operation} : {}),...(payload.scopeViews?{scopeViews:payload.scopeViews}:{}) } : data;
-        const res = await server.postData(settings.remoteHost, settings.remotePort || 3377, JSON.stringify(body));
+        const context=capturedOperationContext(_event,binding),proof=await mainWriteSessions().remoteOptions(context);assertOperationContext(context);
+        const res = await server.postData(settings.remoteHost, settings.remotePort || 3377, JSON.stringify(body),proof);
+        assertOperationContext(context);
         if (identity !== settingsIdentity() || !res?.ok) return false;
         binding.revisions = res.revisions && { ...res.revisions };
         return true;
@@ -513,8 +548,8 @@ app.whenReady().then(() => {
       }
     }
     try {
-      const res = storage.writeAll(getDataDir(), data, { databaseToken:binding.databaseToken, operation:payload.operation,
-        base:payload.base ?? binding.revisions, scopeViews:payload.scopeViews, requireBase:true,requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION,beforeCommit:()=>{ensureDirs();createDailyBackup();},
+      const res = storage.writeAll(getDataDir(), data, { databaseToken:payload.databaseToken, operation:payload.operation,
+        base:payload.base, scopeViews:payload.scopeViews, requireBase:true,...mainWriteSessions().localOptions(capturedOperationContext(_event,binding)),beforeCommit:()=>{ensureDirs();createDailyBackup();},
         principal:{ id:'local-profile', name:getActiveUser().name || 'Локальный пользователь', role:'admin' } });
       if (!res.ok) return false;
       binding.revisions = { ...res.revisions };
@@ -529,12 +564,13 @@ app.whenReady().then(() => {
   // ── Синхронизация по разделам ──
   // Снимок: данные + версии разделов. На старом сервере (без /api/snapshot)
   // версии неизвестны — клиент работает по-старому, целиком.
-  ipcMain.handle('read-snapshot', async (event) => {
+  ipcMain.handle('read-snapshot', async (event,payload) => {
+    const hello=payload?.hello??null;
     const identity = settingsIdentity();
     if (isClientMode()) {
       if(networkConfigError)return null;
       try {
-        const read=await readRemoteSnapshot(event);assertDataRead(event,read.generation,read.identity);
+        const read=await readRemoteSnapshot(event,hello);assertDataRead(event,read.generation,read.identity);
         return JSON.stringify(read.snapshot);
       }
       catch { return null; }
@@ -542,7 +578,7 @@ app.whenReady().then(() => {
     try {
       const dir = getDataDir();
       const snapshot = storage.readSnapshot(dir);
-      bindData(event, snapshot.databaseToken, null, snapshot.revisions, snapshot.platform);
+      bindSnapshotCompatibility(event,snapshot,hello);
       return JSON.stringify(snapshot);
     } catch (e) {
       console.error('[read-snapshot] ' + e.message);
@@ -550,12 +586,14 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('get-revisions', async () => {
+  ipcMain.handle('get-revisions', async (event) => {
     const identity = settingsIdentity();
     if(isClientMode()&&networkConfigError)return null;
     try {
+      const context=readableOperationContext(event);
       if (isClientMode()) {
         const result = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/revisions', 5000);
+        assertOperationContext(context);
         return identity === settingsIdentity() ? result : null;
       }
         return { ...storage.readRevisions(getDataDir()), databaseToken:storage.databaseToken(getDataDir()) };
@@ -566,8 +604,10 @@ app.whenReady().then(() => {
     const identity = settingsIdentity();
     if(isClientMode()&&networkConfigError)return null;
     try {
+      const context=readableOperationContext(_event);
       if (isClientMode()) {
         const result = await server.getJson(settings.remoteHost, settings.remotePort || 3377, '/api/section/' + encodeURIComponent(name), 15000);
+        assertOperationContext(context);
         return identity === settingsIdentity() ? result : null;
       }
       return storage.readSection(getDataDir(), name);
@@ -576,7 +616,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('query-rows', async (event, query) => {
     try {
-      const binding=assertDataBinding(event), identity=settingsIdentity(), token=binding.databaseToken;
+      const context=readableOperationContext(event),binding=assertDataBinding(event), identity=settingsIdentity(), token=binding.databaseToken;
       let result;
       if(isClientMode()) {
         if(networkConfigError)throw Error(networkConfigError);
@@ -584,6 +624,7 @@ app.whenReady().then(() => {
       } else {
         result=require('./data-query.cjs').queryRows(getDataDir(),query,{id:'local-profile',role:'admin'});
       }
+      assertOperationContext(context);
       if(identity!==settingsIdentity()||dataBindings.get(event.sender.id)!==binding||result.databaseToken!==token)
         return {ok:false,code:'CURSOR_STALE',error:'База изменилась. Загрузите раздел заново.'};
       return result;
@@ -595,11 +636,11 @@ app.whenReady().then(() => {
     try {
       payload = JSON.parse(jsonStr);
       binding = assertDataBinding(_event, payload.databaseToken);
-      if (binding.databaseToken) payload.databaseToken = binding.databaseToken;
     } catch (e) { return { ok:false, error:e.message }; }
     const identity = settingsIdentity();
     try {
-      const res=await operationRecovery().execute(capturedOperationContext(_event,binding),payload);
+      const context=capturedOperationContext(_event,binding),res=await operationRecovery().execute(context,payload);
+      assertOperationContext(context);
       if (identity !== settingsIdentity()) return {ok:false,error:'База переключена во время сохранения. Загрузите выбранную базу заново.'};
       if (res?.ok && res.changed?.length) console.log('[write-sections] ' + res.changed.join(', '));
       return res;
@@ -614,7 +655,7 @@ app.whenReady().then(() => {
       const fileContext=await captureFileContext(event),context=fileContext.operation;
       if(dataBindings.get(context.senderId)?.platform?.documentPrint!==1)return {ok:false,unsupported:true,code:'UNSUPPORTED_DOCUMENT_PRINT',error:'Подключение не поддерживает сохранённые печатные редакции.'};
       if(!payload||typeof payload!=='object'||Array.isArray(payload)||!['preview','list','read','export'].includes(payload.action))throw Object.assign(Error('Неизвестное действие печати'),{code:'PRINT_ACTION'});
-      const invoke=()=>context.client?server.postDocumentPrint(context.host,context.port,JSON.stringify(payload)):require('./document-archive.cjs').handle(context.directory,payload,{principal:context.principal,renderPdf:renderArchivedDocumentPdf,requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION});
+      const invoke=async()=>{const proof=context.client?await mainWriteSessions().remoteOptions(context):mainWriteSessions().localOptions(context);await assertFileContext(fileContext);return context.client?server.postDocumentPrint(context.host,context.port,JSON.stringify(payload),proof):require('./document-archive.cjs').handle(context.directory,payload,{principal:context.principal,getPrincipal:()=>{assertFileContextSync(fileContext);return context.principal;},renderPdf:snapshot=>renderArchivedDocumentPdf(snapshot,()=>assertFileContextSync(fileContext)),...proof});};
       const result=await invoke();await assertFileContext(fileContext);
       if(payload.action!=='export'||result?.ok!==true)return result;
       archiveAck=Object.fromEntries(['archiveHeadChanged','canonicalSections','revisions','databaseToken'].filter(name=>Object.hasOwn(result,name)).map(name=>[name,result[name]]));
@@ -633,12 +674,14 @@ app.whenReady().then(() => {
       const fileContext=await captureFileContext(event),context=fileContext.operation;
       if(dataBindings.get(context.senderId)?.platform?.controlledImports!==1)return {ok:false,unsupported:true,code:'UNSUPPORTED_CONTROLLED_IMPORTS',error:'Подключение не поддерживает проверяемый импорт.'};
       if(!payload||typeof payload!=='object'||Array.isArray(payload)||!['stage','preview','read'].includes(payload.action))throw Object.assign(Error('Неизвестное действие источника импорта'),{code:'IMPORT_SOURCE_ACTION'});
+      const proof=context.client?await mainWriteSessions().remoteOptions(context):mainWriteSessions().localOptions(context);await assertFileContext(fileContext);
+      if(!context.client&&payload.action==='stage')storage.assertWriteCompatibility(context.directory,{principal:context.principal,...proof},'controlledImports');
       const request=structuredClone(payload);
       if(request.databaseToken!==undefined&&request.databaseToken!==context.databaseToken)throw Object.assign(Error('База изменилась после выбора файла'),{code:'DATABASE_CHANGED'});
       request.databaseToken=context.databaseToken;
       const encode=source=>{if(!source||typeof source!=='object')return source;if(source.bytes!==undefined){if(source.base64!==undefined)throw Error('Источник задан дважды');const raw=source.bytes;let bytes;if(raw instanceof ArrayBuffer)bytes=Buffer.from(raw);else if(ArrayBuffer.isView(raw))bytes=Buffer.from(raw.buffer,raw.byteOffset,raw.byteLength);else if(Array.isArray(raw)&&raw.every(value=>Number.isInteger(value)&&value>=0&&value<=255))bytes=Buffer.from(raw);else throw Error('Некорректные байты источника');if(bytes.length>25*1024*1024)throw Error('Исходный файл больше 25 МБ');source.base64=bytes.toString('base64');delete source.bytes;}return source;};
       if(request.source){if(Array.isArray(request.source.files))request.source.files=request.source.files.map(encode);else request.source=encode(request.source);}
-      const result=context.client?await server.postImportSource(context.host,context.port,JSON.stringify(request)):await require('./import-source.cjs').handle(context.directory,request,{principal:context.principal,requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION});
+      const result=context.client?await server.postImportSource(context.host,context.port,JSON.stringify(request),proof):await require('./import-source.cjs').handle(context.directory,request,{principal:context.principal,getPrincipal:()=>{assertFileContextSync(fileContext);return context.principal;},...proof});
       await assertFileContext(fileContext);
       if(result?.ok===true&&result.databaseToken!==context.databaseToken)throw Object.assign(Error('Ответ импорта относится к другой базе'),{code:'DATABASE_CHANGED'});
       return result;
@@ -1054,10 +1097,11 @@ app.whenReady().then(() => {
   ipcMain.handle('reestr-learn', async (event, rows) => {
     const context=await captureFileContext(event);
     if(context.operation.client)throw Object.assign(Error('Обучение базы распознавания выполняется на компьютере с основной базой'),{code:'FILES_LOCAL_ONLY'});
-    storage.assertWritable(context.operation.directory,{requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION});
+    const writer={principal:context.operation.principal,...mainWriteSessions().localOptions(context.operation)};
+    storage.assertWritable(context.operation.directory,writer);storage.assertWriteCompatibility(context.operation.directory,writer);
     const { learnFromRows } = await loadReestrLib(event,context);
     await assertFileContext(context);
-    return storage.withDatabaseLock(context.operation.directory,()=>{assertFileContextSync(context);storage.assertWritable(context.operation.directory,{requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION});return learnFromRows(rows);});
+    return storage.withDatabaseLock(context.operation.directory,()=>{assertFileContextSync(context);storage.assertWritable(context.operation.directory,writer);storage.assertWriteCompatibility(context.operation.directory,writer);return learnFromRows(rows);});
   });
 
   ipcMain.handle('reestr-apply-knowledge', async (event, rows) => {
@@ -1234,9 +1278,11 @@ app.whenReady().then(() => {
     } finally { if (loadingTask) await loadingTask.destroy().catch(() => {}); }
   });
 
-  ipcMain.handle('reestr-window-data', event => {
+  ipcMain.handle('reestr-window-data', async event => {
+    const file=await captureFileContext(event);
+    await assertFileContext(file);
     const context = reestrWindowData.get(event.sender.id);
-    if (!context) throw new Error('Окно реестра закрыто');
+    if (!context || file.registry !== context) throw new Error('Окно реестра закрыто');
     const { rows,log,statyi,contracts,vehicles,theme } = context;
     return { rows,log,statyi,contracts,vehicles,theme };
   });
@@ -1244,6 +1290,7 @@ app.whenReady().then(() => {
   ipcMain.handle('reestr-save-rows', async (event, rows) => {
     let context, ownsBusy = false;
     try {
+      const file=await captureFileContext(event),operation=file.operation;
       registryRows(rows);
       context = reestrWindowData.get(event.sender.id);
       const identity = settingsIdentity(), client = isClientMode(), dir = getDataDir();
@@ -1260,14 +1307,16 @@ app.whenReady().then(() => {
         const host = settings.remoteHost, port = settings.remotePort || 3377;
         const snapshot = await server.getJson(host, port, '/api/snapshot', 15000);
         checkSnapshot(snapshot);
-        result = await server.postSections(host, port, JSON.stringify({ databaseToken:context.databaseToken, base:{ reestrRows:context.revision }, sections:{ reestrRows:rows } }));
+        const proof=await mainWriteSessions().remoteOptions(operation);await assertFileContext(file);
+        result = await server.postSections(host, port, JSON.stringify({ databaseToken:context.databaseToken, base:{ reestrRows:context.revision }, sections:{ reestrRows:rows } }),proof);
       } else result = storage.withDatabaseLock(dir, () => {
         const snapshot = localRegistrySnapshot(dir);
         checkSnapshot(snapshot);
         const sections = { reestrRows:rows }, base = { reestrRows:context.revision };
         return storage.writeSections(dir, { databaseToken:context.databaseToken, base, sections }, {
-          principal:{ id:'local-profile', name:getActiveUser().name || 'Локальный пользователь', role:'admin' },requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION,beforeCommit:()=>storage.makeDailyBackup(dir,path.join(dir,'backups'),30) });
+          principal:operation.principal,...mainWriteSessions().localOptions(operation),beforeCommit:()=>storage.makeDailyBackup(dir,path.join(dir,'backups'),30) });
       });
+      await assertFileContext(file);
       if (!result?.ok) throw new Error(result?.error || 'Реестр изменён другим пользователем. Откройте его заново.');
       context.rows = rows; context.baseRows = rows; context.revision = result.revisions.reestrRows;
       const owner = BrowserWindow.getAllWindows().find(win => win.webContents.id === context.ownerId);

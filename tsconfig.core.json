@@ -47,6 +47,7 @@
     "src/core/import-engine.ts",
     "src/core/access-policy.ts",
     "src/core/access-scope.ts",
-    "src/core/database-lifecycle.ts"
+    "src/core/database-lifecycle.ts",
+    "src/core/platform-compatibility.ts"
   ]
 }

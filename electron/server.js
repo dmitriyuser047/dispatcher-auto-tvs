@@ -7,17 +7,21 @@ const dns = require('dns').promises;
 const storage = require('./storage');
 const access = require('./access-control');
 
-let _server = null, _dataDir = null, _backupFn = null, _writeLock = false;
+let _server = null, _dataDir = null, _backupFn = null, _writeLock = false, _writeProof=null, _localWriteProof=null;
 let _clientKey = '', _transport = { protocol:'http:', ca:null }, _accessSettings = {};
 const MAX_BODY = 32 * 1024 * 1024, MAX_IMPORT_BODY = 40 * 1024 * 1024, MAX_RESPONSE = 64 * 1024 * 1024;
+const compatibility=()=>require('../assets/core/platform-compatibility.js');
+function proofProvider(){return require('./write-proof.cjs').createWriteProof({compatibility:compatibility()});}
+function localWriteOptions({hello,databaseToken,principal}){_localWriteProof??=proofProvider();const credential='trusted-local-main',issued=_localWriteProof.negotiate(hello,{databaseToken,principal,descriptor:require('./storage-format.cjs').describe(3),credential});return {requireWriterSchema:true,writerSchemaVersion:3,..._localWriteProof.writeOptions(issued.writeTicket,{credential})};}
 function writerContext(req) {
   const raw=req.headers['x-tvs-writer-schema'];
   const version=typeof raw==='string'&&/^[1-9][0-9]{0,8}$/.test(raw)?Number(raw):raw===undefined?undefined:null;
-  return {requireWriterSchema:true,writerSchemaVersion:version};
+  const credential=/^Bearer (.+)$/.exec(String(req.headers.authorization||''))?.[1];
+  return {requireWriterSchema:true,writerSchemaVersion:version,...(_writeProof?_writeProof.writeOptions(require('./write-proof.cjs').readTicket(req),{credential}):{requireNegotiatedWriter:true})};
 }
 function storageProfile(dataDir) {
   const format=require('./storage-format.cjs'),descriptor=storage.descriptor(dataDir);
-  return {descriptor,readOnly:!format.isCurrent(descriptor.schemaVersion)};
+  return {descriptor,readOnly:!format.isCurrent(descriptor.schemaVersion),compatibility:compatibility().describe().serverProfile};
 }
 function configureKey(key) { _clientKey = String(key || ''); }
 function configureAccess(settings) { _accessSettings = settings || {}; }
@@ -132,12 +136,16 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls,renderPd
     if (!configuredUsers.some(user => user.enabled !== false && user.role === 'admin' && (!user.expiresAt || Date.parse(user.expiresAt) > Date.now()))) return {ok:false,error:'Нужна действующая учётная запись администратора'};
   } else if (!current.networkKey || String(current.networkKey).length < 16) return {ok:false,error:'Нужен ключ сети длиной от 16 знаков'};
   if (tls && (!tls.cert || !tls.key)) return {ok:false,error:'Для HTTPS нужны сертификат и закрытый ключ сервера'};
-  _dataDir = dataDir; _backupFn = backupFn;
+  _dataDir = dataDir; _backupFn = backupFn;_writeProof=proofProvider();
   const handler = (req,res) => {
     const header = String(req.headers.authorization || ''), match = /^Bearer (.+)$/.exec(header);
     const authenticateRequest = () => !req.headers.origin && match ? access.authenticate(match[1],settingsProvider()) : null;
+    const currentPrincipal=()=>{const value=authenticateRequest();if(!value)throw Object.assign(Error('Неверный или отозванный ключ доступа'),{code:'ACCESS_REVOKED',status:401});return value;};
     const principal = authenticateRequest();
     if (!principal) { respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'}); return; }
+    if(req.method==='POST'&&req.url==='/api/negotiate'){
+      void(async()=>{try{const hello=await readBody(req,32*1024);storage.withDatabaseLock(dataDir,()=>{const current=authenticateRequest();if(!current){respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'});return;}const databaseToken=storage.databaseToken(dataDir),platform=storageProfile(dataDir),credential=/^Bearer (.+)$/.exec(String(req.headers.authorization||''))?.[1],issued=_writeProof.negotiate(hello,{databaseToken,principal:current,descriptor:platform.descriptor,credential});respond(res,200,{ok:true,databaseToken,access:publicAccess(current),platform,...issued});});}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'NEGOTIATION_INVALID',error:error.message});}})();return;
+    }
     if (req.method === 'GET' && req.url === '/api/ping') {
       try { respond(res,200,{ok:true,name:serverName || os.hostname(),version:require('../package.json').version,sections:true,databaseToken:storage.databaseToken(_dataDir),protocol:tls ? 'https:' : 'http:',platform:storageProfile(_dataDir),access:publicAccess(principal)}); }
       catch (e) { respond(res,500,{ok:false,error:e.message}); } return;
@@ -149,10 +157,10 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls,renderPd
       void commandRequest(req,res,authenticateRequest);return;
     }
     if(req.method==='POST'&&req.url==='/api/import-source'){
-      void (async()=>{try{const payload=await readBody(req,MAX_IMPORT_BODY);const result=await require('./import-source.cjs').handle(dataDir,payload,{principal,...writerContext(req),getPrincipal:authenticateRequest});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'IMPORT_SOURCE_FAILED',error:error.message});}})();return;
+      void (async()=>{try{const payload=await readBody(req,MAX_IMPORT_BODY),principal=currentPrincipal();const result=await require('./import-source.cjs').handle(dataDir,payload,{principal,...writerContext(req),getPrincipal:currentPrincipal});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'IMPORT_SOURCE_FAILED',error:error.message});}})();return;
     }
     if(req.method==='POST'&&req.url==='/api/document-print'){
-      void (async()=>{try{const payload=await readBody(req);const result=await require('./document-archive.cjs').handle(dataDir,payload,{principal,...writerContext(req),renderPdf,getPrincipal:authenticateRequest});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'DOCUMENT_PRINT_FAILED',error:error.message});}})();return;
+      void (async()=>{try{const payload=await readBody(req),principal=currentPrincipal();const result=await require('./document-archive.cjs').handle(dataDir,payload,{principal,...writerContext(req),renderPdf,getPrincipal:currentPrincipal});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'DOCUMENT_PRINT_FAILED',error:error.message});}})();return;
     }
     if (req.method !== 'GET') { respond(res,404,{ok:false,error:'Неизвестный запрос'}); return; }
     try {
@@ -196,7 +204,7 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls,renderPd
 }
 
 function stop() {
-  const instance = _server; _server = null;
+  const instance = _server; _server = null;_writeProof=null;
   if (!instance) return;
   instance.close(); if (instance.closeIdleConnections) instance.closeIdleConnections();
 }
@@ -227,12 +235,13 @@ async function endpointOptions(host,port,apiPath) {
   return options;
 }
 
-async function request(host,port,apiPath,body,timeout=15000) {
+async function request(host,port,apiPath,body,timeout=15000,transportOptions={}) {
   const options = await endpointOptions(host,port,apiPath);
   options.timeout = timeout; options.method = body == null ? 'GET' : 'POST';
   if (body != null) {
     if (typeof body !== 'string' || Buffer.byteLength(body) > (apiPath==='/api/import-source'?MAX_IMPORT_BODY:MAX_BODY)) throw new Error('Слишком большой или неверный запрос');
     options.headers = {...options.headers,'X-TVS-Writer-Schema':String(require('./storage-format.cjs').SCHEMA_VERSION),'Content-Type':'application/json; charset=utf-8','Content-Length':Buffer.byteLength(body)};
+    if(transportOptions.ticket!==undefined){if(typeof transportOptions.ticket!=='string'||Buffer.byteLength(transportOptions.ticket)>4096)throw Object.assign(Error('Требуется повторная проверка совместимости'),{code:'PROTOCOL_RENEGOTIATE',status:428});options.headers['X-TVS-Write-Ticket']=transportOptions.ticket;}
   }
   return await new Promise((resolve,reject) => {
     let req, settled = false;
@@ -263,20 +272,21 @@ function parseResponse(response,allowConflict) {
   throw error;
 }
 async function fetchData(host,port) { const response = await request(host,port,'/api/data',null,10000); parseResponse(response); return response.text; }
-async function postData(host,port,jsonStr) { return parseResponse(await request(host,port,'/api/data',jsonStr),true); }
+async function postData(host,port,jsonStr,options) { return parseResponse(await request(host,port,'/api/data',jsonStr,15000,options),true); }
 async function getJson(host,port,apiPath,timeout) { return parseResponse(await request(host,port,apiPath,null,timeout || 15000)); }
-async function postSections(host,port,jsonStr) {
-  const response = await request(host,port,'/api/sections',jsonStr);
+async function postSections(host,port,jsonStr,options) {
+  const response = await request(host,port,'/api/sections',jsonStr,15000,options);
   if (response.status === 404) return {ok:false,unsupported:true};
   return parseResponse(response,true);
 }
-async function postCommands(host,port,jsonStr) {
-  const response=await request(host,port,'/api/commands',jsonStr);
+async function postCommands(host,port,jsonStr,options) {
+  const response=await request(host,port,'/api/commands',jsonStr,15000,options);
   if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_COMMANDS'};
   return parseResponse(response,true);
 }
-async function postImportSource(host,port,jsonStr){const response=await request(host,port,'/api/import-source',jsonStr,45000);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_IMPORT_SOURCE'};return parseResponse(response,true);}
-async function postDocumentPrint(host,port,jsonStr){const response=await request(host,port,'/api/document-print',jsonStr,45000);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_DOCUMENT_PRINT'};return parseResponse(response,true);}
+async function postImportSource(host,port,jsonStr,options){const response=await request(host,port,'/api/import-source',jsonStr,45000,options);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_IMPORT_SOURCE'};return parseResponse(response,true);}
+async function postDocumentPrint(host,port,jsonStr,options){const response=await request(host,port,'/api/document-print',jsonStr,45000,options);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_DOCUMENT_PRINT'};return parseResponse(response,true);}
+async function negotiate(host,port,hello){const json=JSON.stringify(hello);if(typeof json!=='string'||Buffer.byteLength(json)>32*1024)throw Object.assign(Error('Некорректный профиль совместимости'),{code:'NEGOTIATION_INVALID',status:400});return parseResponse(await request(host,port,'/api/negotiate',json));}
 async function ping(host,port) { try { return parseResponse(await request(host,port,'/api/ping',null,5000)); } catch { return null; } }
 
-module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,postCommands,postDocumentPrint,postImportSource,configureKey,configureTransport,configureAccess};
+module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,postCommands,postDocumentPrint,postImportSource,negotiate,localWriteOptions,configureKey,configureTransport,configureAccess};

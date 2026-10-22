@@ -42,7 +42,10 @@ test('new assets and cards cannot retroactively resolve closed unresolved fuel r
  }
 });
 const key='identity-test-key-not-real-123456';
-function request(port,route,body){return new Promise((resolve,reject)=>{const req=http.request({host:'127.0.0.1',port,path:route,method:body?'POST':'GET',headers:{...writerHeaders(),Authorization:'Bearer '+key}},res=>{let raw='';res.setEncoding('utf8');res.on('data',part=>raw+=part);res.on('end',()=>resolve({status:res.statusCode,body:JSON.parse(raw)}));});req.on('error',reject);req.end(body?JSON.stringify(body):undefined);});}
+async function request(port,route,body){
+ const currentBody=JSON.stringify(body);
+ const proofHeaders=await writerHeaders({host:'127.0.0.1',port:port,headers:{Authorization:'Bearer '+key},method:body?'POST':'GET'});
+return new Promise((resolve,reject)=>{const req=http.request({host:'127.0.0.1',port,path:route,method:body?'POST':'GET',headers:{...proofHeaders,Authorization:'Bearer '+key}},res=>{let raw='';res.setEncoding('utf8');res.on('data',part=>raw+=part);res.on('end',()=>resolve({status:res.statusCode,body:JSON.parse(raw)}));});req.on('error',reject);req.end(body?currentBody:undefined);});}
 test('server binds ping, snapshots, revisions, reads and both write protocols to the served database',async t=>{
  const dir=temp(t),other=temp(t);storage.writeAll(dir,{vehicles:[{id:'v'}],records:[]});storage.writeAll(other,{vehicles:[{id:'v'}],records:[]});
  const started=await server.start({port:0,dataDir:dir,key});assert.equal(started.ok,true);t.after(()=>server.stop());const token=storage.databaseToken(dir),foreign=storage.databaseToken(other),port=started.port;

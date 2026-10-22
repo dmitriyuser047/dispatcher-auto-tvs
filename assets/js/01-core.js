@@ -267,10 +267,10 @@ async function persistData(d = data, options) {
     if (typeof wfAppendAudit === 'function') wfAppendAudit(d, _lastPersisted);
     const json = JSON.stringify(d);
     if (window.electronAPI) {
-      // По разделам с проверкой версии; на старом сервере — целиком, как раньше
+      // A whole snapshot without its original section versions cannot be saved.
       const ok = typeof _sync !== 'undefined' && _sync.enabled
         ? await syncSave(d, options)
-        : await window.electronAPI.writeData(typeof _sync!=='undefined'&&_sync.databaseToken ? JSON.stringify({databaseToken:_sync.databaseToken,data:d}) : json);
+        : (()=>{throw Error('Нет подтверждённых исходных версий разделов. Загрузите базу из совместимой версии программы.');})();
       if (ok !== true) throw new Error('Изменения не записаны. Проверьте соединение и состояние базы.');
     }
     if (!sameSession()) throw Object.assign(new Error('База или пользователь изменились во время сохранения. Проверьте результат в исходной базе.'),{code:'SESSION_CHANGED'});

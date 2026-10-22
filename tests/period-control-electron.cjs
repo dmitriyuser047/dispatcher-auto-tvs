@@ -41,7 +41,7 @@ test('hidden Electron closes isolated fuel, stock and finance periods through re
   for(const section of ['records','partMovements','payments','vehicles'])assert.deepEqual(closed[section],original[section]);
   assert.equal(period.closureEvents.events.length,3);assert.ok(period.closureEvents.events.every(event=>event.actor.id==='local-profile'&&event.reason.startsWith('Synthetic reviewed')));
   const refusal=await page.evaluate(async()=>{
-   const snapshot=JSON.parse(await window.electronAPI.readSnapshot()),records=structuredClone(snapshot.data.records);records[0].km=101;
+   const snapshot=JSON.parse(await window.electronAPI.readSnapshot({hello:PlatformCompatibility.describe().hello})),records=structuredClone(snapshot.data.records);records[0].km=101;
    const journal=await window.electronAPI.writeSections(JSON.stringify({databaseToken:snapshot.databaseToken,base:{records:snapshot.revisions.records},sections:{records}}));
    const fuelPeriods=structuredClone(snapshot.data.fuelPeriods);fuelPeriods[0].closed=false;fuelPeriods[0].closureEvents.events=[];
    const flags=await window.electronAPI.writeSections(JSON.stringify({databaseToken:snapshot.databaseToken,base:{fuelPeriods:snapshot.revisions.fuelPeriods},sections:{fuelPeriods}}));

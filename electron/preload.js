@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   readData:       ()        => ipcRenderer.invoke('read-data'),
   writeData:      (json)    => ipcRenderer.invoke('write-data', json),
-  readSnapshot:   ()        => ipcRenderer.invoke('read-snapshot'),
+  readSnapshot:   payload   => ipcRenderer.invoke('read-snapshot',payload),
   getRevisions:   ()        => ipcRenderer.invoke('get-revisions'),
   readSection:    (name)    => ipcRenderer.invoke('read-section', name),
   queryRows:      (query)   => ipcRenderer.invoke('query-rows', query),

@@ -2,6 +2,7 @@ const {test,before,after,beforeEach,afterEach}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {pathToFileURL}=require('node:url'),{createRequire}=require('node:module');
+const {install:installSnapshotFixture}=require('./helpers/ui-snapshot-fixture.cjs');
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
 let browser,page,errors;
 const root=path.resolve(__dirname,'..');
@@ -9,11 +10,8 @@ before(async()=>{const edge='C:/Program Files (x86)/Microsoft/Edge/Application/m
 after(async()=>{await browser?.close();});
 beforeEach(async()=>{
  page=await browser.newPage({viewport:{width:1280,height:900}});errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
- await page.addInitScript(()=>{
-  const db={vehicles:[{id:'v',plate:'ТЕСТ001',make:'Тест',org:'ТВС',fuel:'diesel',fuelGrade:'ДТ',norm:10}],records:[{id:'r',vehicleId:'v',date:'2026-10-18',km:100,fuelActual:10}],generators:[],genRecords:[],drivers:[{id:'d',name:'Тестовый водитель',skills:'C'}],tanks:[],parts:[],appMeta:[{id:'meta',toPlanInit:'test'}]};
-  window.__disk=JSON.stringify(db);window.__writes=0;window.__reject=false;
-  window.electronAPI={readData:async()=>window.__disk,writeData:async text=>{window.__writes++;if(window.__reject)return false;const value=JSON.parse(text);window.__disk=JSON.stringify(value.databaseToken?value.data:value);return true;}};
- });
+ const db={vehicles:[{id:'v',plate:'ТЕСТ001',make:'Тест',org:'ТВС',fuel:'diesel',fuelGrade:'ДТ',norm:10}],records:[{id:'r',vehicleId:'v',date:'2026-10-18',km:100,fuelActual:10}],generators:[],genRecords:[],drivers:[{id:'d',name:'Тестовый водитель',skills:'C'}],tanks:[],parts:[],appMeta:[{id:'meta',toPlanInit:'test'}]};
+ await installSnapshotFixture(page,{database:db,token:'synthetic-unified-ui24',countWrites:true});
  await page.goto(pathToFileURL(path.join(root,'index.html')).href);
  await page.waitForFunction(()=>typeof data!=='undefined'&&data.vehicles[0]?.id==='v');
 });
@@ -326,7 +324,7 @@ test('barrel filters survive an empty month and stocks and operations fit 1280 l
 });
 
 async function loadGsmDiagnosticsFixture(controlledRoutes=false){
- await page.evaluate(controlledRoutes=>{
+ await page.evaluate(async controlledRoutes=>{
   Object.assign(data,{
    vehicles:[{id:'diag-v',plate:'AUDIT001',make:'Synthetic vehicle',driver:'Synthetic driver',org:'Аудит A',fuel:'gasoline',fuelGrade:'АИ-95',fuelBalance:10,norm:10,
     fuelBalanceSources:[{org:'Аудит A',grade:'АИ-95',qty:10}],note:''},
@@ -358,7 +356,7 @@ async function loadGsmDiagnosticsFixture(controlledRoutes=false){
      {type:'eval',id:'window.__unsafeRefExecuted=true',label:'Небезопасная команда'}]
    }]});
   }
-  window.__writes=0;window.__disk=JSON.stringify(data);window.__diagBefore=window.__disk;_lastPersisted=window.__disk;
+  window.__writes=0;window.__disk=JSON.stringify(data);data=await syncLoad();window.__disk=JSON.stringify(data);window.__diagBefore=window.__disk;_lastPersisted=window.__disk;
  },controlledRoutes);
  await page.locator('#unifiedNav [data-section="fuelPurchases"]').click();
  await page.getByRole('button',{name:'Проверить ГСМ',exact:true}).click();
@@ -440,10 +438,10 @@ test('an explicit vehicle form save returns to GSM diagnosis and refreshes evide
 
 async function loadOrphanDiagnosticsFixture(){
  await loadGsmDiagnosticsFixture();
- await page.evaluate(()=>{
+ await page.evaluate(async()=>{
   data.records.push({id:'diag-orphan',vehicleId:'missing-source-vehicle',date:'2026-09-12',km:123.4,kmGlonass:122.9,fuelGrade:'АИ-95',fuelIssued:12.345,fuelActual:null,fuelUsed:7.123,fuelIdle:0.111,tankMeasured:4.567,note:'Исходный документ'});
   data.fuelPurchases.push({id:'diag-orphan-purchase',recordId:'diag-orphan',vehicleId:'missing-source-vehicle',date:'2026-09-12',grade:'АИ-95',qty:12.345,manual:true,sourceOrg:'Аудит A'});
-  rebuildIndex();window.__diagOrphanBefore=JSON.stringify(data);window.__disk=window.__diagOrphanBefore;_lastPersisted=window.__disk;window.__writes=0;gsmOpenDiagnostics();
+  window.__disk=JSON.stringify(data);data=await syncLoad();rebuildIndex();window.__diagOrphanBefore=JSON.stringify(data);window.__disk=window.__diagOrphanBefore;_lastPersisted=window.__disk;window.__writes=0;gsmOpenDiagnostics();
  });
 }
 async function previewOrphanLink(){
@@ -504,8 +502,8 @@ test('orphan journal assignment rejects stale sources, changed database and clos
  await page.evaluate(()=>{data.fuelPeriods.push({month:'2026-09',closed:true});window.__orphanCurrent=JSON.stringify(data);});
  await page.locator('#gsmOrphanCommit').click();
  assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__orphanCurrent,writes:window.__writes})),{same:true,writes:0});await cancel();
- await page.evaluate(()=>{data.fuelPeriods=data.fuelPeriods.filter(row=>row.month!=='2026-09');});await previewOrphanLink();
- await page.evaluate(()=>{window.__orphanCurrent=JSON.stringify(data);window.__disk=window.__orphanCurrent;_lastPersisted=window.__orphanCurrent;window.__orphanDisk=window.__disk;window.__reject=true;});
+ await page.evaluate(async()=>{data.fuelPeriods=data.fuelPeriods.filter(row=>row.month!=='2026-09');window.__disk=JSON.stringify(data);data=await syncLoad();window.__orphanCurrent=JSON.stringify(data);window.__disk=window.__orphanCurrent;_lastPersisted=window.__orphanCurrent;window.__orphanDisk=window.__disk;});await previewOrphanLink();
+ await page.evaluate(()=>{window.__reject=true;});
  await page.locator('#gsmOrphanCommit').click();assert.match(await page.locator('#gsmOrphanError').innerText(),/не записана/);
  assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__orphanCurrent,diskSame:window.__disk===window.__orphanDisk,writes:window.__writes})),{same:true,diskSame:true,writes:1});
  await cancel();

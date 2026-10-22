@@ -15,9 +15,9 @@ beforeEach(async()=>{
  });
  await page.addInitScript(({database,sections})=>{
   window.__disk=JSON.stringify(database);window.__token='synthetic-command-IPC-A';window.__revisions=Object.fromEntries(sections.map(name=>[name,1]));
-  window.__nativeRequests=[];window.__nativeRawWrites=0;window.__nativeHold=false;window.__nativeReleases=[];window.__nativeMode='ok';window.__nativeCommits=0;window.__nativeReceipts={};window.__nativeSnapshotReads=0;window.__closeReplies=[];
+  window.__nativeRequests=[];window.__nativeRawWrites=0;window.__nativeHold=false;window.__nativeReleases=[];window.__nativeMode='ok';window.__nativeCommits=0;window.__nativeReceipts={};window.__nativeSnapshotReads=0;window.__nativeUnverifiedReads=0;window.__closeReplies=[];
   window.electronAPI={
-   readSnapshot:async()=>{window.__nativeSnapshotReads++;return JSON.stringify({data:JSON.parse(window.__disk),databaseToken:window.__token,revisions:{...window.__revisions},platform:{apiVersion:1,operations:1,outbox:1,commands:1,personnelPlanning:1,calendar:1}});},
+   readSnapshot:async payload=>{window.__nativeSnapshotReads++;if(JSON.stringify(payload?.hello)!==JSON.stringify(PlatformCompatibility.describe().hello)){window.__nativeUnverifiedReads++;return null;}return JSON.stringify({data:JSON.parse(window.__disk),databaseToken:window.__token,revisions:{...window.__revisions},platform:{apiVersion:1,operations:1,outbox:1,commands:1,personnelPlanning:1,calendar:1}});},
    writeSections:async()=>{window.__nativeRawWrites++;return{ok:false,error:'Unexpected raw persistence in semantic command test'};},
    executeCommand:async raw=>{
     window.__nativeRequests.push(raw);const request=JSON.parse(raw);if(window.__nativeHold)await new Promise(resolve=>window.__nativeReleases.push(resolve));
@@ -148,7 +148,7 @@ test('canonical application preserves unrelated dirty editors without adding the
 });
 
 test('a replay without canonical sections reloads only acknowledged sections and preserves unrelated drafts',async()=>{
- const reads=await page.evaluate(()=>window.__nativeSnapshotReads);const result=await page.evaluate(async()=>{window.__nativeMode='missingCanonical';data.opsTasks.push({id:'local-reload-draft',title:'Preserved unrelated draft'});const response=await platformExecuteCommand(window.__nativeCommand,{operationId:'reload-native-command'});return{response,movements:data.fuelMovements.length,local:data.opsTasks,baseline:JSON.parse(_lastPersisted).opsTasks,reads:window.__nativeSnapshotReads};});assert.equal(result.response.ok,true);assert.equal(result.movements,1);assert.equal(result.local[0].id,'local-reload-draft');assert.deepEqual(result.baseline,[]);assert.equal(result.reads,reads+1);
+ const reads=await page.evaluate(()=>window.__nativeSnapshotReads);const result=await page.evaluate(async()=>{window.__nativeMode='missingCanonical';data.opsTasks.push({id:'local-reload-draft',title:'Preserved unrelated draft'});const response=await platformExecuteCommand(window.__nativeCommand,{operationId:'reload-native-command'});return{response,movements:data.fuelMovements.length,local:data.opsTasks,baseline:JSON.parse(_lastPersisted).opsTasks,reads:window.__nativeSnapshotReads,unverifiedReads:window.__nativeUnverifiedReads,enabled:_sync.enabled};});assert.equal(result.response.ok,true);assert.equal(result.movements,1);assert.equal(result.local[0].id,'local-reload-draft');assert.deepEqual(result.baseline,[]);assert.equal(result.reads,reads+1);assert.equal(result.unverifiedReads,0);assert.equal(result.enabled,true);
 });
 
 test('a receipt with another digest is left unknown and cannot apply even valid-looking canonical sections',async()=>{

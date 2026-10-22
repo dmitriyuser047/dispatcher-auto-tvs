@@ -44,13 +44,16 @@ function assertGuardOnly(dir,expected){
   assert.equal(Number.isSafeInteger(marker.vehicles),false);assert.equal(Number.isSafeInteger(marker.records),false);
   assert.equal(fs.existsSync(path.join(dir,'data.json')),false);return raw;
 }
-function request(port,route,token,body){
+async function request(port,route,token,body){
+ const currentBody=JSON.stringify(body);
+ const proofHeaders=await writerHeaders({host:'127.0.0.1',port:port,headers:{Authorization:'Bearer '+token},method:body===undefined?'GET':'POST'});
+
   return new Promise((resolve,reject)=>{
     const req=http.request({host:'127.0.0.1',port,path:route,method:body===undefined?'GET':'POST',agent:false,
-      headers:{...writerHeaders(),Authorization:'Bearer '+token}},res=>{
+      headers:{...proofHeaders,Authorization:'Bearer '+token}},res=>{
       let raw='';res.setEncoding('utf8');res.on('data',part=>{raw+=part;});
       res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(raw)});}catch(error){reject(error);}});
-    });req.setTimeout(5000,()=>req.destroy(Error('Synthetic HTTP request timed out')));req.on('error',reject);req.end(body===undefined?undefined:JSON.stringify(body));
+    });req.setTimeout(5000,()=>req.destroy(Error('Synthetic HTTP request timed out')));req.on('error',reject);req.end(body===undefined?undefined:currentBody);
   });
 }
 async function httpFixture(t){
@@ -68,11 +71,14 @@ async function httpFixture(t){
   return {...result,tokens,port:started.port,get backups(){return backups;},
     changeUser(change){settings={...settings,serverUsers:access.normalizeServerUsers(settings.serverUsers.map(user=>user.id===admin.id?{...user,...change}:user))};},
     async uploadThenChange(route,body,change){
-      const raw=JSON.stringify(body),authenticated=new Promise(resolve=>{onSettingsRead=resolve;});
+ const currentBody=JSON.stringify(body);
+ const proofHeaders=await writerHeaders({host:'127.0.0.1',port:started.port,headers:{Authorization:'Bearer '+tokens.admin},method:'POST'});
+
+      const raw=currentBody,authenticated=new Promise(resolve=>{onSettingsRead=resolve;});
       let finish;
       const response=new Promise((resolve,reject)=>{
         const req=http.request({host:'127.0.0.1',port:started.port,path:route,method:'POST',agent:false,
-          headers:{...writerHeaders(),Authorization:'Bearer '+tokens.admin,'Content-Length':Buffer.byteLength(raw)}},res=>{
+          headers:{...proofHeaders,Authorization:'Bearer '+tokens.admin,'Content-Length':Buffer.byteLength(raw)}},res=>{
           let text='';res.setEncoding('utf8');res.on('data',part=>{text+=part;});
           res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text)});}catch(error){reject(error);}});
         });req.setTimeout(5000,()=>req.destroy(Error('Synthetic slow upload timed out')));req.on('error',reject);

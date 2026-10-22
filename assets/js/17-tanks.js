@@ -201,6 +201,7 @@ function populateGenTankSelect(selected) {
 
 // ─── TANK CRUD ───────────────────────────────────────────
 function openAddTank() {
+  if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   editingTankId = null;
   document.getElementById('tankModalTitle').textContent = 'Добавить ёмкость';
   document.getElementById('tankDeleteBtn').style.display = 'none';
@@ -212,6 +213,7 @@ function openAddTank() {
 }
 
 function openEditTank(id) {
+  if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   const t = tanksAll().find(x => x.id === id);
   if (!t) return;
   editingTankId = id;
@@ -291,6 +293,7 @@ async function restoreTank(id) {
 
 // ─── TANK INCOME (приход) ────────────────────────────────
 function openAddTankIncome() {
+  if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   if(!EntityIdentity.presentId(selectedTankId))return;
   const tank=tanksAll().find(row=>row.id===selectedTankId);if(!tank||tank.archived||tank.mergedInto){showToast('Для нового прихода нужна действующая ёмкость');return;}
   return newDocument('tankIncomes',{tankId:tank.id});

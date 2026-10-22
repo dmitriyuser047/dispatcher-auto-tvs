@@ -75,7 +75,10 @@ test('malformed financial rows cannot be persisted alongside valid procurement c
  }
 });
 
-function request(port,token,route,body){return new Promise((resolve,reject)=>{const req=http.request({host:'127.0.0.1',port,path:route,method:body?'POST':'GET',headers:{...writerHeaders(),Authorization:'Bearer '+token}},res=>{let text='';res.setEncoding('utf8');res.on('data',chunk=>text+=chunk);res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text)});}catch(error){reject(error);}});});req.on('error',reject);req.end(body?JSON.stringify(body):undefined);});}
+async function request(port,token,route,body){
+ const currentBody=JSON.stringify(body);
+ const proofHeaders=await writerHeaders({host:'127.0.0.1',port:port,headers:{Authorization:'Bearer '+token},method:body?'POST':'GET'});
+return new Promise((resolve,reject)=>{const req=http.request({host:'127.0.0.1',port,path:route,method:body?'POST':'GET',headers:{...proofHeaders,Authorization:'Bearer '+token}},res=>{let text='';res.setEncoding('utf8');res.on('data',chunk=>text+=chunk);res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text)});}catch(error){reject(error);}});});req.on('error',reject);req.end(body?currentBody:undefined);});}
 
 test('HTTP roles cannot bypass planning validation or write financial costs as dispatcher',async t=>{
  const dir=temp(t);storage.writeAll(dir,db());

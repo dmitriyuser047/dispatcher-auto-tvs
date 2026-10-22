@@ -1,11 +1,20 @@
 'use strict';
 const {test,before,after,beforeEach,afterEach}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{createRequire}=require('node:module'),{pathToFileURL}=require('node:url');
 const schema=require('../assets/core/platform-schema.js'),access=require('../electron/access-control');
+const snapshotFixture=require('./helpers/ui-snapshot-fixture.cjs');
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
 let browser,page,errors;
 before(async()=>{const edge='C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';browser=await pw.chromium.launch({headless:true,executablePath:process.env.TVS_TEST_BROWSER||(!process.env.CI&&fs.existsSync(edge)?edge:undefined)});});
 after(async()=>browser?.close());
-beforeEach(async()=>{page=await browser.newPage({viewport:{width:1280,height:900}});errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());const db=Object.fromEntries(schema.sections.map(name=>[name,[]]));db.vehicles=[{id:0,plate:'SYNTHETIC',org:'А',site:'Север'}];db.appMeta=[{id:'meta',toPlanInit:'synthetic'}];await page.addInitScript(({db,actions})=>{window.__settings={networkMode:'standalone',serverUsers:[{id:'owner',name:'Synthetic owner',role:'admin',enabled:true},{id:'scoped',name:'<img src=x onerror="window.__injected=1">',role:'dispatcher',enabled:true}]};window.__settingsWrites=0;window.electronAPI={readData:async()=>JSON.stringify(db),getSettings:async()=>structuredClone(__settings),saveSettings:async value=>{__settings=structuredClone(value);__settingsWrites++;return true;},getAccessCatalog:async()=>({sections:Object.keys(db),actions}),getAppVersion:async()=>'SYNTHETIC'};},{db,actions:access.POLICY_ACTIONS});await page.goto(pathToFileURL(path.join(__dirname,'..','index.html')).href);await page.waitForFunction(()=>typeof acOpenUserPolicy==='function'&&data.vehicles?.length===1);await page.evaluate(()=>{renderSettingsBody=async()=>{};});});
+beforeEach(async()=>{
+ page=await browser.newPage({viewport:{width:1280,height:900}});errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());
+ const db=Object.fromEntries(schema.sections.map(name=>[name,[]]));db.vehicles=[{id:0,plate:'SYNTHETIC',org:'А',site:'Север'}];db.appMeta=[{id:'meta',toPlanInit:'synthetic'}];
+ await snapshotFixture.install(page,{database:db,token:'synthetic-policy-editor',setupData:{actions:access.POLICY_ACTIONS,sections:schema.sections}},({actions,sections})=>{
+  window.__settings={networkMode:'standalone',serverUsers:[{id:'owner',name:'Synthetic owner',role:'admin',enabled:true},{id:'scoped',name:'<img src=x onerror="window.__injected=1">',role:'dispatcher',enabled:true}]};window.__settingsWrites=0;
+  Object.assign(window.electronAPI,{getSettings:async()=>structuredClone(__settings),saveSettings:async value=>{__settings=structuredClone(value);__settingsWrites++;return true;},getAccessCatalog:async()=>({sections,actions}),getAppVersion:async()=>'SYNTHETIC'});
+ });
+ await page.goto(pathToFileURL(path.join(__dirname,'..','index.html')).href);await page.waitForFunction(()=>typeof acOpenUserPolicy==='function'&&data.vehicles?.length===1);await page.evaluate(()=>{renderSettingsBody=async()=>{};});
+});
 afterEach(async()=>{await page?.close();assert.deepEqual(errors,[]);});
 async function open(){await page.evaluate(()=>acOpenUserPolicy('scoped'));await page.locator('#acpForm').waitFor();}
 test('account management exposes an escaped scope editor without changing stored permissions',async()=>{await page.evaluate(()=>acOpenUsers());assert.equal(await page.locator('[data-policy-user="scoped"]').count(),1);await page.locator('[data-policy-user="scoped"]').click();assert.equal(await page.locator('#genericModalTitle').innerText(),'Область доступа · <img src=x onerror="window.__injected=1">');assert.equal(await page.evaluate(()=>window.__injected||0),0);assert.equal(await page.evaluate(()=>__settingsWrites),0);assert.equal(await page.locator('#acpScope').isVisible(),false);});

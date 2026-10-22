@@ -1,6 +1,7 @@
 const {test,before,after,beforeEach,afterEach}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),http=require('node:http');
 const {createRequire}=require('node:module');
+const snapshotFixture=require('./helpers/ui-snapshot-fixture.cjs');
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
 const root=path.resolve(__dirname,'..');let browser,page,server,url,errors;
 before(async()=>{
@@ -16,15 +17,15 @@ before(async()=>{
 after(async()=>{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));});
 beforeEach(async()=>{
  page=await browser.newPage();errors=[];page.on('pageerror',error=>errors.push(error.message));
- await page.addInitScript(()=>{
-  window.__writes=0;window.__pageCalls=[];
-  window.__disk={vehicles:[{id:'async-v',plate:'SYNTHETIC-ASYNC',norm:10,fuelBalance:100,fuelGrade:'ДТ'}],records:[{id:'async-r',vehicleId:'async-v',date:'2026-10-01',km:100,fuelActual:10}],costEntries:[{id:'async-cost',assetRef:'v:async-v',date:'2026-10-01',kind:'expense',amount:100,title:'Synthetic cost',independent:true}],workOrders:[{id:'async-repair',assetRef:'v:async-v',status:'new',title:'Synthetic defect'}],tanks:[{id:'async-t',name:'Synthetic tank',balanceInit:100}],appMeta:[{id:'meta',toPlanInit:'test'}]};
-  window.electronAPI={readData:async()=>JSON.stringify(window.__disk),writeData:async()=>{window.__writes++;return false;},queryRows:async query=>{
+ const db={vehicles:[{id:'async-v',plate:'SYNTHETIC-ASYNC',norm:10,fuelBalance:100,fuelGrade:'ДТ'}],records:[{id:'async-r',vehicleId:'async-v',date:'2026-10-01',km:100,fuelActual:10}],costEntries:[{id:'async-cost',assetRef:'v:async-v',date:'2026-10-01',kind:'expense',amount:100,title:'Synthetic cost',independent:true}],workOrders:[{id:'async-repair',assetRef:'v:async-v',status:'new',title:'Synthetic defect'}],tanks:[{id:'async-t',name:'Synthetic tank',balanceInit:100}],appMeta:[{id:'meta',toPlanInit:'test'}]};
+ await snapshotFixture.install(page,{database:db,token:'synthetic-background',countWrites:true,rejectWrites:true},()=>{
+  window.__pageCalls=[];
+  window.electronAPI.queryRows=async query=>{
    window.__pageCalls.push(structuredClone(query));
    if(window.__holdPage)return new Promise(resolve=>window.__resolvePage=resolve);
    const start=query.cursor?25:0;
    return {ok:true,rows:Array.from({length:25},(_,i)=>({id:start+i,plate:i===0?'<img src=x onerror=window.__injected=true>':'SYNTHETIC-'+(start+i)})),total:50,nextCursor:start?null:'page-2'};
-  }};
+  };
  });
  await page.goto(url);await page.waitForFunction(()=>typeof data!=='undefined'&&data.vehicles[0]?.id==='async-v');
 });

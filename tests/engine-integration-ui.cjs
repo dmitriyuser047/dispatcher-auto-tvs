@@ -2,6 +2,7 @@ const { test, before, after, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const { pathToFileURL } = require('node:url'), { createRequire } = require('node:module');
+const snapshotFixture = require('./helpers/ui-snapshot-fixture.cjs');
 let pw;
 try { pw = require('playwright'); }
 catch { pw = createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES || path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'), 'package.json'))('playwright'); }
@@ -16,8 +17,7 @@ beforeEach(async () => {
   errors = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('dialog', dialog => dialog.accept());
-  await page.addInitScript(() => {
-    const db = {
+  const db = {
       vehicles:[{ id:'engine-v', plate:'ТЕСТ001', make:'Тест', org:'Тестовая организация', fuel:'diesel', fuelGrade:'ДТ', norm:10 }],
       records:[{ id:'engine-r', vehicleId:'engine-v', date:'2026-10-18', km:100, fuelActual:10 }],
       generators:[], genRecords:[],
@@ -26,12 +26,7 @@ beforeEach(async () => {
       procurementRules:[{ id:'engine-rule', kind:'tank', itemId:'engine-t', leadDays:2, coverDays:7, reserveQty:20, expectedDaily:10 }],
       appMeta:[{ id:'meta', toPlanInit:'test' }]
     };
-    window.__disk = JSON.stringify(db); window.__writes = 0;
-    window.electronAPI = {
-      readData:async () => window.__disk,
-      writeData:async json => { window.__writes++; window.__disk = json; return true; }
-    };
-  });
+  await snapshotFixture.install(page,{database:db,token:'synthetic-engine-integration',countWrites:true});
   await page.goto(pathToFileURL(path.join(__dirname, '..', 'index.html')).href);
   await page.waitForFunction(() => typeof dispatcherQuery === 'function' && typeof data !== 'undefined' && data.vehicles[0]?.id === 'engine-v');
 });
@@ -99,30 +94,30 @@ test('live principal permissions constrain both engines even when query options 
 
 test('canonical save and failed-save rollback both discard intermediate calculations', async () => {
   const result = await page.evaluate(async () => {
-    const options = { date:'2026-10-21' }, originalSave = syncSave, originallyEnabled = _sync.enabled;
+    const options = { date:'2026-10-21' }, originalWrite = electronAPI.writeSections;
     let saved, rejected, successEntries, rollbackEntries, actualStock, canonicalJournalKm;
     try {
-      _sync.enabled = true;
-      syncSave = async submitted => {
-        submitted.tanks[0].balanceInit = 55;
-        submitted.records = submitted.records.map(row => ({ ...row, km:150 }));
+      electronAPI.writeSections = async raw => {
+        const request=JSON.parse(raw);
+        data.tanks[0].balanceInit = 55;
+        data.records = data.records.map(row => ({ ...row, km:150 }));
         dispatcherQuery('procurement', options);
-        return true;
+        return {ok:true,databaseToken:_sync.databaseToken,revisions:{..._sync.revs,tanks:_sync.revs.tanks+1,records:_sync.revs.records+1},canonicalSections:{...request.sections,tanks:data.tanks,records:data.records},...(request.operation?{operationReceipt:{id:request.operation.id,digest:request.operation.digest,status:'committed'}}:{})};
       };
       data.tanks[0].name='Changed tank name';
       saved = await saveData(data);
       successEntries = dispatcherEngineStats().entries;
       canonicalJournalKm = recsFor('engine-v')[0].km;
       actualStock = dispatcherQuery('procurement', options)[0].stock;
-      syncSave = async submitted => {
-        submitted.tanks[0].balanceInit = 70;
+      electronAPI.writeSections = async () => {
+        data.tanks[0].balanceInit = 70;
         dispatcherQuery('procurement', options);
-        return false;
+        return {ok:false};
       };
       data.tanks[0].name='Rejected tank name';
       rejected = await saveData(data);
       rollbackEntries = dispatcherEngineStats().entries;
-    } finally { syncSave = originalSave; _sync.enabled = originallyEnabled; }
+    } finally { electronAPI.writeSections = originalWrite; }
     return { saved, rejected, successEntries, rollbackEntries, actualStock, canonicalJournalKm,
       restoredStock:dispatcherQuery('procurement', options)[0].stock, writes:window.__writes };
   });

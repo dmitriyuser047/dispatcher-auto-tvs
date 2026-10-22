@@ -4,6 +4,7 @@
 // ─── GENERATOR CRUD ──────────────────────────────────────
 function genCardSourceFields(){return JSON.stringify(Object.fromEntries(['gm_serial','gm_power','gm_location','gm_responsible','gm_fuel','gm_norm','gm_norm100','gm_norm50','gm_norm_idle','gm_hours_init','gm_fuel_balance','gm_cost','gm_status'].map(id=>[id,document.getElementById(id).value]).concat([['tankId',document.getElementById('gm_tank').selectedOptions[0]?.dataset.typedId??null]])));}
 function openAddGenerator() {
+  if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   editingGeneratorId = null;
   document.getElementById('generatorModal')._generatorEditState=null;
   document.getElementById('generatorModalTitle').textContent = 'Добавить дизельный генератор';
@@ -16,6 +17,7 @@ function openAddGenerator() {
 }
 
 function openEditGenerator(id) {
+  if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   const g = (data.generators || []).find(x => x.id === id);
   if (!g) return;
   editingGeneratorId = id;
@@ -129,6 +131,7 @@ function genPrepareActualInput(source) {
 }
 
 function openAddGenRecord() {
+  if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   editingGenRecordId = null;
   document.getElementById('genRecordModalTitle').textContent = 'Добавить запись';
   const now = new Date();
@@ -147,6 +150,7 @@ function openAddGenRecord() {
 }
 
 function openEditGenRecord(id) {
+  if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   const r = (data.genRecords || []).find(x => x.id === id);
   if (!r) return;
   if (EntityIdentity.presentId(r.fuelMovementId)) { showToast('Это выдача из раздела «Движения топлива». Связанная запись не изменяется; оформите отдельное движение с основанием.'); return; }

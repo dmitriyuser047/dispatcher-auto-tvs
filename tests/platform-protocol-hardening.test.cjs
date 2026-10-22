@@ -1,5 +1,5 @@
 'use strict';
-const {writerHeaders}=require('./helpers/http-writer.cjs');
+const {schemaWriterHeaders}=require('./helpers/http-writer.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -40,7 +40,7 @@ async function protocol(t, { hook = () => {} } = {}) {
     { ...admin, enabled:true, tokenHash:access.hashToken(credentials.admin) },
     { id:'other', name:'Other admin', role:'admin', enabled:true, tokenHash:access.hashToken(credentials.other) },
   ]) };
-  let handler, locked = false, backups = 0;
+  let handler, locked = false, backups = 0, requestPhase='idle';
   const authLockStates = [];
   const fakeHttp = { createServer(fn) {
     handler = fn;
@@ -49,7 +49,7 @@ async function protocol(t, { hook = () => {} } = {}) {
   const storageProxy = { ...storage, withDatabaseLock(dataDir, action) {
     return storage.withDatabaseLock(dataDir, () => {
       locked = true;
-      try { hook(); return action(); }
+      try { if(requestPhase==='write')hook(); return action(); }
       finally { locked = false; }
     });
   } };
@@ -70,26 +70,25 @@ async function protocol(t, { hook = () => {} } = {}) {
   const started = await api.start({ port:0, dataDir:dir, settings:() => settings, backupFn:() => { backups++; } });
   assert.equal(started.ok, true);
   t.after(() => api.stop());
+  async function dispatch(route,raw,headers,beforeEnd=()=>{},phase='write'){
+    const req=Object.assign(new EventEmitter(),{method:'POST',url:route,headers,complete:false,resume(){}});let status;
+    requestPhase=phase;
+    try{return await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Synthetic HTTP handler did not answer')),3000),res={destroyed:false,headersSent:false,writeHead(code){status=code;},end(text){clearTimeout(timer);resolve({status,body:JSON.parse(text)});}};handler(req,res);beforeEnd();req.emit('data',Buffer.from(raw));req.complete=true;req.emit('end');});}
+    finally{requestPhase='idle';}
+  }
   const harness = { dir, credentials, authLockStates, get backups() { return backups; },
     changeUser(change) {
       settings = { ...settings, serverUsers:access.normalizeServerUsers(settings.serverUsers.map(user =>
         user.id === 'admin' ? { ...user, ...change } : user)) };
     },
     async request(route, body, beforeEnd = () => {}) {
-      const req = Object.assign(new EventEmitter(), { method:'POST', url:route,
-        headers:{ ...writerHeaders(), authorization:'Bearer ' + credentials.admin }, complete:false, resume() {} });
-      let status;
-      const completed = new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Synthetic HTTP handler did not answer')), 3000);
-        const res = { destroyed:false, headersSent:false, writeHead(code) { status = code; },
-          end(raw) { clearTimeout(timer); resolve({ status, body:JSON.parse(raw) }); } };
-        handler(req, res);
-        beforeEnd();
-        req.emit('data', Buffer.from(JSON.stringify(body)));
-        req.complete = true;
-        req.emit('end');
-      });
-      return completed;
+      const raw=JSON.stringify(body),authentication={authorization:'Bearer '+credentials.admin};
+      // The same real handler authenticates and signs the proof. Only transport
+      // is virtual; no test secret, minted ticket or bypass enters production.
+      const negotiated=await dispatch('/api/negotiate',JSON.stringify(require('../assets/core/platform-compatibility.js').describe().hello),authentication,()=>{},'negotiate');
+      const headers={...schemaWriterHeaders(),...authentication,...(negotiated.body.writeTicket?{'x-tvs-write-ticket':negotiated.body.writeTicket}:{})};
+      authLockStates.length=0;
+      return dispatch(route,raw,headers,beforeEnd);
     },
     payload(name, operationId) {
       const snapshot = storage.readSnapshot(dir);
@@ -217,7 +216,10 @@ test('a changed role is enforced under the database lock before an ordinary writ
   const h = await protocol(t), before = storage.readSnapshot(h.dir), full = h.payload('Denied');
   const body = { databaseToken:full.databaseToken, base:full.base, sections:{ vehicles:full.data.vehicles } };
   const result = await h.request('/api/sections', body, () => h.changeUser({ role:'viewer' }));
-  assert.equal(result.status, 403);
+  assert.equal(result.status,428);assert.equal(result.body.code,'PROTOCOL_RENEGOTIATE');
+  assert.deepEqual(storage.readSnapshot(h.dir),before);
+  const current = await h.request('/api/sections',body);
+  assert.equal(current.status,403);
   assert.deepEqual(storage.readSnapshot(h.dir), before);
 });
 
@@ -227,6 +229,8 @@ test('the current permitted role and name own canonical audit and ACK filtering'
   const full = h.payload('Permitted', 'current-principal'), body = {
     databaseToken:full.databaseToken, base:full.base, operation:full.operation, sections:{ vehicles:full.data.vehicles },
   };
+  const stale = await h.request('/api/sections', body);
+  assert.equal(stale.status,428);assert.equal(stale.body.code,'PROTOCOL_RENEGOTIATE');assert.equal(h.backups,0);
   const result = await h.request('/api/sections', body);
   assert.equal(result.status, 200); assert.equal(result.body.revisions.payments, 0);
   const event = storage.readAll(h.dir).auditLog.find(row => row.operationId === 'current-principal' && row.section === 'vehicles');

@@ -163,14 +163,17 @@ test('atomic void and source correction still require permission for every chang
   assert.equal(save(dir, { records, fuelWriteoffs:[cancelled] }, { principal:{ id:'dispatcher', name:'Dispatcher', role:'dispatcher' } }).ok, true);
 });
 
-function request(port, token, route, body) {
+async function request(port, token, route, body) {
+ const currentBody=JSON.stringify(body);
+ const proofHeaders=await writerHeaders({host:'127.0.0.1',port:port,headers:{Authorization:'Bearer '+token},method:body?'POST':'GET'});
+
   return new Promise((resolve, reject) => {
     const req = http.request({ host:'127.0.0.1', port, path:route, method:body ? 'POST' : 'GET',
-      headers:{...writerHeaders(), Authorization:'Bearer ' + token, 'Content-Type':'application/json' } }, res => {
+      headers:{...proofHeaders, Authorization:'Bearer ' + token, 'Content-Type':'application/json' } }, res => {
       let raw = ''; res.setEncoding('utf8'); res.on('data', part => { raw += part; });
       res.on('end', () => resolve({ status:res.statusCode, body:JSON.parse(raw) }));
     });
-    req.on('error', reject); req.end(body ? JSON.stringify(body) : undefined);
+    req.on('error', reject); req.end(body ? currentBody : undefined);
   });
 }
 test('authenticated HTTP saves own document authors and history; role checks cannot be bypassed with atomic payloads', async t => {

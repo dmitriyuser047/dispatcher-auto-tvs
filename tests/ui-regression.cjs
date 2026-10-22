@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { createRequire } = require('node:module');
+const { install:installSnapshotFixture } = require('./helpers/ui-snapshot-fixture.cjs');
 let pw;
 try { pw = require('playwright'); }
 catch {
@@ -27,10 +28,7 @@ after(async () => { await browser?.close(); });
 beforeEach(async () => {
   page = await browser.newPage({ viewport: { width: 1280, height: 900 } }); errors = [];
   page.on('pageerror', e => errors.push(e.message)); page.on('dialog', d => d.accept());
-  await page.addInitScript(db => {
-    window.__disk = JSON.stringify(db);
-    window.electronAPI = { readData: async () => window.__disk, writeData: async json => { window.__disk = json; return true; } };
-  }, fixture());
+  await installSnapshotFixture(page,{database:fixture(),token:'synthetic-ui-regression24'});
   await page.goto(pathToFileURL(path.join(__dirname, '../index.html')).href);
   await page.waitForFunction(() => typeof data !== 'undefined' && data.records.length === 2);
   await page.evaluate(() => { toAutoSetupOnce = async () => {}; selectedVehicleId = 'v'; switchSection('vehicles'); selectedVehicleId = 'v'; });
@@ -311,15 +309,15 @@ test('manual review refuses stale data and concurrent server changes instead of 
   await page.evaluate(() => {
     _sync.enabled = true; _sync.revs = Object.fromEntries(SYNC_SECTIONS.map(n => [n, 1]));
     SYNC_SECTIONS.forEach(n => _sync.synced[n] = JSON.stringify(data[n] || [])); window.__mergeReads = 0;
-    window.electronAPI.writeSections = async () => ({ ok: false, conflicts: ['fuelPurchases'] });
-    window.electronAPI.readSection = async () => { window.__mergeReads++; return { rev: 2, rows: [] }; };
+    window.electronAPI.writeSections = async () => ({ ok: false, databaseToken:_sync.databaseToken, conflicts: ['fuelPurchases'] });
+    window.electronAPI.readSection = async () => { window.__mergeReads++; return { rev: 2, rows: [], databaseToken:_sync.databaseToken }; };
   });
   await page.locator('#gsmManualCommit').click(); await page.waitForFunction(() => document.getElementById('gsmManualReviewError').textContent.includes('Не записано'));
   assert.equal(await page.evaluate(() => window.__mergeReads), 0); assert.equal(await page.evaluate(() => data.fuelPurchases.length), 0);
 });
 
 async function openPreciseHistoricalPurchase() {
-  await page.evaluate(() => {
+  await page.evaluate(async() => {
     data.vehicles[0].object = 'Site';
     data.records = [{ id: 'precise-r', vehicleId: 'v', date: '2026-09-01', fuelGrade: 'АИ-95', fuelIssued: 55.563, fuelSum: 5000.34,
       km: 123, odoStart: 1000, odoEnd: 1123, fuelActual: 17.256, tankMeasured: 138.307, note: 'Original journal' }];
@@ -327,7 +325,7 @@ async function openPreciseHistoricalPurchase() {
       qty: 45.562, sum: 4556.2, price: 100, cardNo: '111111', sourceOrg: 'A', restored: true,
       sourceTransaction: { qty: 45.562, sum: 4556.2, product: 'АИ-95' } }];
     data.fuelCards = [{ number: '111111', org: 'A', assignments: [{ vehicleId: 'v', from: '', to: '' }] }];
-    rebuildIndex(); _lastPersisted = JSON.stringify(data); fpEdit('precise-p');
+    window.__disk=JSON.stringify(data);data=await syncLoad();rebuildIndex(); _lastPersisted = JSON.stringify(data); fpEdit('precise-p');
   });
 }
 
@@ -361,9 +359,9 @@ test('explicit historical organization correction requires a reason and retains 
 
 test('confirmed redundant purchase deletion previews and preserves correct journal after failure and retry', async () => {
   await openPreciseHistoricalPurchase(); const before = await page.evaluate(() => JSON.stringify(data.records));
-  await page.evaluate(() => {
+  await page.evaluate(async() => {
     data.fuelPurchases.push({ ...data.fuelPurchases[0], id: 'correct-original', restored: false });
-    _lastPersisted = JSON.stringify(data); fpDelete('precise-p');
+    window.__disk=JSON.stringify(data);data=await syncLoad();_lastPersisted = JSON.stringify(data); fpDelete('precise-p');
   }); await page.locator('#fpd_mode').selectOption('keep');
   assert.match(await page.locator('#fpd_preview').innerText(), /55,563 → 55,563/);
   await page.locator('#fpd_reason').fill('Лишняя восстановленная строка, оригинал проверен'); await page.locator('#fpd_confirm').check();
@@ -438,8 +436,8 @@ test('polling defers while a form is open and field-wise conflict merge preserve
   const out = await page.evaluate(async () => {
     _sync.enabled = true; _sync.revs = { records: 1 }; SYNC_SECTIONS.forEach(n => _sync.synced[n] = JSON.stringify(data[n] || []));
     const remote = data.records.map(r => r.id === 'r1' ? { ...r, km: 200, odoEnd: 1200 } : { ...r }); let writes = 0;
-    window.electronAPI.getRevisions = async () => ({ records: 2 }); window.electronAPI.readSection = async () => ({ rev: 2, rows: remote });
-    window.electronAPI.writeSections = async json => { writes++; return writes === 1 ? { ok: false, conflicts: ['records'] } : { ok: true, revisions: { records: 3 } }; };
+    window.electronAPI.getRevisions = async () => ({ records: 2, databaseToken:_sync.databaseToken }); window.electronAPI.readSection = async () => ({ rev: 2, rows: remote, databaseToken:_sync.databaseToken });
+    window.electronAPI.writeSections = async json => { writes++; return writes === 1 ? { ok: false, databaseToken:_sync.databaseToken, conflicts: ['records'] } : { ok: true, databaseToken:_sync.databaseToken, revisions: { records: 3 } }; };
     openEditRecord('r1'); await syncPoll(); const whileEditing = data.records[0].km;
     document.getElementById('rec_note').value = 'Note only'; await saveRecord(); _sync.enabled = false;
     return { whileEditing, after: data.records[0].km, note: data.records[0].note, norm: data.records[0].fuelUsed };
@@ -450,13 +448,13 @@ test('retry after a failed conflict merge retains the original baseline and pres
     _sync.enabled = true; _sync.revs = Object.fromEntries(SYNC_SECTIONS.map(n => [n, 1]));
     SYNC_SECTIONS.forEach(n => _sync.synced[n] = JSON.stringify(data[n] || []));
     const remote = data.records.map(r => r.id === 'r1' ? { ...r, km: 200, odoEnd: 1200 } : { ...r });
-    window.electronAPI.readSection = async () => ({ rev: 2, rows: remote });
+    window.electronAPI.readSection = async () => ({ rev: 2, rows: remote, databaseToken:_sync.databaseToken });
     let attempts = 0;
     window.electronAPI.writeSections = async json => {
       attempts++; const payload = JSON.parse(json);
-      if (payload.base.records === 1) return { ok: false, conflicts: ['records'] };
+      if (payload.base.records === 1) return { ok: false, databaseToken:_sync.databaseToken, conflicts: ['records'] };
       if (attempts === 2) return { ok: false, error: 'offline' };
-      return { ok: true, revisions: { records: 3 } };
+      return { ok: true, databaseToken:_sync.databaseToken, revisions: { records: 3 } };
     };
     openEditRecord('r1'); document.getElementById('rec_note').value = 'Retried note'; await saveRecord();
     const revisionAfterFailure = _sync.revs.records, stayedOpen = document.getElementById('recordModal').classList.contains('open');
@@ -481,7 +479,7 @@ test('an unrelated save never advances revisions of sections that were not read'
   const out = await page.evaluate(async () => {
     _sync.enabled = true; _sync.revs = Object.fromEntries(SYNC_SECTIONS.map(n => [n, 1]));
     SYNC_SECTIONS.forEach(n => _sync.synced[n] = JSON.stringify(data[n] || []));
-    window.electronAPI.writeSections = async () => ({ ok: true, revisions: { vehicles: 2, records: 99 } });
+    window.electronAPI.writeSections = async () => ({ ok: true, databaseToken:_sync.databaseToken, revisions: { vehicles: 2, records: 99 } });
     data.vehicles[0].make = 'Changed'; await saveData(data); _sync.enabled = false;
     return { vehicles: _sync.revs.vehicles, records: _sync.revs.records };
   }); assert.deepEqual(out, { vehicles: 2, records: 1 });

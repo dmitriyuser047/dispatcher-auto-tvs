@@ -294,7 +294,7 @@ function platformExecuteCommand(value,options={}){
         const requiredWrites=[...new Set([...writes,...archiveExtra])];
         const expected=[...new Set([...writes,...archiveExtra,'auditLog'])];
         if(!canonical||requiredWrites.some(name=>!Array.isArray(canonical[name]))){
-          const raw=await window.electronAPI.readSnapshot();syncEnsureSession(stamp);
+          const raw=await window.electronAPI.readSnapshot({hello:typeof PlatformCompatibility==='undefined'?null:PlatformCompatibility.describe().hello});syncEnsureSession(stamp);
           const snapshot=typeof raw==='string'?JSON.parse(raw):raw;
           syncAssertDatabase(snapshot);guard();
           if(JSON.stringify(snapshot?.access||null)!==JSON.stringify(_sync.access||null))throw platformPrepareError('STALE_ACCESS','Права изменились. Загрузите базу заново.');

@@ -54,14 +54,15 @@ test('hidden Electron application persists synthetic journals, isolates registry
 
   const first = await page.evaluate(async () => {
     for (const section of ['home','vehicles','generators','tanks','dispatch','workflows','reestr','toSchedule','repairs','finances','costs','procurement','contragents','reports','printForms','fuelReport','fuelPurchases']) switchSection(section);
-    const snap = JSON.parse(await window.electronAPI.readSnapshot());
+    const snap = JSON.parse(await window.electronAPI.readSnapshot({hello:PlatformCompatibility.describe().hello}));
     data.records.push({ id:'native-journal',vehicleId:'A',date:'2026-10-01',km:100,odoStart:1000,odoEnd:1100,fuelIssued:0,fuelActual:10,fuelGrade:'ДТ',driver:'Synthetic driver' });
     const saved = await saveData(data);
     return { saved, token:snap.databaseToken, identity:await window.electronAPI.getDataIdentity(), operationReceipt:_sync.lastResult?.operationReceipt, platform:snap.platform,
       ...(saved?{}:{failure:platformRuntimeStatus().lastError,syncResult:_sync.lastResult}) };
   });
   assert.equal(first.saved, true,JSON.stringify(first));
-  assert.deepEqual(first.platform, {apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:3,currentSchemaVersion:3,descriptor:require('../electron/storage-format.cjs').describe(3),readOnly:false,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false});
+  assert.deepEqual(first.platform, {apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:3,currentSchemaVersion:3,descriptor:require('../electron/storage-format.cjs').describe(3),readOnly:false,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false,compatibility:require('../assets/core/platform-compatibility.js').describe().serverProfile,negotiation:require('../assets/core/platform-compatibility.js').negotiate(require('../assets/core/platform-compatibility.js').describe().hello,require('../assets/core/platform-compatibility.js').describe().serverProfile,require('../electron/storage-format.cjs').describe(3))});
+  assert.equal(JSON.stringify(first.platform).includes('writeTicket'),false);assert.equal(JSON.stringify(first.platform).includes('issuerEpoch'),false);
   assert.equal(first.operationReceipt?.status, 'committed'); assert.ok(first.operationReceipt.id);
   assert.equal(storage.readAll(dataA).records[0].id, 'native-journal');
   assert.match(first.token, /^[a-f0-9]{64}$/);
@@ -89,14 +90,13 @@ test('hidden Electron application persists synthetic journals, isolates registry
   assert.equal(backgroundPlan.note,'Synthetic background preflight');assert.equal(backgroundPlan.status.active,0);
   assert.deepEqual(storage.readSnapshot(dataA),beforeBackgroundPlan);
 
-  // Full-write IPC must use the revisions bound by readSnapshot, even when
-  // the renderer sends neither base nor auditLog. An old audit prefix would
-  // independently reject the save and conceal a missing CAS check.
+  // Full-write IPC requires explicitly supplied original revisions. An old
+  // audit prefix must not conceal a missing base or an actual CAS conflict.
   const staleFull = await page.evaluate(async () => {
-    const snapshot = JSON.parse(await window.electronAPI.readSnapshot());
+    const snapshot = JSON.parse(await window.electronAPI.readSnapshot({hello:PlatformCompatibility.describe().hello}));
     const { auditLog, ...source } = snapshot.data;
     source.vehicles[0].note = 'Stale full IPC description';
-    return { databaseToken:snapshot.databaseToken, data:source };
+    return { databaseToken:snapshot.databaseToken, base:snapshot.revisions, data:source };
   });
   const concurrentBase = storage.readSnapshot(dataA);
   const concurrentFull = storage.writeSections(dataA, { databaseToken:concurrentBase.databaseToken,
@@ -107,10 +107,10 @@ test('hidden Electron application persists synthetic journals, isolates registry
   assert.equal(await page.evaluate(payload => window.electronAPI.writeData(JSON.stringify(payload)), staleFull), false);
   assert.deepEqual(storage.readSnapshot(dataA), beforeStaleFull);
   const freshFull = await page.evaluate(async () => {
-    const snapshot = JSON.parse(await window.electronAPI.readSnapshot());
+    const snapshot = JSON.parse(await window.electronAPI.readSnapshot({hello:PlatformCompatibility.describe().hello}));
     const { auditLog, ...source } = snapshot.data;
     source.vehicles[0].note = 'Fresh full IPC description';
-    const saved = await window.electronAPI.writeData(JSON.stringify({ databaseToken:snapshot.databaseToken,data:source }));
+    const saved = await window.electronAPI.writeData(JSON.stringify({ databaseToken:snapshot.databaseToken,base:snapshot.revisions,data:source }));
     data = await loadData(); rebuildIndex();
     return { saved,note:data.vehicles[0].note };
   });
@@ -151,7 +151,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
   }
   assert.equal(featureData.auditLog.filter(row=>row.type==='transaction'&&row.operationId===features.operationReceipt.id).length,1);
   const replayedNative=await page.evaluate(async()=>{
-    const snapshot=JSON.parse(await window.electronAPI.readSnapshot()),id='native-ipc-'+crypto.randomUUID();
+    const snapshot=JSON.parse(await window.electronAPI.readSnapshot({hello:PlatformCompatibility.describe().hello})),id='native-ipc-'+crypto.randomUUID();
     const payload={databaseToken:snapshot.databaseToken,base:{opsTasks:snapshot.revisions.opsTasks},sections:{opsTasks:[...(snapshot.data.opsTasks||[]),{id:'native-idempotent-task',title:'Synthetic native command',status:'open'}]},operation:{id}};
     const first=await window.electronAPI.writeSections(JSON.stringify(payload)),second=await window.electronAPI.writeSections(JSON.stringify(payload));
     data=await loadData();rebuildIndex();

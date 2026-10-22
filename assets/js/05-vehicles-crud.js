@@ -3,6 +3,7 @@
 
 // ─── VEHICLE CRUD ────────────────────────────────────────
 function openAddVehicle() {
+  if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   editingVehicleId = null;
   document.getElementById('vehicleModalTitle').textContent = 'Добавить транспортное средство';
   ['vm_make','vm_plate','vm_driver','vm_org','vm_object','vm_responsible','vm_fuelcard','vm_status','vm_justification','vm_note'].forEach(id => document.getElementById(id).value = '');
@@ -22,6 +23,7 @@ function openAddVehicle() {
 }
 
 function openEditVehicle(id) {
+  if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   const v = data.vehicles.find(x => x.id === id);
   if (!v) return;
   editingVehicleId = id;
@@ -129,6 +131,7 @@ function recFillCardSelect(selectedNum, useDefault) {
 }
 
 function openAddRecord() {
+  if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   if(data.vehicles.find(v=>v.id===selectedVehicleId)?.archived){showToast('Для новой записи восстановите ТС из архива');return;}
   editingRecordId = null;
   recordEditingState = null;
@@ -154,6 +157,7 @@ function openAddRecord() {
 }
 
 function openEditRecord(id) {
+  if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   const r = data.records.find(x => x.id === id);
   if (!r) return;
   if(EntityIdentity.presentId(r.fuelMovementId)){showToast('Выдача связана с движением топлива. Корректировка выполняется отдельным движением.');return;}

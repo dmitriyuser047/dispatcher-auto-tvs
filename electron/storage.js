@@ -56,6 +56,8 @@ function schemaVersion(dataDir){
   return fs.existsSync(legacyFile(dataDir))||storageFormat.legacySections().some(name=>fs.existsSync(sectionFile(dataDir,name)))?1:storageFormat.SCHEMA_VERSION;
 }
 function assertWritable(dataDir,options={}){if(!storageFormat.isCurrent(schemaVersion(dataDir)))storageFormat.upgradeRequired();storageFormat.assertWriter(options);}
+function assertWriteCompatibility(dataDir,options={},requiredCapability){if(options.requireNegotiatedWriter!==true)return null;return require('./write-proof.cjs').assertWriteCompatibility(options,{databaseToken:databaseToken(dataDir),principal:options.getPrincipal?options.getPrincipal():options.principal,descriptor:descriptor(dataDir),requiredCapability});}
+function hasWriteCompatibility(dataDir,options={},requiredCapability){if(options.requireNegotiatedWriter!==true)return true;try{assertWriteCompatibility(dataDir,options,requiredCapability);return true;}catch{return false;}}
 function descriptor(dataDir){const sql=sqliteBackend(dataDir);return sql?sql.readDescriptor(dataDir):fs.existsSync(revisionsFile(dataDir))?storageFormat.decodeRevisions(readJson(revisionsFile(dataDir))).descriptor:storageFormat.describe(schemaVersion(dataDir));}
 function canonicalDirectory(dataDir) {
   const resolved = fs.realpathSync(path.resolve(dataDir));
@@ -361,7 +363,6 @@ function writeAll(dataDir, data, options = {}) {
   if (!data || !Array.isArray(data.vehicles) || !Array.isArray(data.records)) throw new Error('Неполная база: нужны vehicles и records');
   SECTIONS.forEach(n => { if (n in data) validateRows(n, data[n]); });
   const previous = readAll(dataDir);
-  if (!isSplit(dataDir)) migrate(dataDir);
   const revisions = readRevisions(dataDir);
   const platform = require('./platform-service.cjs'), token = databaseToken(dataDir);
   if (options.replace === true) {
@@ -376,9 +377,12 @@ function writeAll(dataDir, data, options = {}) {
   // A confirmed command can be retried after its own commit advanced revisions.
   // Resolve it before CAS, just as writeSections does.
   if (operation?.receipt) return platform.filteredResult(platform.replayResult(previous, revisions, token, operation, Object.keys(data)),options.principal,previous);
+  assertWriteCompatibility(dataDir,options);
+  if(options.requireNegotiatedWriter===true&&(typeof options.databaseToken!=='string'||!options.databaseToken))throw Object.assign(Error('Для записи нужен явный идентификатор прочитанной базы'),{code:'DATABASE_TOKEN_REQUIRED',status:428});
   require('./document-archive.cjs').validateState(dataDir,previous);
   assertWritable(dataDir,options);
-  if (options.replace !== true && (options.requireBase || options.base !== undefined)) {
+  if (!isSplit(dataDir)) migrate(dataDir);
+  if (options.replace !== true && (options.requireNegotiatedWriter===true || options.requireBase || options.base !== undefined)) {
     const base = options.base;
     if (base === undefined) {
       const error = new Error('Для сохранения всей базы нужны исходные версии разделов. Загрузите базу заново.');
@@ -389,10 +393,8 @@ function writeAll(dataDir, data, options = {}) {
       const error = new Error('Некорректные исходные версии разделов');
       error.code = 'INVALID_BASE'; error.status = 400; throw error;
     }
-    // A full snapshot may include unchanged sections without their base version.
-    // Only actual application-data changes participate; history is server-owned.
-    const candidates = SECTIONS.filter(name => name !== 'auditLog' && Object.hasOwn(data, name) &&
-      JSON.stringify(previous[name]) !== JSON.stringify(data[name]));
+    // Modern full writes must name every supplied base, even unchanged rows.
+    const candidates = SECTIONS.filter(name => Object.hasOwn(data, name) && (options.requireNegotiatedWriter===true || name !== 'auditLog' && JSON.stringify(previous[name]) !== JSON.stringify(data[name])));
     if(candidates.some(name=>name==='dispatchJobs'||name==='workOrders')){
       if(!Object.hasOwn(base,'appMeta')){const error=new Error('Для сохранения интервала нужна исходная версия рабочего календаря. Загрузите базу заново.');error.code='CALENDAR_CONTEXT_REQUIRED';error.status=428;throw error;}
       if(!candidates.includes('appMeta'))candidates.push('appMeta');
@@ -469,7 +471,6 @@ function writeSections(dataDir, payload, options = {}) {
   const token = databaseToken(dataDir);
   if (payload && payload.databaseToken != null && payload.databaseToken !== token) return { ok: false, databaseChanged: true, databaseToken: token, error: 'База данных изменилась. Заново откройте её перед сохранением.' };
   const previous = readAll(dataDir);
-  if (!isSplit(dataDir)) migrate(dataDir);
   const base = (payload && payload.base) || {};
   let sections = (payload && payload.sections) || {};
   const names = Object.keys(sections);
@@ -480,8 +481,11 @@ function writeSections(dataDir, payload, options = {}) {
   const context = { ...options,dataDir, operation:payload?.operation || options.operation, scopeViews:payload?.scopeViews||options.scopeViews, base, revisions, databaseToken:token };
   const operation = platform.operationInfo(previous, sections, context);
   if (operation?.receipt) return platform.filteredResult(platform.replayResult(previous, revisions, token, operation, names),options.principal,previous);
+  assertWriteCompatibility(dataDir,options);
   require('./document-archive.cjs').validateState(dataDir,previous);
   assertWritable(dataDir,options);
+  if (!isSplit(dataDir)) migrate(dataDir);
+  if(options.requireNegotiatedWriter===true){if(!payload||typeof payload.databaseToken!=='string'||!payload.databaseToken)throw Object.assign(Error('Для записи нужен явный идентификатор прочитанной базы'),{code:'DATABASE_TOKEN_REQUIRED',status:428});if(!payload.base||Object.prototype.toString.call(payload.base)!=='[object Object]'||Object.keys(payload.base).some(name=>!SECTIONS.includes(name)||!Number.isSafeInteger(payload.base[name])||payload.base[name]<0))throw Object.assign(Error('Нужны явные исходные версии разделов'),{code:'INVALID_BASE',status:400});if(names.some(name=>!Object.hasOwn(payload.base,name)))throw Object.assign(Error('Не указаны исходные версии переданных разделов'),{code:'BASE_REQUIRED',status:428});}
   const calendarRead=names.some(name=>(name==='dispatchJobs'||name==='workOrders')&&JSON.stringify(previous[name])!==JSON.stringify(sections[name]));
   if(calendarRead&&(!Object.hasOwn(base,'appMeta')||!Number.isSafeInteger(base.appMeta)||base.appMeta<0)){const error=new Error('Для сохранения интервала нужна исходная версия рабочего календаря. Загрузите базу заново.');error.code='CALENDAR_CONTEXT_REQUIRED';error.status=428;throw error;}
   const conflicts = [...new Set([...names,...(calendarRead?['appMeta']:[])])].filter(n => (revisions[n] || 0) !== (base[n] || 0));
@@ -540,16 +544,16 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
 }
 
 module.exports = {
-  SECTIONS, sectionsDir, sectionFile, revisionsFile,schemaVersion,descriptor,assertWritable,encodeRevisions:storageFormat.encodeRevisions,
+  SECTIONS, sectionsDir, sectionFile, revisionsFile,schemaVersion,descriptor,assertWritable,assertWriteCompatibility,hasWriteCompatibility,encodeRevisions:storageFormat.encodeRevisions,
   databaseToken, withDatabaseLock, validateRows, prepareWriteoffSections,
   executeCommand:(dataDir,envelope,options)=>require('./command-service.cjs').execute(dataDir,envelope,options),
-  commitPrintArtifact:(dataDir,input,options={})=>withDatabaseLock(dataDir,()=>{assertWritable(dataDir,options);const sql=sqliteBackend(dataDir),readOnly=schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||options.requireWriterSchema===true&&options.writerSchemaVersion!==storageFormat.SCHEMA_VERSION,action=()=>require('./document-archive.cjs').commitArtifact(dataDir,input,options,commitSections);const result=sql?sql.transaction(dataDir,action,{readOnly}):action();if(!readOnly)require('./document-archive.cjs').recover(dataDir,undefined,options);return result;}),
+  commitPrintArtifact:(dataDir,input,options={})=>withDatabaseLock(dataDir,()=>{const sql=sqliteBackend(dataDir),readOnly=schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||options.requireWriterSchema===true&&options.writerSchemaVersion!==storageFormat.SCHEMA_VERSION||!hasWriteCompatibility(dataDir,options,'documentPrint'),action=()=>require('./document-archive.cjs').commitArtifact(dataDir,input,options,commitSections);const result=sql?sql.transaction(dataDir,action,{readOnly}):action();if(!readOnly&&!result?.replayed)require('./document-archive.cjs').recover(dataDir,undefined,options);return result;}),
   isDatabaseLockHeld:dataDir=>heldLocks.has(canonicalDirectory(dataDir)),
   ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot,readOperation }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, () => {
     const sqlite = sqliteBackend(dataDir), action = () => {try{return operation(dataDir,...args);}catch(error){const principal=name==='readSnapshot'?args[0]?.principal:name==='readOperation'?args[1]:args[1]?.principal;throw require('./access-control').publicError(error,principal);}};
-    const writing=['writeAll','writeSections'].includes(name),nested=sqlite?.inTransaction(dataDir);
-    const result=!sqlite||['isSplit','migrate'].includes(name)?action():sqlite.transaction(dataDir,action,{readOnly:!writing||sqlite.schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||args[1]?.requireWriterSchema===true&&args[1]?.writerSchemaVersion!==storageFormat.SCHEMA_VERSION});
-    if(writing&&!nested&&schemaVersion(dataDir)===storageFormat.SCHEMA_VERSION&&!(args[1]?.requireWriterSchema===true&&args[1]?.writerSchemaVersion!==storageFormat.SCHEMA_VERSION))require('./document-archive.cjs').recover(dataDir,undefined,args[1]);
+    const writing=['writeAll','writeSections'].includes(name),nested=sqlite?.inTransaction(dataDir),readOnly=!writing||schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||args[1]?.requireWriterSchema===true&&args[1]?.writerSchemaVersion!==storageFormat.SCHEMA_VERSION||writing&&!hasWriteCompatibility(dataDir,args[1]);
+    const result=!sqlite||['isSplit','migrate'].includes(name)?action():sqlite.transaction(dataDir,action,{readOnly});
+    if(writing&&!nested&&!readOnly&&!result?.replayed)require('./document-archive.cjs').recover(dataDir,undefined,args[1]);
     return result;
   })])),
 };

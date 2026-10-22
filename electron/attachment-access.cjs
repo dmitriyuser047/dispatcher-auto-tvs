@@ -25,7 +25,8 @@ function origin(db,input,principal,action='read'){
  for(const field of action==='read'?['readFields']:['readFields','writeFields'])for(const list of [ctx.context[field]?.[input.section],ctx.policy?.sections?.[input.section]?.[field]])if(list&&!list.includes('*')&&!list.includes('attachments'))fail('Нет права на поле вложений этой записи');
  return rows[0];
 }
-function capture(dir,input,{principal}={}){const storage=require('./storage');return storage.withDatabaseLock(dir,()=>{storage.assertWritable(dir);const db=storage.readAll(dir),row=origin(db,input,principal,'update');return {section:input.section,id:input.id,databaseToken:storage.databaseToken(dir),previousFingerprint:fingerprint(row),policyStamp:require('./access-context.cjs').policyStamp(principal),originScopeSnapshot:require('../assets/core/access-scope.js').capture(db,input.section,row,{now:new Date().toISOString(),actor:require('./access-context.cjs').create(db,db,principal).actor})};});}
+function currentPrincipal(options){const principal=options.getPrincipal?options.getPrincipal():options.principal;if(options.getPrincipal&&!principal)fail('Доступ отозван во время работы с вложением');return principal;}
+function capture(dir,input,options={}){const storage=require('./storage');return storage.withDatabaseLock(dir,()=>{const principal=currentPrincipal(options);storage.assertWritable(dir,options);storage.assertWriteCompatibility(dir,options);const db=storage.readAll(dir),row=origin(db,input,principal,'update');return {section:input.section,id:input.id,databaseToken:storage.databaseToken(dir),previousFingerprint:fingerprint(row),policyStamp:require('./access-context.cjs').policyStamp(principal),originScopeSnapshot:require('../assets/core/access-scope.js').capture(db,input.section,row,{now:new Date().toISOString(),actor:require('./access-context.cjs').create(db,db,principal).actor})};});}
 function body(file){const {proof,...metadata}=file;return {version:1,binding:proof.binding,file:metadata};}
 function verify(file,readKey,section,id,token,previousFingerprint){
  if(!plain(file)||!plain(file.proof)||file.proof.version!==1||!plain(file.proof.binding)||typeof file.proof.signature!=='string'||!/^[a-f0-9]{64}$/.test(file.proof.signature))fail('Не подтверждено происхождение вложения');
@@ -33,10 +34,11 @@ function verify(file,readKey,section,id,token,previousFingerprint){
  const expected=crypto.createHmac('sha256',readKey()).update(stable(body(file))).digest('hex');if(!crypto.timingSafeEqual(Buffer.from(expected,'hex'),Buffer.from(file.proof.signature,'hex')))fail('Подпись вложения не совпала');
  if(typeof file.id!=='string'||!/^[a-f0-9]{64}\.[a-z0-9]{1,6}$/.test(file.id)||file.sha256!==file.id.slice(0,64)||!Number.isSafeInteger(file.size)||file.size<0||file.size>LIMIT)fail('Повреждены сведения о вложении');return true;
 }
-function add(dir,captured,source,{principal}={}){
- const bytes=regular(source),ext=path.extname(source).toLowerCase(),sha256=hash(bytes),id=sha256+ext,storage=require('./storage');
+function add(dir,captured,source,options={}){
+ const storage=require('./storage');
  return storage.withDatabaseLock(dir,()=>{
-  const current=capture(dir,captured,{principal});if(['section','id','databaseToken','previousFingerprint','policyStamp'].some(field=>stable(current[field])!==stable(captured[field])))fail('Запись, база или права изменились после выбора файла');
+  const current=capture(dir,captured,options);if(['section','id','databaseToken','previousFingerprint','policyStamp'].some(field=>stable(current[field])!==stable(captured[field])))fail('Запись, база или права изменились после выбора файла');
+  const bytes=regular(source),ext=path.extname(source).toLowerCase(),sha256=hash(bytes),id=sha256+ext;storage.assertWritable(dir,options);storage.assertWriteCompatibility(dir,options);
   const target=path.join(folder(dir,true),id);if(fs.existsSync(target)){if(!regular(target).equals(bytes))fail('Сохранённое вложение повреждено');}else writeExclusive(target,bytes);
   const file={id,name:path.basename(source),size:bytes.length,sha256,addedAt:new Date().toISOString()};
   const binding={databaseToken:captured.databaseToken,section:captured.section,id:captured.id,previousFingerprint:captured.previousFingerprint,originScopeSnapshot:captured.originScopeSnapshot};
@@ -44,8 +46,8 @@ function add(dir,captured,source,{principal}={}){
   return {...file,proof:{version:1,binding,signature}};
  });
 }
-function inspect(dir,input,{principal}={}){const storage=require('./storage');return storage.withDatabaseLock(dir,()=>{
- const db=storage.readAll(dir),row=origin(db,input,principal),matches=(row.attachments||[]).filter(file=>file.id===input.fileId);if(matches.length!==1)fail('Вложение не найдено в доступной записи');const file=matches[0];
+function inspect(dir,input,options={}){const storage=require('./storage');return storage.withDatabaseLock(dir,()=>{
+ const principal=currentPrincipal(options),db=storage.readAll(dir),row=origin(db,input,principal),matches=(row.attachments||[]).filter(file=>file.id===input.fileId);if(matches.length!==1)fail('Вложение не найдено в доступной записи');const file=matches[0];
  if(file.proof){verify(file,()=>key(dir),input.section,input.id);const ctx=require('./access-context.cjs').create(db,db,principal),facts=ctx.resolveArchive({scopeSnapshot:file.proof.binding.originScopeSnapshot});if(!require('../assets/core/access-policy.js').permits(ctx.policy,input.section,'read',{}, {...ctx.context,resolve:()=>facts}))fail('Нет права на первоначальные данные вложения');}else if(require('./access-context.cjs').hasPolicy(principal))fail('Происхождение старого вложения требует подтверждения администратором');
  const target=filePath(dir,file.id),bytes=regular(target);if(hash(bytes)!==file.id.slice(0,64)||file.sha256&&file.sha256!==hash(bytes)||file.size!==undefined&&file.size!==bytes.length)fail('Контрольная сумма вложения не совпала');return {path:target,file};
  });}

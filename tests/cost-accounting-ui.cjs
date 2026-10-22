@@ -2,16 +2,17 @@ const {test,before,after,beforeEach,afterEach}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {pathToFileURL}=require('node:url'),{createRequire}=require('node:module');
+const snapshotFixture=require('./helpers/ui-snapshot-fixture.cjs');
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
 const root=path.resolve(__dirname,'..');let browser,page,errors;
 before(async()=>{const edge='C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';browser=await pw.chromium.launch({headless:true,executablePath:process.env.TVS_TEST_BROWSER||(!process.env.CI&&fs.existsSync(edge)?edge:undefined)});});
 after(async()=>{await browser?.close();});
 beforeEach(async()=>{
  page=await browser.newPage({viewport:{width:1280,height:900}});errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());
- await page.addInitScript(()=>{
-  const db={vehicles:[{id:'a',plate:'А001',make:'Тест',norm:10,fuel:'diesel',fuelGrade:'ДТ'}],records:[{id:'r',vehicleId:'a',date:'2026-10-18',km:100}],generators:[{id:'g',name:'Генератор'}],genRecords:[{id:'gr',generatorId:'g',date:'2026-10-18',hours:10}],appMeta:[{id:'meta',toPlanInit:'test'}],costEntries:[],costProfiles:[]};
-  window.__disk=JSON.stringify(db);window.__writes=0;window.__reject=false;window.__defer=false;
-  window.electronAPI={readData:async()=>window.__disk,writeData:async json=>{window.__writes++;if(window.__reject)return false;if(window.__defer)await new Promise(resolve=>{window.__releaseWrite=resolve;});const payload=JSON.parse(json);window.__disk=JSON.stringify(payload.databaseToken?payload.data:payload);return true;}};
+ const db={vehicles:[{id:'a',plate:'А001',make:'Тест',norm:10,fuel:'diesel',fuelGrade:'ДТ'}],records:[{id:'r',vehicleId:'a',date:'2026-10-18',km:100}],generators:[{id:'g',name:'Генератор'}],genRecords:[{id:'gr',generatorId:'g',date:'2026-10-18',hours:10}],appMeta:[{id:'meta',toPlanInit:'test'}],costEntries:[],costProfiles:[]};
+ await snapshotFixture.install(page,{database:db,token:'synthetic-cost-accounting'},()=>{
+  window.__defer=false;const writeData=window.electronAPI.writeData;
+  window.electronAPI.writeData=async json=>{window.__writes++;if(window.__reject)return false;if(window.__defer)await new Promise(resolve=>{window.__releaseWrite=resolve;});return writeData(json);};
  });
  await page.goto(pathToFileURL(path.join(root,'index.html')).href);
  await page.waitForFunction(()=>typeof data!=='undefined'&&data.vehicles[0]?.id==='a'&&typeof renderCostsSection==='function');

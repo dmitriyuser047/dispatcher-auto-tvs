@@ -24,12 +24,15 @@ function payload(dir, sections, id) {
 function records(dir, patch = {}) { return storage.readAll(dir).records.map(row => ({ ...row, ...patch })); }
 function audits(dir, operationId) { return storage.readAll(dir).auditLog.filter(row => row.operationId === operationId); }
 const key = 'platform-test-only-access-123456';
-function request(port, route, body) {
+async function request(port, route, body) {
+ const currentBody=JSON.stringify(body);
+ const proofHeaders=await writerHeaders({host:'127.0.0.1',port:port,headers:{Authorization:'Bearer '+key},method:body===undefined?'GET':'POST'});
+
   return new Promise((resolve, reject) => {
-    const req = http.request({ host:'127.0.0.1', port, path:route, method:body === undefined ? 'GET' : 'POST', headers:{...writerHeaders(), Authorization:'Bearer ' + key, 'X-TVS-Writer-Schema':'3' } }, res => {
+    const req = http.request({ host:'127.0.0.1', port, path:route, method:body === undefined ? 'GET' : 'POST', headers:{...proofHeaders, Authorization:'Bearer ' + key, 'X-TVS-Writer-Schema':'3' } }, res => {
       let raw = ''; res.setEncoding('utf8'); res.on('data', part => { raw += part; }); res.on('end', () => resolve({ status:res.statusCode, body:JSON.parse(raw) }));
     });
-    req.on('error', reject); req.end(JSON.stringify(body));
+    req.on('error', reject); req.end(currentBody);
   });
 }
 

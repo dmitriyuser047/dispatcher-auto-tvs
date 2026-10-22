@@ -107,16 +107,19 @@ test('closed periods are guarded in storage, including bulk and legacy writes', 
 });
 
 const key = 'test-key-not-a-real-secret-123456';
-function request(port, route, body, headers = { Authorization: 'Bearer ' + key }, split) {
+async function request(port, route, body, headers = { Authorization: 'Bearer ' + key }, split) {
+ const currentBody=JSON.stringify(body);
+ const proofHeaders=await writerHeaders({host:'127.0.0.1',port:port,headers:headers,method:body==null?'GET':'POST'});
+
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port, path: route, method: body == null ? 'GET' : 'POST', headers:{...writerHeaders(),...headers} }, res => {
+    const req = http.request({ host: '127.0.0.1', port, path: route, method: body == null ? 'GET' : 'POST', headers:{...proofHeaders,...headers} }, res => {
       let text = ''; res.setEncoding('utf8'); res.on('data', part => { text += part; });
       res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }));
     });
     req.on('error', reject);
     if (body == null) req.end();
-    else if (split != null) { const b = Buffer.from(JSON.stringify(body)); req.write(b.subarray(0, split)); setTimeout(() => req.end(b.subarray(split)), 10); }
-    else req.end(JSON.stringify(body));
+    else if (split != null) { const b = Buffer.from(currentBody); req.write(b.subarray(0, split)); setTimeout(() => req.end(b.subarray(split)), 10); }
+    else req.end(currentBody);
   });
 }
 test('authenticated server preserves split UTF-8 and survives malformed and aborted POSTs', async t => {
@@ -134,8 +137,9 @@ test('authenticated server preserves split UTF-8 and survives malformed and abor
     assert.equal((await request(port, route, payload, undefined, split)).status, 200);
     assert.equal(storage.readAll(dir).vehicles[0].driver, rows[0].driver);
   }
+  const abortedProofHeaders=await writerHeaders({port,headers:{Authorization:'Bearer '+key}});
   await new Promise(resolve => {
-    const req = http.request({ host: '127.0.0.1', port, path: '/api/sections', method: 'POST', headers: {...writerHeaders(), Authorization: 'Bearer ' + key } });
+    const req = http.request({ host: '127.0.0.1', port, path: '/api/sections', method: 'POST', headers: {...abortedProofHeaders, Authorization: 'Bearer ' + key } });
     req.on('error', () => {}); req.on('close', resolve); req.write('{'); setTimeout(() => req.destroy(), 20);
   });
   const payload = { databaseToken:storage.databaseToken(dir), base: storage.readRevisions(dir), sections: { records: [] } };

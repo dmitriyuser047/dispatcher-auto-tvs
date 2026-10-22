@@ -62,19 +62,21 @@ function executeInternal(dataDir,input,options={}){
   const commands=require('../assets/core/platform-commands.js');
   const envelope=contracts.parseCommandEnvelope(input,schema.sections),command=commands.parseCommand(envelope.command),principal=checkedPrincipal(options.principal);
   const catalogMerge=command.type==='MergeCatalog';
+  const periodAction=command.type==='PeriodAction',costPolicy=command.type==='CostAction'&&command.input.action==='savePolicy';
+  const dependencies=commands.dependencies(command),footprint=commands.footprint(command);
+  const primary=command.type==='PrintAction'?[command.input.request.source?.section||command.input.request.target?.section]:command.type==='DocumentAction'?[command.input.section]:command.type==='CostAction'?[command.input.action==='savePolicy'?'costProfiles':'costEntries']:command.type==='RepairAction'?['workOrders']:command.type==='PeriodAction'?['fuelPeriods']:command.type==='CalendarAction'?[command.input.target?.section||'appMeta']:footprint;
+  const authorizeNewIntent=()=>{
   if(command.type==='ImportAction'&&!require('./import-source.cjs').actions(principal).includes(command.input.profile))fail('ACCESS_DENIED','Недостаточно прав для выбранного профиля импорта.',403);
   if(catalogMerge&&principal.role!=='admin')fail('ACCESS_DENIED','Объединение справочников доступно администратору.',403);
-  const periodAction=command.type==='PeriodAction';
   if(periodAction&&!require('./period-access.cjs').canManage(principal,command.input.scope))fail('ACCESS_DENIED','Недостаточно прав для управления выбранной областью периода.',403);
   if(command.type==='FuelAction'&&!permitted(principal,'write','fuelMovements'))fail('ACCESS_DENIED','Недостаточно прав для проведения операций с топливом.',403);
   if(command.type==='ProcurementAction'&&!access.procurementActions(principal)[command.input.action==='saveOrder'?command.input.payload.kind:command.input.kind]?.includes(command.input.action))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия с закупкой.',403);
-  const costPolicy=command.type==='CostAction'&&command.input.action==='savePolicy';
   if(command.type==='CostAction'&&!access.costActions(principal).includes(command.input.action))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия со стоимостью.',403);
   if(command.type==='RepairAction'&&!access.repairActions(principal).includes(command.input.action))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия с ремонтом.',403);
   if(command.type==='CalendarAction'&&!access.canCalendarAction(principal,command.input))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия рабочего календаря.',403);
-  const dependencies=commands.dependencies(command),footprint=commands.footprint(command);
-  const primary=command.type==='PrintAction'?[command.input.request.source?.section||command.input.request.target?.section]:command.type==='DocumentAction'?[command.input.section]:command.type==='CostAction'?[command.input.action==='savePolicy'?'costProfiles':'costEntries']:command.type==='RepairAction'?['workOrders']:command.type==='PeriodAction'?['fuelPeriods']:command.type==='CalendarAction'?[command.input.target?.section||'appMeta']:footprint;
   if(!primary.some(name=>access.actionAvailable(principal,semanticAction(command),name)))fail('ACCESS_DENIED','Нет права на выбранное действие.',403);
+  requireAccess(principal,'write',periodAction?footprint.filter(name=>name!=='fuelPeriods'):costPolicy?footprint.filter(name=>name!==command.input.target.section):command.type==='PrintAction'?[]:footprint);
+  };
   if(!Array.isArray(dependencies)||!Array.isArray(footprint)||dependencies.some(name=>!schema.sections.includes(name)||name==='auditLog'&&!catalogMerge)||footprint.some(name=>name==='auditLog'||!dependencies.includes(name)))fail('COMMAND_DEFINITION','Некорректно определены зависимости команды',500);
   requireAccess(principal,'read',dependencies);
   return storage.withDatabaseLock(dataDir,()=>{
@@ -91,8 +93,9 @@ function executeInternal(dataDir,input,options={}){
         requireAccess(principal,'read',changed);
         return filteredResult(platform.replayResult(snapshot.data,snapshot.revisions,token,info,changed),principal,snapshot.data);
       }
+      authorizeNewIntent();
+      storage.assertWriteCompatibility(dataDir,options,command.type==='ImportAction'?'controlledImports':command.type==='PrintAction'?'documentPrint':undefined);
       storage.assertWritable(dataDir,options);
-      requireAccess(principal,'write',periodAction?footprint.filter(name=>name!=='fuelPeriods'):costPolicy?footprint.filter(name=>name!==command.input.target.section):command.type==='PrintAction'?[]:footprint);
       const importSource=command.type==='ImportAction'?require('./import-source.cjs').load(dataDir,command.input.sourceId,principal):null;
       const missing=dependencies.filter(name=>!own(envelope.base,name));
       if(missing.length)fail('COMMAND_BASE_REQUIRED','Для команды нужны версии всех её зависимостей: '+missing.join(', '),428);
@@ -112,13 +115,13 @@ function executeInternal(dataDir,input,options={}){
       // after receipt lookup and before backup/commit. Do not prevalidate a
       // correction without its independently reproducible document proof.
       const result=storage.writeSections(dataDir,{databaseToken:token,base:envelope.base,sections:planned.sections,operation:envelope.operation},
-        {principal,now,commandIntent:envelope,...(importSource?{importSource}:{}),beforeCommit:options.beforeCommit});
+        {principal,now,commandIntent:envelope,...(importSource?{importSource}:{}),requireNegotiatedWriter:options.requireNegotiatedWriter,assertWriteCompatibility:options.assertWriteCompatibility,requireWriterSchema:options.requireWriterSchema,writerSchemaVersion:options.writerSchemaVersion,beforeCommit:options.beforeCommit});
       return {...result,command:true};
     };
     // Do not split snapshot, dependency checks and business/audit writes across
     // SQLite snapshots. Nested storage calls reuse this write connection.
-    const result=sqlite.exists(dataDir)?sqlite.transaction(dataDir,action,{readOnly:sqlite.schemaVersion(dataDir)<require('./storage-format.cjs').SCHEMA_VERSION||options.requireWriterSchema===true&&options.writerSchemaVersion!==require('./storage-format.cjs').SCHEMA_VERSION}):action();
-    if(storage.schemaVersion(dataDir)===require('./storage-format.cjs').SCHEMA_VERSION&&!(options.requireWriterSchema===true&&options.writerSchemaVersion!==require('./storage-format.cjs').SCHEMA_VERSION))require('./document-archive.cjs').recover(dataDir,undefined,options);return result;
+    const readOnly=storage.schemaVersion(dataDir)<require('./storage-format.cjs').SCHEMA_VERSION||options.requireWriterSchema===true&&options.writerSchemaVersion!==require('./storage-format.cjs').SCHEMA_VERSION||!storage.hasWriteCompatibility(dataDir,options,command.type==='ImportAction'?'controlledImports':command.type==='PrintAction'?'documentPrint':undefined),result=sqlite.exists(dataDir)?sqlite.transaction(dataDir,action,{readOnly}):action();
+    if(!readOnly&&!result?.replayed)require('./document-archive.cjs').recover(dataDir,undefined,options);return result;
   });
 }
 function execute(dataDir,input,options={}){try{return executeInternal(dataDir,input,options);}catch(error){throw access.publicError(error,options.principal);}}

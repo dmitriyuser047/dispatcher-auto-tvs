@@ -10,7 +10,7 @@
 //    свои изменения поверх чужих, поле за полем, удалённое остаётся удалённым;
 //  • раз в 20 секунд программа сверяет версии и подтягивает чужие изменения.
 //
-// Если сервер старый (без записи по разделам), работает прежний способ.
+// Для записи нужны согласованный протокол и явные исходные версии разделов.
 
 const SYNC_SECTIONS = typeof PlatformSchema !== 'undefined' ? PlatformSchema.sections.slice() : [
   'vehicles', 'records', 'generators', 'genRecords', 'toRecords',
@@ -57,6 +57,17 @@ function syncInstallScopeViews(response,names) {
 
 function syncEnsureSession(stamp) {
   if (stamp !== syncSessionStamp()) throw Object.assign(new Error('База или права пользователя изменились во время операции. Обновите данные перед повтором.'),{code:'SESSION_CHANGED'});
+}
+
+function syncEditingAllowed(){
+  if(typeof _loadWriteBlocked!=='undefined'&&_loadWriteBlocked||_sync.platform?.negotiation&&_sync.platform.negotiation.writeCompatible!==true){showToast('Сейчас доступен только просмотр. Проверьте совместимость и подключение в «Состоянии программы».');return false;}
+  return true;
+}
+function syncCompatibilityNotice(){
+  if(typeof document==='undefined'||typeof document.getElementById!=='function')return;
+  const notice=document.getElementById('compatibilityNotice'),profile=_sync.platform?.negotiation;if(!notice)return;
+  notice.hidden=!profile||profile.writeCompatible===true;
+  notice.textContent=notice.hidden?'':_sync.platform.needsSchemaUpgrade?'Только просмотр. Для этой базы нужна обновлённая копия в отдельном каталоге.':'Только просмотр. Клиент и сервер не подтвердили совместимость для записи. Проверьте версии программы и подключение в «Состоянии программы».';
 }
 
 function syncAssertDatabase(response) {
@@ -142,7 +153,7 @@ async function syncResolveMerge(section,base,local,remote){
 
 async function syncLoad() {
   if (!window.electronAPI || !window.electronAPI.readSnapshot) return null;
-  const raw = await window.electronAPI.readSnapshot();
+  const raw = await window.electronAPI.readSnapshot({hello:typeof PlatformCompatibility==='undefined'?null:PlatformCompatibility.describe().hello});
   if (!raw) return null;
   const snap = JSON.parse(raw);
   if (!snap || !snap.data) return null;
@@ -153,7 +164,8 @@ async function syncLoad() {
   _sync.databaseToken = typeof snap.databaseToken === 'string' ? snap.databaseToken : null;
   _sync.access=snap.access||null;
   _sync.platform=snap.platform?.apiVersion === 1 ? { ...snap.platform } : null;
-  if(snap.readOnly||snap.platform?.legacyReadOnly){_loadWriteBlocked=true;_sync.platform={...(_sync.platform||{}),legacyReadOnly:1,scopedAccess:1};}
+  if(snap.readOnly||snap.platform?.legacyReadOnly||snap.platform?.negotiation&&snap.platform.negotiation.writeCompatible!==true){_loadWriteBlocked=true;_sync.platform={...(_sync.platform||{}),readOnly:true,scopedAccess:1};}
+  syncCompatibilityNotice();
   if((typeof _loadWriteBlocked==='undefined'||!_loadWriteBlocked)&&typeof wfInitData==='function')wfInitData(snap.data);
   if (snap.revisions) {
     _sync.enabled = true;
@@ -184,6 +196,7 @@ function syncSave(d, options) {
 
 async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
   _sync.lastResult=null;
+  if(!syncEditingAllowed())throw Object.assign(Error('Подключение доступно только для просмотра'),{code:'PROTOCOL_RENEGOTIATE'});
   const requiredCanonical = options && options.requiredCanonicalSections || [];
   if (!Array.isArray(requiredCanonical) || requiredCanonical.some(name => !SYNC_SECTIONS.includes(name)))
     throw new Error('Некорректный список разделов для подтверждённого сохранения.');
@@ -217,10 +230,7 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
       if (_sync.access?.accessPolicy) throw Error('Сервер не поддерживает безопасное сохранение ограниченных данных');
       if (options?.requireOperationReceipt) throw new Error('Хранилище перестало поддерживать подтверждение операций. Загрузите базу заново перед сохранением.');
       if (requiredCanonical.length) throw new Error('Сервер не поддерживает подтверждённое сохранение актов. Обновите сервер перед проведением или аннулированием.');
-      // Сервер старой версии — сохраняем по-старому, целиком
-      _sync.enabled = false;
-      const legacy=await window.electronAPI.writeData(JSON.stringify(_sync.databaseToken ? {databaseToken:_sync.databaseToken,data:d} : d));
-      syncEnsureSession(stamp); return legacy === true;
+      throw Object.assign(Error('Сервер не поддерживает согласованную запись. Загрузите данные из совместимой версии программы.'),{code:'UNSUPPORTED_PROTOCOL'});
     }
     if (res && res.ok) {
       if (options?.operation && (options.requireOperationReceipt || res.operationReceipt) &&
@@ -363,7 +373,7 @@ function syncRefreshView(names) {
   _sync.needRefresh = [];
   try {
     if (activeSection === 'vehicles') {
-      const v = selectedVehicleId && data.vehicles.find(x => x.id === selectedVehicleId);
+      const v = selectedVehicleId!==null&&selectedVehicleId!==undefined&&selectedVehicleId!==''&&data.vehicles.find(x => x.id === selectedVehicleId);
       if (v) renderDetail(v); else if (typeof renderVehicleCards === 'function') renderVehicleCards();
     } else if (activeSection === 'fuelPurchases') renderFuelPurchases();
     else if (activeSection === 'home') renderMainMenu();
@@ -374,7 +384,7 @@ function syncRefreshView(names) {
     else if (activeSection === 'procurement') renderProcurementSection();
     else if (activeSection === 'system') renderPlatformSystem();
     else if (activeSection === 'drivers' || activeSection === 'operators') renderPersonnelSection();
-    else if (activeSection === 'generators' && typeof renderGeneratorCards === 'function' && !selectedGeneratorId) renderGeneratorCards();
+    else if (activeSection === 'generators') {const generator=selectedGeneratorId!==null&&selectedGeneratorId!==undefined&&selectedGeneratorId!==''&&data.generators.find(row=>row.id===selectedGeneratorId);if(generator&&typeof renderGenDetail==='function')renderGenDetail(generator);else if(typeof renderGeneratorCards==='function')renderGeneratorCards();}
   } catch (e) { console.warn('[sync] перерисовка: ' + e.message); }
 }
 

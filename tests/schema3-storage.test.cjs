@@ -31,7 +31,7 @@ test('JSON schema2 remains byte-exact and identity-free during reads and refused
   const snapshot = storage.readSnapshot(dir); assert.equal(snapshot.platform.schemaVersion, 2); assert.equal(snapshot.platform.currentSchemaVersion, 3); assert.equal(snapshot.platform.readOnly, true); assert.equal(snapshot.platform.needsSchemaUpgrade, true); assert.deepEqual(snapshot.data, data); assert.deepEqual(snapshot.platform.descriptor, format.describe(2));
   assert.equal(fs.existsSync(path.join(dir, 'database-identity.json')), false);
   assert.throws(() => storage.writeSections(dir, request(dir, { drivers: [{ id: 'new', name: 'Synthetic' }] })), { code: 'SCHEMA_UPGRADE_REQUIRED' });
-  assert.throws(() => storage.commitPrintArtifact(dir, { archiveId: 'bad', format: 'pdf', bytes: Buffer.from('x') }, { principal }), { code: 'SCHEMA_UPGRADE_REQUIRED' });
+  assert.throws(() => storage.writeAll(dir, snapshot.data, { principal, databaseToken: snapshot.databaseToken, base: snapshot.revisions, requireBase: true }), { code: 'SCHEMA_UPGRADE_REQUIRED' });
   assert.deepEqual(tree(dir), before);
 });
 test('SQLite schema2 reads from a separate copy and never creates or repairs source identity or WAL', t => {
@@ -107,6 +107,9 @@ for (const kind of ['json', 'sqlite']) test('historical print read/cached export
   fs.unlinkSync(path.join(dir, archive.DIR, posted.archive.id + '.pdf.json')); const before = tree(dir);
   const replay = storage.executeCommand(dir, envelope, { principal, now: 'invalid-clock', requireWriterSchema: true }); assert.equal(replay.replayed, true);
   const cached = await archive.handle(dir, { action: 'export', archiveId: posted.archive.id, format: 'pdf' }, { principal, now, requireWriterSchema: true, renderPdf: () => assert.fail('cached artifact must not render') }); assert.equal(cached.base64, exported.base64);
+  // A real existing seal and current token reach the physical write barrier;
+  // unknown archives are resolved before that gate so cached reads stay safe.
+  assert.throws(() => storage.commitPrintArtifact(dir, { archiveId: posted.archive.id, format: 'xlsx', bytes: Buffer.from('MUST NOT WRITE') }, { principal, now, expectedToken: storage.databaseToken(dir) }), { code: 'SCHEMA_UPGRADE_REQUIRED' });
   await assert.rejects(archive.handle(dir, { action: 'export', archiveId: posted.archive.id, format: 'xlsx' }, { principal, now, requireWriterSchema: true }), { code: 'SCHEMA_UPGRADE_REQUIRED' });
   assert.throws(() => archive.recover(dir), { code: 'SCHEMA_UPGRADE_REQUIRED' }); assert.deepEqual(tree(dir), before);
 });

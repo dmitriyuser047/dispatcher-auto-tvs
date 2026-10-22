@@ -9,10 +9,13 @@ const access=require('../electron/access-control');
 const commands=require('../assets/core/platform-commands.js');
 const kernel=require('../assets/core/platform-kernel.js');
 
-function call(port,route,token,value,extraHeaders={}){
+async function call(port,route,token,value,extraHeaders={}){
+ const currentBody=typeof value==='string'?value:JSON.stringify(value);
+ const proofHeaders=await writerHeaders({host:'127.0.0.1',port:port,headers:{...(token?{Authorization:'Bearer '+token}:{}),...extraHeaders},method:'POST'});
+
  return new Promise((resolve,reject)=>{
-  const raw=typeof value==='string'?value:JSON.stringify(value);
-  const req=http.request({host:'127.0.0.1',port,path:route,method:'POST',agent:false,headers:{...writerHeaders(),...(token?{Authorization:'Bearer '+token}:{}),'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw),...extraHeaders}},res=>{
+  const raw=typeof value==='string'?value:currentBody;
+  const req=http.request({host:'127.0.0.1',port,path:route,method:'POST',agent:false,headers:{...proofHeaders,...(token?{Authorization:'Bearer '+token}:{}),'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw),...extraHeaders}},res=>{
    let text='';res.setEncoding('utf8');res.on('data',part=>{text+=part;});res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text),text});}catch(error){reject(error);}});
   });req.setTimeout(5000,()=>req.destroy(Error('Synthetic command HTTP timeout')));req.on('error',reject);req.end(raw);
  });
@@ -37,9 +40,12 @@ async function fixture(t,format){
   changeUser(key,change){settings={...settings,serverUsers:access.normalizeServerUsers(settings.serverUsers.map(user=>user.id==='http-'+key?{...user,...change}:user))};},
   post(value,role='admin',headers={}){return call(start.port,'/api/commands',tokens[role],value,headers);},
   async uploadThenChange(value,role,change){
-   const raw=JSON.stringify(value),authenticated=new Promise(resolve=>{onSettingsRead=resolve;});let finish;
+ const currentBody=JSON.stringify(value);
+ const proofHeaders=await writerHeaders({host:'127.0.0.1',port:start.port,headers:{Authorization:'Bearer '+tokens[role]},method:'POST'});
+
+   const raw=currentBody,authenticated=new Promise(resolve=>{onSettingsRead=resolve;});let finish;
    const response=new Promise((resolve,reject)=>{
-    const req=http.request({host:'127.0.0.1',port:start.port,path:'/api/commands',method:'POST',agent:false,headers:{...writerHeaders(),Authorization:'Bearer '+tokens[role],'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw)}},res=>{
+    const req=http.request({host:'127.0.0.1',port:start.port,path:'/api/commands',method:'POST',agent:false,headers:{...proofHeaders,Authorization:'Bearer '+tokens[role],'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw)}},res=>{
      let text='';res.setEncoding('utf8');res.on('data',part=>{text+=part;});res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text),text});}catch(error){reject(error);}});
     });req.setTimeout(5000,()=>req.destroy(Error('Synthetic slow command upload timeout')));req.on('error',reject);finish=()=>req.end(raw.slice(-1));req.write(raw.slice(0,-1));
    });
@@ -97,8 +103,10 @@ for(const format of ['json','sqlite']){
   h.changeUser('admin',{role:'admin'});safeError(await h.uploadThenChange(request,'admin',{tokenHash:access.hashToken('synthetic-rotated-command-http-token')}),401);assert.deepEqual(storage.readSnapshot(h.dir),before);
  });
 
- test('HTTP '+format+' current post-body principal owns acceptance ACK and audit while manual acceptedBy survives',async t=>{
-  const h=await fixture(t,format),request=envelope(h.dir,accept()),before=storage.readSnapshot(h.dir),result=await h.uploadThenChange(request,'admin',{name:'Current account after upload',role:'dispatcher'});
+ test('HTTP '+format+' a changed permitted role renegotiates before its current principal owns acceptance ACK and audit',async t=>{
+  const h=await fixture(t,format),request=envelope(h.dir,accept()),before=storage.readSnapshot(h.dir),stale=await h.uploadThenChange(request,'admin',{name:'Current account after upload',role:'dispatcher'});
+  safeError(stale,428,'PROTOCOL_RENEGOTIATE');assert.deepEqual(storage.readSnapshot(h.dir),before);assert.equal(h.backups,0);
+  const result=await h.post(request,'admin');
   assert.equal(result.status,200,result.text);assert.equal(result.body.ok,true);const row=result.body.canonicalSections.shiftReports[0];assert.equal(row.status,'accepted');assert.equal(row.acceptedBy,'Manual HTTP business recipient');assert.deepEqual(row.acceptedActor,{id:'http-admin',name:'Current account after upload',role:'dispatcher'});assert.equal(row.acceptedAt,result.body.operationReceipt.at);
   const audit=result.body.canonicalSections.auditLog.filter(row=>row.operationId===request.operation.id);assert.ok(audit.length>=2);for(const event of audit){assert.equal(event.actorId,'http-admin');assert.equal(event.actor,'Current account after upload');assert.equal(event.actorRole,'dispatcher');}
   const after=storage.readSnapshot(h.dir);for(const name of ['records','genRecords','fuelMovements','vehicles','drivers'])assert.deepEqual(after.data[name],before.data[name]);server.configureKey(h.tokens.admin);const receipt=await server.getJson('127.0.0.1',h.port,'/api/operation?id='+encodeURIComponent(request.operation.id)+'&digest='+encodeURIComponent(kernel.requestDigest(request)));
@@ -107,10 +115,11 @@ for(const format of ['json','sqlite']){
 
  test('HTTP '+format+' configured postCommands client preserves commit/replay and typed definitive failures',async t=>{
   const h=await fixture(t,format),request=envelope(h.dir,issue());server.configureTransport({protocol:'http:'});server.configureKey(h.tokens.dispatcher);
-  const result=await server.postCommands('127.0.0.1',h.port,JSON.stringify(request));assert.equal(result.ok,true);assert.equal(result.operationReceipt.digest,kernel.requestDigest(request));const after=storage.readSnapshot(h.dir);
-  const replay=await server.postCommands('127.0.0.1',h.port,JSON.stringify(request));assert.equal(replay.replayed,true);assert.deepEqual(storage.readSnapshot(h.dir),after);
-  const reused=await server.postCommands('127.0.0.1',h.port,JSON.stringify({...request,command:issue({qty:1})}));assert.equal(reused.ok,false);assert.equal(reused.code,'OPERATION_REUSED');
-  await assert.rejects(server.postCommands('127.0.0.1',h.port,JSON.stringify({...request,sql:'SELECT 1'})),error=>error.status===400&&error.definitive===true);assert.deepEqual(storage.readSnapshot(h.dir),after);
+  const postCurrent=async value=>{const raw=JSON.stringify(value),proof=await writerHeaders({port:h.port,headers:{Authorization:'Bearer '+h.tokens.dispatcher}});return server.postCommands('127.0.0.1',h.port,raw,{ticket:proof['x-tvs-write-ticket']});};
+  const result=await postCurrent(request);assert.equal(result.ok,true);assert.equal(result.operationReceipt.digest,kernel.requestDigest(request));const after=storage.readSnapshot(h.dir);
+  const replay=await postCurrent(request);assert.equal(replay.replayed,true);assert.deepEqual(storage.readSnapshot(h.dir),after);
+  const reused=await postCurrent({...request,command:issue({qty:1})});assert.equal(reused.ok,false);assert.equal(reused.code,'OPERATION_REUSED');
+  await assert.rejects(postCurrent({...request,sql:'SELECT 1'}),error=>error.status===400&&error.definitive===true);assert.deepEqual(storage.readSnapshot(h.dir),after);
  });
 }
 

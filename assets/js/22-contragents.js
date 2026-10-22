@@ -25,6 +25,7 @@ function renderContragentsSection() {
 }
 
 function openAddContragent() {
+  if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   editingContragentId = null;
   document.getElementById('caModalTitle').textContent = 'Добавить контрагента';
   ['caName','caInn','caContact','caPhone','caCategory','caNote'].forEach(id => { document.getElementById(id).value = ''; });
@@ -32,6 +33,7 @@ function openAddContragent() {
 }
 
 function openEditContragent(id) {
+  if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   const c = (data.contragents || []).find(x => x.id === id); if (!c) return;
   if(c.mergedInto){showToast('Это архивная ссылка. Измените основную карточку; история остаётся у исходной.');return;}
   editingContragentId = id; document.getElementById('caModalTitle').textContent = 'Редактировать контрагента';

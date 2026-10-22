@@ -56,10 +56,10 @@ test('acknowledged writeoffs install backend canonical authors and revisions in 
   assert.equal(writes.legacy, 0);
 });
 
-test('ordinary legacy saves retain their established full-write fallback', async () => {
+test('ordinary saves cannot fall back to a whole-database write after an unsupported response', async () => {
   const { sandbox, writes, data } = await context(() => ({ ok:false, unsupported:true }));
-  assert.equal(await sandbox.save(data, { noMerge:true }), true);
-  assert.equal(writes.legacy, 1); assert.equal(sandbox.state.enabled, false);
+  await assert.rejects(sandbox.save(data, { noMerge:true }),{code:'UNSUPPORTED_PROTOCOL'});
+  assert.equal(writes.legacy, 0); assert.equal(sandbox.state.enabled, true);
 });
 
 test('canonical IPC acknowledgement cannot share a mutable live document with an earlier audit snapshot or the response', async () => {

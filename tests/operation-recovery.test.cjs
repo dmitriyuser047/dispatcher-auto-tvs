@@ -39,10 +39,13 @@ function timeout(){return Object.assign(Error('Synthetic transport timeout'),{co
 function transactions(dir,id){return storage.readAll(dir).auditLog.filter(row=>row.source==='platform'&&row.type==='transaction'&&row.operationId===id);}
 function receipt(box,ctx,id,patch={}){return {id,status:'committed',digest:box.getForRetry(ctx.scope,id).requestDigest,...patch};}
 function failingOutcome(box){return {...box,updateOutcome(){throw Object.assign(Error('Synthetic durable outcome failure'),{code:'ENOSPC'});}};}
-function request(port,route,token,body){
-  return new Promise((resolve,reject)=>{const req=http.request({host:'127.0.0.1',port,path:route,method:body===undefined?'GET':'POST',agent:false,headers:{...writerHeaders(),Authorization:'Bearer '+token}},res=>{
+async function request(port,route,token,body){
+ const currentBody=JSON.stringify(body);
+ const proofHeaders=await writerHeaders({host:'127.0.0.1',port:port,headers:{Authorization:'Bearer '+token},method:body===undefined?'GET':'POST'});
+
+  return new Promise((resolve,reject)=>{const req=http.request({host:'127.0.0.1',port,path:route,method:body===undefined?'GET':'POST',agent:false,headers:{...proofHeaders,Authorization:'Bearer '+token}},res=>{
     let text='';res.setEncoding('utf8');res.on('data',part=>{text+=part;});res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text)});}catch(error){reject(error);}});
-  });req.setTimeout(5000,()=>req.destroy(timeout()));req.on('error',reject);req.end(body===undefined?undefined:JSON.stringify(body));});
+  });req.setTimeout(5000,()=>req.destroy(timeout()));req.on('error',reject);req.end(body===undefined?undefined:currentBody);});
 }
 
 for(const format of ['json','sqlite']){

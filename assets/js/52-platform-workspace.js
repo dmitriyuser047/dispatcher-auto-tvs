@@ -20,7 +20,7 @@ function platformHealthSnapshot(calculatedIntegrity) {
   return { inspectedAt:new Date().toISOString(), schemaVersion:PlatformSchema.apiVersion,
     modules:PlatformSchema.describe(), integrity,
     runtime:platformRuntimeStatus(), calculations:dispatcherEngineStats(),
-    storage:{ connected:!_loadWriteBlocked, needsSchemaUpgrade:!!_sync.platform?.needsSchemaUpgrade, sectionProtocol:!!_sync.enabled, operationProtocol:!!_sync.platform?.operations, role:context.actor?.role || 'local',
+    storage:{ connected:!_loadWriteBlocked, compatibility:_sync.platform?.negotiation||null, needsSchemaUpgrade:!!_sync.platform?.needsSchemaUpgrade, sectionProtocol:!!_sync.enabled, operationProtocol:!!_sync.platform?.operations, role:context.actor?.role || 'local',
       readable:context.readable || PlatformSchema.sections, writable:context.writable || PlatformSchema.sections } };
 }
 function platformSystemIssues(report) {
