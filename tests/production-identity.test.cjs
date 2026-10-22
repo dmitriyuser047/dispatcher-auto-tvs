@@ -41,6 +41,7 @@ function inspectStartup({ requestedProfile = '', savedSettings = null } = {}) {
     electron: { app, BrowserWindow: forbidden, ipcMain: { handle: forbidden }, shell: {}, dialog: { showErrorBox: forbidden }, session: {}, Notification: forbidden },
     path: windowsPath, fs: fakeFs, os: { homedir: () => home }, http: {},
     './updater': {}, './server': fakeServer, 'node-unrar-js': {}, './storage': new Proxy({}, { get: forbidden }),
+    './storage-format.cjs': require('../electron/storage-format.cjs'),
     './settings': { writeAtomic: (file, value) => writes.push({ file, value: JSON.parse(value) }), validateSettings: value => structuredClone(value), databaseIdentity: () => 'synthetic-identity' },
     './security': {}, 'node:url': {}, './notifications': {},
     crypto: { randomBytes: () => Buffer.alloc(24, 1) },

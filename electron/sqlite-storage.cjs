@@ -66,12 +66,14 @@ function configure(db,readOnly){
 function validateFormat(db){
   const applicationId=db.prepare('PRAGMA application_id').get().application_id,fileVersion=db.prepare('PRAGMA user_version').get().user_version;
   if(fileVersion>SCHEMA_VERSION)fail('SQLITE_FUTURE_FORMAT','Файл SQLite создан более новой версией программы');
-  if(applicationId!==0x54565331||![1,SCHEMA_VERSION].includes(fileVersion))fail('SQLITE_FORMAT','Не совпадает служебная версия или идентификатор файла SQLite');
+  if(applicationId!==0x54565331||!storageFormat.SUPPORTED_READ_SCHEMAS.includes(fileVersion))fail('SQLITE_FORMAT','Не совпадает служебная версия или идентификатор файла SQLite');
   const metadata=Object.fromEntries(db.prepare('SELECT key,value FROM metadata').all().map(row=>[row.key,row.value]));
   if(metadata.format!==FORMAT)fail('SQLITE_FORMAT','Неизвестный формат базы SQLite');
   const version=Number(metadata.format_version),schemaVersion=Number(metadata.schema_version);
   if(version>VERSION||schemaVersion>SCHEMA_VERSION)fail('SQLITE_FUTURE_FORMAT','Эта база SQLite создана более новой версией программы');
-  if(version!==VERSION||![1,SCHEMA_VERSION].includes(schemaVersion)||metadata.format_version!==String(VERSION)||metadata.schema_version!==String(schemaVersion)||fileVersion!==schemaVersion)fail('SQLITE_FORMAT','Не поддерживается версия формата SQLite');
+  if(version!==VERSION||!storageFormat.SUPPORTED_READ_SCHEMAS.includes(schemaVersion)||metadata.format_version!==String(VERSION)||metadata.schema_version!==String(schemaVersion)||fileVersion!==schemaVersion)fail('SQLITE_FORMAT','Не поддерживается версия формата SQLite');
+  if(schemaVersion===3){let descriptor;try{descriptor=JSON.parse(metadata.compatibility);}catch{fail('SQLITE_FORMAT','Отсутствует подтверждение совместимости SQLite');}storageFormat.validateDescriptor(descriptor,3);}
+  else if(own(metadata,'compatibility'))fail('SQLITE_FORMAT','Подтверждение совместимости не соответствует версии SQLite');
   const sections=db.prepare('SELECT name,revision FROM sections').all();
   const names=schemaVersion===1?storageFormat.legacySections():schema.sections;
   if(sections.length!==names.length||sections.some(row=>!names.includes(row.name)||!Number.isSafeInteger(row.revision)||row.revision<0))fail('SQLITE_REVISIONS','Каталог или версии разделов SQLite не соответствуют формату программы');
@@ -93,12 +95,14 @@ function transaction(dataDir,action,options={}){
   if(!exists(target.directory))fail('SQLITE_NOT_FOUND','Файл SQLite не найден; автоматическое создание запрещено');
   assertDatabaseFile(target);
   const header=Buffer.alloc(100),descriptor=fs.openSync(target.file,'r');try{fs.readSync(descriptor,header,0,100,0);}finally{fs.closeSync(descriptor);}
-  const legacy=header.subarray(0,16).toString('binary')==='SQLite format 3\0'&&header.readUInt32BE(60)===1;
+  const headerSchema=header.subarray(0,16).toString('binary')==='SQLite format 3\0'?header.readUInt32BE(60):null;
+  if(headerSchema>SCHEMA_VERSION)fail('SQLITE_FUTURE_FORMAT','Файл SQLite создан более новой версией программы');
+  const legacy=storageFormat.SUPPORTED_READ_SCHEMAS.includes(headerSchema)&&headerSchema<SCHEMA_VERSION;
   let readStage=null,readIdentity=null,openFile=target.file;
   const cleanRead=()=>{if(!readStage)return;const info=fs.lstatSync(readStage);if(path.dirname(path.resolve(readStage))!==path.resolve(os.tmpdir())||!path.basename(readStage).startsWith('tvs-sqlite-legacy-read-')||info.isSymbolicLink()||info.ino!==readIdentity.ino||info.dev!==readIdentity.dev)fail('SQLITE_READ_CLEANUP','Не подтверждён временный каталог чтения');fs.rmSync(readStage,{recursive:true,force:true});readStage=null;};
   if(legacy){
     if(!readOnly)storageFormat.upgradeRequired();
-    const wal=target.file+'-wal';if(fs.existsSync(wal)&&fs.statSync(wal).size)fail('SQLITE_LEGACY_BUSY','Старая SQLite содержит WAL. Закройте прежнюю программу штатно перед чтением или созданием копии');
+    for(const suffix of ['-wal','-journal']){const file=target.file+suffix;let state;try{state=fs.lstatSync(file);}catch(error){if(error.code==='ENOENT')continue;throw error;}if(!state.isFile()||state.isSymbolicLink()||state.nlink>1||state.size)fail('SQLITE_LEGACY_BUSY','Старая SQLite содержит незавершённый журнал. Закройте прежнюю программу штатно перед чтением или созданием копии');}
     const before=fs.statSync(target.file),bytes=fs.readFileSync(target.file),after=fs.statSync(target.file);if(before.size!==after.size||before.mtimeMs!==after.mtimeMs||before.ino!==after.ino)fail('SQLITE_LEGACY_CHANGED','Старая база изменилась при чтении');
     readStage=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-sqlite-legacy-read-'));readIdentity=fs.statSync(readStage);openFile=path.join(readStage,FILE);try{fs.writeFileSync(openFile,bytes,{flag:'wx'});}catch(error){cleanRead();throw error;}
   }
@@ -164,9 +168,10 @@ function readRevisions(dataDir){return transaction(dataDir,()=>{
   return revisionsOf(revisions);
 },{readOnly:true});}
 function schemaVersion(dataDir){return transaction(dataDir,()=>validateFormat(connection(dataDir)),{readOnly:true});}
+function readDescriptor(dataDir){return transaction(dataDir,()=>{const db=connection(dataDir),version=validateFormat(db);return version===3?storageFormat.validateDescriptor(JSON.parse(db.prepare("SELECT value FROM metadata WHERE key='compatibility'").get().value),3):storageFormat.describe(version);},{readOnly:true});}
 function readIdentity(dataDir){return transaction(dataDir,()=>{
   const metadata=Object.fromEntries(connection(dataDir).prepare("SELECT key,value FROM metadata WHERE key IN('database_uuid','generation')").all().map(row=>[row.key,row.value]));
-  if(!metadata.database_uuid&&!metadata.generation&&validateFormat(connection(dataDir))===1)return null;
+  if(!metadata.database_uuid&&!metadata.generation&&validateFormat(connection(dataDir))<SCHEMA_VERSION)return null;
   return require('./database-identity.cjs').validate({format:'tvs-database-identity',version:1,uuid:metadata.database_uuid,generation:Number(metadata.generation)});
 },{readOnly:true});}
 function rowEntries(data){
@@ -246,7 +251,7 @@ function commitSections(dataDir,sections,revisions,options={}){
 }
 const ddl=`
   PRAGMA application_id=0x54565331;
-  PRAGMA user_version=2;
+  PRAGMA user_version=3;
   CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL) STRICT;
   CREATE TABLE sections(name TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>=0 AND revision<=9007199254740991)) STRICT;
   CREATE TABLE section_rows(
@@ -277,6 +282,7 @@ function writeGuard(directory){
 }
 function create(dataDir,input,options={}){
   if(!plain(input)||!plain(input.data)||Object.keys(input.data).some(name=>!schema.sections.includes(name)))fail('SQLITE_CREATE','Для создания нужны разделы данных и их версии');
+  const descriptor=storageFormat.validateDescriptor(input.descriptor===undefined?storageFormat.describe(3):input.descriptor,3),identity=require('./database-identity.cjs').validate(input.identity===undefined?{format:'tvs-database-identity',version:1,uuid:crypto.randomUUID(),generation:1}:input.identity);
   const data=Object.fromEntries(schema.sections.map(name=>[name,own(input.data,name)?input.data[name]:[]]));for(const [name,rows]of Object.entries(data))validateRows(name,rows);
   const revisions=revisionsOf(input.revisions===undefined?{}:input.revisions),target=location(dataDir);let madeDirectory=false,claimed=false,db=null,began=false;
   if(fs.existsSync(target.directory)){if(!fs.statSync(target.directory).isDirectory()||fs.readdirSync(target.directory).length)fail('SQLITE_TARGET_NOT_EMPTY','SQLite можно создать только в новом или пустом отдельном каталоге');}
@@ -285,7 +291,7 @@ function create(dataDir,input,options={}){
     const claim=fs.openSync(target.file,'wx');fs.closeSync(claim);claimed=true;
     assertDatabaseFile(target);
     db=new DatabaseSync(target.file,{enableForeignKeyConstraints:true,allowExtension:false,enableDoubleQuotedStringLiterals:false,timeout:5000,defensive:true});configure(db,false);db.exec('BEGIN IMMEDIATE;');began=true;db.exec(ddl);
-    const meta=db.prepare('INSERT INTO metadata VALUES(?,?)');for(const [name,value]of Object.entries({format:FORMAT,format_version:String(VERSION),schema_version:String(SCHEMA_VERSION),database_uuid:crypto.randomUUID(),generation:'1',created_at:new Date().toISOString()}))meta.run(name,value);
+    const meta=db.prepare('INSERT INTO metadata VALUES(?,?)');for(const [name,value]of Object.entries({format:FORMAT,format_version:String(VERSION),schema_version:String(SCHEMA_VERSION),compatibility:JSON.stringify(descriptor),database_uuid:identity.uuid,generation:String(identity.generation),created_at:new Date().toISOString()}))meta.run(name,value);
     const section=db.prepare('INSERT INTO sections(name,revision) VALUES(?,?)');for(const name of schema.sections)section.run(name,revisions[name]);
     build(db,data,revisions,schema.sections);if(options.beforeCommit)resultSync(()=>options.beforeCommit());db.exec('COMMIT;');began=false;
     db.exec('PRAGMA wal_checkpoint(TRUNCATE);');db.close();db=null;writeGuard(target.directory);
@@ -299,8 +305,8 @@ function create(dataDir,input,options={}){
 function inspect(dataDir){return transaction(dataDir,()=>{
   const db=connection(dataDir),sections=db.prepare('SELECT s.name,s.revision,count(r.row_key) AS count FROM sections s LEFT JOIN section_rows r ON r.section=s.name GROUP BY s.name ORDER BY s.name').all().map(row=>({...row}));
   const integrityCheck=db.prepare('PRAGMA integrity_check').all().map(row=>Object.values(row)[0]),foreignKeyErrors=db.prepare('PRAGMA foreign_key_check').all().map(row=>({...row}));
-  return {ok:integrityCheck.length===1&&integrityCheck[0]==='ok'&&!foreignKeyErrors.length,format:FORMAT,formatVersion:VERSION,schemaVersion:validateFormat(db),sqliteVersion:db.prepare('SELECT sqlite_version() AS version').get().version,
+  return {ok:integrityCheck.length===1&&integrityCheck[0]==='ok'&&!foreignKeyErrors.length,format:FORMAT,formatVersion:VERSION,schemaVersion:validateFormat(db),descriptor:storageFormat.describe(validateFormat(db)),sqliteVersion:db.prepare('SELECT sqlite_version() AS version').get().version,
     sections,rowCount:sections.reduce((total,row)=>total+row.count,0),linkCount:db.prepare('SELECT count(*) AS count FROM row_links').get().count,
     legacyIssues:db.prepare('SELECT issue_json FROM reference_issues ORDER BY id').all().map(row=>JSON.parse(row.issue_json)),integrity:integrityCheck,foreignKeyErrors};
 },{readOnly:true});}
-module.exports={inTransaction:dataDir=>held.has(location(dataDir).key),exists,filename,readAll,readRows,queryRows,countLegacyAssetReferences,readRevisions,readIdentity,schemaVersion,commitSections,create,inspect,transaction};
+module.exports={inTransaction:dataDir=>held.has(location(dataDir).key),exists,filename,readAll,readRows,queryRows,countLegacyAssetReferences,readRevisions,readIdentity,schemaVersion,readDescriptor,commitSections,create,inspect,transaction};

@@ -16,7 +16,7 @@ function fixture({client=true,registry=false}={}){
  const dataBindings=new Map([[1,binding]]),reestrWindowData=new Map();
  if(registry)reestrWindowData.set(2,{ownerId:1,identity:state.identity,databaseToken:state.token});
  const sender={id:registry?2:1,mainFrame:{synthetic:true},isDestroyed:()=>state.destroyed,getURL:()=>state.url,send:(channel,payload)=>state.sent.push({channel,payload})},event={sender};
- const context={Buffer,path,structuredClone,ArrayBuffer,console:{log(){}},settings,dataBindings,reestrWindowData,networkConfigError:'',renderArchivedDocumentPdf:async()=>printBytes,require:name=>{
+ const context={Buffer,path,storageFormat:require(path.join(ROOT,'electron/storage-format.cjs')),structuredClone,ArrayBuffer,console:{log(){}},settings,dataBindings,reestrWindowData,networkConfigError:'',renderArchivedDocumentPdf:async()=>printBytes,require:name=>{
   if(name==='node:crypto')return require(name);
   if(name==='./safe-html-pdf.cjs')return {createSafeHtmlPdfRenderer:()=>async(html,options,guard)=>{guard();state.rendered.push({html,options});await state.renderHook?.();guard();return Buffer.from('%PDF-synthetic');}};
   if(name==='./safe-file.cjs')return {async writeRegularFileAtomic(filename,bytes,options){options.assertCurrent();if(state.writeError)throw state.writeError;state.writes.push({filename,bytes});await state.writeHook?.();options.assertCurrent();}};

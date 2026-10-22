@@ -1,4 +1,5 @@
 'use strict';
+const {writerHeaders}=require('./helpers/http-writer.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -76,7 +77,7 @@ async function protocol(t, { hook = () => {} } = {}) {
     },
     async request(route, body, beforeEnd = () => {}) {
       const req = Object.assign(new EventEmitter(), { method:'POST', url:route,
-        headers:{ authorization:'Bearer ' + credentials.admin }, complete:false, resume() {} });
+        headers:{ ...writerHeaders(), authorization:'Bearer ' + credentials.admin }, complete:false, resume() {} });
       let status;
       const completed = new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('Synthetic HTTP handler did not answer')), 3000);

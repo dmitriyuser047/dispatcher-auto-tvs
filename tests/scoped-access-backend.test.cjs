@@ -1,4 +1,5 @@
 'use strict';
+const {writerHeaders}=require('./helpers/http-writer.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const storage=require('../electron/storage'),sqlite=require('../electron/sqlite-storage.cjs'),schema=require('../assets/core/platform-schema.js'),kernel=require('../assets/core/platform-kernel.js'),access=require('../electron/access-control'),query=require('../electron/data-query.cjs'),platform=require('../electron/platform-service.cjs');
@@ -45,7 +46,7 @@ test('authentication retains normalized policy and computes a trusted stamp; rol
  const before=[{id:0,plate:'numeric',maintenanceRules:[]},{id:'0',plate:'text',maintenanceRules:[]}];assert.throws(()=>access.validateAssetChanges({role:'mechanic'},'vehicles',before,[{...before[1],id:0},{...before[0],id:'0'}]));
 });
 
-function httpRequest(port,token,route,body){const http=require('node:http');return new Promise((resolve,reject)=>{const request=http.request({host:'127.0.0.1',port,path:route,method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}},response=>{let raw='';response.setEncoding('utf8');response.on('data',part=>raw+=part);response.on('end',()=>{try{resolve({status:response.statusCode,body:JSON.parse(raw),raw});}catch(error){reject(error);}});});request.on('error',reject);request.setTimeout(10000,()=>request.destroy(Error('Synthetic scoped HTTP timeout')));request.end(body===undefined?undefined:JSON.stringify(body));});}
+function httpRequest(port,token,route,body){const http=require('node:http');return new Promise((resolve,reject)=>{const request=http.request({host:'127.0.0.1',port,path:route,method:body===undefined?'GET':'POST',headers:{...writerHeaders(),Authorization:'Bearer '+token,'Content-Type':'application/json'}},response=>{let raw='';response.setEncoding('utf8');response.on('data',part=>raw+=part);response.on('end',()=>{try{resolve({status:response.statusCode,body:JSON.parse(raw),raw});}catch(error){reject(error);}});});request.on('error',reject);request.setTimeout(10000,()=>request.destroy(Error('Synthetic scoped HTTP timeout')));request.end(body===undefined?undefined:JSON.stringify(body));});}
 for(const backend of ['json','sqlite'])test(backend+' HTTP uses fresh current policy for snapshot, query, raw ACK and receipt replay',async t=>{
  const server=require('../electron/server'),f=fixture(t,backend),key=access.issueToken(),adminKey=access.issueToken(),account={...principal(),tokenHash:key.tokenHash,enabled:true};let settings={serverUsers:[{id:'admin',name:'Synthetic administrator',role:'admin',tokenHash:adminKey.tokenHash,enabled:true},account],serverAccessConfigured:true};
  const started=await server.start({port:0,dataDir:f.dir,settings:()=>settings});assert.equal(started.ok,true);t.after(()=>server.stop());

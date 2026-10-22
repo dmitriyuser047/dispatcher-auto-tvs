@@ -1,0 +1,14 @@
+[
+  {
+    "sha256": "f7ffb8378d39ca601b3ba0f176556e49d47955d7654fb3caa7afbd723582b44b",
+    "name": "sqlite-storage-v2.cjs"
+  },
+  {
+    "sha256": "0b1db4f4a83e690f9d3f2a882e6d0aaabe80b5a812392cf70a45451913fdad18",
+    "name": "storage-format-v2.cjs"
+  },
+  {
+    "sha256": "6dc0b2584654588745b3ee7dee86fd18711c7dd94f9a82a551bbfc961e3a75c3",
+    "name": "storage-v2.cjs"
+  }
+]

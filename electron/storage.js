@@ -43,11 +43,20 @@ function legacyFile(dataDir) { return path.join(dataDir, 'data.json'); }
 function schemaVersion(dataDir){
   const sql=sqliteBackend(dataDir);if(sql)return sql.schemaVersion(dataDir);
   if(fs.existsSync(revisionsFile(dataDir)))return storageFormat.decodeRevisions(readJson(revisionsFile(dataDir))).schemaVersion;
+  // A crash during the very first current-format commit may leave section
+  // files but no revision commit point. Only its explicit empty-before journal
+  // identifies a new database; it never authorizes recovery of old data.json.
+  const initialJournal=path.join(sectionsDir(dataDir),'.transaction.json');
+  if(!fs.existsSync(legacyFile(dataDir))&&fs.existsSync(initialJournal)){
+    const tx=readJson(initialJournal);
+    if(tx?.schemaVersion===storageFormat.SCHEMA_VERSION&&tx.base===null&&tx.before&&Object.keys(tx.before).length===SECTIONS.length&&SECTIONS.every(name=>Object.hasOwn(tx.before,name)&&tx.before[name]===null)&&storageFormat.decodeRevisions(tx.revisions).schemaVersion===storageFormat.SCHEMA_VERSION)return storageFormat.SCHEMA_VERSION;
+  }
   if(fs.existsSync(sectionFile(dataDir,'documentDrafts')))throw Object.assign(new Error('Повреждены версии новой базы. Восстановите их из копии; автоматическое создание запрещено.'),{code:'STORAGE_REVISIONS'});
   if(fs.existsSync(legacyFile(dataDir))){const legacy=readJson(legacyFile(dataDir));if(Array.isArray(legacy?.documentDrafts)&&legacy.documentDrafts.length)throw Object.assign(new Error('Неверсионированный файл содержит новые документы. Восстановите его в отдельную базу из резервного пакета; документы не были скрыты или удалены.'),{code:'STORAGE_FORMAT'});}
   return fs.existsSync(legacyFile(dataDir))||storageFormat.legacySections().some(name=>fs.existsSync(sectionFile(dataDir,name)))?1:storageFormat.SCHEMA_VERSION;
 }
-function assertWritable(dataDir){if(schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION)storageFormat.upgradeRequired();}
+function assertWritable(dataDir,options={}){if(!storageFormat.isCurrent(schemaVersion(dataDir)))storageFormat.upgradeRequired();storageFormat.assertWriter(options);}
+function descriptor(dataDir){const sql=sqliteBackend(dataDir);return sql?sql.readDescriptor(dataDir):fs.existsSync(revisionsFile(dataDir))?storageFormat.decodeRevisions(readJson(revisionsFile(dataDir))).descriptor:storageFormat.describe(schemaVersion(dataDir));}
 function canonicalDirectory(dataDir) {
   const resolved = fs.realpathSync(path.resolve(dataDir));
   return runtimeProcess.platform === 'win32' ? resolved.toLowerCase() : resolved;
@@ -82,6 +91,15 @@ function releaseLock(file, fd, owner) {
 /** Synchronous, reentrant across modules in one process; readers also lock so
  * recovery cannot mistake a live writer's journal for an interrupted save. */
 function withDatabaseLock(dataDir, action) {
+  // Reading an older schema must not create or recover a lock, identity, WAL,
+  // transaction journal or any other file in the original directory.
+  if(fs.existsSync(dataDir)&&schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION){
+    const key=canonicalDirectory(dataDir);if(heldLocks.has(key))return action();
+    const locks=['.tvs-database.lock','.tvs-database.lock.recovery'];if(locks.some(name=>fs.existsSync(path.join(key,name))))throw lockError(path.join(key,locks[0]),'Старая база открыта другим процессом; изменение её блокировок запрещено.');
+    const files=sqliteBackend(dataDir)?['platform.sqlite','platform.sqlite-wal','platform.sqlite-shm']:['data.json','database-identity.json',...SECTIONS.map(name=>path.join('sections',name+'.json')),path.join('sections',REVISIONS_FILE),path.join('sections','.transaction.json')];
+    const stamp=()=>JSON.stringify(files.map(name=>{const target=path.join(dataDir,name);try{const info=fs.lstatSync(target);if(!info.isFile()||info.isSymbolicLink())throw Error('Недопустимый исходный файл старой базы');return [name,info.size,crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex')];}catch(error){if(error.code==='ENOENT')return [name,null];throw error;}}));
+    const before=stamp();heldLocks.set(key,{readOnly:true});try{const result=action();if(result&&typeof result.then==='function')throw Error('Чтение старой базы должно быть синхронным');if(stamp()!==before)throw Object.assign(Error('Старая база изменилась во время чтения'),{code:'SCHEMA_SOURCE_CHANGED'});return result;}finally{heldLocks.delete(key);}
+  }
   fs.mkdirSync(dataDir, { recursive: true });
   const key = canonicalDirectory(dataDir);
   if (heldLocks.has(key)) return action();
@@ -230,6 +248,7 @@ function recoverTransaction(dataDir) {
   if (sqliteBackend(dataDir)) return;
   const journal = path.join(sectionsDir(dataDir), '.transaction.json');
   if (!fs.existsSync(journal)) return;
+  if(schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION)throw Object.assign(Error('В старой базе обнаружено незавершённое сохранение; используйте прежнюю программу для восстановления перед копированием.'),{code:'SCHEMA_RECOVERY_REQUIRED'});
   const tx = readJson(journal);
   if(tx?.schemaVersion!==storageFormat.SCHEMA_VERSION){const error=new Error('Старая база содержит незавершённое сохранение. Восстановите её прежней версией программы перед созданием обновлённой копии.');error.code='SCHEMA_RECOVERY_REQUIRED';throw error;}
   const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -255,6 +274,7 @@ function recoverTransaction(dataDir) {
 
 function commitSections(dataDir, sections, revisions) {
   if (!Object.keys(sections).length) return;
+  assertWritable(dataDir);
   const sqlite = sqliteBackend(dataDir);
   if (sqlite) return sqlite.commitSections(dataDir,sections,revisions);
   const changed = Object.keys(sections);
@@ -291,7 +311,7 @@ function migrate(dataDir) {
   if (sqliteBackend(dataDir)) return { migrated:false, reason:'SQLite: явный перенос уже выполнен' };
   recoverTransaction(dataDir);
   if (isSplit(dataDir)) return { migrated: false, reason: 'уже разделено' };
-  if(schemaVersion(dataDir)===1)return {migrated:false,reason:'Старая база доступна только для чтения; обновление выполняется отдельной копией'};
+  if(schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION)return {migrated:false,reason:'Старая база доступна только для чтения; обновление выполняется отдельной копией'};
   const legacy = legacyFile(dataDir);
   fs.mkdirSync(sectionsDir(dataDir), { recursive: true });
 
@@ -357,7 +377,7 @@ function writeAll(dataDir, data, options = {}) {
   // Resolve it before CAS, just as writeSections does.
   if (operation?.receipt) return platform.filteredResult(platform.replayResult(previous, revisions, token, operation, Object.keys(data)),options.principal,previous);
   require('./document-archive.cjs').validateState(dataDir,previous);
-  assertWritable(dataDir);
+  assertWritable(dataDir,options);
   if (options.replace !== true && (options.requireBase || options.base !== undefined)) {
     const base = options.base;
     if (base === undefined) {
@@ -431,7 +451,7 @@ function readSnapshot(dataDir,options={}) {
   require('./document-archive.cjs').validateState(dataDir,database);
   const data=options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?platform.visibleRows(name,database[name],options.principal,database):[]])):database;
   const version=schemaVersion(dataDir);
-  return {data,revisions:options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?revisions[name]:0])):revisions,databaseToken:databaseToken(dataDir),...(options.principal?{scopeViews:platform.scopeViews(database,revisions,options.principal)}:{}),platform:{apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,...(require('./access-context.cjs').hasNarrowing(options.principal)?{scopedAccess:1}:{}),schemaVersion:version,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,calendar:version>=2?1:0,personnelPlanning:version>=2?1:0,documentPrint:version>=2?1:0,controlledImports:version>=2?1:0,needsSchemaUpgrade:version<2}};
+  return {data,revisions:options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?revisions[name]:0])):revisions,databaseToken:databaseToken(dataDir),...(options.principal?{scopeViews:platform.scopeViews(database,revisions,options.principal)}:{}),platform:{apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,...(require('./access-context.cjs').hasNarrowing(options.principal)?{scopedAccess:1}:{}),schemaVersion:version,currentSchemaVersion:storageFormat.SCHEMA_VERSION,descriptor:descriptor(dataDir),readOnly:version<storageFormat.SCHEMA_VERSION,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,calendar:version>=2?1:0,personnelPlanning:version>=2?1:0,documentPrint:version>=2?1:0,controlledImports:version>=2?1:0,needsSchemaUpgrade:version<storageFormat.SCHEMA_VERSION}};
 }
 function readOperation(dataDir,query,principal){
   const token=databaseToken(dataDir),database=readAll(dataDir);
@@ -461,7 +481,7 @@ function writeSections(dataDir, payload, options = {}) {
   const operation = platform.operationInfo(previous, sections, context);
   if (operation?.receipt) return platform.filteredResult(platform.replayResult(previous, revisions, token, operation, names),options.principal,previous);
   require('./document-archive.cjs').validateState(dataDir,previous);
-  assertWritable(dataDir);
+  assertWritable(dataDir,options);
   const calendarRead=names.some(name=>(name==='dispatchJobs'||name==='workOrders')&&JSON.stringify(previous[name])!==JSON.stringify(sections[name]));
   if(calendarRead&&(!Object.hasOwn(base,'appMeta')||!Number.isSafeInteger(base.appMeta)||base.appMeta<0)){const error=new Error('Для сохранения интервала нужна исходная версия рабочего календаря. Загрузите базу заново.');error.code='CALENDAR_CONTEXT_REQUIRED';error.status=428;throw error;}
   const conflicts = [...new Set([...names,...(calendarRead?['appMeta']:[])])].filter(n => (revisions[n] || 0) !== (base[n] || 0));
@@ -520,16 +540,16 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
 }
 
 module.exports = {
-  SECTIONS, sectionsDir, sectionFile, revisionsFile,schemaVersion,assertWritable,encodeRevisions:storageFormat.encodeRevisions,
+  SECTIONS, sectionsDir, sectionFile, revisionsFile,schemaVersion,descriptor,assertWritable,encodeRevisions:storageFormat.encodeRevisions,
   databaseToken, withDatabaseLock, validateRows, prepareWriteoffSections,
   executeCommand:(dataDir,envelope,options)=>require('./command-service.cjs').execute(dataDir,envelope,options),
-  commitPrintArtifact:(dataDir,input,options)=>withDatabaseLock(dataDir,()=>{const sql=sqliteBackend(dataDir),action=()=>require('./document-archive.cjs').commitArtifact(dataDir,input,options,commitSections);const result=sql?sql.transaction(dataDir,action):action();require('./document-archive.cjs').recover(dataDir);return result;}),
+  commitPrintArtifact:(dataDir,input,options={})=>withDatabaseLock(dataDir,()=>{assertWritable(dataDir,options);const sql=sqliteBackend(dataDir),readOnly=schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||options.requireWriterSchema===true&&options.writerSchemaVersion!==storageFormat.SCHEMA_VERSION,action=()=>require('./document-archive.cjs').commitArtifact(dataDir,input,options,commitSections);const result=sql?sql.transaction(dataDir,action,{readOnly}):action();if(!readOnly)require('./document-archive.cjs').recover(dataDir,undefined,options);return result;}),
   isDatabaseLockHeld:dataDir=>heldLocks.has(canonicalDirectory(dataDir)),
   ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot,readOperation }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, () => {
     const sqlite = sqliteBackend(dataDir), action = () => {try{return operation(dataDir,...args);}catch(error){const principal=name==='readSnapshot'?args[0]?.principal:name==='readOperation'?args[1]:args[1]?.principal;throw require('./access-control').publicError(error,principal);}};
     const writing=['writeAll','writeSections'].includes(name),nested=sqlite?.inTransaction(dataDir);
-    const result=!sqlite||['isSplit','migrate'].includes(name)?action():sqlite.transaction(dataDir,action,{readOnly:!writing||sqlite.schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION});
-    if(writing&&!nested)require('./document-archive.cjs').recover(dataDir);
+    const result=!sqlite||['isSplit','migrate'].includes(name)?action():sqlite.transaction(dataDir,action,{readOnly:!writing||sqlite.schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||args[1]?.requireWriterSchema===true&&args[1]?.writerSchemaVersion!==storageFormat.SCHEMA_VERSION});
+    if(writing&&!nested&&schemaVersion(dataDir)===storageFormat.SCHEMA_VERSION&&!(args[1]?.requireWriterSchema===true&&args[1]?.writerSchemaVersion!==storageFormat.SCHEMA_VERSION))require('./document-archive.cjs').recover(dataDir,undefined,args[1]);
     return result;
   })])),
 };

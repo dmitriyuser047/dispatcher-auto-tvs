@@ -1,3 +1,4 @@
+const {writerHeaders}=require('./helpers/http-writer.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),http=require('node:http'),vm=require('node:vm');
@@ -74,7 +75,7 @@ test('malformed financial rows cannot be persisted alongside valid procurement c
  }
 });
 
-function request(port,token,route,body){return new Promise((resolve,reject)=>{const req=http.request({host:'127.0.0.1',port,path:route,method:body?'POST':'GET',headers:{Authorization:'Bearer '+token}},res=>{let text='';res.setEncoding('utf8');res.on('data',chunk=>text+=chunk);res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text)});}catch(error){reject(error);}});});req.on('error',reject);req.end(body?JSON.stringify(body):undefined);});}
+function request(port,token,route,body){return new Promise((resolve,reject)=>{const req=http.request({host:'127.0.0.1',port,path:route,method:body?'POST':'GET',headers:{...writerHeaders(),Authorization:'Bearer '+token}},res=>{let text='';res.setEncoding('utf8');res.on('data',chunk=>text+=chunk);res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text)});}catch(error){reject(error);}});});req.on('error',reject);req.end(body?JSON.stringify(body):undefined);});}
 
 test('HTTP roles cannot bypass planning validation or write financial costs as dispatcher',async t=>{
  const dir=temp(t);storage.writeAll(dir,db());

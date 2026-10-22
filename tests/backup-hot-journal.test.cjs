@@ -1,0 +1,9 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),crypto=require('node:crypto'),{DatabaseSync}=require('node:sqlite');
+const sqlite=require('../electron/sqlite-storage.cjs'),backup=require('../electron/backup-service.cjs');
+function tree(root){const result={};for(const name of fs.readdirSync(root).sort()){const file=path.join(root,name);if(fs.lstatSync(file).isDirectory())for(const [key,value]of Object.entries(tree(file)))result[name+'/'+key]=value;else result[name]=crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');}return result;}
+test('backup refuses an actual unfinished SQLite rollback journal before staging and preserves the open source',t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-backup-journal-'));t.after(()=>{assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));assert.match(path.basename(root),/^tvs-backup-journal-/);fs.rmSync(root,{recursive:true,force:true});});
+ const sourceDir=path.join(root,'db'),archivePath=path.join(root,'must-not-exist.zip');sqlite.create(sourceDir,{data:{vehicles:[{id:0,plate:'SYNTHETIC',fuelBalance:923.537}],records:[]}});const db=new DatabaseSync(sqlite.filename(sourceDir));
+ try{db.exec("PRAGMA journal_mode=DELETE; PRAGMA cache_size=1; BEGIN EXCLUSIVE; UPDATE metadata SET value='synthetic-uncommitted' WHERE key='created_at';");assert.ok(fs.statSync(sqlite.filename(sourceDir)+'-journal').size>0);const before=tree(sourceDir);assert.throws(()=>backup.createPackage({sourceDir,archivePath}),{code:'BACKUP_SOURCE_BUSY'});assert.equal(fs.existsSync(archivePath),false);assert.deepEqual(tree(sourceDir),before);assert.deepEqual(fs.readdirSync(root),['db']);}finally{db.exec('ROLLBACK;');db.close();}
+});

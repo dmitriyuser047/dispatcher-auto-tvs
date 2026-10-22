@@ -1,4 +1,5 @@
 'use strict';
+const {writerHeaders}=require('./helpers/http-writer.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),http=require('node:http'),crypto=require('node:crypto');
@@ -46,7 +47,7 @@ function assertGuardOnly(dir,expected){
 function request(port,route,token,body){
   return new Promise((resolve,reject)=>{
     const req=http.request({host:'127.0.0.1',port,path:route,method:body===undefined?'GET':'POST',agent:false,
-      headers:{Authorization:'Bearer '+token}},res=>{
+      headers:{...writerHeaders(),Authorization:'Bearer '+token}},res=>{
       let raw='';res.setEncoding('utf8');res.on('data',part=>{raw+=part;});
       res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(raw)});}catch(error){reject(error);}});
     });req.setTimeout(5000,()=>req.destroy(Error('Synthetic HTTP request timed out')));req.on('error',reject);req.end(body===undefined?undefined:JSON.stringify(body));
@@ -71,7 +72,7 @@ async function httpFixture(t){
       let finish;
       const response=new Promise((resolve,reject)=>{
         const req=http.request({host:'127.0.0.1',port:started.port,path:route,method:'POST',agent:false,
-          headers:{Authorization:'Bearer '+tokens.admin,'Content-Length':Buffer.byteLength(raw)}},res=>{
+          headers:{...writerHeaders(),Authorization:'Bearer '+tokens.admin,'Content-Length':Buffer.byteLength(raw)}},res=>{
           let text='';res.setEncoding('utf8');res.on('data',part=>{text+=part;});
           res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text)});}catch(error){reject(error);}});
         });req.setTimeout(5000,()=>req.destroy(Error('Synthetic slow upload timed out')));req.on('error',reject);
@@ -89,7 +90,7 @@ test('SQLite remains opt-in and ordinary synthetic JSON directories are not conv
 
 test('shared storage reads exact SQLite sections, revisions, typed IDs and 923.537 litre values without JSON shadows',t=>{
   const {dir,initial,revisions}=fixture(t),file=adapter().filename(dir),before=hash(file),guard=assertGuardOnly(dir),snapshot=storage.readSnapshot(dir);
-  assert.deepEqual(snapshot.data,initial);assert.deepEqual(snapshot.revisions,revisions);assert.deepEqual(snapshot.platform,{apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:2,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false});
+  assert.deepEqual(snapshot.data,initial);assert.deepEqual(snapshot.revisions,revisions);assert.deepEqual(snapshot.platform,{apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:3,currentSchemaVersion:3,descriptor:require('../electron/storage-format.cjs').describe(3),readOnly:false,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false});
   assert.equal(snapshot.data.vehicles[0].fuelBalance,923.537);assert.equal(typeof snapshot.data.vehicles[0].id,'number');assert.equal(typeof snapshot.data.vehicles[1].id,'string');
   assert.equal(storage.readSection(dir,'records').rows[0].vehicleId,7);assert.equal(storage.readSection(dir,'records').rows[1].vehicleId,'7');
   assert.equal(hash(file),before);assertGuardOnly(dir,guard);

@@ -1,7 +1,7 @@
 'use strict';
 function validateSources(data,read){require('./import-source.cjs').validateManaged(data,read);require('./attachment-access.cjs').validateManaged(data,read);}
 
-// Backup format 1 remains compatible. No Electron, profile selection or settings
+// Backup format 2 records the verified source schema. Legacy format 1 stays readable. No Electron, profile selection or settings
 // mutation lives here; callers must explicitly provide every source/target path.
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 const AdmZip = require('adm-zip');
@@ -9,7 +9,7 @@ const schema = require('../assets/core/platform-schema.js');
 const contracts = require('../assets/core/platform-contracts.js');
 const storage = require('./storage');
 const sqlite = require('./sqlite-storage.cjs');
-const SECTIONS = schema.sections, MANAGED = ['attachments', 'import-sources', 'reestr-knowledge','document-archive'];
+const SECTIONS = schema.sections, MANAGED = ['attachments', 'import-sources', 'reestr-knowledge','document-archive','migration-history'];
 const MAX_BYTES = 512 * 1024 * 1024, MAX_FILES = 10000;
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -85,6 +85,9 @@ catch {
     fail('BACKUP_REVISIONS', 'Некорректные версии разделов');
 } return Object.fromEntries(SECTIONS.map(name => [name, value[name] ?? 0])); }
 function snapshotFiles(source,allowOwnedLock=false) {
+    const rollback=stat(path.join(source,'platform.sqlite-journal'));
+    if(rollback&&(!rollback.isFile()||rollback.isSymbolicLink()||rollback.size>0))
+        fail('BACKUP_SOURCE_BUSY','В SQLite есть незавершённый журнал. Закройте все экземпляры программы и редакторы базы перед резервированием.');
     for (const name of ['.tvs-database.lock', '.tvs-database.lock.recovery', 'sections/.transaction.json'])
         if (!(name==='.tvs-database.lock'&&allowOwnedLock&&storage.isDatabaseLockHeld(source))&&stat(path.join(source, ...name.split('/'))))
             fail('BACKUP_SOURCE_BUSY', 'База занята или содержит незавершённое сохранение');
@@ -121,7 +124,7 @@ function sourceSnapshot(source, files) {
     const read = relative => { const bytes = readFile(path.join(source, ...relative.split('/'))), entry = expected.get(relative); if (!entry || entry.size !== bytes.length || entry.sha256 !== sha(bytes))
         fail('BACKUP_SOURCE_CHANGED', 'Исходная база изменилась'); return json(bytes, relative); };
     if (expected.has('platform.sqlite')) {
-        const result = sqlite.transaction(source, () => ({ data: database(sqlite.readAll(source)), revisions: revisions(sqlite.readRevisions(source)), sourceFormat: 'sqlite' }), { readOnly: true });
+        const result = sqlite.transaction(source, () => ({ data: database(sqlite.readAll(source)), revisions: revisions(sqlite.readRevisions(source)), sourceFormat: 'sqlite', sourceDescriptor: sqlite.readDescriptor(source), sourceIdentity: sqlite.readIdentity(source) }), { readOnly: true });
         return result;
     }
     if (expected.has('sections')) {
@@ -135,14 +138,14 @@ function sourceSnapshot(source, files) {
             if (expected.has('sections/' + name + '.json'))
                 data[name] = read('sections/' + name + '.json');
             else {
-                if (decoded.schemaVersion===2 || Object.hasOwn(rawVersions, name) || ['vehicles', 'records'].includes(name))
+                if (decoded.schemaVersion>=2 || Object.hasOwn(rawVersions, name) || ['vehicles', 'records'].includes(name))
                     fail('BACKUP_DATABASE', 'Отсутствует исходный раздел базы');
                 data[name] = [];
             }
         }
-        return { data: database(data), revisions: revisions(versions), sourceFormat: 'json' };
+        return { data: database(data), revisions: revisions(versions), sourceFormat: 'json', sourceDescriptor: decoded.descriptor, sourceIdentity: require('./database-identity.cjs').readOrCreate(source,{create:false}) };
     }
-    return { data: database(read('data.json')), revisions: revisions(), sourceFormat: 'json' };
+    return { data: database(read('data.json')), revisions: revisions(), sourceFormat: 'json', sourceDescriptor: require('./storage-format.cjs').describe(1), sourceIdentity: require('./database-identity.cjs').readOrCreate(source,{create:false}) };
 }
 function references(data, files) {
     const byName = new Map(files.map(entry => [entry.name, entry])), used = new Set();
@@ -168,7 +171,7 @@ function references(data, files) {
     return used.size;
 }
 function report(checked) {
-    return { ok: true, format: 'tvs-backup', version: 1, rows: SECTIONS.reduce((total, name) => total + checked.data[name].length, 0), fileCount: checked.files.length,
+    return { ok: true, format: 'tvs-backup', version: checked.version, sourceDescriptor:checked.sourceDescriptor, sourceIdentity:checked.sourceIdentity, rows: SECTIONS.reduce((total, name) => total + checked.data[name].length, 0), fileCount: checked.files.length,
         sections: SECTIONS.map(name => ({ name, count: checked.data[name].length, sha256: sha(JSON.stringify(checked.data[name])) })), databaseSha256: sha(JSON.stringify(checked.data)), archiveSha256: checked.archiveSha256,
         referencedFileCount: checked.referencedFileCount, sourceFormat: checked.sourceFormat, ...(checked.sourceFingerprint ? { sourceFingerprint: checked.sourceFingerprint } : {}) };
 }
@@ -214,8 +217,13 @@ function readPackage(archivePath) {
     if (!manifestEntry || manifestEntry.isDirectory || manifestEntry.header.size > 5 * 1024 * 1024)
         fail('BACKUP_MANIFEST', 'Нет корректного манифеста');
     const manifest = jsonObject(json(manifestEntry.getData(), 'manifest.json'), 'manifest.json');
-    if (manifest.format !== 'tvs-backup' || manifest.version !== 1 || !Array.isArray(manifest.files) || manifest.files.length >= MAX_FILES)
+    if (manifest.format !== 'tvs-backup' || ![1,2].includes(manifest.version) || !Array.isArray(manifest.files) || manifest.files.length >= MAX_FILES)
         fail('BACKUP_MANIFEST', 'Неподдерживаемый манифест резервного пакета');
+    let sourceDescriptor=null,sourceIdentity=null;
+    if(manifest.version===2){
+        if(!plain(manifest.database)||Object.keys(manifest.database).some(name=>!['descriptor','identity'].includes(name))||!Object.hasOwn(manifest.database,'identity'))fail('BACKUP_MANIFEST','Отсутствуют метаданные исходного формата базы');
+        try{sourceDescriptor=require('./storage-format.cjs').validateDescriptor(manifest.database.descriptor);sourceIdentity=manifest.database.identity===null?null:require('./database-identity.cjs').validate(manifest.database.identity);}catch{fail('BACKUP_MANIFEST','Повреждён или несовместим формат исходной базы');}
+    }else if(Object.hasOwn(manifest,'database'))fail('BACKUP_MANIFEST','Версия резервного пакета не согласована с метаданными базы');
     const files = [], names = new Set();
     for (const entry of manifest.files) {
         if (!plain(entry) || !packageNameSafe(entry.name) || entry.name === 'manifest.json' || names.has(entry.name.toLowerCase()) || !Number.isSafeInteger(entry.size) || entry.size < 0 || !/^[a-f0-9]{64}$/.test(entry.sha256))
@@ -245,7 +253,7 @@ function readPackage(archivePath) {
     const data = database(json(primary.bytes, 'database.json')), settings = files.find(entry => entry.name === 'settings.json');
     if (manifest.sourceFormat !== undefined && !['json', 'sqlite'].includes(manifest.sourceFormat))
         fail('BACKUP_MANIFEST', 'Неизвестный исходный формат базы');
-    const checked = { files, data, settings: settings ? jsonObject(json(settings.bytes, 'settings.json'), 'settings.json') : null, revisions: revisions(manifest.revisions), sourceFormat: manifest.sourceFormat === 'sqlite' ? 'sqlite' : 'json', sourceFingerprint: typeof manifest.sourceFingerprint === 'string' && /^[a-f0-9]{64}$/.test(manifest.sourceFingerprint) ? manifest.sourceFingerprint : null, archiveSha256: sha(archive) };
+    const checked = { version:manifest.version,sourceDescriptor,sourceIdentity,files, data, settings: settings ? jsonObject(json(settings.bytes, 'settings.json'), 'settings.json') : null, revisions: revisions(manifest.revisions), sourceFormat: manifest.sourceFormat === 'sqlite' ? 'sqlite' : 'json', sourceFingerprint: typeof manifest.sourceFingerprint === 'string' && /^[a-f0-9]{64}$/.test(manifest.sourceFingerprint) ? manifest.sourceFingerprint : null, archiveSha256: sha(archive) };
     checked.referencedFileCount = references(data, files);
     require('./document-archive.cjs').validateManaged(data,name=>files.find(entry=>entry.name===name)?.bytes);validateSources(data,name=>files.find(entry=>entry.name===name)?.bytes);
     return checked;
@@ -273,6 +281,8 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir,all
     // platform.sqlite in a JSON profile) would change the selected storage
     // format on the next read. Only the existing, dedicated backup directory
     // may receive an archive inside the source profile.
+    if (within(source, target) && !require('./storage-format.cjs').isCurrent(storage.schemaVersion(source)))
+        fail('BACKUP_PATH', 'Для старой базы выберите папку резервной копии вне исходной базы.');
     if (within(source, target) && !within(path.join(source, 'backups'), parent))
         fail('BACKUP_PATH', 'Внутри базы пакет можно сохранить только в существующую папку backups. Выберите отдельную папку для резервной копии.');
     jsonObject(settings, 'settings');
@@ -295,7 +305,7 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir,all
         references(snapshot.data, files);
         require('./document-archive.cjs').validateManaged(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null);validateSources(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null);
         const sourceFingerprint = sha(JSON.stringify(before));
-        zip.addFile('manifest.json', Buffer.from(JSON.stringify({ format: 'tvs-backup', version: 1, createdAt: new Date().toISOString(), files, revisions: snapshot.revisions, sourceFormat: snapshot.sourceFormat, sourceFingerprint })));
+        zip.addFile('manifest.json', Buffer.from(JSON.stringify({ format: 'tvs-backup', version: 2, database:{descriptor:snapshot.sourceDescriptor,identity:snapshot.sourceIdentity}, createdAt: new Date().toISOString(), files, revisions: snapshot.revisions, sourceFormat: snapshot.sourceFormat, sourceFingerprint })));
         stage = path.join(parent, '.tvs-backup-package-' + crypto.randomUUID() + '.zip');
         writeFile(stage, zip.toBuffer());
         identity = fs.lstatSync(stage);
@@ -386,7 +396,7 @@ function restorePackage({ archivePath, targetDir, format, protectedDir } = {}) {
             fail('BACKUP_SOURCE_CHANGED', 'Резервный пакет изменился во время восстановления');
         if (stat(target) || fold(directory(parent)) !== fold(parent))
             fail('BACKUP_TARGET_EXISTS', 'Целевой путь изменился');
-        const result = { ...report(checked), path: target, restoredFormat: chosen };
+        const result = { ...report(checked), path: target, restoredFormat: chosen, restoredDescriptor: require('./storage-format.cjs').describe(require('./storage-format.cjs').SCHEMA_VERSION) };
         fs.renameSync(stage, target);
         stage = null;
         return result;

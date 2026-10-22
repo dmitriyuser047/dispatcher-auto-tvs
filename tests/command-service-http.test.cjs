@@ -1,4 +1,5 @@
 'use strict';
+const {writerHeaders}=require('./helpers/http-writer.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),http=require('node:http');
 const storage=require('../electron/storage');
@@ -11,7 +12,7 @@ const kernel=require('../assets/core/platform-kernel.js');
 function call(port,route,token,value,extraHeaders={}){
  return new Promise((resolve,reject)=>{
   const raw=typeof value==='string'?value:JSON.stringify(value);
-  const req=http.request({host:'127.0.0.1',port,path:route,method:'POST',agent:false,headers:{...(token?{Authorization:'Bearer '+token}:{}),'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw),...extraHeaders}},res=>{
+  const req=http.request({host:'127.0.0.1',port,path:route,method:'POST',agent:false,headers:{...writerHeaders(),...(token?{Authorization:'Bearer '+token}:{}),'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw),...extraHeaders}},res=>{
    let text='';res.setEncoding('utf8');res.on('data',part=>{text+=part;});res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text),text});}catch(error){reject(error);}});
   });req.setTimeout(5000,()=>req.destroy(Error('Synthetic command HTTP timeout')));req.on('error',reject);req.end(raw);
  });
@@ -38,7 +39,7 @@ async function fixture(t,format){
   async uploadThenChange(value,role,change){
    const raw=JSON.stringify(value),authenticated=new Promise(resolve=>{onSettingsRead=resolve;});let finish;
    const response=new Promise((resolve,reject)=>{
-    const req=http.request({host:'127.0.0.1',port:start.port,path:'/api/commands',method:'POST',agent:false,headers:{Authorization:'Bearer '+tokens[role],'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw)}},res=>{
+    const req=http.request({host:'127.0.0.1',port:start.port,path:'/api/commands',method:'POST',agent:false,headers:{...writerHeaders(),Authorization:'Bearer '+tokens[role],'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw)}},res=>{
      let text='';res.setEncoding('utf8');res.on('data',part=>{text+=part;});res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text),text});}catch(error){reject(error);}});
     });req.setTimeout(5000,()=>req.destroy(Error('Synthetic slow command upload timeout')));req.on('error',reject);finish=()=>req.end(raw.slice(-1));req.write(raw.slice(0,-1));
    });

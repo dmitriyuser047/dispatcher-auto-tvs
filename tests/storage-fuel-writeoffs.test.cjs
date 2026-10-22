@@ -1,3 +1,4 @@
+const {writerHeaders}=require('./helpers/http-writer.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), http = require('node:http');
@@ -165,7 +166,7 @@ test('atomic void and source correction still require permission for every chang
 function request(port, token, route, body) {
   return new Promise((resolve, reject) => {
     const req = http.request({ host:'127.0.0.1', port, path:route, method:body ? 'POST' : 'GET',
-      headers:{ Authorization:'Bearer ' + token, 'Content-Type':'application/json' } }, res => {
+      headers:{...writerHeaders(), Authorization:'Bearer ' + token, 'Content-Type':'application/json' } }, res => {
       let raw = ''; res.setEncoding('utf8'); res.on('data', part => { raw += part; });
       res.on('end', () => resolve({ status:res.statusCode, body:JSON.parse(raw) }));
     });

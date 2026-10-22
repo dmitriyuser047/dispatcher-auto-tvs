@@ -1,3 +1,4 @@
+const {writerHeaders}=require('./helpers/http-writer.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), http = require('node:http');
@@ -25,7 +26,7 @@ function audits(dir, operationId) { return storage.readAll(dir).auditLog.filter(
 const key = 'platform-test-only-access-123456';
 function request(port, route, body) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host:'127.0.0.1', port, path:route, method:body === undefined ? 'GET' : 'POST', headers:{ Authorization:'Bearer ' + key } }, res => {
+    const req = http.request({ host:'127.0.0.1', port, path:route, method:body === undefined ? 'GET' : 'POST', headers:{...writerHeaders(), Authorization:'Bearer ' + key, 'X-TVS-Writer-Schema':'3' } }, res => {
       let raw = ''; res.setEncoding('utf8'); res.on('data', part => { raw += part; }); res.on('end', () => resolve({ status:res.statusCode, body:JSON.parse(raw) }));
     });
     req.on('error', reject); req.end(JSON.stringify(body));
@@ -38,7 +39,7 @@ test('storage uses the same authoritative section registry as the platform kerne
 
 test('native snapshots explicitly advertise transactional operation acknowledgement support', t => {
   const dir = fixture(t);
-  assert.deepEqual(storage.readSnapshot(dir).platform, { apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:2,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false });
+  assert.deepEqual(storage.readSnapshot(dir).platform, { apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:3,currentSchemaVersion:3,descriptor:require('../electron/storage-format.cjs').describe(3),readOnly:false,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false });
 });
 
 test('operational roles do not receive financial row history or mixed transaction metadata', () => {

@@ -1,3 +1,4 @@
+const {writerHeaders}=require('./helpers/http-writer.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -7,6 +8,7 @@ const http = require('node:http');
 const vm = require('node:vm');
 const { createRequire } = require('node:module');
 const storage = require('../electron/storage');
+const storageFormat = require('../electron/storage-format.cjs');
 const server = require('../electron/server');
 
 function database() {
@@ -31,7 +33,7 @@ test('corrupt or missing working section never becomes empty or writable', t => 
   assert.equal(fs.readFileSync(file, 'utf8'), bad);
   fs.unlinkSync(file); assert.throws(() => storage.readAll(dir), /records/);
 });
-test('loss of schema-2 revisions stops reads and preserves newer split data instead of reconstructing metadata or replaying old legacy data', t => {
+test('loss of current-schema revisions stops reads and preserves newer split data instead of reconstructing metadata or replaying old legacy data', t => {
   const dir = temp(t), db = database(); storage.writeAll(dir, db);
   fs.writeFileSync(path.join(dir, 'data.json'), JSON.stringify({ ...db, records: [{ id: 'OLD' }] }));
   fs.unlinkSync(storage.revisionsFile(dir));
@@ -81,7 +83,7 @@ test('restart rolls back an interrupted transaction before exposing sections', t
   const dir = temp(t), db = database(); storage.writeAll(dir, db);
   const baseline = storage.readAll(dir);
   const base = storage.readRevisions(dir), revisions = { ...base, vehicles: base.vehicles + 1, records: base.records + 1 };
-  const tx = { schemaVersion:2,before: { vehicles: db.vehicles, records: db.records }, sections: { vehicles: [{ id: 'new-v' }], records: [{ id: 'new-r' }] }, base:storage.encodeRevisions(base), revisions:storage.encodeRevisions(revisions) };
+  const tx = { schemaVersion:storageFormat.SCHEMA_VERSION,before: { vehicles: db.vehicles, records: db.records }, sections: { vehicles: [{ id: 'new-v' }], records: [{ id: 'new-r' }] }, base:storage.encodeRevisions(base), revisions:storage.encodeRevisions(revisions) };
   fs.writeFileSync(path.join(storage.sectionsDir(dir), '.transaction.json'), JSON.stringify(tx));
   fs.writeFileSync(storage.sectionFile(dir, 'vehicles'), JSON.stringify(tx.sections.vehicles));
   assert.deepEqual(storage.readAll(dir), baseline); assert.deepEqual(storage.readRevisions(dir), base);
@@ -89,7 +91,7 @@ test('restart rolls back an interrupted transaction before exposing sections', t
 test('restart finishes a transaction only after its revision commit point', t => {
   const dir = temp(t), db = database(); storage.writeAll(dir, db);
   const base = storage.readRevisions(dir), revisions = { ...base, vehicles: base.vehicles + 1 };
-  const tx = { schemaVersion:2,before: { vehicles: db.vehicles }, sections: { vehicles: [{ id: 'committed' }] }, base:storage.encodeRevisions(base), revisions:storage.encodeRevisions(revisions) };
+  const tx = { schemaVersion:storageFormat.SCHEMA_VERSION,before: { vehicles: db.vehicles }, sections: { vehicles: [{ id: 'committed' }] }, base:storage.encodeRevisions(base), revisions:storage.encodeRevisions(revisions) };
   fs.writeFileSync(path.join(storage.sectionsDir(dir), '.transaction.json'), JSON.stringify(tx));
   fs.writeFileSync(storage.revisionsFile(dir), JSON.stringify(storage.encodeRevisions(revisions)));
   assert.equal(storage.readAll(dir).vehicles[0].id, 'committed');
@@ -107,7 +109,7 @@ test('closed periods are guarded in storage, including bulk and legacy writes', 
 const key = 'test-key-not-a-real-secret-123456';
 function request(port, route, body, headers = { Authorization: 'Bearer ' + key }, split) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port, path: route, method: body == null ? 'GET' : 'POST', headers }, res => {
+    const req = http.request({ host: '127.0.0.1', port, path: route, method: body == null ? 'GET' : 'POST', headers:{...writerHeaders(),...headers} }, res => {
       let text = ''; res.setEncoding('utf8'); res.on('data', part => { text += part; });
       res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }));
     });
@@ -133,7 +135,7 @@ test('authenticated server preserves split UTF-8 and survives malformed and abor
     assert.equal(storage.readAll(dir).vehicles[0].driver, rows[0].driver);
   }
   await new Promise(resolve => {
-    const req = http.request({ host: '127.0.0.1', port, path: '/api/sections', method: 'POST', headers: { Authorization: 'Bearer ' + key } });
+    const req = http.request({ host: '127.0.0.1', port, path: '/api/sections', method: 'POST', headers: {...writerHeaders(), Authorization: 'Bearer ' + key } });
     req.on('error', () => {}); req.on('close', resolve); req.write('{'); setTimeout(() => req.destroy(), 20);
   });
   const payload = { databaseToken:storage.databaseToken(dir), base: storage.readRevisions(dir), sections: { records: [] } };

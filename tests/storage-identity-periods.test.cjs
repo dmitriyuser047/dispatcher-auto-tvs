@@ -1,3 +1,4 @@
+const {writerHeaders}=require('./helpers/http-writer.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),http=require('node:http'),vm=require('node:vm');
@@ -41,7 +42,7 @@ test('new assets and cards cannot retroactively resolve closed unresolved fuel r
  }
 });
 const key='identity-test-key-not-real-123456';
-function request(port,route,body){return new Promise((resolve,reject)=>{const req=http.request({host:'127.0.0.1',port,path:route,method:body?'POST':'GET',headers:{Authorization:'Bearer '+key}},res=>{let raw='';res.setEncoding('utf8');res.on('data',part=>raw+=part);res.on('end',()=>resolve({status:res.statusCode,body:JSON.parse(raw)}));});req.on('error',reject);req.end(body?JSON.stringify(body):undefined);});}
+function request(port,route,body){return new Promise((resolve,reject)=>{const req=http.request({host:'127.0.0.1',port,path:route,method:body?'POST':'GET',headers:{...writerHeaders(),Authorization:'Bearer '+key}},res=>{let raw='';res.setEncoding('utf8');res.on('data',part=>raw+=part);res.on('end',()=>resolve({status:res.statusCode,body:JSON.parse(raw)}));});req.on('error',reject);req.end(body?JSON.stringify(body):undefined);});}
 test('server binds ping, snapshots, revisions, reads and both write protocols to the served database',async t=>{
  const dir=temp(t),other=temp(t);storage.writeAll(dir,{vehicles:[{id:'v'}],records:[]});storage.writeAll(other,{vehicles:[{id:'v'}],records:[]});
  const started=await server.start({port:0,dataDir:dir,key});assert.equal(started.ok,true);t.after(()=>server.stop());const token=storage.databaseToken(dir),foreign=storage.databaseToken(other),port=started.port;

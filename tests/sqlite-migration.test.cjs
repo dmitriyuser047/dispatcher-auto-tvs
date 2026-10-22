@@ -56,7 +56,15 @@ function tree(directory) {
   };
   visit(directory);return entries;
 }
-function noStage(parent) { assert.deepEqual(fs.readdirSync(parent).filter(name=>name.startsWith('.tvs-sqlite-stage-')),[]); }
+function noStage(parent) {
+  assert.deepEqual(fs.readdirSync(parent).filter(name=>name.startsWith('.tvs-sqlite-stage-')),[]);
+  const journals=fs.readdirSync(parent).filter(name=>/^\.tvs-migration-[a-f0-9]{64}\.json$/.test(name)).map(name=>JSON.parse(fs.readFileSync(path.join(parent,name),'utf8')));
+  for(const name of fs.readdirSync(parent).filter(name=>name.startsWith('.tvs-copy-'))){
+    const directory=path.join(parent,name),journal=journals.find(item=>[item.stage,...(item.retainedStages||[])].some(stage=>stage.path===directory));assert.ok(journal,'A retained copy must have its durable journal');const stage=[journal.stage,...(journal.retainedStages||[])].find(item=>item.path===directory);
+    const info=fs.lstatSync(directory),owner=JSON.parse(fs.readFileSync(path.join(directory,'.tvs-migration-owner.json'),'utf8'));
+    assert.equal(info.isSymbolicLink(),false);assert.equal(String(info.ino),stage.ino);assert.equal(owner.migrationId,journal.migrationId);assert.equal(owner.uuid,journal.identity.uuid);
+  }
+}
 function faultAdapter(overrides) {
   const filename = path.join(__dirname,'../electron/sqlite-migration.cjs'), localRequire = createRequire(filename), exported = {exports:{}};
   vm.runInNewContext(fs.readFileSync(filename,'utf8'),{module:exported,exports:exported.exports,process,Buffer,console,
@@ -189,14 +197,14 @@ test('missing attachments, traversal references and mismatched managed file hash
   }
 });
 
-test('a failed SQLite creation removes only its owned staging directory',t=>{
+test('a failed SQLite creation retains only a journal-owned resumable stage',t=>{
   const paths=directories(t);split(paths.sourceDir);const before=tree(paths.sourceDir);
   const failing=faultAdapter({create(stage,payload){sqlite.create(stage,payload);throw Error('Synthetic failure after SQLite commit');}});
   assert.throws(()=>failing.migrateCopy(paths),{code:'MIGRATION_FAILED'});
   assert.deepEqual(tree(paths.sourceDir),before);assert.equal(fs.existsSync(paths.targetDir),false);noStage(paths.parent);
 });
 
-test('parity and SQLite integrity failures clean staging without publishing a destination',t=>{
+test('parity and SQLite integrity failures retain owned staging without publishing a destination',t=>{
   for (const mode of ['parity','integrity']) {
     const paths=directories(t);split(paths.sourceDir);const before=tree(paths.sourceDir);
     const failing=mode==='parity'?faultAdapter({readAll(stage){const result=sqlite.readAll(stage);result.vehicles.reverse();return result;}}):

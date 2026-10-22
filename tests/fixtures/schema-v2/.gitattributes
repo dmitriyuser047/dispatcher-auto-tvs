@@ -1,0 +1,3 @@
+# Frozen actual v2 sources are pinned by raw SHA256 in source-sha256.json.
+# Preserve exact historical bytes on every checkout, including core.autocrlf.
+*.cjs -text

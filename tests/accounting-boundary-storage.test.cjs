@@ -1,4 +1,5 @@
 'use strict';
+const {writerHeaders}=require('./helpers/http-writer.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),http=require('node:http'),vm=require('node:vm');
 const storage=require('../electron/storage');
@@ -29,7 +30,7 @@ function issue(dir,input={},id='boundary-issue'){
 }
 const execute=(dir,payload)=>storage.executeCommand(dir,payload,{principal:admin,now});
 const code=expected=>error=>error.code===expected||error.issues?.some(row=>row.code===expected)||error.details?.issues?.some(row=>row.code===expected);
-function request(port,route,token,body){return new Promise((resolve,reject)=>{const raw=JSON.stringify(body),req=http.request({host:'127.0.0.1',port,path:route,method:'POST',agent:false,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw)}},res=>{let text='';res.setEncoding('utf8');res.on('data',part=>{text+=part;});res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text),text});}catch(error){reject(error);}});});req.setTimeout(5000,()=>req.destroy(Error('Synthetic boundary HTTP timeout')));req.on('error',reject);req.end(raw);});}
+function request(port,route,token,body){return new Promise((resolve,reject)=>{const raw=JSON.stringify(body),req=http.request({host:'127.0.0.1',port,path:route,method:'POST',agent:false,headers:{...writerHeaders(),Authorization:'Bearer '+token,'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw)}},res=>{let text='';res.setEncoding('utf8');res.on('data',part=>{text+=part;});res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text),text});}catch(error){reject(error);}});});req.setTimeout(5000,()=>req.destroy(Error('Synthetic boundary HTTP timeout')));req.on('error',reject);req.end(raw);});}
 
 for(const format of ['json','sqlite']){
  test(format+' explicit anchors preserve old opening fields, dated history, typed IDs and exact fractional metadata through full and section channels',t=>{

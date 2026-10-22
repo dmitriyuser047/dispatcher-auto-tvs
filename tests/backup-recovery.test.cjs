@@ -31,7 +31,7 @@ function replaceMember(zip, manifest, name, bytes) { zip.updateFile(name, bytes)
 for(const kind of ['json','sqlite'])test(kind+' schema-2 backup preserves mixed document drafts and their managed evidence in a separate restored database',t=>{
  const paths=temp(t),input=data(),evidence=managed(paths,'attachments',Buffer.from('Synthetic draft evidence'),'.txt');input.documentDrafts=[{id:0,section:'payments',status:'draft',payload:{date:'2026-10-20',sum:7.01,description:'Synthetic financial draft',attachments:[evidence]},createdAt:'2026-10-22T12:00:00.000Z',createdBy:{id:'draft-admin',name:'Synthetic administrator',role:'admin'},updatedAt:'2026-10-22T12:00:00.000Z'}];const revisions=Object.fromEntries(schema.sections.map(name=>[name,7]));
  if(kind==='sqlite'){const attachmentDir=path.join(paths.parent,'evidence');fs.renameSync(path.join(paths.sourceDir,'attachments'),attachmentDir);sqlite.create(paths.sourceDir,{data:input,revisions});fs.renameSync(attachmentDir,path.join(paths.sourceDir,'attachments'));}else{fs.mkdirSync(storage.sectionsDir(paths.sourceDir));for(const name of schema.sections)fs.writeFileSync(storage.sectionFile(paths.sourceDir,name),JSON.stringify(input[name]));fs.writeFileSync(storage.revisionsFile(paths.sourceDir),JSON.stringify(storage.encodeRevisions(revisions)));}
- const before=businessTree(paths.sourceDir);backup.createPackage(paths);backup.verifyPackage(paths);backup.restorePackage(paths);const restored=storage.readSnapshot(paths.targetDir);assert.equal(restored.platform.schemaVersion,2);assert.deepEqual(restored.data.documentDrafts,input.documentDrafts);assert.equal(restored.revisions.documentDrafts,7);assert.deepEqual(fs.readFileSync(path.join(paths.targetDir,'attachments',evidence.id)),Buffer.from('Synthetic draft evidence'));assert.deepEqual(businessTree(paths.sourceDir),before);
+ const before=businessTree(paths.sourceDir);backup.createPackage(paths);backup.verifyPackage(paths);backup.restorePackage(paths);const restored=storage.readSnapshot(paths.targetDir);assert.equal(restored.platform.schemaVersion,3);assert.deepEqual(restored.data.documentDrafts,input.documentDrafts);assert.equal(restored.revisions.documentDrafts,7);assert.deepEqual(fs.readFileSync(path.join(paths.targetDir,'attachments',evidence.id)),Buffer.from('Synthetic draft evidence'));assert.deepEqual(businessTree(paths.sourceDir),before);
 });
 function service(overrides = {}) { const filename = path.join(__dirname, '../electron/backup-service.cjs'), requireHere = createRequire(filename), exports = { exports: {} }; vm.runInNewContext(fs.readFileSync(filename, 'utf8'), { module: exports, exports: exports.exports, Buffer, process, console, require(name) { return Object.hasOwn(overrides, name) ? overrides[name] : requireHere(name); } }, { filename }); return exports.exports; }
 for (const format of ['json', 'sqlite'])
@@ -101,7 +101,7 @@ test('existing destination files and directories are never overwritten', t => {
     noStage(paths.parent);
 });
 for (const kind of ['legacy-json', 'sqlite'])
-    test(kind + ' backup rejects reserved profile paths without changing the source and still supports its existing backup directory', t => {
+    test(kind + ' backup protects source paths and permits an internal backup only for a current writable source', t => {
         const paths = temp(t);
         if (kind === 'sqlite') source(paths, kind);
         else {
@@ -116,12 +116,18 @@ for (const kind of ['legacy-json', 'sqlite'])
             assert.deepEqual(businessTree(paths.sourceDir), before, name);
         }
         const snapshot = storage.readSnapshot(paths.sourceDir);
-        assert.equal(snapshot.platform.schemaVersion, kind === 'legacy-json' ? 1 : 2);
+        assert.equal(snapshot.platform.schemaVersion, kind === 'legacy-json' ? 1 : 3);
         assert.deepEqual(businessTree(paths.sourceDir), before);
         fs.mkdirSync(path.join(paths.sourceDir, 'backups'));
         const archivePath = path.join(paths.sourceDir, 'backups', 'verified.zip');
-        assert.equal(backup.createPackage({ ...paths, archivePath }).ok, true);
-        assert.equal(backup.verifyPackage({ archivePath }).ok, true);
+        if(kind==='legacy-json'){
+            assert.throws(()=>backup.createPackage({...paths,archivePath}),{code:'BACKUP_PATH'});
+            assert.deepEqual(fs.readdirSync(path.join(paths.sourceDir,'backups')),[]);
+            assert.equal(backup.createPackage(paths).ok,true);
+        }else{
+            assert.equal(backup.createPackage({ ...paths, archivePath }).ok, true);
+            assert.equal(backup.verifyPackage({ archivePath }).ok, true);
+        }
         assert.deepEqual(businessTree(paths.sourceDir).filter(entry => !entry.name.startsWith('backups')), before);
         noStage(paths.parent);
         noStage(path.join(paths.sourceDir, 'backups'));

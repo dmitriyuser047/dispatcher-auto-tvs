@@ -10,6 +10,15 @@ const access = require('./access-control');
 let _server = null, _dataDir = null, _backupFn = null, _writeLock = false;
 let _clientKey = '', _transport = { protocol:'http:', ca:null }, _accessSettings = {};
 const MAX_BODY = 32 * 1024 * 1024, MAX_IMPORT_BODY = 40 * 1024 * 1024, MAX_RESPONSE = 64 * 1024 * 1024;
+function writerContext(req) {
+  const raw=req.headers['x-tvs-writer-schema'];
+  const version=typeof raw==='string'&&/^[1-9][0-9]{0,8}$/.test(raw)?Number(raw):raw===undefined?undefined:null;
+  return {requireWriterSchema:true,writerSchemaVersion:version};
+}
+function storageProfile(dataDir) {
+  const format=require('./storage-format.cjs'),descriptor=storage.descriptor(dataDir);
+  return {descriptor,readOnly:!format.isCurrent(descriptor.schemaVersion)};
+}
 function configureKey(key) { _clientKey = String(key || ''); }
 function configureAccess(settings) { _accessSettings = settings || {}; }
 function configureTransport(options = {}) {
@@ -79,7 +88,7 @@ async function writeRequest(req,res,full,authenticateRequest) {
       if (names.some(name => !storage.SECTIONS.includes(name) || !Array.isArray(sections[name]))) throw new Error('Некорректные разделы');
       if (typeof payload.databaseToken !== 'string' || !payload.databaseToken) { respond(res,428,{ok:false,databaseToken:token,error:'Обновите клиент и заново загрузите базу: для сохранения нужен идентификатор прочитанной базы.'}); return; }
       if (payload.databaseToken !== token) { respond(res,409,{ok:false,databaseChanged:true,databaseToken:token,error:'База данных на сервере изменилась. Заново откройте её перед сохранением.'}); return; }
-      const writeContext = { principal, now:new Date().toISOString(),beforeCommit:backup||undefined };
+      const writeContext = { principal, ...writerContext(req), now:new Date().toISOString(),beforeCommit:backup||undefined };
       const result = full
         ? storage.writeAll(dataDir,sections,{databaseToken:payload.databaseToken,operation:payload.operation,scopeViews:payload.scopeViews,base:payload.base,requireBase:true,...writeContext})
         : storage.writeSections(dataDir,{base:payload.base || {},sections,databaseToken:payload.databaseToken,operation:payload.operation,scopeViews:payload.scopeViews},writeContext);
@@ -102,7 +111,7 @@ async function commandRequest(req,res,authenticateRequest) {
         // its role changed. Only this current principal owns the command.
         const principal=authenticateRequest();
         if(!principal){respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'});return;}
-        const result=storage.executeCommand(dataDir,envelope,{principal,now:new Date().toISOString(),beforeCommit:backup || undefined});
+        const result=storage.executeCommand(dataDir,envelope,{principal,...writerContext(req),now:new Date().toISOString(),beforeCommit:backup || undefined});
         respond(res,result.ok?200:409,result);
       });
     } finally {_writeLock=false;}
@@ -130,7 +139,7 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls,renderPd
     const principal = authenticateRequest();
     if (!principal) { respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'}); return; }
     if (req.method === 'GET' && req.url === '/api/ping') {
-      try { respond(res,200,{ok:true,name:serverName || os.hostname(),version:require('../package.json').version,sections:true,databaseToken:storage.databaseToken(_dataDir),protocol:tls ? 'https:' : 'http:',access:publicAccess(principal)}); }
+      try { respond(res,200,{ok:true,name:serverName || os.hostname(),version:require('../package.json').version,sections:true,databaseToken:storage.databaseToken(_dataDir),protocol:tls ? 'https:' : 'http:',platform:storageProfile(_dataDir),access:publicAccess(principal)}); }
       catch (e) { respond(res,500,{ok:false,error:e.message}); } return;
     }
     if (req.method === 'POST' && ['/api/sections','/api/data'].includes(req.url)) {
@@ -140,10 +149,10 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls,renderPd
       void commandRequest(req,res,authenticateRequest);return;
     }
     if(req.method==='POST'&&req.url==='/api/import-source'){
-      void (async()=>{try{const payload=await readBody(req,MAX_IMPORT_BODY);const result=await require('./import-source.cjs').handle(dataDir,payload,{principal,getPrincipal:authenticateRequest});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'IMPORT_SOURCE_FAILED',error:error.message});}})();return;
+      void (async()=>{try{const payload=await readBody(req,MAX_IMPORT_BODY);const result=await require('./import-source.cjs').handle(dataDir,payload,{principal,...writerContext(req),getPrincipal:authenticateRequest});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'IMPORT_SOURCE_FAILED',error:error.message});}})();return;
     }
     if(req.method==='POST'&&req.url==='/api/document-print'){
-      void (async()=>{try{const payload=await readBody(req);const result=await require('./document-archive.cjs').handle(dataDir,payload,{principal,renderPdf,getPrincipal:authenticateRequest});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'DOCUMENT_PRINT_FAILED',error:error.message});}})();return;
+      void (async()=>{try{const payload=await readBody(req);const result=await require('./document-archive.cjs').handle(dataDir,payload,{principal,...writerContext(req),renderPdf,getPrincipal:authenticateRequest});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'DOCUMENT_PRINT_FAILED',error:error.message});}})();return;
     }
     if (req.method !== 'GET') { respond(res,404,{ok:false,error:'Неизвестный запрос'}); return; }
     try {
@@ -223,7 +232,7 @@ async function request(host,port,apiPath,body,timeout=15000) {
   options.timeout = timeout; options.method = body == null ? 'GET' : 'POST';
   if (body != null) {
     if (typeof body !== 'string' || Buffer.byteLength(body) > (apiPath==='/api/import-source'?MAX_IMPORT_BODY:MAX_BODY)) throw new Error('Слишком большой или неверный запрос');
-    options.headers = {...options.headers,'Content-Type':'application/json; charset=utf-8','Content-Length':Buffer.byteLength(body)};
+    options.headers = {...options.headers,'X-TVS-Writer-Schema':String(require('./storage-format.cjs').SCHEMA_VERSION),'Content-Type':'application/json; charset=utf-8','Content-Length':Buffer.byteLength(body)};
   }
   return await new Promise((resolve,reject) => {
     let req, settled = false;

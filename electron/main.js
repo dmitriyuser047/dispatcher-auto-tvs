@@ -6,6 +6,7 @@ const http    = require('http');
 const updater = require('./updater');
 const server  = require('./server');
 const storage = require('./storage');
+const storageFormat=require('./storage-format.cjs');
 const { writeAtomic, validateSettings, databaseIdentity } = require('./settings');
 const { trustedPage, canInvoke, staticFile } = require('./security');
 const { pathToFileURL } = require('node:url');
@@ -214,9 +215,8 @@ function operationRecovery(){
         const payload=JSON.parse(json),command=Object.hasOwn(payload,'command');
         if(command&&!context.supportsCommands)throw Object.assign(Error('Подключение не поддерживает атомарные команды'),{code:'UNSUPPORTED_COMMANDS',definitive:true});
         if(context.client){if(networkConfigError)throw Error(networkConfigError);return command?server.postCommands(context.host,context.port,json):server.postSections(context.host,context.port,json);}
-        ensureDirs();
-        if(command)return storage.executeCommand(context.directory,payload,{principal:context.principal,beforeCommit:createDailyBackup});
-        createDailyBackup();return storage.writeSections(context.directory,payload,{principal:context.principal});
+        if(command)return storage.executeCommand(context.directory,payload,{principal:context.principal,requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION,beforeCommit:()=>{ensureDirs();createDailyBackup();}});
+        return storage.writeSections(context.directory,payload,{principal:context.principal,requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION,beforeCommit:()=>{ensureDirs();createDailyBackup();}});
       },
       lookup:async(context,id,digest)=>{
         assertOperationContext(context);
@@ -280,7 +280,7 @@ function ensureDirs() {
   const dd = getDataDir();
   const bd = getBackupDir();
   if (!fs.existsSync(dd)) fs.mkdirSync(dd, { recursive: true });
-  if (storage.schemaVersion(dd) < 2) return;
+  if (storage.schemaVersion(dd) < storageFormat.SCHEMA_VERSION) return;
   if (!fs.existsSync(bd)) fs.mkdirSync(bd, { recursive: true });
 }
 
@@ -498,11 +498,9 @@ app.whenReady().then(() => {
         return false;
       }
     }
-    ensureDirs();
-    createDailyBackup();
     try {
       const res = storage.writeAll(getDataDir(), data, { databaseToken:binding.databaseToken, operation:payload.operation,
-        base:payload.base ?? binding.revisions, scopeViews:payload.scopeViews, requireBase:true,
+        base:payload.base ?? binding.revisions, scopeViews:payload.scopeViews, requireBase:true,requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION,beforeCommit:()=>{ensureDirs();createDailyBackup();},
         principal:{ id:'local-profile', name:getActiveUser().name || 'Локальный пользователь', role:'admin' } });
       if (!res.ok) return false;
       binding.revisions = { ...res.revisions };
@@ -602,7 +600,7 @@ app.whenReady().then(() => {
       const fileContext=await captureFileContext(event),context=fileContext.operation;
       if(dataBindings.get(context.senderId)?.platform?.documentPrint!==1)return {ok:false,unsupported:true,code:'UNSUPPORTED_DOCUMENT_PRINT',error:'Подключение не поддерживает сохранённые печатные редакции.'};
       if(!payload||typeof payload!=='object'||Array.isArray(payload)||!['preview','list','read','export'].includes(payload.action))throw Object.assign(Error('Неизвестное действие печати'),{code:'PRINT_ACTION'});
-      const invoke=()=>context.client?server.postDocumentPrint(context.host,context.port,JSON.stringify(payload)):require('./document-archive.cjs').handle(context.directory,payload,{principal:context.principal,renderPdf:renderArchivedDocumentPdf});
+      const invoke=()=>context.client?server.postDocumentPrint(context.host,context.port,JSON.stringify(payload)):require('./document-archive.cjs').handle(context.directory,payload,{principal:context.principal,renderPdf:renderArchivedDocumentPdf,requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION});
       const result=await invoke();await assertFileContext(fileContext);
       if(payload.action!=='export'||result?.ok!==true)return result;
       archiveAck=Object.fromEntries(['archiveHeadChanged','canonicalSections','revisions','databaseToken'].filter(name=>Object.hasOwn(result,name)).map(name=>[name,result[name]]));
@@ -626,7 +624,7 @@ app.whenReady().then(() => {
       request.databaseToken=context.databaseToken;
       const encode=source=>{if(!source||typeof source!=='object')return source;if(source.bytes!==undefined){if(source.base64!==undefined)throw Error('Источник задан дважды');const raw=source.bytes;let bytes;if(raw instanceof ArrayBuffer)bytes=Buffer.from(raw);else if(ArrayBuffer.isView(raw))bytes=Buffer.from(raw.buffer,raw.byteOffset,raw.byteLength);else if(Array.isArray(raw)&&raw.every(value=>Number.isInteger(value)&&value>=0&&value<=255))bytes=Buffer.from(raw);else throw Error('Некорректные байты источника');if(bytes.length>25*1024*1024)throw Error('Исходный файл больше 25 МБ');source.base64=bytes.toString('base64');delete source.bytes;}return source;};
       if(request.source){if(Array.isArray(request.source.files))request.source.files=request.source.files.map(encode);else request.source=encode(request.source);}
-      const result=context.client?await server.postImportSource(context.host,context.port,JSON.stringify(request)):await require('./import-source.cjs').handle(context.directory,request,{principal:context.principal});
+      const result=context.client?await server.postImportSource(context.host,context.port,JSON.stringify(request)):await require('./import-source.cjs').handle(context.directory,request,{principal:context.principal,requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION});
       await assertFileContext(fileContext);
       if(result?.ok===true&&result.databaseToken!==context.databaseToken)throw Object.assign(Error('Ответ импорта относится к другой базе'),{code:'DATABASE_CHANGED'});
       return result;
@@ -1025,9 +1023,11 @@ app.whenReady().then(() => {
 
   ipcMain.handle('reestr-learn', async (event, rows) => {
     const context=await captureFileContext(event);
+    if(context.operation.client)throw Object.assign(Error('Обучение базы распознавания выполняется на компьютере с основной базой'),{code:'FILES_LOCAL_ONLY'});
+    storage.assertWritable(context.operation.directory,{requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION});
     const { learnFromRows } = await loadReestrLib(event,context);
     await assertFileContext(context);
-    return learnFromRows(rows);
+    return storage.withDatabaseLock(context.operation.directory,()=>{assertFileContextSync(context);storage.assertWritable(context.operation.directory,{requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION});return learnFromRows(rows);});
   });
 
   ipcMain.handle('reestr-apply-knowledge', async (event, rows) => {
@@ -1234,10 +1234,9 @@ app.whenReady().then(() => {
       } else result = storage.withDatabaseLock(dir, () => {
         const snapshot = localRegistrySnapshot(dir);
         checkSnapshot(snapshot);
-        storage.makeDailyBackup(dir, path.join(dir, 'backups'), 30);
         const sections = { reestrRows:rows }, base = { reestrRows:context.revision };
         return storage.writeSections(dir, { databaseToken:context.databaseToken, base, sections }, {
-          principal:{ id:'local-profile', name:getActiveUser().name || 'Локальный пользователь', role:'admin' } });
+          principal:{ id:'local-profile', name:getActiveUser().name || 'Локальный пользователь', role:'admin' },requireWriterSchema:true,writerSchemaVersion:storageFormat.SCHEMA_VERSION,beforeCommit:()=>storage.makeDailyBackup(dir,path.join(dir,'backups'),30) });
       });
       if (!result?.ok) throw new Error(result?.error || 'Реестр изменён другим пользователем. Откройте его заново.');
       context.rows = rows; context.baseRows = rows; context.revision = result.revisions.reestrRows;
