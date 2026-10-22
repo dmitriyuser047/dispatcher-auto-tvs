@@ -1,0 +1,20 @@
+[
+  {
+    "name": "storage-format-v3.cjs",
+    "source": "electron/storage-format.cjs",
+    "commit": "d527ddf6c576726695d92a1994a3020da9d5b0ee",
+    "sha256": "9d04e220a013d8b8c160962b6373b1a5e2a2759a3dfcc69f9be84ea8c9b8a9f3"
+  },
+  {
+    "name": "sqlite-storage-v3.cjs",
+    "source": "electron/sqlite-storage.cjs",
+    "commit": "d527ddf6c576726695d92a1994a3020da9d5b0ee",
+    "sha256": "3d470daf99600b5bd5d044dfd986079ce76c1248ce000d64d46f019f4462ff8c"
+  },
+  {
+    "name": "storage-v3.cjs",
+    "source": "electron/storage.js",
+    "commit": "d527ddf6c576726695d92a1994a3020da9d5b0ee",
+    "sha256": "04d8656339be8545693ceaa4a96bbd81f768b931e1c76029dba1553dc42cbf39"
+  }
+]

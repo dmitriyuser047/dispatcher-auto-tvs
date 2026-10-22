@@ -49,7 +49,7 @@ function schemaVersion(dataDir){
   const initialJournal=path.join(sectionsDir(dataDir),'.transaction.json');
   if(!fs.existsSync(legacyFile(dataDir))&&fs.existsSync(initialJournal)){
     const tx=readJson(initialJournal);
-    if(tx?.schemaVersion===storageFormat.SCHEMA_VERSION&&tx.base===null&&tx.before&&Object.keys(tx.before).length===SECTIONS.length&&SECTIONS.every(name=>Object.hasOwn(tx.before,name)&&tx.before[name]===null)&&storageFormat.decodeRevisions(tx.revisions).schemaVersion===storageFormat.SCHEMA_VERSION)return storageFormat.SCHEMA_VERSION;
+    if(tx?.schemaVersion===storageFormat.SCHEMA_VERSION&&tx.base===null&&tx.before&&Object.keys(tx.before).length===SECTIONS.length&&SECTIONS.every(name=>Object.hasOwn(tx.before,name)&&tx.before[name]===null)&&((tx.version===2&&tx.initial===true)||(tx.version===undefined&&storageFormat.decodeRevisions(tx.revisions).schemaVersion===storageFormat.SCHEMA_VERSION)))return storageFormat.SCHEMA_VERSION;
   }
   if(fs.existsSync(sectionFile(dataDir,'documentDrafts')))throw Object.assign(new Error('Повреждены версии новой базы. Восстановите их из копии; автоматическое создание запрещено.'),{code:'STORAGE_REVISIONS'});
   if(fs.existsSync(legacyFile(dataDir))){const legacy=readJson(legacyFile(dataDir));if(Array.isArray(legacy?.documentDrafts)&&legacy.documentDrafts.length)throw Object.assign(new Error('Неверсионированный файл содержит новые документы. Восстановите его в отдельную базу из резервного пакета; документы не были скрыты или удалены.'),{code:'STORAGE_FORMAT'});}
@@ -64,7 +64,8 @@ function canonicalDirectory(dataDir) {
   return runtimeProcess.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 function databaseToken(dataDir) {
-  return withDatabaseLock(dataDir,()=>{
+  return withDatabaseLock(dataDir,physical=>{
+    dataDir=physical;
     const sqlite=sqliteBackend(dataDir);
     const identity=sqlite ? sqlite.readIdentity(dataDir) : require('./database-identity.cjs').readOrCreate(dataDir,{create:schemaVersion(dataDir)>=storageFormat.SCHEMA_VERSION});
     return crypto.createHash('sha256').update(JSON.stringify(['tvs-database',canonicalDirectory(dataDir),identity?.uuid??'legacy-readonly',identity?.generation??0])).digest('hex');
@@ -96,15 +97,15 @@ function withDatabaseLock(dataDir, action) {
   // Reading an older schema must not create or recover a lock, identity, WAL,
   // transaction journal or any other file in the original directory.
   if(fs.existsSync(dataDir)&&schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION){
-    const key=canonicalDirectory(dataDir);if(heldLocks.has(key))return action();
+    const physical=fs.realpathSync(path.resolve(dataDir)),key=runtimeProcess.platform==='win32'?physical.toLowerCase():physical;if(heldLocks.has(key))return action(physical);
     const locks=['.tvs-database.lock','.tvs-database.lock.recovery'];if(locks.some(name=>fs.existsSync(path.join(key,name))))throw lockError(path.join(key,locks[0]),'Старая база открыта другим процессом; изменение её блокировок запрещено.');
     const files=sqliteBackend(dataDir)?['platform.sqlite','platform.sqlite-wal','platform.sqlite-shm']:['data.json','database-identity.json',...SECTIONS.map(name=>path.join('sections',name+'.json')),path.join('sections',REVISIONS_FILE),path.join('sections','.transaction.json')];
     const stamp=()=>JSON.stringify(files.map(name=>{const target=path.join(dataDir,name);try{const info=fs.lstatSync(target);if(!info.isFile()||info.isSymbolicLink())throw Error('Недопустимый исходный файл старой базы');return [name,info.size,crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex')];}catch(error){if(error.code==='ENOENT')return [name,null];throw error;}}));
-    const before=stamp();heldLocks.set(key,{readOnly:true});try{const result=action();if(result&&typeof result.then==='function')throw Error('Чтение старой базы должно быть синхронным');if(stamp()!==before)throw Object.assign(Error('Старая база изменилась во время чтения'),{code:'SCHEMA_SOURCE_CHANGED'});return result;}finally{heldLocks.delete(key);}
+    const before=stamp();heldLocks.set(key,{readOnly:true});try{const result=action(physical);if(result&&typeof result.then==='function')throw Error('Чтение старой базы должно быть синхронным');if(stamp()!==before)throw Object.assign(Error('Старая база изменилась во время чтения'),{code:'SCHEMA_SOURCE_CHANGED'});return result;}finally{heldLocks.delete(key);}
   }
   fs.mkdirSync(dataDir, { recursive: true });
-  const key = canonicalDirectory(dataDir);
-  if (heldLocks.has(key)) return action();
+  const physical=fs.realpathSync(path.resolve(dataDir)),key=runtimeProcess.platform==='win32'?physical.toLowerCase():physical;
+  if (heldLocks.has(key)) return action(physical);
   const file = path.join(key, '.tvs-database.lock'), recovery = file + '.recovery';
   const owner = { host: os.hostname(), pid: runtimeProcess.pid, nonce: crypto.randomUUID(), startedAt: new Date().toISOString() };
   if (fs.existsSync(recovery)) throw lockError(recovery, 'Проверяется аварийная блокировка.');
@@ -130,7 +131,7 @@ function withDatabaseLock(dataDir, action) {
   if (fs.existsSync(recovery)) { releaseLock(file, fd, owner); throw lockError(recovery, 'Проверяется аварийная блокировка.'); }
   heldLocks.set(key, owner);
   try {
-    const result = action();
+    const result = action(physical);
     if (result && typeof result.then === 'function') throw new Error('Блокировка базы поддерживает только синхронные операции');
     return result;
   } finally { heldLocks.delete(key); releaseLock(file, fd, owner); }
@@ -251,49 +252,78 @@ function recoverTransaction(dataDir) {
   const journal = path.join(sectionsDir(dataDir), '.transaction.json');
   if (!fs.existsSync(journal)) return;
   if(schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION)throw Object.assign(Error('В старой базе обнаружено незавершённое сохранение; используйте прежнюю программу для восстановления перед копированием.'),{code:'SCHEMA_RECOVERY_REQUIRED'});
-  const tx = readJson(journal);
-  if(tx?.schemaVersion!==storageFormat.SCHEMA_VERSION){const error=new Error('Старая база содержит незавершённое сохранение. Восстановите её прежней версией программы перед созданием обновлённой копии.');error.code='SCHEMA_RECOVERY_REQUIRED';throw error;}
-  const object = value => value && typeof value === 'object' && !Array.isArray(value);
-  const names = object(tx?.sections) ? Object.keys(tx.sections) : null;
-  // Recover using the schema recorded by the interrupted transaction. New
-  // optional sections are added by readRevisions only after recovery finishes.
-  const revisionsValid = value => {try{return storageFormat.decodeRevisions(value).schemaVersion===storageFormat.SCHEMA_VERSION;}catch{return false;}};
-  if (!tx || !names || !object(tx.before) ||
-      names.some(n => !SECTIONS.includes(n) || !Array.isArray(tx.sections[n]) || !Object.hasOwn(tx.before, n) || tx.before[n] !== null && !Array.isArray(tx.before[n])) ||
-      !revisionsValid(tx.revisions, ['vehicles', 'records', ...names]) ||
-      tx.base !== null && !revisionsValid(tx.base, ['vehicles', 'records'])) throw new Error('Повреждён журнал сохранения');
-  const committed = JSON.stringify(readJson(revisionsFile(dataDir), null)) === JSON.stringify(tx.revisions);
-  const target = committed ? tx.sections : tx.before;
-  Object.keys(tx.sections).forEach(name => {
-    const file = sectionFile(dataDir, name), rows = target[name];
-    if (rows === null) { if (fs.existsSync(file)) fs.unlinkSync(file); }
-    else writeJsonAtomic(file, rows);
-  });
-  if (committed || tx.base !== null) writeJsonAtomic(revisionsFile(dataDir), committed ? tx.revisions : tx.base);
-  else if (fs.existsSync(revisionsFile(dataDir))) fs.unlinkSync(revisionsFile(dataDir));
-  fs.unlinkSync(journal);
+  const managed=require('./operation-store.cjs').managedFiles(path.resolve(dataDir)),snapshot=managed.read(journal,192*1024*1024),tx=JSON.parse(snapshot.bytes.toString('utf8'));
+  if(tx?.version===2)return recoverCurrentTransaction(dataDir,managed,snapshot,tx);
+  // Schema 4 has never used the old unbound repair format. A legacy journal
+  // must be recovered by its original writer before the separate copy upgrade.
+  throw Object.assign(Error('Не поддерживается журнал восстановления этой базы'),{code:'SCHEMA_RECOVERY_REQUIRED'});
 }
 
-function commitSections(dataDir, sections, revisions) {
-  if (!Object.keys(sections).length) return;
+function commitSections(dataDir, sections, revisions, options={}) {
   assertWritable(dataDir);
   const sqlite = sqliteBackend(dataDir);
-  if (sqlite) return sqlite.commitSections(dataDir,sections,revisions);
-  const changed = Object.keys(sections);
-  if (!changed.length) return;
-  const journal = path.join(sectionsDir(dataDir), '.transaction.json');
-  const before = Object.fromEntries(changed.map(n => [n, readJson(sectionFile(dataDir, n), null)]));
-  const base = readJson(revisionsFile(dataDir), null);
-  const encoded=storageFormat.encodeRevisions(revisions);
-  writeJsonAtomic(journal, {schemaVersion:storageFormat.SCHEMA_VERSION, before, base, sections, revisions:encoded });
+  if (sqlite) return sqlite.commitSections(dataDir,sections,revisions,options);
+  const store=require('./operation-store.cjs'),managed=store.managedFiles(path.resolve(dataDir)),changed=Object.keys(sections),journal=path.join(sectionsDir(dataDir),'.transaction.json'),base=managed.read(revisionsFile(dataDir)),before={},after={},current={};
+  if(changed.some(name=>!SECTIONS.includes(name)))throw Object.assign(Error('Неизвестный раздел сохранения'),{code:'STORAGE_TRANSACTION'});
+  managed.verifyDirectory(sectionsDir(dataDir),true);
+  for(const name of changed){validateRows(name,sections[name]);current[name]=managed.read(sectionFile(dataDir,name),64*1024*1024);before[name]=current[name]?.bytes.toString('base64')??null;after[name]=Buffer.from(JSON.stringify(sections[name])).toString('base64');}
+  let operation,operationState;
+  if(options.initialSeed){
+    if(base||fs.existsSync(legacyFile(dataDir))||changed.length!==SECTIONS.length||Object.values(before).some(value=>value!==null))throw Object.assign(Error('Инициализация разрешена только новой базе'),{code:'OPERATION_INITIALIZE'});
+    const seed=store.validateSeed({operationState:options.initialSeed.operationState,operationObjects:options.initialSeed.objects,hotRows:sections.auditLog});store.putObjects(dataDir,seed.objects);operationState=seed.operationState;operation={objects:seed.objects.map(object=>object.id)};
+  }else{
+    if(!base)throw Object.assign(Error('Отсутствует состояние текущей базы'),{code:'OPERATION_STATE_MISSING'});
+    const previousHotRows=changed.includes('auditLog')?JSON.parse(Buffer.from(before.auditLog,'base64')):readRows(dataDir,'auditLog'),plan=store.validateCommit(dataDir,{expectedOperationState:options.expectedOperationState??store.readState(dataDir),nextOperationState:options.nextOperationState??storageFormat.createOperationState(store.readState(dataDir).head),operationPlans:options.operationPlans??[]},{previousHotRows,nextHotRows:sections.auditLog??previousHotRows});store.putObjects(dataDir,plan.objects);operation=plan.reference;operationState=plan.nextOperationState;
+  }
+  const encoded=Buffer.from(JSON.stringify(storageFormat.encodeRevisions(revisions,storageFormat.describe(4),operationState))),tx={version:2,schemaVersion:4,initial:!!options.initialSeed,before,after,base:base?.bytes.toString('base64')??null,next:encoded.toString('base64'),operation},journalBytes=Buffer.from(JSON.stringify(tx));
+  const journalSnapshot=managed.atomic(journal,journalBytes,null,192*1024*1024);
   try {
-    changed.forEach(n => writeJsonAtomic(sectionFile(dataDir, n), sections[n]));
-    writeJsonAtomic(revisionsFile(dataDir), encoded);
+    // Revalidate the complete durable intent before the first business change.
+    validateCurrentTransaction(dataDir,managed,journalSnapshot,tx);
+    changed.forEach(name=>managed.atomic(sectionFile(dataDir,name),Buffer.from(after[name],'base64'),current[name],64*1024*1024));
+    managed.atomic(revisionsFile(dataDir),encoded,base);
   } catch (e) {
     recoverTransaction(dataDir);
     throw e;
   }
-  try { fs.unlinkSync(journal); } catch (e) { console.error('[storage] cleanup: ' + e.message); }
+  managed.unlink(journal,journalSnapshot,192*1024*1024);
+  if(sections.auditLog)require('./platform-service.cjs').bindHistory({auditLog:sections.auditLog},dataDir);
+}
+
+function transactionFailure(){throw Object.assign(Error('Журнал сохранения или файлы базы изменены. Автоматическое восстановление остановлено.'),{code:'STORAGE_TRANSACTION',status:409});}
+function journalBytes(value,nullable=false){if(value===null&&nullable)return null;if(typeof value!=='string'||value.length>256*1024*1024||! /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value))transactionFailure();const bytes=Buffer.from(value,'base64');if(bytes.toString('base64')!==value)transactionFailure();return bytes;}
+function validateCurrentTransaction(dataDir,managed,snapshot,tx){
+  const object=value=>value&&typeof value==='object'&&!Array.isArray(value),keys=value=>Object.keys(value).sort().join('|');
+  if(!object(tx)||keys(tx)!==['version','schemaVersion','initial','before','after','base','next','operation'].sort().join('|')||tx.version!==2||tx.schemaVersion!==4||typeof tx.initial!=='boolean'||!object(tx.before)||!object(tx.after)||keys(tx.before)!==keys(tx.after)||Object.keys(tx.before).some(name=>!SECTIONS.includes(name)))transactionFailure();
+  const before={},after={},files={},base=journalBytes(tx.base,true),next=journalBytes(tx.next),decode=bytes=>{const value=storageFormat.decodeRevisions(JSON.parse(bytes));if(value.schemaVersion!==4)transactionFailure();return value;},nextDecoded=decode(next),baseDecoded=base?decode(base):null;
+  for(const name of Object.keys(tx.before)){before[name]=journalBytes(tx.before[name],true);after[name]=journalBytes(tx.after[name]);for(const bytes of [before[name],after[name]])if(bytes!==null){if(bytes.length>64*1024*1024)transactionFailure();validateRows(name,JSON.parse(bytes));}files[name]=managed.read(sectionFile(dataDir,name),64*1024*1024);const bytes=files[name]?.bytes??null;if(!(bytes===null&&before[name]===null)&&!bytes?.equals(before[name]??Buffer.alloc(0))&&!bytes?.equals(after[name]))transactionFailure();}
+  const revisionSnapshot=managed.read(revisionsFile(dataDir)),actual=revisionSnapshot?.bytes??null,committed=!!actual?.equals(next);if(!committed&&!(actual===null&&base===null)&&!actual?.equals(base??Buffer.alloc(0)))transactionFailure();
+  const store=require('./operation-store.cjs');
+  if(tx.initial){if(base!==null||fs.existsSync(legacyFile(dataDir))||Object.keys(before).length!==SECTIONS.length||Object.values(before).some(value=>value!==null)||!object(tx.operation)||keys(tx.operation)!=='objects'||!Array.isArray(tx.operation.objects))transactionFailure();const objects=tx.operation.objects.map(id=>{const bytes=store.readObject(dataDir,id);if(!bytes)transactionFailure();return {id,json:bytes.toString('utf8')};});store.validateSeed({operationState:nextDecoded.operationState,operationObjects:objects,hotRows:JSON.parse(after.auditLog)});}
+  else{if(!baseDecoded||!object(tx.operation)||JSON.stringify(baseDecoded.operationState)!==JSON.stringify(tx.operation.expectedOperationState)||JSON.stringify(nextDecoded.operationState)!==JSON.stringify(tx.operation.nextOperationState))transactionFailure();const hot=managed.read(sectionFile(dataDir,'auditLog'),64*1024*1024);if(!hot)transactionFailure();store.validateCommit(dataDir,tx.operation,{previousHotRows:JSON.parse(before.auditLog??hot.bytes),nextHotRows:JSON.parse(after.auditLog??hot.bytes),recovery:true});}
+  managed.assertFile(path.join(sectionsDir(dataDir),'.transaction.json'),snapshot,192*1024*1024);
+  return {before,after,files,base,next,committed,revisionSnapshot};
+}
+function recoverCurrentTransaction(dataDir,managed,snapshot,tx){
+  const checked=validateCurrentTransaction(dataDir,managed,snapshot,tx),target=checked.committed?checked.after:checked.before;
+  // All bytes and object references were checked before any recovery mutation.
+  for(const [name,bytes]of Object.entries(target)){const current=checked.files[name];if(bytes===null){if(current)managed.unlink(sectionFile(dataDir,name),current,64*1024*1024);}else if(!current?.bytes.equals(bytes))managed.atomic(sectionFile(dataDir,name),bytes,current,64*1024*1024);}
+  const revisions=checked.committed?checked.next:checked.base;if(revisions===null){if(checked.revisionSnapshot)managed.unlink(revisionsFile(dataDir),checked.revisionSnapshot);}else if(!checked.revisionSnapshot?.bytes.equals(revisions))managed.atomic(revisionsFile(dataDir),revisions,checked.revisionSnapshot);
+  managed.unlink(path.join(sectionsDir(dataDir),'.transaction.json'),snapshot,192*1024*1024);
+}
+
+// Explicit trusted NEW-target initializer. It validates JSON structure but does
+// not reinterpret or repair old domain facts through a new-transaction planner.
+function createJson(dataDir,input){
+  if(!input||typeof input!=='object'||Array.isArray(input)||!input.data||typeof input.data!=='object'||Array.isArray(input.data)||Object.keys(input.data).some(name=>!SECTIONS.includes(name)))throw Object.assign(Error('Для создания нужны исходные разделы базы'),{code:'JSON_CREATE'});
+  const safe=require('./safe-file.cjs'),store=require('./operation-store.cjs'),location=path.resolve(dataDir),parent=safe.verifiedDirectory(path.dirname(location)),descriptor=storageFormat.validateDescriptor(input.descriptor??storageFormat.describe(4),4),identity=require('./database-identity.cjs').validate(input.identity??{format:'tvs-database-identity',version:1,uuid:crypto.randomUUID(),generation:1});
+  const data=require('../assets/core/platform-contracts.js').validateSections(Object.fromEntries(SECTIONS.map(name=>[name,Object.hasOwn(input.data,name)?input.data[name]:[]])),SECTIONS),raw=input.revisions??{};
+  if(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.keys(raw).some(name=>!SECTIONS.includes(name))||Object.values(raw).some(value=>!Number.isSafeInteger(value)||value<0))throw Object.assign(Error('Некорректные исходные версии разделов'),{code:'JSON_CREATE'});
+  const revisions=Object.fromEntries(SECTIONS.map(name=>[name,raw[name]??0])),provided=Object.hasOwn(input,'operationState')||Object.hasOwn(input,'operationObjects'),seed=provided?store.validateSeed({operationState:input.operationState,operationObjects:input.operationObjects,hotRows:data.auditLog}):store.bootstrap({auditRows:data.auditLog});data.auditLog=seed.hotRows;
+  safe.assertDirectory(parent);if(fs.existsSync(location)){safe.verifiedDirectory(location);if(fs.readdirSync(location).length)throw Object.assign(Error('База создаётся только в новом или пустом отдельном каталоге'),{code:'JSON_TARGET_NOT_EMPTY'});}else fs.mkdirSync(location,{mode:0o700});
+  const files=store.managedFiles(location);store.putObjects(location,seed.objects);files.atomic(path.join(location,'database-identity.json'),Buffer.from(JSON.stringify(identity)),null,4096);files.verifyDirectory(path.join(location,'sections'),true);
+  for(const name of SECTIONS)files.atomic(sectionFile(location,name),Buffer.from(JSON.stringify(data[name])),null,64*1024*1024);
+  files.atomic(revisionsFile(location),Buffer.from(JSON.stringify(storageFormat.encodeRevisions(revisions,descriptor,seed.operationState))),null);return {ok:true,path:location,schemaVersion:4,descriptor,identity};
 }
 
 // PeriodPolicy, registered in the shared kernel, owns fuel/stock/finance
@@ -331,7 +361,8 @@ function migrate(dataDir) {
     revisions[name] = existing.length ? Date.now() : 1;
     records += arr.length;
   });
-  commitSections(dataDir, sections, revisions);
+  const seed=require('./operation-store.cjs').bootstrap({auditRows:sections.auditLog});sections.auditLog=seed.hotRows;
+  commitSections(dataDir, sections, revisions,{initialSeed:seed});
 
   if (data) {
     // Помечаем исходник, чтобы было видно: он больше не рабочий
@@ -351,6 +382,7 @@ function readAll(dataDir) {
   const out = {};
   SECTIONS.forEach(name => { out[name] = readRows(dataDir, name); });
   require('../assets/core/platform-contracts.js').validateSections(out,SECTIONS);
+  if(schemaVersion(dataDir)===4){require('./operation-store.cjs').validateHot(dataDir,out.auditLog);require('./platform-service.cjs').bindHistory(out,dataDir);}
   return out;
 }
 
@@ -430,9 +462,10 @@ function writeAll(dataDir, data, options = {}) {
     changed.push(name);
   });
 
+  const history=sections.auditLog?platform.prepareHistoryCommit(dataDir,previous,sections,revisions,{...options,historyInputSections:Object.keys(data)}):{sections};
   if(changed.length&&options.beforeCommit!==undefined){if(typeof options.beforeCommit!=='function')throw Error('Ожидалась синхронная подготовка записи');const result=options.beforeCommit();if(result&&typeof result.then==='function')throw Error('Подготовка записи должна быть синхронной');}
-  commitSections(dataDir, sections, revisions);
-  return platform.filteredResult({ ok:true, changed, revisions, databaseToken:token, canonicalSections:sections,
+  if(changed.length||history.nextOperationState)commitSections(dataDir, history.sections, revisions,history);
+  return platform.filteredResult({ ok:true, changed, revisions, databaseToken:token, canonicalSections:history.sections,
     ...(prepared.archiveHeadChanged?{archiveHeadChanged:true}:{}),...(prepared.archive?{archive:prepared.archive}:{}),
     ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) },options.principal,{...previous,...sections});
 }
@@ -456,6 +489,7 @@ function readSnapshot(dataDir,options={}) {
   return {data,revisions:options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?revisions[name]:0])):revisions,databaseToken:databaseToken(dataDir),...(options.principal?{scopeViews:platform.scopeViews(database,revisions,options.principal)}:{}),platform:{apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,...(require('./access-context.cjs').hasNarrowing(options.principal)?{scopedAccess:1}:{}),schemaVersion:version,currentSchemaVersion:storageFormat.SCHEMA_VERSION,descriptor:descriptor(dataDir),readOnly:version<storageFormat.SCHEMA_VERSION,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,calendar:version>=2?1:0,personnelPlanning:version>=2?1:0,documentPrint:version>=2?1:0,controlledImports:version>=2?1:0,needsSchemaUpgrade:version<storageFormat.SCHEMA_VERSION}};
 }
 function readOperation(dataDir,query,principal){
+  if(schemaVersion(dataDir)===4)return require('./platform-service.cjs').readReceipt(dataDir,query,principal);
   const token=databaseToken(dataDir),database=readAll(dataDir);
   return {ok:true,databaseToken:token,operationReceipt:require('./platform-service.cjs').findReceipt(database.auditLog,query,principal,token,database)};
 }
@@ -510,6 +544,7 @@ function writeSections(dataDir, payload, options = {}) {
     revisions[name] = (revisions[name] || 0) + 1;
     changed.push(name);
   });
+  const history=pending.auditLog?platform.prepareHistoryCommit(dataDir,previous,pending,revisions,{...context,historyInputSections:names}):{sections:pending};
   // Trusted maintenance hooks run only for a new, fully validated commit. A
   // replay, conflict or refused command must not create a backup as a side effect.
   if (changed.length && options.beforeCommit !== undefined) {
@@ -517,9 +552,36 @@ function writeSections(dataDir, payload, options = {}) {
     const preparedCommit = options.beforeCommit();
     if (preparedCommit && typeof preparedCommit.then === 'function') throw new Error('Подготовка записи должна быть синхронной');
   }
-  commitSections(dataDir, pending, revisions);
+  if(changed.length||history.nextOperationState)commitSections(dataDir, history.sections, revisions,history);
   return platform.filteredResult({ ok: true, changed, revisions, databaseToken: token,
     canonicalSections:pending,...(prepared.archiveHeadChanged?{archiveHeadChanged:true}:{}),...(prepared.archive?{archive:prepared.archive}:{}), ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) },options.principal,{...previous,...pending});
+}
+
+function archiveHistory(dataDir,input,options={}){
+  const principal=options.getPrincipal?options.getPrincipal():options.principal,access=require('./access-context.cjs');
+  const broad=principal&&['readable','writable'].every(key=>principal[key]===undefined||principal[key]===null||Array.isArray(principal[key])&&principal[key].includes('*'));
+  if(!principal||principal.role!=='admin'||!broad||access.hasNarrowing(principal))throw Object.assign(Error('Архивация истории разрешена действующему администратору без ограничений доступа'),{code:'ACCESS_DENIED',status:403});
+  assertWritable(dataDir,options);assertWriteCompatibility(dataDir,{...options,principal});
+  const token=databaseToken(dataDir),store=require('./operation-store.cjs'),state=store.readState(dataDir);
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['databaseToken','expectedTransactionId','throughSeq'].includes(key))||input.databaseToken!==token)throw Object.assign(Error('База данных изменилась'),{code:'DATABASE_CHANGED',status:409});
+  if(input.expectedTransactionId!==state.transactionId)throw Object.assign(Error('История изменилась; перечитайте состояние перед архивацией'),{code:'OPERATION_STATE_CONFLICT',status:409});
+  if(!Number.isSafeInteger(input.throughSeq)||input.throughSeq<0||input.throughSeq>state.head.lastSeq)throw Object.assign(Error('Некорректная граница архивации'),{code:'HISTORY_RANGE',status:400});
+  const before=readAll(dataDir),revisions=readRevisions(dataDir),plan=store.prepareCommit(dataDir,{expectedOperationState:state,previousHotRows:before.auditLog,archiveThroughSeq:input.throughSeq}),changed=JSON.stringify(before.auditLog)!==JSON.stringify(plan.hotRows),sections=changed?{auditLog:plan.hotRows}:{};
+  if(changed)revisions.auditLog++;
+  if(options.beforeCommit!==undefined){if(typeof options.beforeCommit!=='function')throw Error('Ожидалась синхронная подготовка записи');if(options.beforeCommit()?.then)throw Error('Подготовка записи должна быть синхронной');}
+  commitSections(dataDir,sections,revisions,plan);
+  return require('./platform-service.cjs').filteredResult({ok:true,databaseToken:token,revisions,canonicalSections:{auditLog:plan.hotRows}},principal,{...before,auditLog:plan.hotRows});
+}
+
+function commitPrintArtifact(dataDir,input,options={}){
+  return withDatabaseLock(dataDir,physical=>{
+    dataDir=physical;
+    const sql=sqliteBackend(dataDir),readOnly=schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||options.requireWriterSchema===true&&options.writerSchemaVersion!==storageFormat.SCHEMA_VERSION||!hasWriteCompatibility(dataDir,options,'documentPrint');
+    const action=()=>require('./document-archive.cjs').commitArtifact(dataDir,input,options,(directory,sections,revisions)=>{
+      const previous=readAll(directory),history=require('./platform-service.cjs').prepareHistoryCommit(directory,previous,sections,revisions,options);commitSections(directory,history.sections,revisions,history);
+    });
+    const result=sql?sql.transaction(dataDir,action,{readOnly}):action();if(!readOnly&&!result?.replayed)require('./document-archive.cjs').recover(dataDir,undefined,options);return result;
+  });
 }
 
 /** Ежедневная резервная копия: складываем разделы обратно в один файл */
@@ -527,7 +589,9 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
   if(schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION)return null;
   if (!isSplit(dataDir)) return null;
   const today = new Date().toISOString().slice(0, 10);
-  const archiveAware=!!require('./document-archive.cjs').head(readAll(dataDir));
+  // The compact receipt/index closure is authoritative even without a printed
+  // document. A schema-4 daily copy must always use the service-aware package.
+  const archiveAware=schemaVersion(dataDir)>=4||!!require('./document-archive.cjs').head(readAll(dataDir));
   const dest = path.join(backupDir, 'data_' + today + (archiveAware?'.zip':'.json'));
   if (fs.existsSync(dest)) return null;
   fs.mkdirSync(backupDir, { recursive: true });
@@ -545,13 +609,14 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
 
 module.exports = {
   SECTIONS, sectionsDir, sectionFile, revisionsFile,schemaVersion,descriptor,assertWritable,assertWriteCompatibility,hasWriteCompatibility,encodeRevisions:storageFormat.encodeRevisions,
-  databaseToken, withDatabaseLock, validateRows, prepareWriteoffSections,
+  databaseToken, withDatabaseLock, validateRows, prepareWriteoffSections,createJson,
   executeCommand:(dataDir,envelope,options)=>require('./command-service.cjs').execute(dataDir,envelope,options),
-  commitPrintArtifact:(dataDir,input,options={})=>withDatabaseLock(dataDir,()=>{const sql=sqliteBackend(dataDir),readOnly=schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||options.requireWriterSchema===true&&options.writerSchemaVersion!==storageFormat.SCHEMA_VERSION||!hasWriteCompatibility(dataDir,options,'documentPrint'),action=()=>require('./document-archive.cjs').commitArtifact(dataDir,input,options,commitSections);const result=sql?sql.transaction(dataDir,action,{readOnly}):action();if(!readOnly&&!result?.replayed)require('./document-archive.cjs').recover(dataDir,undefined,options);return result;}),
+  commitPrintArtifact,
   isDatabaseLockHeld:dataDir=>heldLocks.has(canonicalDirectory(dataDir)),
-  ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot,readOperation }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, () => {
+  ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot,readOperation,archiveHistory }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, physical => {
+    dataDir=physical;
     const sqlite = sqliteBackend(dataDir), action = () => {try{return operation(dataDir,...args);}catch(error){const principal=name==='readSnapshot'?args[0]?.principal:name==='readOperation'?args[1]:args[1]?.principal;throw require('./access-control').publicError(error,principal);}};
-    const writing=['writeAll','writeSections'].includes(name),nested=sqlite?.inTransaction(dataDir),readOnly=!writing||schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||args[1]?.requireWriterSchema===true&&args[1]?.writerSchemaVersion!==storageFormat.SCHEMA_VERSION||writing&&!hasWriteCompatibility(dataDir,args[1]);
+    const writing=['writeAll','writeSections','archiveHistory'].includes(name),nested=sqlite?.inTransaction(dataDir),readOnly=!writing||schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||args[1]?.requireWriterSchema===true&&args[1]?.writerSchemaVersion!==storageFormat.SCHEMA_VERSION||writing&&!hasWriteCompatibility(dataDir,args[1]);
     const result=!sqlite||['isSplit','migrate'].includes(name)?action():sqlite.transaction(dataDir,action,{readOnly});
     if(writing&&!nested&&!readOnly&&!result?.replayed)require('./document-archive.cjs').recover(dataDir,undefined,args[1]);
     return result;

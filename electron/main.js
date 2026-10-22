@@ -631,6 +631,17 @@ app.whenReady().then(() => {
     } catch(error) { return {ok:false,code:error.code||'QUERY_FAILED',error:error.message}; }
   });
 
+  ipcMain.handle('query-history',async(event,query)=>{
+    try{
+      const context=readableOperationContext(event);let result;
+      if(context.client){if(networkConfigError)throw Error(networkConfigError);result=await server.getJson(context.host,context.port,'/api/history?query='+encodeURIComponent(JSON.stringify(query)),30000);}
+      else result=require('./platform-service.cjs').queryHistory(context.directory||getDataDir(),query,context.principal);
+      assertOperationContext(context);
+      if(result?.databaseToken!==context.databaseToken)throw Object.assign(Error('База изменилась. Загрузите историю заново.'),{code:'CURSOR_STALE'});
+      return result;
+    }catch(error){return {ok:false,code:error.code||'HISTORY_FAILED',error:error.message};}
+  });
+
   ipcMain.handle('write-sections', async (_event, jsonStr) => {
     let payload,binding;
     try {

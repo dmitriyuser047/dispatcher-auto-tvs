@@ -8,6 +8,32 @@ const kernel = () => require('../assets/core/platform-kernel.js');
 const schema = () => require('../assets/core/platform-schema.js');
 const contracts = () => require('../assets/core/platform-contracts.js');
 const accessContext = () => require('./access-context.cjs');
+// Kept outside serializable database rows. Object spreads retain the raw hot
+// array, while a renderer clone cannot manufacture this trusted capability.
+const historyBindings = new WeakMap();
+function bindHistory(database,dataDir){
+  if(!Array.isArray(database?.auditLog))return database;
+  const store=require('./operation-store.cjs');
+  historyBindings.set(database.auditLog,{state:store.readState(dataDir),engine:store.engine(dataDir),receipts:new Map()});
+  return database;
+}
+function boundReceipt(binding,id){
+  if(!binding.receipts.has(id))binding.receipts.set(id,binding.engine.inspectReceipt(binding.state.head,id));
+  return binding.receipts.get(id);
+}
+function projectHistoryEvent(event,principal,binding){
+  const evidence=require('./operation-evidence.cjs'),stored=typeof event?.operationId==='string'?boundReceipt(binding,event.operationId):null;
+  return publicAuditRow(stored?.kind==='receipt'&&!stored.legacy?evidence.projectEvent(event,stored.proof,principal):evidence.projectLegacyEvent(event,principal));
+}
+function publicAuditRow(row){if(!row)return null;const {archiveScope,...publicRow}=row;return publicRow;}
+function literalReceipt(stored){
+  const value=stored.receipt,result=value.result||{};
+  return {...result,id:result.id??'operation:'+value.operation.id,type:'transaction',source:'platform',section:'auditLog',operationId:value.operation.id,requestDigest:value.operation.digest,databaseToken:value.operation.databaseToken,actorId:value.operation.actorId,actorRole:value.operation.actorRole,at:value.at,changedSections:value.changedSections,revisions:value.revisions};
+}
+function authorizeStoredProof(proof,principal,receipt){
+  const evidence=require('./operation-evidence.cjs');
+  try{return evidence.authorizeProof(proof.status==='legacy-unverified'&&proof.request?.status==='unknown'?evidence.createLegacyProof(receipt):proof,principal,receipt);}catch{return false;}
+}
 
 function fail(code, message, status) {
   const error = new Error(message); error.code = code; error.status = status || 400; throw error;
@@ -18,6 +44,11 @@ function principalOf(principal) {
   return { id:String(value.id || 'local-profile'), name:String(value.name || 'Локальный пользователь'), role:value.role };
 }
 function visibleAudit(rows, principal, database) {
+  const binding=historyBindings.get(rows);
+  if(binding)return (rows||[]).map(row=>projectHistoryEvent(row,principal||{id:'local-profile',name:'Локальный пользователь',role:'admin'},binding)).filter(Boolean);
+  // Older history has no sealed completeness or ownership witness. A limited
+  // reader cannot acquire one by finding only the remaining hot siblings.
+  if(accessContext().hasNarrowing(principal))return [];
   const db=database||{auditLog:rows||[]}, scoped=accessContext().hasNarrowing(principal), context=accessContext().create(db,db,{...principal,id:principal?.id||'legacy-role-check'});
   return (rows || []).filter(row => row && typeof row.section === 'string' && require('./document-access.cjs').permitted(principal, 'read', row.section) &&
     (!(row.printCapture||row.printArtifact)||Array.isArray(row.archiveReadSections)&&row.archiveReadSections.every(name=>require('./document-access.cjs').permitted(principal,'read',name)))&&
@@ -72,6 +103,9 @@ function filteredResult(result,principal,database){
 }
 function findReceipt(rows,query,principal,token,database){
   const operation=contracts().validateOperation(query),actor=principalOf(principal);
+  const binding=historyBindings.get(rows);
+  if(binding){const result=binding.engine.lookup(binding.state.head,{id:operation.id,digest:operation.digest,actorId:actor.id,actorRole:actor.role,databaseToken:token},(proof,receipt)=>authorizeStoredProof(proof,principal||actor,receipt));return result?{id:result.id,digest:result.digest,status:'committed',at:result.at}:null;}
+  if(accessContext().hasNarrowing(principal))return null;
   const receipt=(rows||[]).find(row=>row?.source==='platform'&&row.type==='transaction'&&row.operationId===operation.id&&
     (!row.importReadSections||row.importReadSections.every(name=>require('./document-access.cjs').permitted(principal||actor,'read',name)))&&row.actorId===actor.id&&row.actorRole===actor.role&&row.databaseToken===token&&row.requestDigest===operation.digest&&
     (!(row.printCapture||row.printArtifact)||Array.isArray(row.archiveReadSections)&&row.archiveReadSections.every(name=>require('./document-access.cjs').permitted(principal||actor,'read',name)))&&
@@ -87,6 +121,13 @@ function operationInfo(previous, sections, options = {}) {
   // change the identity of a semantic command or prevent its receipt replay.
   const digest = kernel().requestDigest(options.commandIntent || { base:options.base || {}, sections,...(options.scopeViews?{scopeViews:options.scopeViews}:{}) });
   if (operation.digest != null && operation.digest !== digest) fail('OPERATION_DIGEST', 'Состав операции изменился после подготовки', 409);
+  const binding=historyBindings.get(previous.auditLog);
+  if(binding){
+    let result;
+    try{result=binding.engine.lookup(binding.state.head,{id:operation.id,digest,actorId:actor.id,actorRole:actor.role,databaseToken:options.databaseToken},(proof,receipt)=>authorizeStoredProof(proof,options.principal||actor,receipt),{mode:'replay'});}
+    catch(error){if(error.code==='OPERATION_REUSED')error.status=409;else if(error.code==='ACCESS_DENIED')error.status=403;throw error;}
+    return {id:operation.id,digest,actor,principal:options.principal||actor,receipt:result?literalReceipt(result):null,historyValidated:!!result};
+  }
   const receipt = (previous.auditLog || []).find(row => row.source === 'platform' && row.type === 'transaction' && row.operationId === operation.id);
   if (receipt && (receipt.requestDigest !== digest || receipt.actorId !== actor.id || receipt.actorRole !== actor.role || receipt.databaseToken !== options.databaseToken))
     fail('OPERATION_REUSED', 'Этот идентификатор операции уже использован для другого состава, пользователя или базы', 409);
@@ -94,7 +135,7 @@ function operationInfo(previous, sections, options = {}) {
 }
 function replayResult(previous, revisions, token, info, names) {
   if (!info?.receipt) return null;
-  if(accessContext().hasNarrowing(info.principal)&&!auditRowAllowed(info.receipt,info.principal,previous))fail('ACCESS_DENIED','Недостаточно текущих прав для результата операции.',403);
+  if(!info.historyValidated&&accessContext().hasNarrowing(info.principal))fail('ACCESS_DENIED','Нет полного подтверждённого свидетельства для результата прежней операции.',403);
   if(info.receipt.importReadSections?.some(name=>!require('./document-access.cjs').permitted(info.principal||info.actor,'read',name)))fail('ACCESS_DENIED','Нет доступа ко всему исходному файлу импорта',403);
   const canonicalSections = {};
   for (const name of new Set([...names, 'auditLog'])) {
@@ -207,7 +248,8 @@ function prepareTransaction(previous, supplied, options = {}) {
   if (options.prepareSections) sections = options.prepareSections(sections);
   // This proof is derived from the semantic execution option, never a section
   // request field. Raw/full writes cannot authorize their own catalog aliases.
-  let plan = kernel().prepare(previous, sections, { id, identity:options.databaseToken || 'local-storage', actor,
+  const kernelPrevious=commandProof.commandIntent?.command?.type==='MergeCatalog'?require('./catalog-history.cjs').reviewDatabase(options.dataDir,previous,options.principal||actor):previous;
+  let plan = kernel().prepare(kernelPrevious, sections, { id, identity:options.databaseToken || 'local-storage', actor,
     revisions:options.revisions || {}, now:at,today:clock.today,calendar:clock,...commandProof,...importProof,
     readable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'read', name)),
     writable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'write', name)||name==='fuelPeriods'&&periodCommand||name===costTarget&&costCommand) });
@@ -236,4 +278,51 @@ function prepareTransaction(previous, supplied, options = {}) {
   return { sections:result, plan, operationReceipt:{ id, digest, status:'committed', at } };
 }
 
-module.exports = { prepareTransaction, operationInfo, replayResult, visibleAudit,visibleRows,filteredResult,findReceipt,scopeViews,assertScopeViews,auditRowAllowed };
+function prepareHistoryCommit(dataDir,previous,sections,revisions,options={}){
+  const store=require('./operation-store.cjs'),evidence=require('./operation-evidence.cjs'),before=previous.auditLog||[],after=sections.auditLog;
+  if(!Array.isArray(after)||after.length<before.length||before.some((row,index)=>JSON.stringify(row)!==JSON.stringify(after[index])))fail('AUDIT_IMMUTABLE','История изменяется только доверенным добавлением событий.',403);
+  const events=after.slice(before.length),summaries=events.filter(row=>row.source==='platform'&&row.type==='transaction');
+  if(summaries.length!==1)fail('OPERATION_RECEIPT_REQUIRED','Для сохранения нужно одно каноническое подтверждение операции.',409);
+  const literal=summaries[0],receipt=require('./operation-record.cjs').fromAuditRow(literal),next={...previous,...sections};
+  const principal=accessContext().normalizePrincipal(options.principal||{id:'local-profile',name:'Локальный пользователь',role:'admin'}),writes=Object.keys(sections).filter(name=>name!=='auditLog');
+  let collector;
+  if(options.commandIntent){const command=options.commandIntent.command,dependencies=require('../assets/core/platform-commands.js').dependencies(command);collector=require('./command-service.cjs').collectCommandEvidence(previous,command,dependencies,{strict:false});}
+  else{
+    const reads=[...new Set([...(options.historyInputSections||Object.keys(options.base||{})),...writes])].filter(name=>name!=='auditLog'&&schema().sections.includes(name)),selectedTargets=[];
+    const readContext=accessContext().create(previous,previous,principal);
+    for(const name of reads){const counts=new Map();for(const row of previous[name]||[])if(Object.hasOwn(row,'id'))counts.set(row.id,(counts.get(row.id)||0)+1);
+      (previous[name]||[]).forEach((row,index)=>{
+        if(!visibleRows(name,[row],principal,previous,readContext).length)return;
+        if(Object.hasOwn(row,'id')&&counts.get(row.id)===1)selectedTargets.push({section:name,id:row.id});
+        else selectedTargets.push({section:name,before:row,after:null,beforeIndex:index});
+      });
+    }
+    collector={complete:true,readSections:reads,selectedTargets};
+  }
+  const selected=collector.selectedTargets.slice();
+  if(options.importSource){const section=options.importSource.sourceScopes?.[0];if(!schema().sections.includes(section))fail('OPERATION_EVIDENCE_INVALID','Не подтверждены разделы исходного импорта',409);selected.push({section,kind:'source',value:options.importSource});}
+  selected.push(...require('./document-archive.cjs').operationEvidenceModels(dataDir,literal));
+  const proof=evidence.createProof({previous,next,principal,mode:'transaction',sections:{complete:collector.complete,readSections:collector.readSections,writeSections:writes,selectedTargets:selected},receipt,events,...(options.commandIntent?{commandIntent:options.commandIntent}:{})});
+  if(!evidence.authorizeProof(proof,principal,receipt))fail('OPERATION_EVIDENCE_ACCESS','Текущие права не подтверждают все источники и результат операции.',403);
+  const prepared=store.prepareCommit(dataDir,{expectedOperationState:store.readState(dataDir),previousHotRows:before,newEvents:events,receipt,evidence:proof});
+  // Keep the array capability and the artifact caller's canonical reference.
+  after.splice(0,after.length,...prepared.hotRows);
+  return {sections,...prepared};
+}
+function readReceipt(dataDir,query,principal){
+  const operation=contracts().validateOperation(query),actor=principalOf(principal),store=require('./operation-store.cjs'),token=require('./storage').databaseToken(dataDir),state=store.readState(dataDir);
+  const result=store.engine(dataDir).lookup(state.head,{id:operation.id,digest:operation.digest,actorId:actor.id,actorRole:actor.role,databaseToken:token},(proof,receipt)=>authorizeStoredProof(proof,principal||actor,receipt));
+  return {ok:true,databaseToken:token,operationReceipt:result?{id:result.id,digest:result.digest,status:'committed',at:result.at}:null};
+}
+function queryHistoryInternal(dataDir,input,principal){
+  const normalized=accessContext().normalizePrincipal(principal),store=require('./operation-store.cjs');
+  if(!require('./document-access.cjs').permitted(normalized,'read','auditLog'))fail('ACCESS_DENIED','Нет доступа к истории операций.',403);
+  if(!input||typeof input!=='object'||Array.isArray(input)||Buffer.byteLength(JSON.stringify(input))>8192)fail('HISTORY_QUERY','Некорректный запрос истории.');
+  const value=contracts().validateSections({appMeta:[input]},schema().sections).appMeta[0];
+  if(Object.keys(value).some(name=>!['query','limit','cursor'].includes(name)))fail('HISTORY_QUERY','Некорректный запрос истории.');
+  const token=require('./storage').databaseToken(dataDir),state=store.readState(dataDir),evidence=require('./operation-evidence.cjs'),principalStamp='sha256:'+crypto.createHash('sha256').update(kernel().stableSerialize([normalized.id,normalized.role,normalized.policyStamp])).digest('hex');
+  return {ok:true,databaseToken:token,...store.engine(dataDir).page(state.head,{databaseToken:token,principalStamp,query:value.query||{},limit:value.limit??25,...(value.cursor===undefined?{}:{cursor:value.cursor})},(event,context)=>publicAuditRow(context.proof.status==='legacy-unverified'&&context.proof.request?.status==='unknown'?evidence.projectLegacyEvent(event,normalized):evidence.projectEvent(event,context.proof,normalized)))};
+}
+function queryHistory(dataDir,input,principal){return require('./storage').withDatabaseLock(dataDir,()=>{const sqlite=require('./sqlite-storage.cjs'),action=()=>queryHistoryInternal(dataDir,input,principal);return sqlite.exists(dataDir)?sqlite.transaction(dataDir,action,{readOnly:true}):action();});}
+
+module.exports = { prepareTransaction, prepareHistoryCommit, bindHistory, readReceipt, queryHistory, operationInfo, replayResult, visibleAudit,visibleRows,filteredResult,findReceipt,scopeViews,assertScopeViews,auditRowAllowed };

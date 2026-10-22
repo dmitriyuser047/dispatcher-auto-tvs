@@ -128,6 +128,6 @@ test('failed JSON publication rolls back both business sides, audit and receipt 
 
 test('failed SQLite COMMIT rolls back business rows, links, revisions, audit and receipt together',t=>{
  const f=fixture(t,'sqlite'),before=snapshot(f.dir),inspection=sqlite.inspect(f.dir),request=envelope(f.dir,issue()),original=sqlite.commitSections;let injected=false;
- try{sqlite.commitSections=function(dir,sections,revisions){return original(dir,sections,revisions,{beforeCommit(){injected=true;throw Error('Synthetic SQL before-COMMIT fault');}});};assert.throws(()=>execute(f.dir,request),/Synthetic SQL before-COMMIT fault/);}finally{sqlite.commitSections=original;}
+ try{sqlite.commitSections=function(dir,sections,revisions,options){return original(dir,sections,revisions,{...options,beforeCommit(){injected=true;throw Error('Synthetic SQL before-COMMIT fault');}});};assert.throws(()=>execute(f.dir,request),/Synthetic SQL before-COMMIT fault/);}finally{sqlite.commitSections=original;}
  assert.equal(injected,true);assert.deepEqual(snapshot(f.dir),before);assert.deepEqual(sqlite.inspect(f.dir),inspection);assert.equal(execute(f.dir,request).ok,true);
 });

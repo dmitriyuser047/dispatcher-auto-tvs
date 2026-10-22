@@ -30,7 +30,7 @@ function bootstrap({database,token,names,descriptor,serverProfile,countWrites,re
 }
 async function install(page,{database,token='synthetic-ui-snapshot24',countWrites=false,rejectWrites=false,setupData=null}={},setup){
  if(setup!==undefined&&typeof setup!=='function')throw TypeError('Synthetic UI setup must be a function');
- const input={database,token,names:schema.sections,descriptor:format.describe(3),serverProfile:compatibility.describe().serverProfile,countWrites,rejectWrites};
+ const input={database,token,names:schema.sections,descriptor:format.describe(format.SCHEMA_VERSION),serverProfile:compatibility.describe().serverProfile,countWrites,rejectWrites};
  // One script fixes bootstrap/setup ordering; Playwright does not guarantee the
  // relative execution order of separately registered initialization scripts.
  const content='('+bootstrap.toString()+')('+JSON.stringify(input)+');'+(setup?'\n('+setup.toString()+')('+JSON.stringify(setupData)+');':'');

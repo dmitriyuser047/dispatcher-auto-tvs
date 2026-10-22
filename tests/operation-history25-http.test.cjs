@@ -1,0 +1,14 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),http=require('node:http');
+const host=require('./helpers/operation-history25-host.cjs'),server=require('../electron/server'),access=require('../electron/access-control');
+function request(port,token,query,path){return new Promise((resolve,reject)=>{http.get({host:'127.0.0.1',port,path:path||'/api/history?query='+encodeURIComponent(JSON.stringify(query)),headers:{Authorization:'Bearer '+token}},res=>{let body='';res.on('data',chunk=>body+=chunk);res.on('end',()=>resolve({status:res.statusCode,body:JSON.parse(body),text:body}));}).on('error',reject);});}
+for(const kind of ['json','sqlite'])test(kind+' HTTP history projects archived events before search and binds opaque cursors to current access',{timeout:90000},async t=>{
+ const {dir}=host.fixture(t,kind);host.commit(dir,host.actor,'http-history-once');host.archive(dir,require('../electron/operation-store.cjs').readState(dir).head.lastSeq);
+ const token='synthetic-history-http-token-0123456789',settings=who=>({serverAccessConfigured:true,serverUsers:access.normalizeServerUsers([{...who,id:'http-history',name:'Synthetic history reader',enabled:true,tokenHash:access.hashToken(token)}])});
+ t.after(()=>server.stop());const started=await server.start({port:0,dataDir:dir,settings:settings(host.A)}),before=host.storage.readSnapshot(dir);
+ const visible=await request(started.port,token,{limit:1});assert.equal(visible.status,200,visible.text);assert.equal(visible.body.rows.length,1);assert.equal(visible.body.rows[0].after.org,'A');assert.equal(visible.body.nextCursor,null);assert.equal(Object.hasOwn(visible.body,'total'),false);assert.doesNotMatch(visible.text,/archiveScope|proofHash|receiptRoot|auditHead|SYNTHETIC STRING|before B/);
+ const hidden=await request(started.port,token,{query:{search:'SYNTHETIC STRING'},limit:1});assert.deepEqual(hidden.body.rows,[]);assert.equal(hidden.body.nextCursor,null);
+ server.configureAccess(settings(host.actor));const all=await request(started.port,token,{limit:1});assert.ok(all.body.nextCursor);server.configureAccess(settings(host.B));const stale=await request(started.port,token,{limit:1,cursor:all.body.nextCursor});assert.notEqual(stale.status,200);assert.equal(stale.body.code,'LEDGER_CURSOR_STALE');assert.doesNotMatch(stale.text,/SYNTHETIC|sha256:|h1\./);
+ for(const query of [{cursor:'bad',limit:1},{query:{section:'not-a-section'}},{limit:201},{query:{search:'x'.repeat(9000)}}]){const result=await request(started.port,token,query);assert.notEqual(result.status,200);assert.equal(result.body.rows,undefined);}
+ const malformed=await request(started.port,token,null,'/api/history?query=%7B');assert.equal(malformed.status,400);const extra=await request(started.port,token,null,'/api/history?query=%7B%7D&other=1');assert.equal(extra.status,400);assert.deepEqual(host.storage.readSnapshot(dir),before);
+});

@@ -6,7 +6,7 @@ function fixture(){
  const description=compatibility.describe(),hello=copy(description.hello),access={user:{id:'synthetic-actor',name:'Synthetic',role:'admin'},policyStamp:'sha256:'+'a'.repeat(64),readable:['vehicles'],writable:['vehicles']};
  const context={senderId:7,scope:'synthetic-scope-A',databaseToken:'synthetic-token-A',host:'synthetic.invalid',port:3377,client:true,access,principal:{...access.user,policyStamp:access.policyStamp}},active=new Map([[7,context]]),state={now:100000,calls:[],localCalls:[]};
  const assertContext=value=>{const current=active.get(value.senderId);if(!current||current.scope!==value.scope||current.databaseToken!==value.databaseToken||current.host!==value.host||current.port!==value.port||JSON.stringify(current.access)!==JSON.stringify(value.access))throw Object.assign(Error('Synthetic context changed'),{code:'SESSION_CHANGED'});};
- const response=(patch={})=>({ok:true,databaseToken:context.databaseToken,access:copy(access),platform:{descriptor:format.describe(3),compatibility:copy(description.serverProfile)},writeTicket:'synthetic-private-ticket-A',writeTicketExpiresAt:state.now+60000,...patch});
+ const response=(patch={})=>({ok:true,databaseToken:context.databaseToken,access:copy(access),platform:{descriptor:format.describe(format.SCHEMA_VERSION),compatibility:copy(description.serverProfile)},writeTicket:'synthetic-private-ticket-A',writeTicketExpiresAt:state.now+60000,...patch});
  const sessions=createWriteSessions({assertContext,now:()=>state.now,negotiate:async(...args)=>{state.calls.push(args);return state.renew?state.renew(...args):response({writeTicket:'synthetic-private-ticket-B'});},localWriteOptions:input=>{state.localCalls.push(input);return {requireNegotiatedWriter:true,syntheticAuthorizedHello:input.hello};}});
  return {context,active,state,hello,response,sessions,bind:patch=>sessions.bind(context,hello,response(patch))};
 }
@@ -54,7 +54,7 @@ test('renewal rechecks the captured context and the actual response database and
 });
 
 test('a safe read-only negotiation or invalid renewed ticket removes the old proof',async()=>{
- for(const patch of [{platform:{descriptor:format.describe(3),compatibility:{...compatibility.describe().serverProfile,readOnly:true}}},{writeTicket:null},{writeTicket:'x'.repeat(4097)},{writeTicketExpiresAt:0}]){const f=fixture();f.bind({writeTicketExpiresAt:0});f.state.renew=async()=>f.response(patch);assert.deepEqual(await f.sessions.remoteOptions(f.context),{});assert.deepEqual(await f.sessions.remoteOptions(f.context),{});}
+ for(const patch of [{platform:{descriptor:format.describe(format.SCHEMA_VERSION),compatibility:{...compatibility.describe().serverProfile,readOnly:true}}},{writeTicket:null},{writeTicket:'x'.repeat(4097)},{writeTicketExpiresAt:0}]){const f=fixture();f.bind({writeTicketExpiresAt:0});f.state.renew=async()=>f.response(patch);assert.deepEqual(await f.sessions.remoteOptions(f.context),{});assert.deepEqual(await f.sessions.remoteOptions(f.context),{});}
 });
 
 test('unbound, unsupported and separately scoped senders cannot borrow a private proof',async()=>{

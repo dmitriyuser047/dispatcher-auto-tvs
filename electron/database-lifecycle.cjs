@@ -58,10 +58,10 @@ function createMetadataInspector({ DatabaseSync: suppliedDatabase } = {}) {
           if (rows.some(row => typeof row.key !== 'string' || typeof row.value !== 'string')) return issue('IDENTITY_SQLITE_METADATA');
           const meta = Object.fromEntries(rows.map(row => [row.key, row.value]));
           if (meta.format !== 'tvs-platform-sqlite' || meta.format_version !== '1' || meta.schema_version !== String(version)) return issue('IDENTITY_SQLITE_METADATA');
-          if (version === 3) { let value; try { value = JSON.parse(meta.compatibility); } catch { return issue('IDENTITY_DESCRIPTOR'); } descriptor = format.validateDescriptor(value, version); }
+          if (version >= 3) { let value; try { value = JSON.parse(meta.compatibility); } catch { return issue('IDENTITY_DESCRIPTOR'); } descriptor = format.validateDescriptor(value, version); }
           else { if (Object.hasOwn(meta, 'compatibility')) return issue('IDENTITY_DESCRIPTOR'); descriptor = format.describe(version); }
           if (meta.database_uuid !== undefined || meta.generation !== undefined) identity = identities.validate({ format: 'tvs-database-identity', version: 1, uuid: meta.database_uuid, generation: Number(meta.generation) });
-          if (version === 3 && !identity) return issue('IDENTITY_METADATA_MISSING');
+          if (version >= 3 && !identity) return issue('IDENTITY_METADATA_MISSING');
           proof = { header: hash(header), metadata: rows };
         } finally { db.close(); }
         const after = fs.lstatSync(sqlite.file), afterWal = info(sqlite.file + '-wal'); rollbackJournals.assertUnchanged(sqlite.file, rollback);
@@ -76,12 +76,12 @@ function createMetadataInspector({ DatabaseSync: suppliedDatabase } = {}) {
         }
         const savedIdentity = jsonMetadata(directory, identities.FILE, 4096);
         if (savedIdentity) { identity = identities.validate(savedIdentity.value); proof.identity = savedIdentity.hash; }
-        if (descriptor.schemaVersion === 3 && !identity) return issue('IDENTITY_METADATA_MISSING');
+        if (descriptor.schemaVersion >= 3 && !identity) return issue('IDENTITY_METADATA_MISSING');
         const confirmedRevisions = jsonMetadata(directory, path.join('sections', 'revisions.json'), 256 * 1024), confirmedIdentity = jsonMetadata(directory, identities.FILE, 4096);
         if (revisions?.hash !== confirmedRevisions?.hash || savedIdentity?.hash !== confirmedIdentity?.hash) return issue('IDENTITY_METADATA_CHANGED', 'busy');
       }
       const metadataStamp = hash(stable({ physicalKey: blank.physicalKey, format: blank.format, descriptor, identity, proof }));
-      return freeze({ ...blank, state: descriptor.schemaVersion === 3 ? 'known' : 'legacy', descriptor, identity, metadataStamp, proof: 'metadata-only' });
+      return freeze({ ...blank, state: descriptor.schemaVersion === format.SCHEMA_VERSION ? 'known' : 'legacy', descriptor, identity, metadataStamp, proof: 'metadata-only' });
     } catch (caught) {
       if (['SQLITE_ROLLBACK_BUSY', 'SQLITE_ROLLBACK_CHANGED'].includes(caught.code)) return issue('IDENTITY_SQLITE_ROLLBACK_REQUIRED', 'busy');
       return issue(['STORAGE_FORMAT', 'SQLITE_FUTURE_FORMAT'].includes(caught.code) ? 'IDENTITY_FORMAT_UNSUPPORTED' : caught.code || 'IDENTITY_METADATA', ['STORAGE_FORMAT', 'SQLITE_FUTURE_FORMAT'].includes(caught.code) ? 'unsupported' : 'corrupt');

@@ -66,7 +66,7 @@ function createDatabaseMaintenance(options){
   }
   const head=payload.mode==='restoreContinuation'?known.profiles.find(row=>row.id===payload.headProfileId):null;
   if(payload.mode==='restoreContinuation'&&(!head||head.state!=='known'||!head.identity))fail('MAINTENANCE_HEAD','Выберите профиль с подтверждённым текущим поколением');
-  const input={action:payload.mode,source,target:{format:payload.targetFormat,descriptor:format.describe(3),physicalKey:destination.physicalKey},reason:payload.reason.trim(),knownHeads,...(head?{continuationOf:{identity:head.identity,physicalKey:head.physicalKey,metadataStamp:head.metadataStamp}}:{})};
+  const input={action:payload.mode,source,target:{format:payload.targetFormat,descriptor:format.describe(format.SCHEMA_VERSION),physicalKey:destination.physicalKey},reason:payload.reason.trim(),knownHeads,...(head?{continuationOf:{identity:head.identity,physicalKey:head.physicalKey,metadataStamp:head.metadataStamp}}:{})};
   const operationContext={operationId:crypto.randomUUID(),at:new Date().toISOString(),actor:{id:context.actor.id,name:context.actor.name,role:context.actor.role},newUuid:crypto.randomUUID()},review=engine.preview(input,operationContext);
   if(!review.canApply)return {ok:false,code:review.issues[0]?.code||'MAINTENANCE_PLAN',error:review.issues[0]?.message||'План не подтверждён',issues:review.issues};
   if(fs.existsSync(destination.path))fail('MAINTENANCE_TARGET','Целевой каталог уже существует. Для прерванной операции откройте её сохранённый план.');

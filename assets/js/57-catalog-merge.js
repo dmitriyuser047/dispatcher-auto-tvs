@@ -5,6 +5,7 @@ function catalogMergeToday(){return BusinessCalendar.resolve(data,new Date().toI
 function catalogMergeContext(){return platformSessionContext();}
 function catalogMergeReadable(context=catalogMergeContext()){
  if(Array.isArray(context.readable)&&!context.readable.includes('*')&&!PlatformSchema.sections.every(name=>context.readable.includes(name)))return false;
+ if(context.readFields&&Object.values(context.readFields).some(fields=>!Array.isArray(fields)||!fields.includes('*')))return false;
  const policy=context.accessPolicy;if(!policy)return true;
  const allows=(values,action)=>values===undefined||Array.isArray(values)&&(values.includes('*')||values.includes(action));
  // A catalog review inventories the complete database. An owned subset or
@@ -58,10 +59,27 @@ function catalogMergeInput(state){
  if(!reason)throw Error('Укажите основание объединения');
  return {section:state.form.elements.section.value,sourceId:source.id,targetId:target.id,reason,mutableRefs:state.selected.map(ref=>({...ref}))};
 }
+async function catalogMergeLoadReviewDatabase(state){
+ catalogMergeAssert(state);if(state.reviewDatabase)return state.reviewDatabase;
+ const modern=typeof _sync!=='undefined'&&_sync.platform?.schemaVersion>=4;
+ if(!modern){state.reviewDatabase=data;return data;}
+ const context=catalogMergeContext();if(context.actor?.role!=='admin'||!catalogMergeReadable(context))throw Error('Для полной проверки архивной истории нужен администратор без ограничений чтения.');
+ if(!window.electronAPI?.queryHistory)throw Error('Основная программа не поддерживает полную проверку архивной истории. Обновите программу.');
+ const rows=[];let cursor,bytes=0;const token=_sync.databaseToken;
+ for(let page=0;page<10000;page++){
+  const result=await window.electronAPI.queryHistory({query:{},limit:100,...(cursor?{cursor}:{})});catalogMergeAssert(state);
+  if(!result?.ok||result.databaseToken!==token||!Array.isArray(result.rows)||!(result.nextCursor===null||typeof result.nextCursor==='string'&&result.nextCursor))throw Error(result?.error||'Не удалось полностью прочитать архивную историю. Повторите проверку.');
+  bytes+=JSON.stringify(result.rows).length;if(bytes>64*1024*1024||rows.length+result.rows.length>1000000)throw Error('Полная история превышает предел одной проверки объединения.');rows.push(...result.rows);
+  if(result.nextCursor===null){state.reviewDatabase={...data,auditLog:rows.reverse()};return state.reviewDatabase;}
+  if(result.nextCursor===cursor)throw Error('Не подтверждена следующая страница истории. Повторите проверку.');cursor=result.nextCursor;
+ }
+ throw Error('Полная история превышает предел одной проверки объединения.');
+}
 function catalogMergeReview(state){
  catalogMergeAssert(state);const input=catalogMergeInput(state);
  const context={today:state.today},readable=catalogMergeContext().readable;if(Array.isArray(readable))context.readable=readable;
- const preview=MergeCatalog.preview(data,input,context);
+ if(typeof _sync!=='undefined'&&_sync.platform?.schemaVersion>=4&&!state.reviewDatabase)throw Error('Сначала загрузите полную архивную историю для проверки.');
+ const preview=MergeCatalog.preview(state.reviewDatabase||data,input,context);
  const host=state.form.querySelector('[data-cm-review]');host.replaceChildren();
  const summary=document.createElement('div');summary.className='wf-note';summary.innerHTML='<h4>Архивная ссылка → основная карточка</h4><p>'+htmlEsc(preview.source.label)+' → '+htmlEsc(preview.target.label)+'</p><p>Проверка на '+htmlEsc(fmtDate(state.today))+'. Исходная карточка останется в архиве со ссылкой на основную. Остатки, начальные значения, нормы и реквизиты основной карточки не складываются и не заменяются. Исторические документы сохраняют прежние ID и тексты.</p><p>Новые операции оформляйте на основную карточку. Невыбранные связи останутся у дубля; будущие назначения при необходимости переназначьте отдельно.</p><p>Связей: '+preview.references.length+'. Отмечаются только разрешённые изменяемые связи; по умолчанию ни одна не выбрана.</p>';host.append(summary);
  if(preview.blockers.length){const box=document.createElement('div');box.className='wf-note';box.dataset.cmBlockers='';box.setAttribute('role','alert');box.innerHTML='<h4>Что мешает объединению</h4><ul>'+preview.blockers.map(issue=>'<li>'+htmlEsc(issue.message||issue.code)+'</li>').join('')+'</ul>';host.append(box);}
@@ -86,7 +104,7 @@ function catalogMergeReview(state){
  state.form.querySelector('[data-cm-confirm]').hidden=false;state.form.querySelector('[data-cm-save]').disabled=true;
 }
 async function catalogMergeCommit(state){
- if(state.pending)return;const errorNode=state.form.querySelector('[data-cm-error]');errorNode.textContent='';let unlock;
+ if(state.pending||state.loading)return;const errorNode=state.form.querySelector('[data-cm-error]');errorNode.textContent='';let unlock;
  try{
   catalogMergeAssert(state);const input=catalogMergeInput(state);
   if(!state.preview?.canMerge||state.preview.input!==JSON.stringify(input)||!state.form.elements.confirm.checked)throw Error('Проверьте актуальный предпросмотр, устраните ограничения и подтвердите объединение');
@@ -110,14 +128,14 @@ function catalogMergeOpen(section='vehicles',id){
   if(!catalogMergeReadable())throw Error('Для проверки объединения требуется доступ ко всем разделам базы. Скрытые данные не будут показаны. Обратитесь к администратору.');
   if(!CATALOG_MERGE_SECTIONS.includes(section))section='vehicles';
   wfShowDialog('Объединение карточек справочника','<form id="catalogMergeForm" class="wf-form"><p class="wf-wide wf-note">Выберите дубль и основную карточку. Сначала проверьте все связи. Объединение не удаляет историю и не переносит остатки.</p><label class="wf-wide"><span>Справочник</span><select name="section">'+CATALOG_MERGE_SECTIONS.map(name=>'<option value="'+name+'" '+(name===section?'selected':'')+'>'+htmlEsc(catalogMergeSectionLabel(name))+'</option>').join('')+'</select></label><label><span>Дубль → архивная ссылка</span><select name="source"></select></label><label><span>Основная карточка</span><select name="target"></select></label><label class="wf-wide"><span>Основание *</span><textarea name="reason" maxlength="2000" required></textarea></label><div class="wf-wide wf-actions"><button type="button" class="btn btn-ghost" data-cm-preview>Проверить все связи</button></div><div class="wf-wide" data-cm-review></div><label class="wf-wide" data-cm-confirm hidden><span><input type="checkbox" name="confirm"> Подтверждаю архивную ссылку и только отмеченные переносы связей</span></label><p class="wf-wide wf-note" role="status" data-cm-status></p><div class="wf-wide wf-note" role="alert" data-cm-error></div><div class="wf-wide wf-actions"><button type="button" class="btn btn-ghost" data-cm-cancel>Закрыть</button><button type="submit" class="btn btn-primary" data-cm-save disabled>Подтвердить объединение</button></div></form>');
-  const form=document.getElementById('catalogMergeForm'),state=catalogMergeSession={form,context:wfCommandContextStamp(),database:data,source:catalogMergeSourceStamp(),today:catalogMergeToday(),selected:[],preview:null,pending:false};
+  const form=document.getElementById('catalogMergeForm'),state=catalogMergeSession={form,context:wfCommandContextStamp(),database:data,source:catalogMergeSourceStamp(),today:catalogMergeToday(),selected:[],preview:null,pending:false,loading:false,reviewDatabase:null};
   form.style.minWidth='0';form.style.overflowWrap='anywhere';for(const element of form.children)element.style.minWidth='0';form.querySelectorAll('select,textarea').forEach(element=>{element.style.minWidth='0';element.style.width='100%';});form.querySelectorAll('.wf-actions').forEach(element=>element.style.flexWrap='wrap');catalogMergeOptions(state,id);
   form.closest('.modal-overlay').querySelector('.modal-header button').onclick=()=>{if(!state.pending){catalogMergeSession=null;closeModal('wfModal');}};
   form.elements.section.onchange=()=>{if(!state.pending)catalogMergeOptions(state);};
   for(const field of ['source','target'])form.elements[field].onchange=()=>{if(!state.pending)catalogMergeInvalidate(state,true);};
   form.elements.reason.oninput=()=>{if(!state.pending)catalogMergeInvalidate(state);};
   form.elements.confirm.onchange=()=>{form.querySelector('[data-cm-save]').disabled=!state.preview?.canMerge||!form.elements.confirm.checked;};
-  form.querySelector('[data-cm-preview]').onclick=()=>{if(state.pending)return;form.querySelector('[data-cm-error]').textContent='';try{catalogMergeReview(state);}catch(error){catalogMergeInvalidate(state);wfShowCommandError(form.querySelector('[data-cm-error]'),error);}};
+  form.querySelector('[data-cm-preview]').onclick=async()=>{if(state.pending||state.loading)return;form.querySelector('[data-cm-error]').textContent='';state.loading=true;catalogMergeInvalidate(state);form.querySelector('[data-cm-status]').textContent='Проверяю текущие и архивные связи…';try{await catalogMergeLoadReviewDatabase(state);catalogMergeReview(state);form.querySelector('[data-cm-status]').textContent='Проверены текущие и архивные связи.';}catch(error){catalogMergeInvalidate(state);wfShowCommandError(form.querySelector('[data-cm-error]'),error);}finally{state.loading=false;}};
   form.querySelector('[data-cm-cancel]').onclick=()=>{if(!state.pending){catalogMergeSession=null;closeModal('wfModal');}};
   form.onsubmit=event=>{event.preventDefault();void catalogMergeCommit(state);};
  }catch(error){showToast(error.message);}

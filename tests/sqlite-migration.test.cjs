@@ -5,8 +5,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const vm = require('node:vm');
-const { createRequire } = require('node:module');
+const Module = require('node:module');
+const { createRequire } = Module;
 const { spawnSync } = require('node:child_process');
 const schema = require('../assets/core/platform-schema.js');
 const sqlite = require('../electron/sqlite-storage.cjs');
@@ -66,10 +66,11 @@ function noStage(parent) {
   }
 }
 function faultAdapter(overrides) {
-  const filename = path.join(__dirname,'../electron/sqlite-migration.cjs'), localRequire = createRequire(filename), exported = {exports:{}};
-  vm.runInNewContext(fs.readFileSync(filename,'utf8'),{module:exported,exports:exported.exports,process,Buffer,console,
-    require(name) { return name === './sqlite-storage.cjs' ? {...sqlite,...overrides} : localRequire(name); }},{filename});
-  return exported.exports;
+  const filename = path.join(__dirname,'../electron/sqlite-migration.cjs'), localRequire = createRequire(filename), instance = new Module(filename,module);
+  instance.filename=filename;instance.paths=Module._nodeModulePaths(path.dirname(filename));
+  instance.require=name=>name==='./sqlite-storage.cjs'?{...sqlite,...overrides}:localRequire(name);
+  instance._compile(fs.readFileSync(filename,'utf8'),filename);
+  return instance.exports;
 }
 function managedFile(sourceDir,directory,bytes,extension) {
   const sha256=hash(bytes),id=sha256+extension;

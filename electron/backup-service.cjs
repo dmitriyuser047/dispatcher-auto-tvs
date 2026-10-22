@@ -1,7 +1,7 @@
 'use strict';
 function validateSources(data,read){require('./import-source.cjs').validateManaged(data,read);require('./attachment-access.cjs').validateManaged(data,read);}
 
-// Backup format 2 records the verified source schema. Legacy format 1 stays readable. No Electron, profile selection or settings
+// Format 3 preserves the immutable operation closure. Legacy formats 1/2 remain readable. No Electron, profile selection or settings
 // mutation lives here; callers must explicitly provide every source/target path.
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 const AdmZip = require('adm-zip');
@@ -14,6 +14,11 @@ const MAX_BYTES = 512 * 1024 * 1024, MAX_FILES = 10000;
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const fold = value => process.platform === 'win32' ? value.toLowerCase() : value;
+const operationObjectsName=/^operation-ledger\/objects\/([a-f0-9]{64})\.json$/;
+const operations=()=>require('./operation-store.cjs');
+function operationSeed(data,transactionId){const seed=operations().bootstrap({auditRows:data.auditLog||[],archiveLegacy:(data.auditLog||[]).length>5000});return transactionId?{...seed,operationState:require('./storage-format.cjs').validateOperationState({...seed.operationState,transactionId})}:seed;}
+function operationFiles(seed){return [{name:'operation-state.json',bytes:Buffer.from(JSON.stringify({format:'tvs-operation-state',version:1,operationState:seed.operationState}))},...seed.objects.map(object=>({name:'operation-ledger/objects/'+object.id+'.json',bytes:Buffer.from(object.json)}))];}
+function readOperations(files){const entry=files.find(entry=>entry.name==='operation-state.json');if(!entry)fail('BACKUP_OPERATION_STATE','В пакете отсутствует состояние истории операций');const raw=jsonObject(json(entry.bytes,entry.name),entry.name);if(Object.keys(raw).length!==3||raw.format!=='tvs-operation-state'||raw.version!==1)fail('BACKUP_OPERATION_STATE','Неизвестный формат истории операций');try{const operationState=require('./storage-format.cjs').validateOperationState(raw.operationState),objects=files.filter(entry=>operationObjectsName.test(entry.name)).map(entry=>({id:operationObjectsName.exec(entry.name)[1],json:entry.bytes.toString('utf8')}));return operations().fromClosure({version:1,kind:'operation-ledger-closure',head:operationState.head,objects},{operationState});}catch(error){fail('BACKUP_OPERATION_STATE','Не подтверждена полная история операций: '+(error.code||''));}}
 function fail(code, message) { const error = new Error(message); error.code = code; throw error; }
 function stat(filename) { try {
     return fs.lstatSync(filename);
@@ -25,7 +30,7 @@ catch (error) {
 } }
 function safeName(name) { return typeof name === 'string' && !!name && name.length <= 240 && !/[\x00-\x1f\\/:*?"<>|]/.test(name) && !/[. ]$/.test(name) && !['.', '..'].includes(name) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name); }
 function packageNameSafe(name) { if (typeof name !== 'string' || name.length > 240)
-    return false; if (['database.json', 'settings.json', 'manifest.json'].includes(name))
+    return false; if (['database.json', 'settings.json', 'manifest.json','operation-state.json'].includes(name)||operationObjectsName.test(name))
     return true; const parts = name.split('/'); return parts.length === 2 && MANAGED.includes(parts[0]) && safeName(parts[1]); }
 function explicit(value) { if (typeof value !== 'string' || !value.trim() || value.includes('\0') || /^\\\\[?.]\\/.test(value) || /^[a-z]:[^\\/]/i.test(value))
     fail('BACKUP_PATH', 'Нужен явный обычный путь'); return path.resolve(value); }
@@ -117,6 +122,8 @@ function snapshotFiles(source,allowOwnedLock=false) {
             add(name + '/' + entry);
         }
     }
+    const operationDirectory=stat(path.join(source,'operation-ledger'));
+    if(operationDirectory){if(!operationDirectory.isDirectory()||operationDirectory.isSymbolicLink())fail('BACKUP_PATH','Недопустимый каталог истории операций');for(const name of fs.readdirSync(path.join(source,'operation-ledger')))if(name!=='objects')fail('BACKUP_PATH','Неизвестный файл истории операций');const objects=path.join(source,'operation-ledger','objects'),info=stat(objects);if(info){if(!info.isDirectory()||info.isSymbolicLink())fail('BACKUP_PATH','Недопустимый каталог объектов истории');for(const name of fs.readdirSync(objects).sort()){if(!/^[a-f0-9]{64}\.json$/.test(name))fail('BACKUP_PATH','Неизвестное имя объекта истории');add('operation-ledger/objects/'+name);}}}
     verifySourceRollback(source,rollback);return result.sort((a, b) => a.name.localeCompare(b.name));
 }
 function sourceSnapshot(source, files) {
@@ -125,7 +132,7 @@ function sourceSnapshot(source, files) {
     const read = relative => { const bytes = readFile(path.join(source, ...relative.split('/'))), entry = expected.get(relative); if (!entry || entry.size !== bytes.length || entry.sha256 !== sha(bytes))
         fail('BACKUP_SOURCE_CHANGED', 'Исходная база изменилась'); return json(bytes, relative); };
     if (expected.has('platform.sqlite')) {
-        const result = sqlite.transaction(source, () => ({ data: database(sqlite.readAll(source)), revisions: revisions(sqlite.readRevisions(source)), sourceFormat: 'sqlite', sourceDescriptor: sqlite.readDescriptor(source), sourceIdentity: sqlite.readIdentity(source) }), { readOnly: true });
+        const result = sqlite.transaction(source, () => {const sourceDescriptor=sqlite.readDescriptor(source);return { data: database(sqlite.readAll(source)), revisions: revisions(sqlite.readRevisions(source)), sourceFormat: 'sqlite', sourceDescriptor, sourceIdentity: sqlite.readIdentity(source),...(sourceDescriptor.schemaVersion>=4?{operationSeed:operations().fromClosure(operations().exportClosure(source),{operationState:operations().readState(source)})}:{})};}, { readOnly: true });
         return result;
     }
     if (expected.has('sections')) {
@@ -144,7 +151,7 @@ function sourceSnapshot(source, files) {
                 data[name] = [];
             }
         }
-        return { data: database(data), revisions: revisions(versions), sourceFormat: 'json', sourceDescriptor: decoded.descriptor, sourceIdentity: require('./database-identity.cjs').readOrCreate(source,{create:false}) };
+        return { data: database(data), revisions: revisions(versions), sourceFormat: 'json', sourceDescriptor: decoded.descriptor, sourceIdentity: require('./database-identity.cjs').readOrCreate(source,{create:false}),...(decoded.schemaVersion>=4?{operationSeed:operations().fromClosure(operations().exportClosure(source),{operationState:decoded.operationState})}:{}) };
     }
     return { data: database(read('data.json')), revisions: revisions(), sourceFormat: 'json', sourceDescriptor: require('./storage-format.cjs').describe(1), sourceIdentity: require('./database-identity.cjs').readOrCreate(source,{create:false}) };
     }finally{verifySourceRollback(source,rollback);}
@@ -202,7 +209,7 @@ function readPackage(archivePath) {
         if (mode === 0o120000)
             fail('BACKUP_PATH', 'Ссылки в ZIP не допускаются');
         if (entry.isDirectory) {
-            if (!MANAGED.some(name => entry.entryName === name + '/'))
+            if (!MANAGED.some(name => entry.entryName === name + '/')&&!['operation-ledger/','operation-ledger/objects/'].includes(entry.entryName))
                 fail('BACKUP_PATH', 'Недопустимый каталог ZIP');
             continue;
         }
@@ -219,10 +226,10 @@ function readPackage(archivePath) {
     if (!manifestEntry || manifestEntry.isDirectory || manifestEntry.header.size > 5 * 1024 * 1024)
         fail('BACKUP_MANIFEST', 'Нет корректного манифеста');
     const manifest = jsonObject(json(manifestEntry.getData(), 'manifest.json'), 'manifest.json');
-    if (manifest.format !== 'tvs-backup' || ![1,2].includes(manifest.version) || !Array.isArray(manifest.files) || manifest.files.length >= MAX_FILES)
+    if (manifest.format !== 'tvs-backup' || ![1,2,3].includes(manifest.version) || !Array.isArray(manifest.files) || manifest.files.length >= MAX_FILES)
         fail('BACKUP_MANIFEST', 'Неподдерживаемый манифест резервного пакета');
     let sourceDescriptor=null,sourceIdentity=null;
-    if(manifest.version===2){
+    if(manifest.version>=2){
         if(!plain(manifest.database)||Object.keys(manifest.database).some(name=>!['descriptor','identity'].includes(name))||!Object.hasOwn(manifest.database,'identity'))fail('BACKUP_MANIFEST','Отсутствуют метаданные исходного формата базы');
         try{sourceDescriptor=require('./storage-format.cjs').validateDescriptor(manifest.database.descriptor);sourceIdentity=manifest.database.identity===null?null:require('./database-identity.cjs').validate(manifest.database.identity);}catch{fail('BACKUP_MANIFEST','Повреждён или несовместим формат исходной базы');}
     }else if(Object.hasOwn(manifest,'database'))fail('BACKUP_MANIFEST','Версия резервного пакета не согласована с метаданными базы');
@@ -256,6 +263,8 @@ function readPackage(archivePath) {
     if (manifest.sourceFormat !== undefined && !['json', 'sqlite'].includes(manifest.sourceFormat))
         fail('BACKUP_MANIFEST', 'Неизвестный исходный формат базы');
     const checked = { version:manifest.version,sourceDescriptor,sourceIdentity,files, data, settings: settings ? jsonObject(json(settings.bytes, 'settings.json'), 'settings.json') : null, revisions: revisions(manifest.revisions), sourceFormat: manifest.sourceFormat === 'sqlite' ? 'sqlite' : 'json', sourceFingerprint: typeof manifest.sourceFingerprint === 'string' && /^[a-f0-9]{64}$/.test(manifest.sourceFingerprint) ? manifest.sourceFingerprint : null, archiveSha256: sha(archive) };
+    if(sourceDescriptor?.schemaVersion>=4&&manifest.version!==3||manifest.version===3&&sourceDescriptor?.schemaVersion!==4||manifest.version<3&&entries.some(entry=>entry.entryName==='operation-state.json'||entry.entryName.startsWith('operation-ledger/')))fail('BACKUP_OPERATION_STATE','Версия пакета не сохраняет историю операций исходной базы');
+    if(manifest.version===3){checked.operationSeed=readOperations(files);if(JSON.stringify(checked.operationSeed.hotRows)!==JSON.stringify(data.auditLog))fail('BACKUP_OPERATION_STATE','Горячая история не соответствует полному журналу операций');}
     checked.referencedFileCount = references(data, files);
     require('./document-archive.cjs').validateManaged(data,name=>files.find(entry=>entry.name===name)?.bytes);validateSources(data,name=>files.find(entry=>entry.name===name)?.bytes);
     return checked;
@@ -296,6 +305,7 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir,all
             fail('BACKUP_LIMIT', 'Резервный пакет превышает допустимый размер'); zip.addFile(name, bytes); files.push({ name, size: bytes.length, sha256: sha(bytes) }); };
         add('database.json', Buffer.from(JSON.stringify(snapshot.data)));
         add('settings.json', Buffer.from(JSON.stringify(settings)));
+        if(snapshot.operationSeed)for(const entry of operationFiles(snapshot.operationSeed))add(entry.name,entry.bytes);
         for (const entry of before) {
             if (entry.type === 'directory' || !MANAGED.includes(entry.name.split('/')[0])||entry.name.startsWith('document-archive/')&&!reachable.has(entry.name.slice('document-archive/'.length)))
                 continue;
@@ -307,7 +317,7 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir,all
         references(snapshot.data, files);
         require('./document-archive.cjs').validateManaged(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null);validateSources(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null);
         const sourceFingerprint = sha(JSON.stringify(before));
-        zip.addFile('manifest.json', Buffer.from(JSON.stringify({ format: 'tvs-backup', version: 2, database:{descriptor:snapshot.sourceDescriptor,identity:snapshot.sourceIdentity}, createdAt: new Date().toISOString(), files, revisions: snapshot.revisions, sourceFormat: snapshot.sourceFormat, sourceFingerprint })));
+        zip.addFile('manifest.json', Buffer.from(JSON.stringify({ format: 'tvs-backup', version: snapshot.operationSeed?3:2, database:{descriptor:snapshot.sourceDescriptor,identity:snapshot.sourceIdentity}, createdAt: new Date().toISOString(), files, revisions: snapshot.revisions, sourceFormat: snapshot.sourceFormat, sourceFingerprint })));
         stage = path.join(parent, '.tvs-backup-package-' + crypto.randomUUID() + '.zip');
         writeFile(stage, zip.toBuffer());
         identity = fs.lstatSync(stage);
@@ -347,6 +357,7 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir,all
 }
 function restoreLegacyPackage({ archivePath, targetDir, format, protectedDir } = {}) {
     const archive = explicit(archivePath), checked = readPackage(archive), { parent, target } = newTarget(targetDir);
+    const seed=checked.operationSeed||operationSeed(checked.data),restoredData={...checked.data,auditLog:seed.hotRows};
     if (protectedDir) {
         const protectedPath = directory(protectedDir);
         if (within(protectedPath, target) || within(target, protectedPath))
@@ -362,15 +373,16 @@ function restoreLegacyPackage({ archivePath, targetDir, format, protectedDir } =
         stage = fs.mkdtempSync(path.join(parent, '.tvs-backup-stage-'));
         identity = fs.lstatSync(stage);
         if (chosen === 'sqlite')
-            sqlite.create(stage, { data: checked.data, revisions: checked.revisions });
+            sqlite.create(stage, { data: restoredData, revisions: checked.revisions,operationState:seed.operationState,operationObjects:seed.objects });
         else {
             fs.mkdirSync(path.join(stage, 'sections'));
             for (const name of SECTIONS)
-                writeFile(path.join(stage, 'sections', name + '.json'), Buffer.from(JSON.stringify(checked.data[name])));
-            writeFile(path.join(stage, 'sections/revisions.json'), Buffer.from(JSON.stringify(storage.encodeRevisions(checked.revisions))));
+                writeFile(path.join(stage, 'sections', name + '.json'), Buffer.from(JSON.stringify(restoredData[name])));
+            writeFile(path.join(stage, 'sections/revisions.json'), Buffer.from(JSON.stringify(storage.encodeRevisions(checked.revisions,require('./storage-format.cjs').describe(require('./storage-format.cjs').SCHEMA_VERSION),seed.operationState))));
+            require('./database-identity.cjs').readOrCreate(stage);operations().putObjects(stage,seed.objects);
         }
         for (const entry of checked.files) {
-            if (entry.name === 'database.json')
+            if (entry.name === 'database.json'||entry.name==='operation-state.json'||operationObjectsName.test(entry.name))
                 continue;
             const filename = path.join(stage, ...entry.name.split('/'));
             if (entry.name !== 'settings.json')
@@ -381,8 +393,11 @@ function restoreLegacyPackage({ archivePath, targetDir, format, protectedDir } =
         }
         const actual = storage.readSnapshot(stage);
         for (const name of SECTIONS)
-            if (JSON.stringify(actual.data[name]) !== JSON.stringify(checked.data[name]) || actual.revisions[name] !== checked.revisions[name])
+            if (JSON.stringify(actual.data[name]) !== JSON.stringify(restoredData[name]) || actual.revisions[name] !== checked.revisions[name])
                 fail('BACKUP_PARITY', 'Восстановленные данные или версии не совпали');
+        const restored=operations().fromClosure(operations().exportClosure(stage),{operationState:operations().readState(stage)});
+        if(JSON.stringify(restored.operationState)!==JSON.stringify(seed.operationState)||JSON.stringify(restored.objects)!==JSON.stringify(seed.objects))
+            fail('BACKUP_OPERATION_STATE','Восстановленная история операций отличается от пакета');
         if (chosen === 'sqlite') {
             const inspected = sqlite.inspect(stage);
             if (!inspected.ok || inspected.integrity.length !== 1 || inspected.integrity[0] !== 'ok' || inspected.foreignKeyErrors.length)
@@ -415,7 +430,7 @@ function restoreReviewedPackage({ archivePath, targetDir, format, protectedDir }
     const requested=explicit(archivePath),archive=path.join(directory(path.dirname(requested)),path.basename(requested)),proposed=explicit(targetDir),parent=directory(path.dirname(proposed)),target=path.join(parent,path.basename(proposed));
     if(!safeName(path.basename(target))||within(target,archive))fail('BACKUP_PATH','Нужна новая отдельная папка вне исходного резервного пакета');
     if(protectedDir){const protectedPath=directory(protectedDir);if(within(protectedPath,target)||within(target,protectedPath))fail('BACKUP_PATH','Восстановление должно выполняться вне рабочей папки базы');}
-    const chosen=format??plan.target?.format,descriptor=require('./storage-format.cjs').describe(3);
+    const chosen=format??plan.target?.format,descriptor=require('./storage-format.cjs').describe(require('./storage-format.cjs').SCHEMA_VERSION);
     if(!['json','sqlite'].includes(chosen))fail('BACKUP_FORMAT','Неизвестный формат восстановления');
     let checked=null;
     const load=()=>{
@@ -434,27 +449,32 @@ function restoreReviewedPackage({ archivePath, targetDir, format, protectedDir }
         verifySource(){load();if('sha256:'+sha(readFile(archive))!==plan.source.fingerprint)fail('BACKUP_SOURCE_CHANGED','Резервный пакет изменился после проверки');},
         create(stage,metadata){
             const value=load();
+            const seed=value.operationSeed||operationSeed(value.data,metadata.migrationId),restoredData={...value.data,auditLog:seed.hotRows};
+            value.restoreSeed=seed;value.restoredData=restoredData;
             if(value.files.some(entry=>entry.name==='migration-history/'+metadata.migrationId+'.json'))fail('BACKUP_HISTORY_COLLISION','Новый идентификатор восстановления совпал с сохранённой историей');
             if(chosen==='sqlite'){
-                const child=path.join(stage,'sqlite-data');sqlite.create(child,{data:value.data,revisions:value.revisions,descriptor:metadata.descriptor,identity:metadata.identity});
+                const child=path.join(stage,'sqlite-data');sqlite.create(child,{data:restoredData,revisions:value.revisions,descriptor:metadata.descriptor,identity:metadata.identity,operationState:seed.operationState,operationObjects:seed.objects});
                 for(const suffix of ['-wal','-shm']){const filename=path.join(child,'platform.sqlite'+suffix),state=stat(filename);if(state){if(!state.isFile()||state.isSymbolicLink()||state.nlink!==1||suffix==='-wal'&&state.size)fail('BACKUP_INTEGRITY','Не завершён или небезопасен журнал новой SQLite');fs.unlinkSync(filename);}}
                 if(JSON.stringify(fs.readdirSync(child).sort())!==JSON.stringify(['platform.sqlite','sections']))fail('BACKUP_INTEGRITY','Неожиданные файлы в новой SQLite');
                 for(const name of ['platform.sqlite','sections'])fs.renameSync(path.join(child,name),path.join(stage,name));fs.rmdirSync(child);
             }else{
                 fs.mkdirSync(path.join(stage,'sections'));
-                for(const name of SECTIONS)writeFile(path.join(stage,'sections',name+'.json'),Buffer.from(JSON.stringify(value.data[name])));
-                writeFile(path.join(stage,'sections/revisions.json'),Buffer.from(JSON.stringify(storage.encodeRevisions(value.revisions,metadata.descriptor))));
+                for(const name of SECTIONS)writeFile(path.join(stage,'sections',name+'.json'),Buffer.from(JSON.stringify(restoredData[name])));
+                writeFile(path.join(stage,'sections/revisions.json'),Buffer.from(JSON.stringify(storage.encodeRevisions(value.revisions,metadata.descriptor,seed.operationState))));
                 writeFile(path.join(stage,'database-identity.json'),Buffer.from(JSON.stringify(metadata.identity)));
+                operations().putObjects(stage,seed.objects);
             }
             for(const entry of value.files){
-                if(entry.name==='database.json')continue;
+                if(entry.name==='database.json'||entry.name==='operation-state.json'||operationObjectsName.test(entry.name))continue;
                 const filename=path.join(stage,...entry.name.split('/'));if(entry.name!=='settings.json')fs.mkdirSync(path.dirname(filename),{recursive:true,mode:0o700});
                 writeFile(filename,entry.bytes);if(sha(readFile(filename))!==entry.sha256)fail('BACKUP_HASH','Восстановленный файл не совпал с пакетом');
             }
         },
         verify(stage,metadata){
             const value=load(),actual=storage.readSnapshot(stage);
-            for(const name of SECTIONS)if(JSON.stringify(actual.data[name])!==JSON.stringify(value.data[name])||actual.revisions[name]!==value.revisions[name])fail('BACKUP_PARITY','Восстановленные данные или версии не совпали');
+            const seed=value.restoreSeed||value.operationSeed||operationSeed(value.data,metadata.migrationId),restoredData=value.restoredData||{...value.data,auditLog:seed.hotRows};
+            for(const name of SECTIONS)if(JSON.stringify(actual.data[name])!==JSON.stringify(restoredData[name])||actual.revisions[name]!==value.revisions[name])fail('BACKUP_PARITY','Восстановленные данные или версии не совпали');
+            const restored=operations().fromClosure(operations().exportClosure(stage),{operationState:operations().readState(stage)});if(JSON.stringify(restored.operationState)!==JSON.stringify(seed.operationState)||JSON.stringify(restored.objects)!==JSON.stringify(seed.objects))fail('BACKUP_OPERATION_STATE','Восстановленная история операций отличается от пакета');
             if(chosen==='sqlite'){
                 const inspected=sqlite.inspect(stage);if(!inspected.ok||inspected.integrity.length!==1||inspected.integrity[0]!=='ok'||inspected.foreignKeyErrors.length)fail('BACKUP_INTEGRITY','Проверка целостности восстановленной SQLite не пройдена');
                 if(stat(path.join(stage,'platform.sqlite-wal'))?.size)fail('BACKUP_INTEGRITY','Не завершён журнал восстановленной SQLite');

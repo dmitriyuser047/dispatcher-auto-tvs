@@ -17,13 +17,9 @@ function initial(){return {...Object.fromEntries(storage.SECTIONS.map(name=>[nam
   records:[{id:'identity-row',vehicleId:7,date:'2026-09-01',km:10.125,fuelActual:1.001}],
   repairs:[{id:'legacy-orphan',vehicleId:'missing-synthetic-vehicle',status:'planned'}]};}
 function create(dir,format,data=initial(),revisions=Object.fromEntries(storage.SECTIONS.map(name=>[name,11]))){
-  if(format==='sqlite')sqlite.create(dir,{data,revisions});else{
-    // Seed an existing legacy JSON fixture verbatim. A new ordinary command
-    // must reject the intentional historical orphan, rather than create it.
-    fs.mkdirSync(storage.sectionsDir(dir),{recursive:true});
-    for(const name of storage.SECTIONS)fs.writeFileSync(storage.sectionFile(dir,name),JSON.stringify(data[name]||[]));
-    fs.writeFileSync(storage.revisionsFile(dir),JSON.stringify(storage.encodeRevisions(revisions)));
-  }
+  // A trusted new-target builder preserves the intentional historical orphan
+  // and honestly bootstraps current history without an ordinary-command bypass.
+  if(format==='sqlite')sqlite.create(dir,{data,revisions});else storage.createJson(dir,{data,revisions});
 }
 function fixture(t,format){const root=temp(t),dir=path.join(root,'database');create(dir,format);return {root,dir};}
 function readIdentity(dir,format){return format==='sqlite'?sqlite.readIdentity(dir):identity.readOrCreate(dir);}

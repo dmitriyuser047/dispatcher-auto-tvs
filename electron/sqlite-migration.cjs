@@ -7,6 +7,13 @@ const crypto = require('node:crypto');
 const schema = require('../assets/core/platform-schema.js');
 const contracts = require('../assets/core/platform-contracts.js');
 const sqlite = require('./sqlite-storage.cjs');
+const storageFormat = require('./storage-format.cjs');
+const operations = () => require('./operation-store.cjs');
+function targetOperations(source, transactionId) {
+  if (source.operationSeed) return source.operationSeed;
+  const seed = operations().bootstrap({auditRows:source.data.auditLog || [],archiveLegacy:(source.data.auditLog || []).length > 5000});
+  return {...seed,operationState:storageFormat.validateOperationState({...seed.operationState,transactionId})};
+}
 const sections = schema.sections;
 const managed = ['attachments','import-sources','reestr-knowledge','document-archive','migration-history'];
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -96,6 +103,21 @@ function sourceManifest(source) {
       addFile(directory + '/' + name);
     }
   }
+  if (stat(path.join(source,'operation-ledger'))) {
+    const directory=path.join(source,'operation-ledger'),info=stat(directory);
+    if (!info.isDirectory() || info.isSymbolicLink() || fs.readdirSync(directory).some(name=>name!=='objects')) fail('MIGRATION_SOURCE_FILE','Неизвестный каталог истории операций');
+    manifest.push({path:'operation-ledger',type:'directory'});
+    const objects=path.join(directory,'objects');
+    if (stat(objects)) {
+      const info=stat(objects);
+      if (!info.isDirectory() || info.isSymbolicLink()) fail('MIGRATION_SOURCE_FILE','Недопустимый каталог объектов истории');
+      manifest.push({path:'operation-ledger/objects',type:'directory'});
+      for (const name of fs.readdirSync(objects).sort()) {
+        if (!/^[a-f0-9]{64}\.json$/.test(name)) fail('MIGRATION_SOURCE_FILE','Неизвестное имя объекта истории');
+        addFile('operation-ledger/objects/'+name);
+      }
+    }
+  }
   manifest.sort((a,b) => a.path.localeCompare(b.path));
   return manifest;
 }
@@ -109,11 +131,12 @@ function readSource(source,manifest) {
     try { return JSON.parse(bytes.toString('utf8')); }
     catch { fail('MIGRATION_SOURCE_JSON','Не удалось разобрать JSON: ' + relative); }
   };
-  let data, revisions, format,descriptor,sourceIdentity=null;
+  let data, revisions, format,descriptor,sourceIdentity=null,operationSeed;
   if (manifest.some(file => file.path === 'sections')) {
     const rawRevisions=read('sections/revisions.json');let decoded;
     try{decoded=require('./storage-format.cjs').decodeRevisions(rawRevisions);}catch{fail('MIGRATION_SOURCE_REVISIONS','Повреждены версии исходных разделов');}
     revisions = decoded.revisions; data = {}; format = 'split-json';descriptor=decoded.descriptor;
+    if (decoded.schemaVersion>=4) operationSeed=operations().fromClosure(operations().exportClosure(source),{operationState:decoded.operationState});
     for (const section of sections) {
       const relative = 'sections/' + section + '.json';
       if (byPath.has(relative)) data[section] = read(relative);
@@ -137,8 +160,9 @@ function readSource(source,manifest) {
   // turn Infinity into null during serialization to the new store.
   try { contracts.validateSections(data,sections); }
   catch { fail('MIGRATION_SOURCE_JSON_SHAPE','Исходная база содержит небезопасные или непредставимые значения JSON'); }
-  descriptor??=require('./storage-format.cjs').describe(1);if(byPath.has('database-identity.json'))sourceIdentity=require('./database-identity.cjs').validate(read('database-identity.json'));if(descriptor.schemaVersion===3&&!sourceIdentity)fail('MIGRATION_SOURCE_IDENTITY','Отсутствует подтверждённый идентификатор базы');
-  return { data,revisions,format,descriptor,sourceIdentity };
+  descriptor??=require('./storage-format.cjs').describe(1);if(byPath.has('database-identity.json'))sourceIdentity=require('./database-identity.cjs').validate(read('database-identity.json'));if(descriptor.schemaVersion>=3&&!sourceIdentity)fail('MIGRATION_SOURCE_IDENTITY','Отсутствует подтверждённый идентификатор базы');
+  if (operationSeed && JSON.stringify(operationSeed.hotRows)!==JSON.stringify(data.auditLog)) fail('MIGRATION_OPERATION_STATE','Горячая история не соответствует журналу операций');
+  return { data,revisions,format,descriptor,sourceIdentity,operationSeed };
 }
 function referencedFiles(data,manifest) {
   const files = new Map(manifest.filter(file => file.type === 'file').map(file => [file.path,file]));
@@ -183,7 +207,7 @@ function copyManaged(source,stage,manifest,data) {
   }
   return copied;
 }
-function verifyDatabase(stage,source) {
+function verifyDatabase(stage,source,seed) {
   const data = sqlite.readAll(stage), revisions = sqlite.readRevisions(stage), inspected = sqlite.inspect(stage);
   require('./document-archive.cjs').validateState(stage,data);require('./import-source.cjs').validateState(stage,data);require('./attachment-access.cjs').validateManaged(data,name=>fs.readFileSync(path.join(stage,...name.split('/'))));
   if (!inspected.ok || !Array.isArray(inspected.integrity) || inspected.integrity.length !== 1 || inspected.integrity[0] !== 'ok' ||
@@ -191,8 +215,11 @@ function verifyDatabase(stage,source) {
     fail('MIGRATION_SQLITE_INTEGRITY','Проверка целостности SQLite не пройдена');
   if (!plain(data) || Object.keys(data).length !== sections.length || !plain(revisions) || Object.keys(revisions).length !== sections.length)
     fail('MIGRATION_PARITY','Набор разделов SQLite отличается от исходного');
-  for (const section of sections) if (JSON.stringify(data[section]) !== JSON.stringify(source.data[section]) || revisions[section] !== source.revisions[section])
+  const expected={...source.data,auditLog:seed.hotRows};
+  for (const section of sections) if (JSON.stringify(data[section]) !== JSON.stringify(expected[section]) || revisions[section] !== source.revisions[section])
     fail('MIGRATION_PARITY','Данные или версия раздела не совпали после копирования: ' + section);
+  const restored=operations().fromClosure(operations().exportClosure(stage),{operationState:operations().readState(stage)});
+  if (JSON.stringify(restored.operationState)!==JSON.stringify(seed.operationState) || JSON.stringify(restored.objects)!==JSON.stringify(seed.objects)) fail('MIGRATION_PARITY','История операций отличается от источника');
   return { sections:sections.map(name => ({name,count:data[name].length,revision:revisions[name],sha256:sha(JSON.stringify(data[name]))})),
     rowCount:sections.reduce((count,name) => count + data[name].length,0),linkCount:inspected.linkCount,
     legacyIssueCount:Array.isArray(inspected.legacyIssues) ? inspected.legacyIssues.length : 0,
@@ -221,13 +248,13 @@ function createSqliteMigration({checkpoint}={}){
   let previous;try{previous=journal.readPlan({sourceDir,targetDir,kind:'sqlite-copy'});}catch(error){if(error.code==='MIGRATION_JOURNAL_PATH')error.code='MIGRATION_PATH';throw error;}let source,manifest,original,referencedFileCount,copiedFiles,parity;
   const load=()=>{if(original)return original;source=checkedDirectory(sourceDir);manifest=sourceManifest(source);original=readSource(source,manifest);const read=name=>manifest.some(entry=>entry.path===name)?require('./safe-file.cjs').readRegularFileSync(ordinaryFile(source,name).filename,{maxBytes:Math.max(1,stat(path.join(source,...name.split('/'))).size)}):null;require('./document-archive.cjs').validateManaged(original.data,read);require('./import-source.cjs').validateManaged(original.data,read);require('./attachment-access.cjs').validateManaged(original.data,read);referencedFileCount=referencedFiles(original.data,manifest);return original;};
   try{const sourceFingerprint=previous?.operation.sourceFingerprint??(load(),'sha256:'+sha(JSON.stringify(manifest)));
-   return runCopy({sourceDir:localAbsolute(sourceDir),targetDir:localAbsolute(targetDir),sourceFingerprint,targetFormat:'sqlite',kind:'sqlite-copy',descriptor:require('./storage-format.cjs').describe(3),sourceIdentity:previous?previous.sourceIdentity:load().sourceIdentity,reportName:'migration-report.json',
+   return runCopy({sourceDir:localAbsolute(sourceDir),targetDir:localAbsolute(targetDir),sourceFingerprint,targetFormat:'sqlite',kind:'sqlite-copy',descriptor:storageFormat.describe(storageFormat.SCHEMA_VERSION),sourceIdentity:previous?previous.sourceIdentity:load().sourceIdentity,reportName:'migration-report.json',
    verifySource(plan){load();if('sha256:'+sha(JSON.stringify(sourceManifest(source)))!==sourceFingerprint)fail('MIGRATION_SOURCE_CHANGED','Исходная база изменилась во время копирования');if(plan&&(plan.source.format!=='json'||JSON.stringify(plan.source.descriptor)!==JSON.stringify(original.descriptor)||JSON.stringify(plan.source.identity)!==JSON.stringify(original.sourceIdentity)))fail('MIGRATION_LIFECYCLE_CHANGED','Метаданные источника не соответствуют подтверждённому плану');},
-   create(stage,metadata){load();const database=path.join(stage,'.database-build');fs.mkdirSync(database);sqlite.create(database,{data:original.data,revisions:original.revisions,identity:metadata.identity,descriptor:metadata.descriptor});for(const name of fs.readdirSync(database))fs.renameSync(path.join(database,name),path.join(stage,name));fs.rmdirSync(database);copiedFiles=copyManaged(source,stage,manifest,original.data);},
-   verify(stage,metadata){load();parity=verifyDatabase(stage,original);if(JSON.stringify(sqlite.readIdentity(stage))!==JSON.stringify(metadata.identity))fail('MIGRATION_PARITY','Идентификатор копии отличается от журнала');},
+   create(stage,metadata){load();const seed=targetOperations(original,metadata.migrationId);original.targetSeed=seed;const database=path.join(stage,'.database-build');fs.mkdirSync(database);sqlite.create(database,{data:{...original.data,auditLog:seed.hotRows},revisions:original.revisions,identity:metadata.identity,descriptor:metadata.descriptor,operationState:seed.operationState,operationObjects:seed.objects});for(const name of fs.readdirSync(database))fs.renameSync(path.join(database,name),path.join(stage,name));fs.rmdirSync(database);copiedFiles=copyManaged(source,stage,manifest,original.data);},
+   verify(stage,metadata){load();parity=verifyDatabase(stage,original,original.targetSeed||targetOperations(original,metadata.migrationId));if(JSON.stringify(sqlite.readIdentity(stage))!==JSON.stringify(metadata.identity))fail('MIGRATION_PARITY','Идентификатор копии отличается от журнала');},
    verifyPublishedIdentity(published,metadata){try{let identity,descriptor;sqlite.transaction(published,()=>{identity=sqlite.readIdentity(published);descriptor=sqlite.readDescriptor(published);},{readOnly:true});if(JSON.stringify(identity)!==JSON.stringify(metadata.identity)||JSON.stringify(descriptor)!==JSON.stringify(metadata.descriptor))fail('MIGRATION_TARGET_IDENTITY','Идентификатор или совместимость опубликованной копии изменились');}catch(error){if(error.code==='MIGRATION_TARGET_IDENTITY')throw error;throw Object.assign(Error('Не подтверждён идентификатор опубликованной копии'),{code:'MIGRATION_TARGET_IDENTITY',cause:error});}},
-   report(stage,metadata){load();parity??=verifyDatabase(stage,original);const reachable=require('./document-archive.cjs').managedNames(source,original.data);copiedFiles??=manifest.filter(entry=>entry.type==='file'&&managed.includes(entry.path.split('/')[0])&&(entry.path.split('/')[0]!=='document-archive'||reachable.has(entry.path.slice('document-archive/'.length)))).map(entry=>({path:entry.path,...hashFile(path.join(stage,...entry.path.split('/')))}));const database=ordinaryFile(stage,'platform.sqlite'),wal=stat(database.filename+'-wal');if(wal?.size)fail('MIGRATION_SQLITE_CHECKPOINT','SQLite не закрыла журнал перед публикацией копии');for(const suffix of ['-wal','-shm'])if(stat(database.filename+suffix))fs.unlinkSync(ordinaryFile(stage,'platform.sqlite'+suffix).filename);
-    return {ok:true,format:'tvs-sqlite-copy-migration',version:2,schemaVersion:3,descriptor:metadata.descriptor,targetIdentity:metadata.identity,sourceIdentity:metadata.sourceIdentity,migrationId:metadata.migrationId,startedAt:metadata.startedAt,retainedStages:metadata.retainedStages,...(metadata.lifecycleDecision?{lifecycleDecision:metadata.lifecycleDecision}:{}),sourceFormat:original.format,sourceFingerprint:sourceFingerprint.slice(7),sourceFileCount:manifest.filter(file=>file.type==='file').length,sourceFiles:manifest.filter(file=>file.type==='file'),referencedFileCount,copiedFileCount:copiedFiles.length,copiedFiles,databaseSha256:hashFile(database.filename).sha256,...parity};}
+   report(stage,metadata){load();parity??=verifyDatabase(stage,original,original.targetSeed||targetOperations(original,metadata.migrationId));const reachable=require('./document-archive.cjs').managedNames(source,original.data);copiedFiles??=manifest.filter(entry=>entry.type==='file'&&managed.includes(entry.path.split('/')[0])&&(entry.path.split('/')[0]!=='document-archive'||reachable.has(entry.path.slice('document-archive/'.length)))).map(entry=>({path:entry.path,...hashFile(path.join(stage,...entry.path.split('/')))}));const database=ordinaryFile(stage,'platform.sqlite'),wal=stat(database.filename+'-wal');if(wal?.size)fail('MIGRATION_SQLITE_CHECKPOINT','SQLite не закрыла журнал перед публикацией копии');for(const suffix of ['-wal','-shm'])if(stat(database.filename+suffix))fs.unlinkSync(ordinaryFile(stage,'platform.sqlite'+suffix).filename);
+    return {ok:true,format:'tvs-sqlite-copy-migration',version:2,schemaVersion:storageFormat.SCHEMA_VERSION,descriptor:metadata.descriptor,targetIdentity:metadata.identity,sourceIdentity:metadata.sourceIdentity,migrationId:metadata.migrationId,startedAt:metadata.startedAt,retainedStages:metadata.retainedStages,...(metadata.lifecycleDecision?{lifecycleDecision:metadata.lifecycleDecision}:{}),sourceFormat:original.format,sourceFingerprint:sourceFingerprint.slice(7),sourceFileCount:manifest.filter(file=>file.type==='file').length,sourceFiles:manifest.filter(file=>file.type==='file'),referencedFileCount,copiedFileCount:copiedFiles.length,copiedFiles,databaseSha256:hashFile(database.filename).sha256,...parity};}
   },options);}catch(error){if(error.code?.startsWith('MIGRATION_'))throw error;const wrapped=new Error('Не удалось создать и проверить отдельную SQLite копию. Исходная база не изменялась.');wrapped.code='MIGRATION_FAILED';wrapped.cause=error;throw wrapped;}
  }
  return Object.freeze({migrateCopy});

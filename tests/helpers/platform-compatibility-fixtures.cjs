@@ -11,6 +11,6 @@ function compile(){
  const context=vm.createContext({exports:{}});new vm.Script('(function(exports){\n'+artifact+'\n})(exports);',{filename:SOURCE}).runInContext(context);compiled={artifact,options,exports:context.exports,source:fs.readFileSync(SOURCE,'utf8')};return compiled;
 }
 function api(){return require(path.join(ROOT,'assets/core/platform-compatibility.js'));}
-const plain=value=>JSON.parse(JSON.stringify(value));
-function fixture(schemaVersion=3){const module=api(),description=plain(module.describe());return {module,hello:description.hello,server:description.serverProfile,descriptor:require(path.join(ROOT,'electron/storage-format.cjs')).describe(schemaVersion)};}
-module.exports={ROOT,SOURCE,compile,api,plain,fixture};
+const plain=value=>JSON.parse(JSON.stringify(value)),CURRENT=require(path.join(ROOT,'electron/storage-format.cjs')).SCHEMA_VERSION;
+function fixture(schemaVersion=CURRENT){const module=api(),description=plain(module.describe());return {module,hello:description.hello,server:description.serverProfile,descriptor:require(path.join(ROOT,'electron/storage-format.cjs')).describe(schemaVersion)};}
+module.exports={ROOT,SOURCE,compile,api,plain,fixture,CURRENT};

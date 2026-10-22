@@ -30,7 +30,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
   const profile = path.join(dir, 'profile'), dataA = path.join(dir, 'A'), dataB = path.join(dir, 'B');
   fs.mkdirSync(profile);
   const fixture = id => ({ vehicles:[{ id, make:'Synthetic vehicle', plate:id, driver:'Synthetic driver', org:'A', norm:10, fuelGrade:'ДТ', fuelBalance:100 }], records:[], reestrRows:[{ id:'original-'+id, sum:1 }], appMeta:[] });
-  storage.writeAll(dataA, fixture('A'));
+  storage.createJson(dataA, {data:fixture('A')});
   // The same real Electron shell must support JSON and explicit SQLite profiles.
   sqlite.create(dataB,{ data:fixture('B') });
   fs.writeFileSync(path.join(profile, 'settings.json'), JSON.stringify({ users:[{ name:'Test A',dataDir:dataA },{ name:'Test B',dataDir:dataB }], activeUser:0, networkMode:'local', serverPort:3377, remotePort:3377, remoteHost:'127.0.0.1', networkKey:'synthetic-native-key-not-a-secret' }));
@@ -61,7 +61,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
       ...(saved?{}:{failure:platformRuntimeStatus().lastError,syncResult:_sync.lastResult}) };
   });
   assert.equal(first.saved, true,JSON.stringify(first));
-  assert.deepEqual(first.platform, {apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:3,currentSchemaVersion:3,descriptor:require('../electron/storage-format.cjs').describe(3),readOnly:false,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false,compatibility:require('../assets/core/platform-compatibility.js').describe().serverProfile,negotiation:require('../assets/core/platform-compatibility.js').negotiate(require('../assets/core/platform-compatibility.js').describe().hello,require('../assets/core/platform-compatibility.js').describe().serverProfile,require('../electron/storage-format.cjs').describe(3))});
+  assert.deepEqual(first.platform, {apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:require('../electron/storage-format.cjs').SCHEMA_VERSION,currentSchemaVersion:require('../electron/storage-format.cjs').SCHEMA_VERSION,descriptor:require('../electron/storage-format.cjs').describe(require('../electron/storage-format.cjs').SCHEMA_VERSION),readOnly:false,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false,compatibility:require('../assets/core/platform-compatibility.js').describe().serverProfile,negotiation:require('../assets/core/platform-compatibility.js').negotiate(require('../assets/core/platform-compatibility.js').describe().hello,require('../assets/core/platform-compatibility.js').describe().serverProfile,require('../electron/storage-format.cjs').describe(require('../electron/storage-format.cjs').SCHEMA_VERSION))});
   assert.equal(JSON.stringify(first.platform).includes('writeTicket'),false);assert.equal(JSON.stringify(first.platform).includes('issuerEpoch'),false);
   assert.equal(first.operationReceipt?.status, 'committed'); assert.ok(first.operationReceipt.id);
   assert.equal(storage.readAll(dataA).records[0].id, 'native-journal');

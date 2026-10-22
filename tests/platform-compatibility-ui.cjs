@@ -1,18 +1,18 @@
 'use strict';
 const {test,before,after,beforeEach,afterEach}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{createRequire}=require('node:module'),{pathToFileURL}=require('node:url');
-const schema=require('../assets/core/platform-schema.js'),engine=require('../assets/core/platform-compatibility.js'),descriptor=require('../electron/storage-format.cjs').describe(3);
+const schema=require('../assets/core/platform-schema.js'),engine=require('../assets/core/platform-compatibility.js'),format=require('../electron/storage-format.cjs'),descriptor=format.describe(format.SCHEMA_VERSION);
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
 let browser,page,errors;
 before(async()=>{const edge='C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';browser=await pw.chromium.launch({headless:true,executablePath:process.env.TVS_TEST_BROWSER||(!process.env.CI&&fs.existsSync(edge)?edge:undefined)});});after(async()=>{await browser?.close();});
 beforeEach(async()=>{
  page=await browser.newPage({viewport:{width:1400,height:1000}});errors=[];page.on('pageerror',error=>errors.push(error.message));
  const defaults=engine.describe(),readonly=engine.negotiate({...defaults.hello,writerSchemaVersions:[]},defaults.serverProfile,descriptor),readwrite=engine.negotiate(defaults.hello,defaults.serverProfile,descriptor);
- await page.addInitScript(({sections,readonly,readwrite})=>{
+ await page.addInitScript(({sections,readonly,readwrite,currentSchema})=>{
   const rows=Object.fromEntries(sections.map(name=>[name,[]]));rows.vehicles=[{id:0,plate:'SYNTHETIC NUMBER',fuelBalance:923.537},{id:'0',plate:'SYNTHETIC TEXT',fuelBalance:0}];rows.generators=[{id:0,name:'SYNTHETIC NUMERIC GENERATOR'},{id:'0',name:'SYNTHETIC STRING GENERATOR'}];rows.appMeta=[{id:'meta',toPlanInit:'synthetic'}];
   window.__source=JSON.stringify(rows);window.__hellos=[];window.__raw=0;window.__sections=0;window.__mode='read-only';window.__unsupported=false;
-  window.electronAPI={readSnapshot:async payload=>{__hellos.push(structuredClone(payload));return JSON.stringify({data:JSON.parse(__source),databaseToken:'synthetic-compatibility',revisions:Object.fromEntries(sections.map(name=>[name,1])),readOnly:__mode!=='read-write',platform:{apiVersion:1,operations:1,outbox:1,commands:1,documentDrafts:1,documentPrint:1,controlledImports:1,schemaVersion:3,negotiation:__mode==='read-write'?readwrite:readonly}});},writeSections:async()=>{__sections++;return __unsupported?{ok:false,unsupported:true}:{ok:false,error:'Unexpected write'};},writeData:async()=>{__raw++;return true;}};
- },{sections:schema.sections,readonly,readwrite});
+  window.electronAPI={readSnapshot:async payload=>{__hellos.push(structuredClone(payload));return JSON.stringify({data:JSON.parse(__source),databaseToken:'synthetic-compatibility',revisions:Object.fromEntries(sections.map(name=>[name,1])),readOnly:__mode!=='read-write',platform:{apiVersion:1,operations:1,outbox:1,commands:1,documentDrafts:1,documentPrint:1,controlledImports:1,schemaVersion:currentSchema,negotiation:__mode==='read-write'?readwrite:readonly}});},writeSections:async()=>{__sections++;return __unsupported?{ok:false,unsupported:true}:{ok:false,error:'Unexpected write'};},writeData:async()=>{__raw++;return true;}};
+ },{sections:schema.sections,readonly,readwrite,currentSchema:format.SCHEMA_VERSION});
  await page.goto(pathToFileURL(path.resolve(__dirname,'../index.html')).href);await page.waitForFunction(()=>typeof data!=='undefined'&&data.vehicles.some(row=>row.id===0)&&typeof syncRefreshView==='function');
 });
 afterEach(async()=>{await page?.close();assert.deepEqual(errors,[]);});

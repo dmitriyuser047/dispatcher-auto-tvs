@@ -12,7 +12,7 @@ let _clientKey = '', _transport = { protocol:'http:', ca:null }, _accessSettings
 const MAX_BODY = 32 * 1024 * 1024, MAX_IMPORT_BODY = 40 * 1024 * 1024, MAX_RESPONSE = 64 * 1024 * 1024;
 const compatibility=()=>require('../assets/core/platform-compatibility.js');
 function proofProvider(){return require('./write-proof.cjs').createWriteProof({compatibility:compatibility()});}
-function localWriteOptions({hello,databaseToken,principal}){_localWriteProof??=proofProvider();const credential='trusted-local-main',issued=_localWriteProof.negotiate(hello,{databaseToken,principal,descriptor:require('./storage-format.cjs').describe(3),credential});return {requireWriterSchema:true,writerSchemaVersion:3,..._localWriteProof.writeOptions(issued.writeTicket,{credential})};}
+function localWriteOptions({hello,databaseToken,principal}){_localWriteProof??=proofProvider();const format=require('./storage-format.cjs'),credential='trusted-local-main',issued=_localWriteProof.negotiate(hello,{databaseToken,principal,descriptor:format.describe(format.SCHEMA_VERSION),credential});return {requireWriterSchema:true,writerSchemaVersion:format.SCHEMA_VERSION,..._localWriteProof.writeOptions(issued.writeTicket,{credential})};}
 function writerContext(req) {
   const raw=req.headers['x-tvs-writer-schema'];
   const version=typeof raw==='string'&&/^[1-9][0-9]{0,8}$/.test(raw)?Number(raw):raw===undefined?undefined:null;
@@ -164,6 +164,14 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls,renderPd
     }
     if (req.method !== 'GET') { respond(res,404,{ok:false,error:'Неизвестный запрос'}); return; }
     try {
+      if(req.url.startsWith('/api/history?')){
+        if(req.url.length>12000){respond(res,400,{ok:false,code:'HISTORY_QUERY',error:'Слишком длинный запрос истории'});return;}
+        const parameters=new URL(req.url,'http://localhost').searchParams;
+        if([...parameters.keys()].length!==1||!parameters.has('query')){respond(res,400,{ok:false,code:'HISTORY_QUERY',error:'Неверные параметры истории'});return;}
+        let input;try{input=JSON.parse(parameters.get('query'));}catch{respond(res,400,{ok:false,code:'HISTORY_QUERY',error:'Неверные параметры истории'});return;}
+        try{respond(res,200,require('./platform-service.cjs').queryHistory(_dataDir,input,currentPrincipal()));}
+        catch(error){respond(res,error.status||400,{ok:false,code:error.code||'HISTORY_FAILED',error:error.message});}return;
+      }
       if(req.url.startsWith('/api/query?')) {
         if(req.url.length>12000){respond(res,400,{ok:false,code:'QUERY_INVALID',error:'Слишком длинный запрос выборки'});return;}
         const parameters=new URL(req.url,'http://localhost').searchParams;

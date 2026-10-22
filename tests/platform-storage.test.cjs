@@ -29,7 +29,7 @@ async function request(port, route, body) {
  const proofHeaders=await writerHeaders({host:'127.0.0.1',port:port,headers:{Authorization:'Bearer '+key},method:body===undefined?'GET':'POST'});
 
   return new Promise((resolve, reject) => {
-    const req = http.request({ host:'127.0.0.1', port, path:route, method:body === undefined ? 'GET' : 'POST', headers:{...proofHeaders, Authorization:'Bearer ' + key, 'X-TVS-Writer-Schema':'3' } }, res => {
+    const req = http.request({ host:'127.0.0.1', port, path:route, method:body === undefined ? 'GET' : 'POST', headers:{...proofHeaders, Authorization:'Bearer ' + key } }, res => {
       let raw = ''; res.setEncoding('utf8'); res.on('data', part => { raw += part; }); res.on('end', () => resolve({ status:res.statusCode, body:JSON.parse(raw) }));
     });
     req.on('error', reject); req.end(currentBody);
@@ -42,7 +42,8 @@ test('storage uses the same authoritative section registry as the platform kerne
 
 test('native snapshots explicitly advertise transactional operation acknowledgement support', t => {
   const dir = fixture(t);
-  assert.deepEqual(storage.readSnapshot(dir).platform, { apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:3,currentSchemaVersion:3,descriptor:require('../electron/storage-format.cjs').describe(3),readOnly:false,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false });
+  const current=require('../electron/storage-format.cjs').SCHEMA_VERSION;
+  assert.deepEqual(storage.readSnapshot(dir).platform, { apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:current,currentSchemaVersion:current,descriptor:require('../electron/storage-format.cjs').describe(current),readOnly:false,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false });
 });
 
 test('operational roles do not receive financial row history or mixed transaction metadata', () => {
@@ -152,9 +153,9 @@ test('stored audit history cannot be changed or deleted through native saves', t
 });
 
 test('unchanged historical audit rows from obsolete sections survive a native descriptive edit', t => {
-  const dir = fixture(t), previous = storage.readAll(dir);
+  const source = fixture(t), previous = storage.readAll(source),dir=path.join(source,'synthetic-legacy-copy');
   const historical = { id:'old-history-row', section:'obsoleteSection', action:'import', note:'Synthetic historical evidence' };
-  fs.writeFileSync(storage.sectionFile(dir, 'auditLog'), JSON.stringify([historical, ...previous.auditLog]));
+  storage.createJson(dir,{data:{...previous,auditLog:[historical,...previous.auditLog]}});
   const submitted = storage.readAll(dir); submitted.records[0].note = 'Descriptive edit';
   storage.writeAll(dir, submitted);
   assert.deepEqual(storage.readAll(dir).auditLog[0], historical);

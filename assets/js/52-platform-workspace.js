@@ -83,6 +83,35 @@ function renderPlatformSystem(calculatedIntegrity) {
   platformBindSourceLinks(report);
   platformRenderRecoveryPanel();
   platformRenderDataBrowser();
+  platformRenderHistory();
+}
+function platformRenderHistory(){
+  const readable=platformSessionContext().readable||PlatformSchema.sections;
+  if(!window.electronAPI?.queryHistory||!(_sync.platform?.schemaVersion>=4)||!readable.includes('*')&&!readable.includes('auditLog'))return;
+  const workspace=document.querySelector('.platform-workspace');if(!workspace)return;
+  document.getElementById('platformHistory')?.remove();
+  const panel=document.createElement('section');panel.id='platformHistory';
+  panel.innerHTML='<h3>История изменений</h3><p class="platform-note">Текущие и архивные события показаны вместе. Подтверждения команд сохраняются после архивации.</p><form class="platform-filters"><label>Раздел<select name="section"><option value="">Все доступные разделы</option></select></label><label>Поиск<input name="search" maxlength="200" placeholder="По доступным событиям"></label><button class="btn btn-ghost" type="submit">Показать</button></form><p role="status"></p><div class="platform-page-rows"></div><div class="platform-actions"><button type="button" class="btn btn-ghost" data-history="previous">Назад</button><button type="button" class="btn btn-ghost" data-history="next">Далее</button></div>';
+  const form=panel.querySelector('form'),status=panel.querySelector('[role=status]'),host=panel.querySelector('.platform-page-rows'),previous=panel.querySelector('[data-history=previous]'),next=panel.querySelector('[data-history=next]');
+  for(const name of PlatformSchema.sections){if(!readable.includes('*')&&!readable.includes(name))continue;const option=document.createElement('option');option.value=name;option.textContent=platformSectionLabel(name);form.elements.section.append(option);}
+  workspace.append(panel);let page=0,cursors=[null],nextCursor=null,sequence=0,query={};const stamp=syncSessionStamp();
+  async function load(){
+    const request=++sequence;previous.disabled=true;next.disabled=true;host.replaceChildren();status.textContent='Загружаю историю…';let result;
+    try{result=await window.electronAPI.queryHistory({query,limit:25,...(cursors[page]?{cursor:cursors[page]}:{})});}catch{result={ok:false,error:'Не удалось загрузить историю. Повторите выборку.'};}
+    if(request!==sequence||stamp!==syncSessionStamp()||!panel.isConnected)return;
+    if(!result?.ok||!Array.isArray(result.rows)){status.textContent=result?.error||'История недоступна';previous.disabled=page===0;return;}
+    nextCursor=result.nextCursor;previous.disabled=page===0;next.disabled=!nextCursor;status.textContent='Страница '+(page+1)+' · событий '+result.rows.length;
+    for(const row of result.rows){
+      const article=document.createElement('article'),title=document.createElement('strong'),description=document.createElement('p');article.className='platform-issue';
+      title.textContent=platformSectionLabel(row.section)+' · '+(({create:'Добавлено',update:'Изменено',delete:'Удалено',transaction:'Подтверждено'})[row.action]||row.action||'Событие');
+      description.textContent=[row.at,row.actor,Array.isArray(row.fields)&&row.fields.length?'Поля: '+row.fields.join(', '):''].filter(Boolean).join(' · ');article.append(title,description);
+      if(row.before||row.after){const details=document.createElement('details'),summary=document.createElement('summary'),body=document.createElement('pre');summary.textContent='Данные события';details.append(summary,body);details.addEventListener('toggle',()=>{if(details.open&&!body.textContent)body.textContent=JSON.stringify({before:row.before??null,after:row.after??null},null,2);});article.append(details);}
+      const id=row.after?.id??row.before?.id;if(id!==undefined&&row.section!=='auditLog'){const button=document.createElement('button');button.type='button';button.className='btn btn-ghost btn-sm';button.textContent='Открыть раздел';button.onclick=()=>platformOpenSource(row.section,id);article.append(button);}
+      host.append(article);
+    }
+  }
+  form.onsubmit=event=>{event.preventDefault();query={...(form.elements.section.value?{section:form.elements.section.value}:{}),...(form.elements.search.value.trim()?{search:form.elements.search.value.trim()}: {})};page=0;cursors=[null];void load();};
+  previous.onclick=()=>{if(page>0){page--;void load();}};next.onclick=()=>{if(nextCursor){cursors[++page]=nextCursor;void load();}};void load();
 }
 function platformRenderDataBrowser(){
   if(!window.electronAPI?.queryRows)return;

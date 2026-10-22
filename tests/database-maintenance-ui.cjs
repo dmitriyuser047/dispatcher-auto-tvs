@@ -1,22 +1,22 @@
 'use strict';
 const {test,before,after,beforeEach,afterEach}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{createRequire}=require('node:module'),{pathToFileURL}=require('node:url');
-const schema=require('../assets/core/platform-schema.js');
+const schema=require('../assets/core/platform-schema.js'),currentSchema=require('../electron/storage-format.cjs').SCHEMA_VERSION;
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
 let browser,page,errors;
 before(async()=>{const edge='C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';browser=await pw.chromium.launch({headless:true,executablePath:process.env.TVS_TEST_BROWSER||(!process.env.CI&&fs.existsSync(edge)?edge:undefined)});});
 after(async()=>{await browser?.close();});
 beforeEach(async()=>{
  page=await browser.newPage({viewport:{width:1400,height:1000}});errors=[];page.on('pageerror',error=>errors.push(error.message));
- await page.addInitScript(({sections})=>{
+ await page.addInitScript(({sections,currentSchema})=>{
   const database=Object.fromEntries(sections.map(name=>[name,[]]));database.vehicles=[{id:0,plate:'SYNTHETIC ONLY',fuelBalance:923.537}];
   window.__requests=[];window.__writes=[];window.__hold=false;window.__releases=[];window.__cancelBackup=false;window.__saved=[];
   const identity={format:'tvs-database-identity',version:1,uuid:'11111111-1111-4111-8111-111111111111',generation:5},target={...identity,uuid:'22222222-2222-4222-8222-222222222222',generation:1};
-  window.electronAPI={readSnapshot:async()=>JSON.stringify({data:database,databaseToken:'synthetic-maintenance',revisions:Object.fromEntries(sections.map(name=>[name,1])),platform:{apiVersion:1,operations:1,outbox:1,commands:1,schemaVersion:3,documentDrafts:1}}),writeSections:async payload=>{window.__writes.push(payload);return {ok:false};},
+  window.electronAPI={readSnapshot:async()=>JSON.stringify({data:database,databaseToken:'synthetic-maintenance',revisions:Object.fromEntries(sections.map(name=>[name,1])),platform:{apiVersion:1,operations:1,outbox:1,commands:1,schemaVersion:currentSchema,documentDrafts:1}}),writeSections:async payload=>{window.__writes.push(payload);return {ok:false};},
    chooseMaintenanceBackup:async()=>window.__cancelBackup?{ok:false,canceled:true}:{ok:true,backupId:'selected-by-main',name:'<img src=x onerror=alert(1)>.zip',rows:1,sourceIdentity:identity},
    databaseMaintenance:async payload=>{window.__requests.push(structuredClone(payload));if(payload.action==='profiles')return {ok:true,profiles:[{id:0,name:'<b>Numeric profile</b>',dataDir:'synthetic:only',state:'known',identity},{id:'0',name:'String profile',dataDir:'synthetic:other',state:'busy',identity:null}],groups:[{kind:'duplicateIdentity'}]};if(payload.action==='list')return {ok:true,reviews:window.__saved};if(payload.action==='inspect')return {ok:true,sourceFormat:'json',sourceIdentity:identity};if(window.__hold)await new Promise(resolve=>window.__releases.push(resolve));if(payload.action==='preview')return {ok:true,reviewId:'opaque-host-plan',reviewFingerprint:'sha256:reviewed',mode:payload.mode,targetDir:payload.targetDir,targetFormat:payload.targetFormat,reason:payload.reason,targetIdentity:payload.mode==='clone'?target:{...identity,generation:payload.mode==='restoreContinuation'?6:5},warnings:[]};if(payload.action==='apply')return {ok:true,targetDir:'synthetic:new-target'};return {ok:false,error:'Unexpected action'};}
   };
- },{sections:schema.sections});
+ },{sections:schema.sections,currentSchema});
  await page.goto(pathToFileURL(path.resolve(__dirname,'../index.html')).href);await page.waitForFunction(()=>typeof databaseMaintenanceOpen==='function'&&typeof data!=='undefined'&&data.vehicles[0]?.id===0);
 });
 afterEach(async()=>{await page?.close();assert.deepEqual(errors,[]);});

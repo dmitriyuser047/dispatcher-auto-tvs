@@ -23,7 +23,7 @@ test('planning data survives partial legacy saves, revision conflicts and daily 
  const restored=storage.readAll(dir);assert.deepEqual(restored.procurementOrders,sections.procurementOrders);assert.deepEqual(restored.procurementRules,sections.procurementRules);
  assert.deepEqual(restored.costEntries,db().costEntries);assert.deepEqual(restored.costProfiles,db().costProfiles);
  const backup=storage.makeDailyBackup(dir,path.join(dir,'backups'),30);
- assert.deepEqual(JSON.parse(fs.readFileSync(backup,'utf8')).procurementOrders,sections.procurementOrders);
+ assert.match(backup,/\.zip$/);const packageFile=new(require('adm-zip'))(backup);assert.deepEqual(JSON.parse(packageFile.readAsText('database.json')).procurementOrders,sections.procurementOrders);
  assert.equal(restored.tanks[0].balanceInit,100);assert.deepEqual(restored.tankIncomes,[]);assert.deepEqual(restored.partMovements,[]);
 });
 
