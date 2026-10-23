@@ -28,7 +28,24 @@ test('local cache context works with only dependencies visible at module scope',
 test('fresh main-issued ping metadata replaces a changed binding and rejects caller/cached ACL authority',async()=>{
  const h=harness();await h.context.read(h.event);const before=h.bindings.get(7);await h.context.fresh(h.event);assert.equal(h.bindings.get(7),before);
  h.state.ping.access=access('b');const result=await h.context.fresh(h.event);assert.equal(result.policyStamp,access('b').policyStamp);assert.notEqual(h.bindings.get(7),before);assert.equal(h.bindings.get(7).notificationAccess.policyStamp,result.policyStamp);
- h.state.pingError=Object.assign(Error('HTTP 401'),{status:401});await assert.rejects(h.context.fresh(h.event),{code:'ACCESS_REVOKED'});assert.equal(h.bindings.has(7),false);
+ h.state.pingError=Object.assign(Error('HTTP 401'),{status:401});assert.deepEqual(JSON.parse(JSON.stringify(await h.context.fresh(h.event))),{version:1,unavailable:'ACCESS_REVOKED'});assert.equal(h.bindings.has(7),false);
+});
+test('local lock contention returns only the fixed IPC result and never converts other failures to busy',async()=>{
+ const h=harness();h.context.settings.networkMode='local';h.context.storage.databaseToken=()=>{throw Object.assign(Error('SYNTHETIC private physical path'),{code:'DB_BUSY',path:'/synthetic/private'});};
+ assert.deepEqual(JSON.parse(JSON.stringify(await h.context.fresh(h.event))),{version:1,unavailable:'DB_BUSY'});assert.equal(h.state.pings,0);assert.equal(h.bindings.size,0);
+ for(const failure of [Object.assign(Error('DB_BUSY text is not an error code'),{code:'EACCES'}),Error('DB_BUSY')]){h.context.storage.databaseToken=()=>{throw failure;};await assert.rejects(h.context.fresh(h.event),error=>error===failure);}
+});
+test('local contention cannot mask a changed profile or a replaced caller',async()=>{
+ for(const mutate of [h=>{h.state.identity='new-profile';},h=>{h.state.url='http://127.0.0.1/replaced.html';},h=>{h.event.sender.mainFrame={replacement:true};},h=>{h.state.destroyed=true;}]){
+  const h=harness();h.context.settings.networkMode='local';h.context.storage.databaseToken=()=>{mutate(h);throw Object.assign(Error('busy'),{code:'DB_BUSY'});};await assert.rejects(h.context.fresh(h.event),{code:'SESSION_CHANGED'});
+ }
+});
+test('remote revocation is a data-free IPC result after invalidating all prior write authority',async()=>{
+ for(const status of [401,403]){const h=harness();await h.context.read(h.event);const captured=h.context.capturedOperationContext(h.event);h.state.pingError=Object.assign(Error('SYNTHETIC private server response'),{status});assert.deepEqual(JSON.parse(JSON.stringify(await h.context.fresh(h.event))),{version:1,unavailable:'ACCESS_REVOKED'});assert.equal(h.bindings.has(7),false);assert.throws(()=>h.context.mainWriteSessions().profile(captured),{code:'SESSION_CHANGED'});}
+ const remoteBusy=harness();await remoteBusy.context.read(remoteBusy.event);remoteBusy.state.pingError=Object.assign(Error('remote busy'),{code:'DB_BUSY'});await assert.rejects(remoteBusy.context.fresh(remoteBusy.event),{code:'DB_BUSY'});assert.equal(remoteBusy.bindings.has(7),false);
+});
+test('a delayed revocation cannot clear a newer confirmed scope',async()=>{
+ const h=harness();let reject;const original=h.context.server.getJson;h.context.server.getJson=async(host,port,url)=>url==='/api/ping'?new Promise((_resolve,fail)=>{reject=fail;}):original(host,port,url);const old=h.context.fresh(h.event);h.state.snapshot.access=access('b');await h.context.read(h.event);reject(Object.assign(Error('revoked former scope'),{status:403}));await assert.rejects(old,{code:'SESSION_CHANGED'});assert.equal(h.bindings.get(7).notificationAccess.policyStamp,access('b').policyStamp);
 });
 test('modern snapshot failures never downgrade to the stamp-less data endpoint',async()=>{
  for(const status of [401,403,408,500,0]){const h=harness();h.state.snapshotError=Object.assign(Error('failure'),{status});await assert.rejects(h.context.read(h.event));assert.equal(h.state.bare,0);assert.equal(h.bindings.has(7),false);}

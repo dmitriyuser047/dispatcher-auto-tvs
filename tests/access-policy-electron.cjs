@@ -23,6 +23,15 @@ test('hidden Electron client carries full-view witnesses and current scoped righ
   account.accessPolicy={version:1,grants:[{org:'Б',site:'Юг'}],sections:{vehicles:{readFields:['id','plate','org','site','notes'],writeFields:['notes']}}};
   const refused=await page.evaluate(async()=>{data.vehicles[0].notes='Stale rights';return await saveData(data);});assert.equal(refused,false);assert.equal((await observeDatabase(()=>storage.readAll(database))).vehicles[0].notes,'Native scoped edit');
   const reloaded=await page.evaluate(async()=>{data=await loadData();rebuildIndex();return {rows:data.vehicles,stamp:_sync.access.policyStamp,views:_sync.scopeViews};});assert.deepEqual(reloaded.rows.map(row=>row.id),['0']);assert.equal(reloaded.rows[0].plate,'PRIVATE-B');assert.notEqual(reloaded.stamp,first.view.policyStamp);assert.ok(reloaded.views.vehicles);
+  // Revoke the actual server account after its newly private view was loaded.
+  // The real main/preload IPC must carry a data-free revocation result; the
+  // renderer poll must clear the cached view rather than retain stale grants.
+  const beforeRevocation=await page.evaluate(()=>{renderVehicleList();return {enabled:_sync.enabled,blocked:_loadWriteBlocked,token:_sync.databaseToken,visible:document.body.textContent};});
+  assert.equal(beforeRevocation.enabled,true);assert.equal(beforeRevocation.blocked,false);assert.ok(beforeRevocation.token);assert.match(beforeRevocation.visible,/PRIVATE-B/);
+  account.enabled=false;
+  const revokedWire=await page.evaluate(()=>window.electronAPI.getDataCacheContext());assert.deepEqual(revokedWire,{version:1,unavailable:'ACCESS_REVOKED'});
+  const revokedView=await page.evaluate(async()=>{await syncPoll();return {enabled:_sync.enabled,blocked:_loadWriteBlocked,token:_sync.databaseToken,access:_sync.access,scopeViews:_sync.scopeViews,synced:_sync.synced,revisions:_sync.revs,cacheKey:localCacheKey,persisted:_lastPersisted,empty:PlatformSchema.sections.every(name=>Array.isArray(data[name])&&data[name].length===0),serialized:JSON.stringify(data),visible:document.body.textContent};});
+  assert.equal(revokedView.enabled,false);assert.equal(revokedView.blocked,true);assert.equal(revokedView.token,null);assert.equal(revokedView.access,null);assert.deepEqual(revokedView.scopeViews,{});assert.deepEqual(revokedView.synced,{});assert.deepEqual(revokedView.revisions,{});assert.equal(revokedView.cacheKey,null);assert.equal(revokedView.persisted,null);assert.equal(revokedView.empty,true);assert.doesNotMatch(revokedView.serialized,/PRIVATE-B|PRIVATE-FIELD|Native scoped edit/);assert.doesNotMatch(revokedView.visible,/PRIVATE-B|PRIVATE-FIELD/);assert.deepEqual((await observeDatabase(()=>storage.readAll(database))).vehicles,actual.vehicles);
   assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().some(window=>window.isVisible())),false);assert.deepEqual(errors,[]);
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(window=>window.destroy()));await app.close();app=null;await server.stop();
  }

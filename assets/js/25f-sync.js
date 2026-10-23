@@ -289,6 +289,13 @@ async function syncPoll() {
     try{
       const current=await window.electronAPI.getDataCacheContext();
       if(accessStamp!==syncSessionStamp())return;
+      // Error properties do not survive Electron IPC/contextBridge. Decode only
+      // this fixed, data-free result in the main world, after the session check.
+      if(current&&typeof current==='object'&&Object.hasOwn(current,'unavailable')){
+        const known=Object.hasOwn(current,'version')&&Reflect.ownKeys(current).length===2&&current.version===1&&['DB_BUSY','ACCESS_REVOKED'].includes(current.unavailable);
+        const code=known?current.unavailable:'ACCESS_UNVERIFIED';
+        throw Object.assign(Error(code==='DB_BUSY'?'База временно занята':code==='ACCESS_REVOKED'?'Доступ к серверу отозван':'Состояние подключения не подтверждено'),{code});
+      }
       if(current?.mode==='client'){
         if(current.legacy){_loadWriteBlocked=true;return;}
         if(!/^sha256:[a-f0-9]{64}$/.test(current.policyStamp||'')||current.access?.policyStamp!==current.policyStamp)throw Object.assign(Error('Права сервера не подтверждены'),{code:'ACCESS_UNVERIFIED'});

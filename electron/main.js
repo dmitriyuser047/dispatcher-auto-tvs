@@ -146,7 +146,12 @@ async function freshDataCacheContext(event){
   const identity=settingsIdentity(),generation=beginDataRead(event);
   const sender=event.sender,frame=sender.mainFrame,url=sender.getURL();
   const assertCache=()=>{assertDataRead(event,generation,identity);if(sender.isDestroyed()||sender.mainFrame!==frame||sender.getURL()!==url)throw Object.assign(Error('Окно изменилось во время проверки подключения'),{code:'SESSION_CHANGED'});};
-  if(!(settings.networkMode==='client'&&settings.remoteHost)){const token=storage.databaseToken(getDataDir());return {version:1,mode:'local',identity:identity+':'+token,databaseToken:token,access:null,policyStamp:null};}
+  // IPC and contextBridge retain plain values, but discard Error.code/status.
+  // These fixed results carry no identity, grant, token or underlying exception.
+  if(!(settings.networkMode==='client'&&settings.remoteHost)){
+    try{const token=storage.databaseToken(getDataDir());return {version:1,mode:'local',identity:identity+':'+token,databaseToken:token,access:null,policyStamp:null};}
+    catch(error){if(error?.code!=='DB_BUSY')throw error;assertCache();return {version:1,unavailable:'DB_BUSY'};}
+  }
   try{
     if(networkConfigError)throw Error(networkConfigError);
     const ping=await server.getJson(settings.remoteHost,settings.remotePort||3377,'/api/ping',5000);
@@ -156,7 +161,7 @@ async function freshDataCacheContext(event){
     if(!ping?.ok||typeof ping.databaseToken!=='string'||!ping.databaseToken||!validPublicAccess(ping.access))throw Object.assign(Error('Актуальные права сервера не подтверждены'),{code:'ACCESS_UNVERIFIED'});
     if(!previous||previous.identity!==identity||previous.databaseToken!==ping.databaseToken||JSON.stringify(previous.notificationAccess)!==JSON.stringify(ping.access))bindData(event,ping.databaseToken,ping.access,null,previous?.platform||{apiVersion:1,scopedAccess:1});
     return {version:1,mode:'client',identity:identity+':'+ping.databaseToken,databaseToken:ping.databaseToken,access:ping.access,policyStamp:ping.access.policyStamp};
-  }catch(error){assertCache();invalidateDataBinding(event);throw Object.assign(new Error([401,403].includes(error.status)?'Доступ к серверу отозван':'Не удалось подтвердить текущие права сервера'),{code:[401,403].includes(error.status)?'ACCESS_REVOKED':error.code||'ACCESS_UNVERIFIED',status:error.status||0});}
+  }catch(error){assertCache();invalidateDataBinding(event);if([401,403].includes(error.status)||error.code==='ACCESS_REVOKED')return {version:1,unavailable:'ACCESS_REVOKED'};throw Object.assign(new Error('Не удалось подтвердить текущие права сервера'),{code:error.code||'ACCESS_UNVERIFIED',status:error.status||0});}
 }
 let recoveryService=null;
 let writeSessions=null;
