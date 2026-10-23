@@ -55,6 +55,7 @@ for(const format of ['json','sqlite']){
  });
 
  test('HTTP '+format+' full, sections and commands share precision refusal and never disclose hidden financial legacy issues',async t=>{
+  t.mock.timers.enable({apis:['Date'],now:Date.parse(now)});
   const {dir}=fixture(t,format),tokens={admin:'synthetic-precision-admin-123456789',dispatcher:'synthetic-precision-dispatcher-123456789'},users=Object.keys(tokens).map(role=>({id:role==='admin'?principal.id:'precision-dispatcher',name:'Synthetic '+role,role,enabled:true,tokenHash:access.hashToken(tokens[role])}));const started=await server.start({port:0,dataDir:dir,settings:{serverAccessConfigured:true,serverUsers:access.normalizeServerUsers(users)},backupFn:()=>{}});assert.equal(started.ok,true);const old=storage.readSnapshot(dir);
   for(const route of ['/api/sections','/api/data']){const sections={records:old.data.records.map(row=>({...row,km:0.0001}))},payload={databaseToken:old.databaseToken,base:old.revisions,...(route.endsWith('/data')?{data:{...old.data,...sections}}:{sections})};const result=await post(started.port,route,tokens.admin,payload);assert.equal(result.status,400,result.text);assert.equal(result.body.ok,false);assert.equal(result.body.code,'PRECISION_VIOLATION');assert.deepEqual(storage.readSnapshot(dir),old);}
   const bad=await post(started.port,'/api/commands',tokens.dispatcher,issue(dir,0.0001));assert.equal(bad.status,400,bad.text);assert.doesNotMatch(bad.text,/PRIVATE-PRECISION-FACT|998877/);assert.deepEqual(storage.readSnapshot(dir),old);

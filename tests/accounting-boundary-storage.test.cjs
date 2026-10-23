@@ -115,6 +115,7 @@ for(const format of ['json','sqlite']){
  });
 
  test('HTTP '+format+' raw section/full and command protocols share metadata, ACL, period and date guards',async t=>{
+  t.mock.timers.enable({apis:['Date'],now:Date.parse(now)});
   const f=fixture(t,format),tokens={admin:'synthetic-boundary-admin-token-123456',mechanic:'synthetic-boundary-mechanic-token-123456'},users=Object.keys(tokens).map(role=>({id:'boundary-'+role,name:'Synthetic '+role,role,enabled:true,tokenHash:access.hashToken(tokens[role])}));let backups=0;
   const started=await server.start({port:0,dataDir:f.dir,settings:{serverAccessConfigured:true,serverUsers:access.normalizeServerUsers(users)},backupFn:()=>{backups++;}});assert.equal(started.ok,true);
   const before=snapshot(f.dir);for(const route of ['/api/sections','/api/data']){const rows=before.data.vehicles.map(row=>({...row,fuelAccounting:{...anchor(),opening:'923.537'}})),payload={databaseToken:before.databaseToken,base:before.revisions,...(route==='/api/data'?{data:{...before.data,vehicles:rows}}:{sections:{vehicles:rows}})};const result=await request(started.port,route,tokens.admin,payload);assert.equal(result.status,400,result.text);assert.equal(result.body.ok,false);assert.deepEqual(snapshot(f.dir),before);}
