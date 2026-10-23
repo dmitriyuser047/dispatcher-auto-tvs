@@ -36,7 +36,7 @@ test('gate recipes cover the full current package test sets and reject shell or 
 });
 
 test('source gates cannot accidentally test an older packaged executable or a preloaded source overlay',()=>{
- const input={TVS_PACKAGED_EXE:'old-unverified.exe',NODE_OPTIONS:'--require old-overlay.cjs',PATH:'synthetic runtime path'},actual=candidate.gateEnvironment(input);assert.equal(Object.hasOwn(actual,'TVS_PACKAGED_EXE'),false);assert.equal(Object.hasOwn(actual,'NODE_OPTIONS'),false);assert.equal(actual.PATH,input.PATH);assert.equal(input.TVS_PACKAGED_EXE,'old-unverified.exe');
+ const input={TVS_PACKAGED_EXE:'old-unverified.exe',TVS_SECURITY_RENDERER_MODULE:'old-pdf-overlay.cjs',NODE_OPTIONS:'--require old-overlay.cjs',NODE_TEST_CONTEXT:'child-v8',ELECTRON_RUN_AS_NODE:'1',PATH:'synthetic runtime path'},actual=candidate.gateEnvironment(input);for(const name of ['TVS_PACKAGED_EXE','TVS_SECURITY_RENDERER_MODULE','NODE_OPTIONS','NODE_TEST_CONTEXT','ELECTRON_RUN_AS_NODE'])assert.equal(Object.hasOwn(actual,name),false,name);assert.equal(actual.PATH,input.PATH);assert.equal(input.TVS_PACKAGED_EXE,'old-unverified.exe');assert.equal(input.TVS_SECURITY_RENDERER_MODULE,'old-pdf-overlay.cjs');
 });
 
 test('existing installer baseline detects replacement, deletion and any new dist release artifact',t=>{
