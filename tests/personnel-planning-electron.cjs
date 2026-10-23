@@ -1,4 +1,5 @@
 'use strict';
+const {observeDatabase}=require('./helpers/native-database-observer.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{createRequire}=require('node:module');
 const storage=require('../electron/storage'),sqlite=require('../electron/sqlite-storage.cjs'),{seedDatabase}=require('./period-test-support.cjs'),root=path.resolve(__dirname,'..');
@@ -9,7 +10,7 @@ function fixture(){const planning=id=>({version:1,schedule:{periods:[{id:'schedu
  assetAssignments:[{id:0,assetRef:'v:a',driverId:0,from:'2026-10-01',to:'',site:'SYNTHETIC former site',org:'SYNTHETIC former organization',reason:'SYNTHETIC original assignment'}],
  shiftReports:[{id:0,title:'SYNTHETIC unchanged legacy acceptance',date:'2026-09-30',assetRef:'v:a',driverId:0,status:'accepted',acceptedBy:'SYNTHETIC original receiver'},{id:'replacement-shift',title:'SYNTHETIC replacement fact',date:'2026-10-20',assetRef:'v:a',driverId:'0',status:'sent',hours:1,fuelIssued:0},{id:'actual-deviation',title:'SYNTHETIC actual deviation',date:'2026-10-21',assetRef:'v:a',driverId:0,status:'sent',hours:1,fuelIssued:0}],
  records:[{id:'unchanged-journal',vehicleId:'a',date:'2026-10-20',km:123.456,fuelIssued:0,fuelActual:0}],fuelCards:[{id:'cash',number:'НАЛИЧКА',provider:'Наличка',assignments:[]}],appMeta:[{id:'meta',toPlanInit:'synthetic'}]};}
-async function readDatabase(directory){const deadline=Date.now()+5000;for(;;){try{return storage.readAll(directory);}catch(error){if(error.code!=='DB_BUSY'||Date.now()>=deadline)throw error;await new Promise(resolve=>setTimeout(resolve,25));}}}
+async function readDatabase(directory){return observeDatabase(()=>storage.readAll(directory));}
 test('hidden native personnel planning preserves actual facts, explicit replacement and acceptance history in JSON and SQLite',{timeout:420000},async t=>{
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-native-personnel-')),profile=path.join(directory,'profile'),jsonDir=path.join(directory,'json'),sqlDir=path.join(directory,'sqlite');let app;
  t.after(async()=>{if(app){await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(win=>win.destroy())).catch(()=>{});await app.close().catch(()=>{});}const resolved=path.resolve(directory);assert.equal(path.dirname(resolved),path.resolve(os.tmpdir()));assert.ok(path.basename(resolved).startsWith('tvs-native-personnel-'));fs.rmSync(resolved,{recursive:true,force:true});});

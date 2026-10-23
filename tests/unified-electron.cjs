@@ -1,3 +1,4 @@
+const {observeDatabase}=require('./helpers/native-database-observer.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -64,7 +65,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
   assert.deepEqual(first.platform, {apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:require('../electron/storage-format.cjs').SCHEMA_VERSION,currentSchemaVersion:require('../electron/storage-format.cjs').SCHEMA_VERSION,descriptor:require('../electron/storage-format.cjs').describe(require('../electron/storage-format.cjs').SCHEMA_VERSION),readOnly:false,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false,compatibility:require('../assets/core/platform-compatibility.js').describe().serverProfile,negotiation:require('../assets/core/platform-compatibility.js').negotiate(require('../assets/core/platform-compatibility.js').describe().hello,require('../assets/core/platform-compatibility.js').describe().serverProfile,require('../electron/storage-format.cjs').describe(require('../electron/storage-format.cjs').SCHEMA_VERSION))});
   assert.equal(JSON.stringify(first.platform).includes('writeTicket'),false);assert.equal(JSON.stringify(first.platform).includes('issuerEpoch'),false);
   assert.equal(first.operationReceipt?.status, 'committed'); assert.ok(first.operationReceipt.id);
-  assert.equal(storage.readAll(dataA).records[0].id, 'native-journal');
+  assert.equal((await observeDatabase(()=>storage.readAll(dataA))).records[0].id, 'native-journal');
   assert.match(first.token, /^[a-f0-9]{64}$/);
   assert.ok(first.identity.endsWith(':'+first.token));
 
@@ -77,7 +78,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
   });
   assert.equal(background.ok,true);assert.deepEqual(background.ids,['A']);assert.equal(background.backend,'json');
   assert.equal(background.token,first.token);assert.ok(background.fuelRows>0);assert.equal(background.healthSections,storage.SECTIONS.length);
-  const beforeBackgroundPlan=storage.readSnapshot(dataA);
+  const beforeBackgroundPlan=(await observeDatabase(()=>storage.readSnapshot(dataA)));
   const backgroundPlan=await page.evaluate(async()=>{
     const previous=structuredClone(data);
     previous.records=Array.from({length:1000},(_,index)=>({id:'native-prepare-'+index,vehicleId:'A',date:'2026-10-01',km:0,fuelActual:0,fuelGrade:'ДТ'}));
@@ -88,7 +89,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
   });
   assert.equal(backgroundPlan.id,'native-background-plan');assert.deepEqual(backgroundPlan.changed,['records']);
   assert.equal(backgroundPlan.note,'Synthetic background preflight');assert.equal(backgroundPlan.status.active,0);
-  assert.deepEqual(storage.readSnapshot(dataA),beforeBackgroundPlan);
+  assert.deepEqual((await observeDatabase(()=>storage.readSnapshot(dataA))),beforeBackgroundPlan);
 
   // Full-write IPC requires explicitly supplied original revisions. An old
   // audit prefix must not conceal a missing base or an actual CAS conflict.
@@ -98,14 +99,14 @@ test('hidden Electron application persists synthetic journals, isolates registry
     source.vehicles[0].note = 'Stale full IPC description';
     return { databaseToken:snapshot.databaseToken, base:snapshot.revisions, data:source };
   });
-  const concurrentBase = storage.readSnapshot(dataA);
+  const concurrentBase = (await observeDatabase(()=>storage.readSnapshot(dataA)));
   const concurrentFull = storage.writeSections(dataA, { databaseToken:concurrentBase.databaseToken,
     base:{ vehicles:concurrentBase.revisions.vehicles },
     sections:{ vehicles:concurrentBase.data.vehicles.map(row => ({ ...row,note:'Concurrent native description' })) } });
   assert.equal(concurrentFull.ok, true);
-  const beforeStaleFull = storage.readSnapshot(dataA);
+  const beforeStaleFull = (await observeDatabase(()=>storage.readSnapshot(dataA)));
   assert.equal(await page.evaluate(payload => window.electronAPI.writeData(JSON.stringify(payload)), staleFull), false);
-  assert.deepEqual(storage.readSnapshot(dataA), beforeStaleFull);
+  assert.deepEqual((await observeDatabase(()=>storage.readSnapshot(dataA))), beforeStaleFull);
   const freshFull = await page.evaluate(async () => {
     const snapshot = JSON.parse(await window.electronAPI.readSnapshot({hello:PlatformCompatibility.describe().hello}));
     const { auditLog, ...source } = snapshot.data;
@@ -115,7 +116,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
     return { saved,note:data.vehicles[0].note };
   });
   assert.deepEqual(freshFull, { saved:true,note:'Fresh full IPC description' });
-  const afterFreshFull = storage.readSnapshot(dataA);
+  const afterFreshFull = (await observeDatabase(()=>storage.readSnapshot(dataA)));
   assert.equal(afterFreshFull.data.vehicles[0].note, freshFull.note);
   assert.equal(afterFreshFull.revisions.vehicles, beforeStaleFull.revisions.vehicles + 1);
   assert.ok(afterFreshFull.data.auditLog.some(row => row.section === 'vehicles' && row.after?.note === freshFull.note));
@@ -141,7 +142,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
   });
   assert.equal(features.saved,true);assert.equal(features.state.ok,true);assert.equal(features.state.preferences.enabled,false);
   assert.equal(features.state.supported,false);assert.equal(features.enabled.preferences.enabled,true);assert.equal(features.probe.ok,false);assert.equal(features.probe.code,'test-mode');assert.equal(features.stale.ok,false);assert.equal(features.modal,true);
-  const featureData=storage.readAll(dataA);
+  const featureData=(await observeDatabase(()=>storage.readAll(dataA)));
   assert.equal(featureData.costEntries[0].amount,1000);assert.equal(featureData.costProfiles[0].salaryRate,5);assert.equal(featureData.procurementOrders[0].receivedQty,0);assert.equal(featureData.procurementOrders[0].procurement.mode,'linked');assert.equal(featureData.procurementRules[0].reserveQty,2);assert.deepEqual(featureData.partMovements,[]);
   assert.equal(features.operationReceipt?.status,'committed');
   assert.equal(features.orderReceipt?.status,'committed');assert.ok(featureData.auditLog.some(row=>row.section==='procurementOrders'&&row.operationId===features.orderReceipt.id));
@@ -159,7 +160,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
   });
   assert.equal(replayedNative.first.ok,true);assert.equal(replayedNative.second.ok,true);assert.equal(replayedNative.second.replayed,true);assert.deepEqual(replayedNative.second.changed,[]);
   assert.equal(replayedNative.second.operationReceipt.id,replayedNative.id);
-  const replayData=storage.readAll(dataA);
+  const replayData=(await observeDatabase(()=>storage.readAll(dataA)));
   assert.equal(replayData.opsTasks.filter(row=>row.id==='native-idempotent-task').length,1);
   assert.equal(replayData.auditLog.filter(row=>row.type==='transaction'&&row.operationId===replayedNative.id).length,1);
   // The private journal stores committed receipts without retaining submitted
@@ -179,7 +180,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
   }
   const nativeScope=outboxRecords().find(row=>row.id===first.operationReceipt.id).scope;
   const durableOutbox=require('../electron/command-outbox.cjs').createCommandOutbox({rootDir:outboxDirectory});
-  const recoveredId='native-durable-recovery',recoveryBase=storage.readSnapshot(dataA);
+  const recoveredId='native-durable-recovery',recoveryBase=(await observeDatabase(()=>storage.readSnapshot(dataA)));
   durableOutbox.stage(nativeScope,{databaseToken:recoveryBase.databaseToken,base:{opsTasks:recoveryBase.revisions.opsTasks},
     sections:{opsTasks:[...recoveryBase.data.opsTasks,{id:'native-recovered-task',status:'open',title:'Synthetic durable original request'}]},
     operation:{id:recoveredId}},{supportsOperations:true});
@@ -190,14 +191,14 @@ test('hidden Electron application persists synthetic journals, isolates registry
     data=await loadData();rebuildIndex();return result;
   },recoveredId);
   assert.equal(recovered.ok,true);assert.equal(recovered.operationReceipt.id,recoveredId);
-  assert.equal(storage.readAll(dataA).opsTasks.filter(row=>row.id==='native-recovered-task').length,1);
-  assert.equal(storage.readAll(dataA).auditLog.filter(row=>row.type==='transaction'&&row.operationId===recoveredId).length,1);
+  assert.equal((await observeDatabase(()=>storage.readAll(dataA))).opsTasks.filter(row=>row.id==='native-recovered-task').length,1);
+  assert.equal((await observeDatabase(()=>storage.readAll(dataA))).auditLog.filter(row=>row.type==='transaction'&&row.operationId===recoveredId).length,1);
   const recoveredRecord=outboxRecords().find(row=>row.id===recoveredId);
   assert.equal(recoveredRecord.status,'committed');assert.equal(recoveredRecord.payloadJson,null);
   assert.equal(JSON.stringify(recoveredRecord).includes('Synthetic durable original request'),false);
   const reconciled=await page.evaluate(id=>window.electronAPI.reconcileOperation(id),recoveredId);
   assert.equal(reconciled.ok,true);assert.equal(reconciled.committed,true);
-  assert.equal(storage.readAll(dataA).auditLog.filter(row=>row.type==='transaction'&&row.operationId===recoveredId).length,1);
+  assert.equal((await observeDatabase(()=>storage.readAll(dataA))).auditLog.filter(row=>row.type==='transaction'&&row.operationId===recoveredId).length,1);
   for (const request of ['/electron/main.js','/package.json','/bundled-data/data-2.0.57.json']) assert.equal(await page.evaluate(url => fetch(url).then(res => res.status), request), 403);
 
   // The actual native section protocol must acknowledge the backend's document,
@@ -222,7 +223,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
   assert.deepEqual(postedAct.doc.events, [{ type:'posted',at:postedAct.doc.postedAt,by:postedAct.doc.postedBy }]);
   assert.equal(postedAct.doc.totals.spent, 10); assert.equal(postedAct.doc.totals.end, 90);
   assert.deepEqual(postedAct.synced, [postedAct.doc]); assert.ok(Number.isSafeInteger(postedAct.revision));
-  const nativePosted = storage.readAll(dataA);
+  const nativePosted = (await observeDatabase(()=>storage.readAll(dataA)));
   assert.deepEqual(nativePosted.fuelWriteoffs, [postedAct.doc]);
   for (const name of ['vehicles','records','fuelPurchases','fuelCards','monthlyFuel','fuelPeriods']) assert.deepEqual(nativePosted[name], featureData[name], name);
   const blockedSource = await page.evaluate(async () => {
@@ -231,8 +232,8 @@ test('hidden Electron application persists synthetic journals, isolates registry
     return { saved,actual:data.records.find(row => row.id === 'native-journal').fuelActual };
   });
   assert.equal(blockedSource.saved, false); assert.equal(blockedSource.actual, 10);
-  assert.deepEqual(storage.readAll(dataA).records, nativePosted.records);
-  assert.deepEqual(storage.readAll(dataA).fuelWriteoffs, [postedAct.doc]);
+  assert.deepEqual((await observeDatabase(()=>storage.readAll(dataA))).records, nativePosted.records);
+  assert.deepEqual((await observeDatabase(()=>storage.readAll(dataA))).fuelWriteoffs, [postedAct.doc]);
   const voidedAct = await page.evaluate(async id => {
     gsmVoidWriteoffDialog(id);
     const form = document.getElementById('gsmWriteoffVoidForm');
@@ -244,8 +245,8 @@ test('hidden Electron application persists synthetic journals, isolates registry
   assert.equal(voidedAct.doc.status, 'void'); assert.deepEqual(voidedAct.doc.snapshot, postedAct.doc.snapshot);
   assert.equal(voidedAct.doc.voidedBy.id, 'local-profile'); assert.equal(voidedAct.doc.voidedBy.name, 'Test A');
   assert.deepEqual(voidedAct.doc.events[0], postedAct.doc.events[0]); assert.equal(voidedAct.doc.events[1].type, 'void');
-  assert.deepEqual(voidedAct.synced, [voidedAct.doc]); assert.deepEqual(storage.readAll(dataA).fuelWriteoffs, [voidedAct.doc]);
-  assert.deepEqual(storage.readAll(dataA).records, nativePosted.records);
+  assert.deepEqual(voidedAct.synced, [voidedAct.doc]); assert.deepEqual((await observeDatabase(()=>storage.readAll(dataA))).fuelWriteoffs, [voidedAct.doc]);
+  assert.deepEqual((await observeDatabase(()=>storage.readAll(dataA))).records, nativePosted.records);
 
   // A second process with the same profile exits without running another writer.
   if (!process.env.TVS_PACKAGED_EXE) {
@@ -281,7 +282,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
   const savedRegister = await registers[0].evaluate(() => window.reestrWindow.saveRows([{ id:'saved-A',sum:42 }]));
   assert.equal(savedRegister.ok, true);
   await page.waitForFunction(() => data.reestrRows[0]?.id === 'saved-A');
-  assert.equal(storage.readAll(dataA).reestrRows[0].sum, 42);
+  assert.equal((await observeDatabase(()=>storage.readAll(dataA))).reestrRows[0].sum, 42);
   const xlsx = await registers[0].evaluate(() => window.reestrAPI.buildXlsx({ rows:[{ id:'xlsx-only',sum:42,date:'18.10.2026',description:'Synthetic registry',osn:'N-1' }] }));
   assert.ok(xlsx.xlsxBase64.length > 100);
   assert.equal((await registers[1].evaluate(() => window.reestrWindow.saveRows([{ id:'stale',sum:99 }]))).ok, false);
@@ -289,7 +290,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
   await page.evaluate(() => window.electronAPI.setTheme('dark'));
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
   await registers[0].waitForFunction(() => document.documentElement.dataset.theme === 'dark');
-  const isolatedId='native-profile-A-pending',isolatedBase=storage.readSnapshot(dataA);
+  const isolatedId='native-profile-A-pending',isolatedBase=(await observeDatabase(()=>storage.readSnapshot(dataA)));
   durableOutbox.stage(nativeScope,{databaseToken:isolatedBase.databaseToken,base:{opsTasks:isolatedBase.revisions.opsTasks},
     sections:{opsTasks:[...isolatedBase.data.opsTasks,{id:'must-stay-in-profile-A',status:'open',title:'Synthetic profile A pending request'}]},
     operation:{id:isolatedId}},{supportsOperations:true});
@@ -305,18 +306,18 @@ test('hidden Electron application persists synthetic journals, isolates registry
   const newProfileQueue=await page.evaluate(async id=>({queue:await window.electronAPI.getPendingOperations(),retry:await window.electronAPI.retryOperation(id)}),isolatedId);
   assert.equal(newProfileQueue.queue.ok,true);assert.deepEqual(newProfileQueue.queue.operations,[]);assert.equal(newProfileQueue.retry.ok,false);
   assert.equal(outboxRecords().find(row=>row.id===isolatedId).status,'pending');
-  assert.equal(storage.readAll(dataB).opsTasks.some(row=>row.id==='must-stay-in-profile-A'),false);
-  assert.equal(storage.readAll(dataA).opsTasks.some(row=>row.id==='must-stay-in-profile-A'),false);
+  assert.equal((await observeDatabase(()=>storage.readAll(dataB))).opsTasks.some(row=>row.id==='must-stay-in-profile-A'),false);
+  assert.equal((await observeDatabase(()=>storage.readAll(dataA))).opsTasks.some(row=>row.id==='must-stay-in-profile-A'),false);
   assert.equal((await registers[0].evaluate(() => window.reestrWindow.saveRows([]))).ok, false);
-  assert.equal(storage.readAll(dataB).vehicles[0].id, 'B');
-  assert.equal(storage.readAll(dataB).reestrRows[0].id, 'original-B');
+  assert.equal((await observeDatabase(()=>storage.readAll(dataB))).vehicles[0].id, 'B');
+  assert.equal((await observeDatabase(()=>storage.readAll(dataB))).reestrRows[0].id, 'original-B');
   const sqliteSave=await page.evaluate(async()=>{
     data.records.push({id:'native-sqlite-journal',vehicleId:'B',date:'2026-10-02',km:25.125,fuelIssued:0,fuelActual:2.125,fuelGrade:'ДТ'});
     return {saved:await saveData(data),receipt:_sync.lastResult?.operationReceipt};
   });
   assert.equal(sqliteSave.saved,true);assert.equal(sqliteSave.receipt?.status,'committed');
-  assert.equal(storage.readAll(dataB).records[0].km,25.125);
-  assert.equal(storage.readAll(dataB).records[0].fuelActual,2.125);
+  assert.equal((await observeDatabase(()=>storage.readAll(dataB))).records[0].km,25.125);
+  assert.equal((await observeDatabase(()=>storage.readAll(dataB))).records[0].fuelActual,2.125);
   const sqlitePage=await page.evaluate(()=>window.electronAPI.queryRows({section:'records',limit:1,assetRef:'v:B',from:'2026-10-01'}));
   assert.equal(sqlitePage.ok,true);assert.equal(sqlitePage.backend,'sqlite');assert.equal(sqlitePage.total,1);
   assert.equal(sqlitePage.rows[0].fuelActual,2.125);assert.equal(sqlitePage.rows[0].id,'native-sqlite-journal');
@@ -355,7 +356,7 @@ test('hidden Electron application persists synthetic journals, isolates registry
 
   // Closing waits for the renderer's save barrier. A false result in hidden
   // mode keeps the window alive and never opens a native confirmation dialog.
-  const beforeClose=storage.readSnapshot(dataB);
+  const beforeClose=(await observeDatabase(()=>storage.readSnapshot(dataB)));
   await page.evaluate(()=>{
     window.__originalCloseFlush=platformFlushForClose;window.__closeFlushCalls=0;
     platformFlushForClose=async()=>{window.__closeFlushCalls++;return new Promise(resolve=>{window.__releaseCloseFlush=resolve;});};
@@ -372,6 +373,6 @@ test('hidden Electron application persists synthetic journals, isolates registry
   await page.evaluate(async()=>{window.__releaseCloseFlush(false);await new Promise(resolve=>setTimeout(resolve,50));platformFlushForClose=window.__originalCloseFlush;});
   assert.equal(await app.evaluate(({BrowserWindow},id)=>!!BrowserWindow.fromId(id)&&!BrowserWindow.fromId(id).isDestroyed(),closeWindowId),true);
   assert.equal(await app.evaluate(()=>globalThis.__syntheticCloseDialogs),0);
-  assert.deepEqual(storage.readSnapshot(dataB),beforeClose);
+  assert.deepEqual((await observeDatabase(()=>storage.readSnapshot(dataB))),beforeClose);
   assert.deepEqual(errors, []);
 });

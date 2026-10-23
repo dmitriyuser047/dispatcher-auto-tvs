@@ -1,4 +1,5 @@
 'use strict';
+const {observeDatabase}=require('./helpers/native-database-observer.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {createRequire}=require('node:module');
@@ -34,9 +35,9 @@ test('hidden Electron closes isolated fuel, stock and finance periods through re
  }
  for(const[index,dir]of [jsonDir,sqlDir].entries()){
   if(index)await page.evaluate(async()=>{await window.electronAPI.switchUser(1);data=await loadData();rebuildIndex();});
-  assert.equal(await page.evaluate(()=>_sync.platform.periods),1);const original=storage.readAll(dir);
+  assert.equal(await page.evaluate(()=>_sync.platform.periods),1);const original=(await observeDatabase(()=>storage.readAll(dir)));
   for(const scope of ['fuel','stock','finance'])await act(scope);
-  const closed=storage.readAll(dir),period=closed.fuelPeriods.find(row=>row.month==='2026-09');
+  const closed=(await observeDatabase(()=>storage.readAll(dir))),period=closed.fuelPeriods.find(row=>row.month==='2026-09');
   assert.equal(period.closed,true);assert.equal(period.stockClosed,true);assert.equal(period.financeClosed,true);
   for(const section of ['records','partMovements','payments','vehicles'])assert.deepEqual(closed[section],original[section]);
   assert.equal(period.closureEvents.events.length,3);assert.ok(period.closureEvents.events.every(event=>event.actor.id==='local-profile'&&event.reason.startsWith('Synthetic reviewed')));
@@ -46,7 +47,7 @@ test('hidden Electron closes isolated fuel, stock and finance periods through re
    const fuelPeriods=structuredClone(snapshot.data.fuelPeriods);fuelPeriods[0].closed=false;fuelPeriods[0].closureEvents.events=[];
    const flags=await window.electronAPI.writeSections(JSON.stringify({databaseToken:snapshot.databaseToken,base:{fuelPeriods:snapshot.revisions.fuelPeriods},sections:{fuelPeriods}}));
    return {journal,flags};
-  });assert.equal(refusal.journal.ok,false,JSON.stringify(refusal));assert.equal(refusal.flags.ok,false,JSON.stringify(refusal));assert.deepEqual(storage.readAll(dir).fuelPeriods,closed.fuelPeriods);assert.deepEqual(storage.readAll(dir).records,original.records);
+  });assert.equal(refusal.journal.ok,false,JSON.stringify(refusal));assert.equal(refusal.flags.ok,false,JSON.stringify(refusal));assert.deepEqual((await observeDatabase(()=>storage.readAll(dir))).fuelPeriods,closed.fuelPeriods);assert.deepEqual((await observeDatabase(()=>storage.readAll(dir))).records,original.records);
   const settled=await page.evaluate(async()=>{
    const today=dispatcherLocalDate(),base={action:'settle',section:'payments',id:0,amount:20,date:'2026-10-20',reason:'Synthetic actual October payment'},review=DocumentEngine.preview(data,base,{today}),id=crypto.randomUUID();
    const result=await platformExecuteCommand({type:'DocumentAction',version:1,input:{...base,reviewFingerprint:review.fingerprint}},{operationId:id});
@@ -54,8 +55,8 @@ test('hidden Electron closes isolated fuel, stock and finance periods through re
    const backdated=DocumentEngine.preview(data,{...base,date:'2026-09-20'},{today});const correction=DocumentEngine.preview(data,{action:'post',section:'payments',id:0,payload:{date:'2026-10-01',sum:80},reason:'Synthetic correction'},{today});
    return {result:{ok:result.ok},replayed:replayed.ok,auditCount:count,backdated:backdated.canPost,correction:correction.canPost};
   });assert.equal(settled.result.ok,true,JSON.stringify(settled));assert.equal(settled.replayed,true);assert.equal(settled.backdated,false);assert.equal(settled.correction,false);
-  const payment=storage.readAll(dir).payments[0];assert.equal(payment.sum,100);assert.equal(payment.paidAmount,0);assert.equal(payment.paymentSettlements.events.length,1);assert.equal(payment.paymentSettlements.events[0].amount,20);assert.equal(storage.readAll(dir).auditLog.length,settled.auditCount);
-  await act('fuel','reopen');const reopened=storage.readAll(dir).fuelPeriods[0];assert.equal(reopened.closed,false);assert.equal(reopened.stockClosed,true);assert.equal(reopened.financeClosed,true);assert.equal(reopened.closureEvents.events.length,4);
+  const payment=(await observeDatabase(()=>storage.readAll(dir))).payments[0];assert.equal(payment.sum,100);assert.equal(payment.paidAmount,0);assert.equal(payment.paymentSettlements.events.length,1);assert.equal(payment.paymentSettlements.events[0].amount,20);assert.equal((await observeDatabase(()=>storage.readAll(dir))).auditLog.length,settled.auditCount);
+  await act('fuel','reopen');const reopened=(await observeDatabase(()=>storage.readAll(dir))).fuelPeriods[0];assert.equal(reopened.closed,false);assert.equal(reopened.stockClosed,true);assert.equal(reopened.financeClosed,true);assert.equal(reopened.closureEvents.events.length,4);
  }
  assert.deepEqual(errors,[]);
 });

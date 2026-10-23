@@ -1,4 +1,5 @@
 'use strict';
+const {observeDatabase}=require('./helpers/native-database-observer.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{createRequire}=require('node:module');
 const storage=require('../electron/storage'),sqlite=require('../electron/sqlite-storage.cjs'),server=require('../electron/server'),access=require('../electron/access-control'),root=path.resolve(__dirname,'..');
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
@@ -18,9 +19,9 @@ test('hidden Electron client carries full-view witnesses and current scoped righ
   await page.waitForFunction(()=>typeof data!=='undefined'&&data.vehicles?.length===2&&_sync.access?.accessPolicy?.version===1);
   const first=await page.evaluate(async()=>{const query=await window.electronAPI.queryRows({section:'vehicles',limit:1});const before=JSON.stringify(data);data.vehicles[0].notes='Native scoped edit';const saved=await saveData(data);return {saved,before,query,rows:data.vehicles,view:_sync.scopeViews.vehicles,error:platformRuntimeStatus().lastError};});
   assert.equal(first.saved,true,JSON.stringify(first));assert.equal(first.query.total,2);assert.equal(first.query.scopeViews,undefined);assert.equal(first.rows[0].notes,'Native scoped edit');assert.doesNotMatch(JSON.stringify(first),/PRIVATE/);assert.equal(first.view.policyStamp.length,71);
-  const actual=storage.readAll(database);assert.equal(actual.vehicles[0].secret,'PRIVATE-FIELD');assert.equal(actual.vehicles[1].plate,'PRIVATE-B');assert.deepEqual(actual.vehicles.map(row=>row.id),[0,'0','last']);
+  const actual=(await observeDatabase(()=>storage.readAll(database)));assert.equal(actual.vehicles[0].secret,'PRIVATE-FIELD');assert.equal(actual.vehicles[1].plate,'PRIVATE-B');assert.deepEqual(actual.vehicles.map(row=>row.id),[0,'0','last']);
   account.accessPolicy={version:1,grants:[{org:'Б',site:'Юг'}],sections:{vehicles:{readFields:['id','plate','org','site','notes'],writeFields:['notes']}}};
-  const refused=await page.evaluate(async()=>{data.vehicles[0].notes='Stale rights';return await saveData(data);});assert.equal(refused,false);assert.equal(storage.readAll(database).vehicles[0].notes,'Native scoped edit');
+  const refused=await page.evaluate(async()=>{data.vehicles[0].notes='Stale rights';return await saveData(data);});assert.equal(refused,false);assert.equal((await observeDatabase(()=>storage.readAll(database))).vehicles[0].notes,'Native scoped edit');
   const reloaded=await page.evaluate(async()=>{data=await loadData();rebuildIndex();return {rows:data.vehicles,stamp:_sync.access.policyStamp,views:_sync.scopeViews};});assert.deepEqual(reloaded.rows.map(row=>row.id),['0']);assert.equal(reloaded.rows[0].plate,'PRIVATE-B');assert.notEqual(reloaded.stamp,first.view.policyStamp);assert.ok(reloaded.views.vehicles);
   assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().some(window=>window.isVisible())),false);assert.deepEqual(errors,[]);
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(window=>window.destroy()));await app.close();app=null;await server.stop();

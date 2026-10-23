@@ -1,10 +1,11 @@
 'use strict';
+const {observeDatabase}=require('./helpers/native-database-observer.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{createRequire}=require('node:module');
 const storage=require('../electron/storage'),sqlite=require('../electron/sqlite-storage.cjs'),root=path.resolve(__dirname,'..');
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
 function fixture(){return{...Object.fromEntries(storage.SECTIONS.map(name=>[name,[]])),tanks:[{id:0,name:'SYNTHETIC NUMERIC TANK',fuel:'diesel',org:'SYNTHETIC',balanceInit:0},{id:'0',name:'SYNTHETIC TEXT TANK',fuel:'diesel',balanceInit:0}],parts:[{id:0,name:'SYNTHETIC NUMERIC PART',unit:'шт'},{id:'0',name:'SYNTHETIC TEXT PART',unit:'шт'}],fuelCards:[{id:'cash',number:'НАЛИЧКА',provider:'Наличка',assignments:[]}],appMeta:[{id:'meta',toPlanInit:'synthetic'}]};}
-async function readDatabase(directory){const deadline=Date.now()+5000;for(;;){try{return storage.readAll(directory);}catch(error){if(error.code!=='DB_BUSY'||Date.now()>=deadline)throw error;await new Promise(resolve=>setTimeout(resolve,25));}}}
+async function readDatabase(directory){return observeDatabase(()=>storage.readAll(directory));}
 
 test('hidden Electron fulfills isolated JSON and SQLite tank and part orders from posted partial receipts, returns stock outwards and replays once',{timeout:360000},async t=>{
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-native-procurement-')),profile=path.join(directory,'profile'),jsonDir=path.join(directory,'json'),sqlDir=path.join(directory,'sqlite');let app;

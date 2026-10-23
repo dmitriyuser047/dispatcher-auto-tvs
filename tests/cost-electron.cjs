@@ -1,10 +1,11 @@
 'use strict';
+const {observeDatabase}=require('./helpers/native-database-observer.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{createRequire}=require('node:module');
 const storage=require('../electron/storage'),sqlite=require('../electron/sqlite-storage.cjs'),root=path.resolve(__dirname,'..');
 // The real app may hold its directory lock for background polling after an ACK.
 // Retry only this read-only physical oracle; no command or assertion is retried.
-async function readPhysical(dir){const deadline=Date.now()+5000;while(true){try{return storage.readAll(dir);}catch(error){if(error.code!=='DB_BUSY'||Date.now()>=deadline)throw error;await new Promise(resolve=>setTimeout(resolve,25));}}}
+async function readPhysical(dir){return observeDatabase(()=>storage.readAll(dir));}
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
 function fixture(){return{...Object.fromEntries(storage.SECTIONS.map(name=>[name,[]])),parts:[{id:0,name:'SYNTHETIC NUMERIC VALUED PART',unit:'шт'},{id:'0',name:'SYNTHETIC TEXT PART',unit:'шт'}],partMovements:[{id:'lot-a',partId:0,kind:'receipt',qty:10,date:'2026-09-01',sum:100,grossSum:100,vatAmount:0,vatRate:0},{id:'lot-b',partId:0,kind:'receipt',qty:10,date:'2026-09-02',sum:200,grossSum:200,vatAmount:0,vatRate:0},{id:'used',partId:0,kind:'issue',qty:5,date:'2026-09-03',assetRef:'v:a',reason:'SYNTHETIC material used'}],vehicles:[{id:'a',plate:'SYNTHETIC COST A',fuel:'diesel',fuelBalance:0,norm:0},{id:'b',plate:'SYNTHETIC COST B',fuel:'diesel',fuelBalance:0,norm:0}],records:[{id:'km-a',vehicleId:'a',date:'2026-09-03',km:100,fuelIssued:0,fuelActual:0},{id:'km-b',vehicleId:'b',date:'2026-09-03',km:300,fuelIssued:0,fuelActual:0}],payments:[{id:'overhead',date:'2026-09-03',sum:100,description:'SYNTHETIC actual overhead',category:'Прочее',paidAmount:0}],fuelCards:[{id:'cash',number:'НАЛИЧКА',provider:'Наличка',assignments:[]}],appMeta:[{id:'meta',toPlanInit:'synthetic'}]};}
 test('hidden Electron saves explicit valuation and a conserved expense allocation through real IPC in isolated JSON and SQLite',{timeout:360000},async t=>{

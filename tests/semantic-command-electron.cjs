@@ -1,4 +1,5 @@
 'use strict';
+const {observeDatabase}=require('./helpers/native-database-observer.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{createRequire}=require('node:module');
 const storage=require('../electron/storage'),sqlite=require('../electron/sqlite-storage.cjs');
@@ -27,20 +28,20 @@ test('hidden Electron executes semantic commands, dated norms and catalog merge 
   assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().some(win=>win.isVisible())),false);
   for(const [index,dir]of [jsonDir,sqlDir].entries()){
     if(index){await page.evaluate(async()=>{await window.electronAPI.switchUser(1);data=await loadData();rebuildIndex();});}
-    const originalRows=storage.readAll(dir).records;
+    const originalRows=(await observeDatabase(()=>storage.readAll(dir))).records;
     for(const [section,id]of [['vehicles',7],['tanks',5]]){
       await page.evaluate(({section,id})=>{if(section==='vehicles'){activeSection='vehicles';renderDetail(data.vehicles.find(row=>row.id===id));}else{activeSection='generators';renderTankDetail(data.tanks.find(row=>row.id===id));}},{section,id});
       await page.getByRole('button',{name:'Начало учёта ГСМ',exact:true}).click();
       const form=page.locator('#fuelAccountingForm');await form.locator('[name="from"]').fill('2026-09-01');await form.locator('[name="opening"]').fill('923,537');await form.locator('[name="basis"]').fill('Synthetic physical measurement on 31 August');
       await form.locator('[data-fa-review]').click();await form.locator('[name="confirm"]').check();await form.locator('[data-fa-save]').click();
       await page.waitForFunction(()=>!document.querySelector('#fuelAccountingForm')||!document.querySelector('#fuelAccountingForm').closest('.modal-overlay')?.classList.contains('open'));
-      const saved=storage.readAll(dir)[section].find(row=>row.id===id);assert.equal(saved.fuelAccounting.opening,923.537);assert.equal(saved.fuelAccounting.from,'2026-09-01');assert.equal(saved[section==='vehicles'?'fuelBalance':'balanceInit'],section==='vehicles'?500:100);
+      const saved=(await observeDatabase(()=>storage.readAll(dir)))[section].find(row=>row.id===id);assert.equal(saved.fuelAccounting.opening,923.537);assert.equal(saved.fuelAccounting.from,'2026-09-01');assert.equal(saved[section==='vehicles'?'fuelBalance':'balanceInit'],section==='vehicles'?500:100);
     }
-    assert.deepEqual(storage.readAll(dir).records,originalRows);
+    assert.deepEqual((await observeDatabase(()=>storage.readAll(dir))).records,originalRows);
     await page.evaluate(()=>fuelNormsOpen('vehicles',7));
     const periods=page.locator('#effectiveParametersForm');await periods.locator('[data-ep-copy]').click();await periods.locator('[name="from"]').fill('2026-06-01');await periods.locator('[name="basis"]').fill('Synthetic confirmed original norm');await periods.locator('[data-ep-stage]').click();
     await periods.locator('[name="from"]').fill('2026-11-01');await periods.locator('[name="norm"]').fill('20');await periods.locator('[name="basis"]').fill('Synthetic confirmed future norm');await periods.locator('[data-ep-stage]').click();await periods.locator('[data-ep-review]').click();await periods.locator('[name="confirm"]').check();await periods.locator('[data-ep-save]').click();await page.waitForFunction(()=>!document.querySelector('#wfModal.open'));
-    const datedVehicle=storage.readAll(dir).vehicles[0];assert.equal(datedVehicle.norm,10);assert.deepEqual(datedVehicle.fuelNorms.periods.map(row=>row.from),['2026-06-01','2026-11-01']);assert.deepEqual(storage.readAll(dir).records,originalRows);
+    const datedVehicle=(await observeDatabase(()=>storage.readAll(dir))).vehicles[0];assert.equal(datedVehicle.norm,10);assert.deepEqual(datedVehicle.fuelNorms.periods.map(row=>row.from),['2026-06-01','2026-11-01']);assert.deepEqual((await observeDatabase(()=>storage.readAll(dir))).records,originalRows);
     const datedValues=await page.evaluate(()=>{const v=data.vehicles[0];return ['2026-09-10','2026-11-10'].map(date=>TvsFuelEngine.fqRecord({date,km:100},v).norm);});assert.deepEqual(datedValues,[10,20]);
     const result=await page.evaluate(async index=>{
       const issue={type:'IssueFuel',version:1,input:{tankId:5,target:{section:'vehicles',id:7},date:'2026-10-01',qty:80.537,reason:'Synthetic native command'}};
@@ -52,7 +53,7 @@ test('hidden Electron executes semantic commands, dated norms and catalog merge 
     },index);
     for(const name of ['issued','accepted','assigned'])assert.equal(result[name].ok,true,JSON.stringify({name,result:result[name]}));
     assert.equal(result.replayed.operationReceipt.status,'replayed');assert.equal(result.replayed.operationReceipt.digest,result.issued.operationReceipt.digest);
-    const actual=storage.readAll(dir),movement=actual.fuelMovements[0],record=actual.records.find(row=>row.fuelMovementId===movement.id);
+    const actual=(await observeDatabase(()=>storage.readAll(dir))),movement=actual.fuelMovements[0],record=actual.records.find(row=>row.fuelMovementId===movement.id);
     assert.equal(actual.fuelMovements.length,1);assert.equal(record.fuelIssued,80.537);assert.equal(record.vehicleId,7);assert.equal(record.km,0);assert.equal(actual.records.find(row=>row.id==='original').km,100);assert.equal(actual.vehicles[0].fuelBalance,500);assert.equal(actual.vehicles[0].fuelAccounting.opening,923.537);
     const physical=await page.evaluate(()=>({tank:computeTankBalanceAt(5,'2026-10-31',true),vehicle:TvsFuelEngine.buildLedger(data,{from:'2026-10-01',to:'2026-10-31'}).rows.reduce((sum,row)=>sum+row.end,0),km:recsFor(7).reduce((sum,row)=>sum+row.km,0)}));assert.ok(Math.abs(physical.tank-843)<1e-8);assert.ok(Math.abs(physical.vehicle-994.074)<1e-8);assert.equal(physical.km,150);
     assert.equal(actual.shiftReports[0].status,'accepted');assert.equal(actual.shiftReports[0].acceptedBy,'Physical shift recipient');assert.equal(actual.shiftReports[0].acceptedActor.id,'local-profile');assert.equal(actual.shiftReports[0].acceptedActor.name,index?'Synthetic SQLite':'Synthetic JSON');assert.ok(actual.shiftReports[0].acceptedAt);
@@ -62,7 +63,7 @@ test('hidden Electron executes semantic commands, dated norms and catalog merge 
     assert.equal(actual.auditLog.filter(row=>row.type==='transaction'&&row.operationId==='native-issue-'+index).length,1);
     await page.evaluate(()=>{catalogMergeOpen('drivers',0);window.__nativeMergeState=catalogMergeSession;});
     const merge=page.locator('#catalogMergeForm'),targetToken=await page.evaluate(()=>catalogMergeSession.choices.find(choice=>choice.id==='0').token);await merge.locator('[name="target"]').selectOption(targetToken);await merge.locator('[name="reason"]').fill('Synthetic confirmed duplicate without factual history');await merge.locator('[data-cm-preview]').click();assert.equal(await page.evaluate(()=>catalogMergeSession.preview?.canMerge),true,await merge.innerText());
-    const review=await page.evaluate(()=>({data:structuredClone(data),input:catalogMergeInput(catalogMergeSession),today:catalogMergeSession.today,fingerprint:catalogMergeSession.preview.fingerprint}));assert.equal(catalogMerge.preview(review.data,review.input,{today:review.today}).fingerprint,review.fingerprint,'native renderer and Node must compute the same reviewed graph');const storedBeforeMerge=storage.readAll(dir),principal={id:'local-profile',name:index?'Synthetic SQLite':'Synthetic JSON',role:'admin'},projectedBeforeMerge=Object.fromEntries(storage.SECTIONS.map(name=>[name,platform.visibleRows(name,storedBeforeMerge[name],principal,storedBeforeMerge)])),different=storage.SECTIONS.filter(name=>kernel.stableSerialize(projectedBeforeMerge[name]||[])!==kernel.stableSerialize(review.data[name]||[]));
+    const review=await page.evaluate(()=>({data:structuredClone(data),input:catalogMergeInput(catalogMergeSession),today:catalogMergeSession.today,fingerprint:catalogMergeSession.preview.fingerprint}));assert.equal(catalogMerge.preview(review.data,review.input,{today:review.today}).fingerprint,review.fingerprint,'native renderer and Node must compute the same reviewed graph');const storedBeforeMerge=(await observeDatabase(()=>storage.readAll(dir))),principal={id:'local-profile',name:index?'Synthetic SQLite':'Synthetic JSON',role:'admin'},projectedBeforeMerge=Object.fromEntries(storage.SECTIONS.map(name=>[name,platform.visibleRows(name,storedBeforeMerge[name],principal,storedBeforeMerge)])),different=storage.SECTIONS.filter(name=>kernel.stableSerialize(projectedBeforeMerge[name]||[])!==kernel.stableSerialize(review.data[name]||[]));
     assert.deepEqual(different,[],'renderer data must exactly match the trusted current projection');
     assert.ok(storedBeforeMerge.auditLog.some(row=>Object.hasOwn(row,'archiveScope')),'the physical audit must retain its trusted print scope proof');
     assert.ok(projectedBeforeMerge.auditLog.every(row=>!Object.hasOwn(row,'archiveScope')));assert.ok(review.data.auditLog.every(row=>!Object.hasOwn(row,'archiveScope')),'private print scope proofs must not enter the renderer');
@@ -70,8 +71,8 @@ test('hidden Electron executes semantic commands, dated norms and catalog merge 
     assert.equal(catalogMerge.preview(projectedBeforeMerge,review.input,{today:review.today}).fingerprint,review.fingerprint,'trusted public projection and renderer must review the same graph');
     assert.equal(catalogMerge.preview(storedBeforeMerge,review.input,{today:review.today}).fingerprint,review.fingerprint,'the trusted full source must validate the same catalog review without exposing private audit proof');
     await merge.locator('[name="confirm"]').check();await merge.locator('[data-cm-save]').click();await page.waitForFunction(()=>!document.querySelector('#wfModal.open')||!!document.querySelector('[data-cm-error]')?.textContent.trim());assert.equal(await page.evaluate(()=>document.querySelector('#wfModal.open [data-cm-error]')?.textContent||''),'');
-    const merged=storage.readAll(dir),alias=merged.drivers.find(row=>row.id===0);assert.equal(alias.archived,true);assert.equal(alias.mergedInto.id,'0');assert.equal(alias.mergedInto.actor.id,'local-profile');assert.equal(alias.mergedInto.section,'drivers');assert.deepEqual(merged.records,actual.records);assert.deepEqual(merged.assetAssignments,actual.assetAssignments);assert.deepEqual(merged.drivers.find(row=>row.id==='0'),actual.drivers.find(row=>row.id==='0'));
-    const mergeReplay=await page.evaluate(async()=>window.electronAPI.executeCommand(JSON.stringify(_platformCommandIntents.get(window.__nativeMergeState.operationId).envelope)));assert.equal(mergeReplay.operationReceipt.status,'replayed');assert.equal(storage.readAll(dir).auditLog.filter(row=>row.type==='transaction'&&row.operationId===alias.mergedInto.operationId).length,1);
+    const merged=(await observeDatabase(()=>storage.readAll(dir))),alias=merged.drivers.find(row=>row.id===0);assert.equal(alias.archived,true);assert.equal(alias.mergedInto.id,'0');assert.equal(alias.mergedInto.actor.id,'local-profile');assert.equal(alias.mergedInto.section,'drivers');assert.deepEqual(merged.records,actual.records);assert.deepEqual(merged.assetAssignments,actual.assetAssignments);assert.deepEqual(merged.drivers.find(row=>row.id==='0'),actual.drivers.find(row=>row.id==='0'));
+    const mergeReplay=await page.evaluate(async()=>window.electronAPI.executeCommand(JSON.stringify(_platformCommandIntents.get(window.__nativeMergeState.operationId).envelope)));assert.equal(mergeReplay.operationReceipt.status,'replayed');assert.equal((await observeDatabase(()=>storage.readAll(dir))).auditLog.filter(row=>row.type==='transaction'&&row.operationId===alias.mergedInto.operationId).length,1);
   }
   assert.deepEqual(errors,[]);
 });

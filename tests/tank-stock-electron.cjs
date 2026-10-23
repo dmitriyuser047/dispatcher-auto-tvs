@@ -1,14 +1,12 @@
 'use strict';
+const {observeDatabase}=require('./helpers/native-database-observer.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{createRequire}=require('node:module');
 const storage=require('../electron/storage'),sqlite=require('../electron/sqlite-storage.cjs'),root=path.resolve(__dirname,'..');
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
 // The running app may briefly own the database lock during its background
 // refresh. Retry only this observational read, never the tested command.
-async function readDatabase(directory){
- const deadline=Date.now()+5000;
- for(;;){try{return storage.readAll(directory);}catch(error){if(error.code!=='DB_BUSY'||Date.now()>=deadline)throw error;await new Promise(resolve=>setTimeout(resolve,25));}}
-}
+async function readDatabase(directory){return observeDatabase(()=>storage.readAll(directory));}
 function fixture(){return{...Object.fromEntries(storage.SECTIONS.map(name=>[name,[]])),
  tanks:[{id:0,name:'SYNTHETIC NUMERIC TANK',fuel:'diesel',balanceInit:100},{id:'0',name:'SYNTHETIC TEXT TANK',fuel:'diesel',balanceInit:20}],
  tankIncomes:[{id:'receipt',tankId:0,date:'2026-09-03',amount:5,source:'SYNTHETIC INVOICE'},{id:'out',tankId:0,counterTankId:'0',date:'2026-09-04',amount:-5.125,kind:'out',linkId:'synthetic-pair'},{id:'in',tankId:'0',counterTankId:0,date:'2026-09-04',amount:5.125,kind:'in',linkId:'synthetic-pair'}],

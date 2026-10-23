@@ -1,4 +1,5 @@
 'use strict';
+const {observeDatabase}=require('./helpers/native-database-observer.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{createRequire}=require('node:module');
 const storage=require('../electron/storage'),sqlite=require('../electron/sqlite-storage.cjs'),root=path.resolve(__dirname,'..');
@@ -13,7 +14,7 @@ function fixture(){return {...Object.fromEntries(storage.SECTIONS.map(name=>[nam
  parts:[{id:0,name:'SYNTHETIC NUMERIC PART',unit:'шт'},{id:'0',name:'SYNTHETIC TEXT PART',unit:'шт'}],
  partMovements:[{id:'receipt',partId:0,kind:'receipt',date:'2026-09-01',qty:10,sum:100,grossSum:100,vatRate:0,vatAmount:0,reason:'Synthetic actual source invoice'}],
  fuelCards:[{id:'cash',number:'НАЛИЧКА',provider:'Наличка',assignments:[]}],appMeta:[{id:'meta',toPlanInit:'synthetic'}]};}
-async function readDatabase(directory){const deadline=Date.now()+5000;for(;;){try{return storage.readAll(directory);}catch(error){if(error.code!=='DB_BUSY'||Date.now()>=deadline)throw error;await new Promise(resolve=>setTimeout(resolve,25));}}}
+async function readDatabase(directory){return observeDatabase(()=>storage.readAll(directory));}
 
 test('hidden Electron carries a real defect through approval, materials, no-downtime acceptance and a linked return in isolated JSON and SQLite',{timeout:420000},async t=>{
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-native-repair-')),profile=path.join(directory,'profile'),jsonDir=path.join(directory,'json'),sqlDir=path.join(directory,'sqlite');let app;

@@ -1,9 +1,10 @@
 'use strict';
+const {observeDatabase}=require('./helpers/native-database-observer.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),crypto=require('node:crypto'),{createRequire}=require('node:module');
 const storage=require('../electron/storage'),sqlite=require('../electron/sqlite-storage.cjs'),{seedDatabase}=require('./period-test-support.cjs'),root=path.resolve(__dirname,'..');
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
 function fixture(){return {...Object.fromEntries(storage.SECTIONS.map(name=>[name,[]])),vehicles:[{id:0,plate:'SYNTHETIC NUMBER',fuel:'diesel',fuelBalance:0,norm:10},{id:'0',plate:'SYNTHETIC TEXT',fuel:'diesel',fuelBalance:0,norm:20}],records:[{id:'preserved',vehicleId:0,date:'2026-09-01',km:123.456,fuelIssued:5,fuelActual:2}],fuelCards:[{id:'cash',number:'НАЛИЧКА',provider:'Наличка',assignments:[]}],fuelPeriods:[{month:'2026-09',recon:{'Наличка':{litres:7,sum:12.34}}}],reestrRows:[{id:'original-registry',sum:7,description:'SYNTHETIC OLD WORKSPACE'}],appMeta:[{id:'meta',toPlanInit:'synthetic'}]};}
-async function observe(directory){const deadline=Date.now()+5000;for(;;)try{return storage.readAll(directory);}catch(error){if(error.code!=='DB_BUSY'||Date.now()>=deadline)throw error;await new Promise(resolve=>setTimeout(resolve,25));}}
+async function observe(directory){return observeDatabase(()=>storage.readAll(directory));}
 async function invoicePdf(){
  const {PDFDocument}=require('pdf-lib'),document=await PDFDocument.create();document.registerFontkit(require('@pdf-lib/fontkit'));
  const fontPath=path.join(process.env.WINDIR||'C:/Windows','Fonts','arial.ttf');assert.ok(fs.existsSync(fontPath),'Synthetic Cyrillic PDF requires the installed Arial font');
