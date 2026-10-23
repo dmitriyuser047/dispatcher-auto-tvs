@@ -2,6 +2,7 @@ const {test,before,after,beforeEach,afterEach}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {pathToFileURL}=require('node:url'),{createRequire}=require('node:module');
 const commands=require('../assets/core/platform-commands.js'),schema=require('../assets/core/platform-schema.js');
+const fixtureNow='2026-10-22T12:00:00.000Z',fixtureToday=fixtureNow.slice(0,10);
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
 let browser,page,errors;
 function fixture(){
@@ -18,8 +19,9 @@ before(async()=>{const edge='C:/Program Files (x86)/Microsoft/Edge/Application/m
 after(async()=>{await browser?.close();});
 beforeEach(async()=>{
  page=await browser.newPage({viewport:{width:1280,height:900}});errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());
+ await page.clock.setFixedTime(new Date(fixtureNow));
  await page.exposeFunction('__planSemantic',request=>{
-  try{return {ok:true,...commands.plan(request.database,request.command,{id:request.operationId,now:'2026-10-22T12:00:00.000Z',today:'2026-10-22',actor:{id:'confirmed-server-user',name:'Confirmed server user',role:'admin'}})};}
+  try{return {ok:true,...commands.plan(request.database,request.command,{id:request.operationId,now:fixtureNow,today:fixtureToday,actor:{id:'confirmed-server-user',name:'Confirmed server user',role:'admin'}})};}
   catch(error){return {ok:false,code:error.code,message:error.message,issues:error.issues};}
  });
  await page.addInitScript(({database,sections})=>{
@@ -60,7 +62,7 @@ test('AcceptShift submits unsaved form edits and manual receiver in one command,
  await page.evaluate(()=>wfEdit('shiftReports',91));const form=page.locator('#wfForm');await form.locator('[name="status"]').selectOption('accepted');await form.locator('[name="acceptedBy"]').fill('Actual master at the site');await form.locator('[name="odoEnd"]').fill('125');await form.locator('[name="result"]').fill('Corrected actual shift result');await holdSubmit(form);
  assert.deepEqual(await page.evaluate(()=>({status:data.shiftReports[0].status,end:data.shiftReports[0].odoEnd,result:data.shiftReports[0].result,records:data.records.length,raw:window.__rawWrites})),{status:'sent',end:110,result:'Original result',records:0,raw:0});
  const command=await page.evaluate(()=>window.__semanticCalls[0].command);assert.equal(command.type,'AcceptShift');assert.equal(command.input.shiftId,91);assert.equal(command.input.changes.acceptedBy,'Actual master at the site');assert.equal(command.input.changes.odoEnd,125);assert.deepEqual(command.input.changes.target,{section:'vehicles',id:712});for(const field of ['status','acceptedActor','acceptedAt','rejectionReason'])assert.equal(field in command.input.changes,false);
- await release();await waitClosed();const after=await page.evaluate(()=>({shift:data.shiftReports[0],records:data.records.length,genRecords:data.genRecords.length,raw:window.__rawWrites}));assert.equal(after.shift.status,'accepted');assert.equal(after.shift.result,'Corrected actual shift result');assert.equal(after.shift.acceptedBy,'Actual master at the site');assert.equal(after.shift.acceptedActor.id,'confirmed-server-user');assert.equal(after.shift.acceptedAt,'2026-10-22T12:00:00.000Z');assert.equal(after.records,0);assert.equal(after.genRecords,0);assert.equal(after.raw,0);
+ await release();await waitClosed();const after=await page.evaluate(()=>({shift:data.shiftReports[0],records:data.records.length,genRecords:data.genRecords.length,raw:window.__rawWrites}));assert.equal(after.shift.status,'accepted');assert.equal(after.shift.result,'Corrected actual shift result');assert.equal(after.shift.acceptedBy,'Actual master at the site');assert.equal(after.shift.acceptedActor.id,'confirmed-server-user');assert.equal(after.shift.acceptedAt,fixtureNow);assert.equal(after.records,0);assert.equal(after.genRecords,0);assert.equal(after.raw,0);
 });
 
 

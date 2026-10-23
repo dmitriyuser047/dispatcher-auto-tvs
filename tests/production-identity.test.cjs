@@ -16,7 +16,7 @@ const stableDatabase = windowsPath.join(home, 'Documents', 'Диспетчери
 // Run only synchronous identity/settings setup. All filesystem, Electron,
 // database and server objects are fake; the ready callback is never executed.
 function inspectStartup({ requestedProfile = '', savedSettings = null } = {}) {
-  const writes = [], reads = [], subscriptions = [], readyCallbacks = [];
+  const writes = [], reads = [], subscriptions = [], readyCallbacks = [], diagnosticObservers = [];
   const paths = { appData: roaming, userData: 'C:\\Synthetic\\UnrelatedElectronDefault' };
   let appUserModelId;
   const forbidden = () => { throw new Error('Application/database startup is forbidden in the identity test'); };
@@ -42,6 +42,10 @@ function inspectStartup({ requestedProfile = '', savedSettings = null } = {}) {
     path: windowsPath, fs: fakeFs, os: { homedir: () => home }, http: {},
     './updater': {}, './server': fakeServer, 'node-unrar-js': {}, './storage': new Proxy({}, { get: forbidden }),
     './storage-format.cjs': require('../electron/storage-format.cjs'),
+    './diagnostic-boundary.cjs': {
+      configure: observer => { assert.equal(typeof observer, 'function'); diagnosticObservers.push(observer); return () => {}; },
+      record: forbidden,
+    },
     './settings': { writeAtomic: (file, value) => writes.push({ file, value: JSON.parse(value) }), validateSettings: value => structuredClone(value), databaseIdentity: () => 'synthetic-identity' },
     './security': {}, 'node:url': {}, './notifications': {},
     crypto: { randomBytes: () => Buffer.alloc(24, 1) },
@@ -53,6 +57,7 @@ function inspectStartup({ requestedProfile = '', savedSettings = null } = {}) {
   });
   vm.runInContext(mainSource + '\nglobalThis.__identity = { defaultDataDir:DEFAULT_DATA_DIR, settingsFile:SETTINGS_FILE, settings };', context);
   assert.equal(readyCallbacks.length, 1);
+  assert.equal(diagnosticObservers.length, 1);
   assert.ok(subscriptions.some(row => row.name === 'window-all-closed'));
   return { ...JSON.parse(JSON.stringify(context.__identity)), paths, appUserModelId, writes, reads, configuredKeys };
 }
