@@ -29,6 +29,8 @@
     "src/core/accounting-boundary.ts",
     "src/core/decimal-core.ts",
     "src/core/effective-periods.ts",
+    "src/core/generator-fuel.ts",
+    "src/core/seasonal-fuel.ts",
     "src/core/entity-identity.ts",
     "src/core/record-identity.ts",
     "src/core/document-state.ts",

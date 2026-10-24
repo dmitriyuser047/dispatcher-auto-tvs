@@ -5,7 +5,7 @@ const fixture=require('./fixtures/issue-fuel-v1-before-extraction.json');
 const clone=value=>JSON.parse(JSON.stringify(value)),hash=text=>crypto.createHash('sha256').update(text).digest('hex');
 function browser(){
  const context=vm.createContext({PlatformSchema:require('../assets/core/platform-schema.js'),WorkflowInspection:require('../assets/core/workflow-inspection.js'),RepairProcess:require('../assets/core/repair-process.js'),FuelOperations:require('../assets/core/fuel-operations.js'),ProcurementOperations:require('../assets/core/procurement-operations.js'),DomainSources:require('../assets/core/financial-recognition.js'),PersonnelPlanning:require('../assets/core/personnel-planning.js')});
- for(const name of ['platform-contracts','command-source','entity-identity','decimal-core','accounting-boundary','effective-periods','business-calendar','document-state','fuel-engine','writeoff-engine','fuel-stock','fuel-movement-policy','issue-fuel','document-engine'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name+'.js'),'utf8'),context,{filename:name+'.js'});
+ for(const name of ['platform-contracts','command-source','entity-identity','decimal-core','accounting-boundary','effective-periods','generator-fuel','business-calendar','document-state','fuel-engine','writeoff-engine','fuel-stock','fuel-movement-policy','issue-fuel','document-engine'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name+'.js'),'utf8'),context,{filename:name+'.js'});
  Object.defineProperty(context,'PlatformCommands',{get(){throw Error('Document/fuel planning must not call the command dispatcher');}});
  return context;
 }

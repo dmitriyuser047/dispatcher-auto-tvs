@@ -73,7 +73,7 @@ test('a stationary millilitre stock stays visible and v2 source checks no longer
 });
 
 test('browser calculation versions match CommonJS using the actual UMD dependency order',()=>{
-  const context=vm.createContext({});for(const file of ['decimal-core.js','accounting-boundary.js','fuel-engine.js','writeoff-engine.js','fuel-movement-policy.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',file),'utf8'),context,{filename:file});
+  const context=vm.createContext({});for(const file of ['decimal-core.js','accounting-boundary.js','effective-periods.js','generator-fuel.js','fuel-engine.js','writeoff-engine.js','fuel-movement-policy.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',file),'utf8'),context,{filename:file});
   for(const version of [1,2]){
     assert.equal(hash(context.TvsFuelEngine.forVersion(version).buildLedger(fixture(),period)),hash(fuel.forVersion(version).buildLedger(fixture(),period)));
     assert.equal(hash(context.TvsWriteoffEngine.forVersion(version).prepare(fixture(),request)),hash(writeoff.forVersion(version).prepare(fixture(),request)));

@@ -263,6 +263,7 @@ function renderDetail(v) {
       <div class="vdh-actions">
         <button class="btn btn-ghost btn-sm" onclick="fuelAccountingOpen('vehicles',${htmlEsc(JSON.stringify(v.id))})">Начало учёта ГСМ</button>
         <button class="btn btn-ghost btn-sm" onclick="fuelNormsOpen('vehicles',${htmlEsc(JSON.stringify(v.id))})">Нормы по датам</button>
+        ${typeof seasonalFuelCardButton === 'function' ? seasonalFuelCardButton('vehicles',v.id) : ''}
         <button class="btn btn-ghost btn-sm" onclick="personnelRequirementsOpen('vehicles',${htmlEsc(JSON.stringify(v.id))})">Допуски сотрудника</button>
         <button class="btn btn-ghost btn-sm" onclick="wfTimeline(${htmlJs('v:'+v.id)})">История</button>
         <button class="btn btn-ghost btn-sm" onclick="openEditVehicle(${htmlJs(v.id)})">

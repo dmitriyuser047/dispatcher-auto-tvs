@@ -201,7 +201,7 @@ test('native storage catches an intermediate stock deficit created by a backdate
 });
 
 test('pure browser modules expose the same API and health inspection honors unreadable sections',()=>{
-  const context=vm.createContext({});for(const name of ['platform-contracts.js','entity-identity.js','decimal-core.js','accounting-boundary.js','fuel-stock.js','fuel-engine.js','fuel-movement-policy.js','document-facts.js','document-lifecycle.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name),'utf8'),context);
+  const context=vm.createContext({});for(const name of ['platform-contracts.js','entity-identity.js','decimal-core.js','accounting-boundary.js','effective-periods.js','generator-fuel.js','fuel-stock.js','fuel-engine.js','fuel-movement-policy.js','document-facts.js','document-lifecycle.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name),'utf8'),context);
   assert.equal(context.FuelMovementPolicy.apiVersion,1);assert.equal(context.DocumentLifecycle.apiVersion,1);assert.equal(Object.isFrozen(context.FuelMovementPolicy),true);
   const before=db(),next=clone(before);issue(next);const copy=JSON.stringify(next);context.FuelMovementPolicy.validateChanges(before,next);assert.equal(JSON.stringify(next),copy);
   const invalid=clone(next);invalid.records=[];assert.equal(fuelPolicy.inspect(invalid,{readable:['vehicles']}).issues.length,0);

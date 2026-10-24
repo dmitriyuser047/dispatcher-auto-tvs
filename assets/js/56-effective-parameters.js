@@ -16,6 +16,7 @@ function effectiveParametersAsset(section,id){const rows=(data[section]||[]).fil
 function effectiveParametersProfile(assetRef){const rows=(data.costProfiles||[]).filter(row=>row.assetRef===assetRef);if(rows.length>1)throw Error('Для техники найдено несколько профилей ставок. Сначала проверьте дубли.');return rows[0]||null;}
 function effectiveParametersToday(){return typeof dispatcherLocalDate==='function'?dispatcherLocalDate():wfToday();}
 function effectiveParametersBefore(date){const day=new Date(date+'T12:00:00Z');day.setUTCDate(day.getUTCDate()-1);return day.toISOString().slice(0,10);}
+function effectiveParametersPeriodStart(period){return period.from==='1900-01-01'&&typeof period.id==='string'&&period.id.startsWith('fuel-season:baseline:')?'Прежние нормы карточки':fmtDate(period.from);}
 function effectiveParametersMetadata(state){return {version:1,periods:effectiveParametersClone(state.periods)};}
 function effectiveParametersValidate(state,metadata){return effectiveParametersClone(EffectivePeriods.validate(state.section,{...(state.original||{}),[state.kind]:metadata},state.kind));}
 function effectiveParametersCurrent(state,write=true){
@@ -33,7 +34,7 @@ function effectiveParametersReset(state,period){
  state.form.elements.from.value=period?.from||'';state.form.elements.basis.value=period?.basis||'';
  state.fields.forEach(([key])=>{state.form.elements[key].value=period?.parameters[key]??'';});
  state.form.querySelector('[data-ep-stage]').textContent=period?'Применить правку к черновику':'Добавить период в черновик';
- state.form.querySelector('[data-ep-editing]').textContent=period?'Редактируется период с '+fmtDate(period.from):'Новый период: укажите реальную дату начала и основание.';
+ state.form.querySelector('[data-ep-editing]').textContent=period?(effectiveParametersPeriodStart(period)==='Прежние нормы карточки'?'Редактируются прежние нормы карточки':'Редактируется период с '+fmtDate(period.from)):'Новый период: укажите реальную дату начала и основание.';
  state.initialFields=effectiveParametersRaw(state);precisionRemember(state.form);
 }
 function effectiveParametersChoose(state,period){
@@ -46,7 +47,7 @@ function effectiveParametersHistory(state){
  if(!periods.length){host.innerHTML='<p>Периодов пока нет. Прежние поля карточки действуют, пока вы явно не сохраните журнал.</p>';return;}
  const table=document.createElement('table');table.className='tbl';table.innerHTML='<thead><tr><th>С даты</th><th>По дату включительно</th><th>Параметры</th><th>Основание</th>'+(state.readonly?'':'<th>Правка черновика</th>')+'</tr></thead><tbody></tbody>';
  const body=table.querySelector('tbody');periods.forEach((period,index)=>{
-  const row=document.createElement('tr');row.dataset.periodId=JSON.stringify(period.id);row.innerHTML='<td>'+htmlEsc(fmtDate(period.from))+(period.from>effectiveParametersToday()?'<br><small>Будущий период</small>':'')+'</td><td>'+htmlEsc(periods[index+1]?fmtDate(effectiveParametersBefore(periods[index+1].from)):'Без окончания')+'</td><td>'+state.fields.map(([key,label])=>htmlEsc(label)+': '+htmlEsc(period.parameters[key]==null?'Не задано':precisionFormat(period.parameters[key]))).join('<br>')+'</td><td style="white-space:pre-wrap">'+htmlEsc(period.basis)+'</td>';
+  const row=document.createElement('tr');row.dataset.periodId=JSON.stringify(period.id);row.innerHTML='<td>'+htmlEsc(effectiveParametersPeriodStart(period))+(period.from>effectiveParametersToday()?'<br><small>Будущий период</small>':'')+'</td><td>'+htmlEsc(periods[index+1]?fmtDate(effectiveParametersBefore(periods[index+1].from)):'Без окончания')+'</td><td>'+state.fields.map(([key,label])=>htmlEsc(label)+': '+htmlEsc(period.parameters[key]==null?'Не задано':precisionFormat(period.parameters[key]))).join('<br>')+'</td><td style="white-space:pre-wrap">'+htmlEsc(period.basis)+'</td>';
   if(!state.readonly){const actions=document.createElement('td');actions.innerHTML='<button type="button" class="btn btn-ghost btn-sm" data-ep-edit>Изменить</button> <button type="button" class="btn btn-ghost btn-sm" data-ep-delete>Убрать из черновика</button>';
    actions.querySelector('[data-ep-edit]').onclick=()=>effectiveParametersChoose(state,period);
    actions.querySelector('[data-ep-delete]').onclick=()=>{if(state.pending)return;if(effectiveParametersRaw(state)!==state.initialFields){state.form.querySelector('[data-ep-error]').textContent='Сначала примените или отмените текущую правку.';return;}state.periods=state.periods.filter(item=>item.id!==period.id);effectiveParametersInvalidate(state);effectiveParametersReset(state);effectiveParametersHistory(state);};row.append(actions);

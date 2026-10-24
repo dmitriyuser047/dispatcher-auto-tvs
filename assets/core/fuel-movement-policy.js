@@ -1,5 +1,5 @@
 /* Fuel conservation and journal linkage rules shared by native, API and UI saves. */
-(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(()=>require('./fuel-engine.js'),()=>require('./accounting-boundary.js'),()=>require('./decimal-core.js'),()=>require('./effective-periods.js'),()=>require('./fuel-stock.js'));else root.FuelMovementPolicy=factory(()=>root.TvsFuelEngine,()=>root.AccountingBoundary,()=>root.DecimalCore,()=>root.EffectivePeriods,()=>root.FuelStock);})(typeof globalThis==='object'?globalThis:this,function(getFuel,getAccounting,getDecimal,getPeriods,getStock){
+(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(()=>require('./fuel-engine.js'),()=>require('./accounting-boundary.js'),()=>require('./decimal-core.js'),()=>require('./fuel-stock.js'),()=>require('./generator-fuel.js'));else root.FuelMovementPolicy=factory(()=>root.TvsFuelEngine,()=>root.AccountingBoundary,()=>root.DecimalCore,()=>root.FuelStock,()=>root.GeneratorFuel);})(typeof globalThis==='object'?globalThis:this,function(getFuel,getAccounting,getDecimal,getStock,getGenerator){
   'use strict';
   const own=(row,key)=>Object.prototype.hasOwnProperty.call(row,key);
   const rows=(db,section)=>Array.isArray(db?.[section])?db[section].filter(row=>row&&typeof row==='object'&&!Array.isArray(row)):[];
@@ -117,47 +117,12 @@
   }
   function inspect(db,context={}){const issues=analyze(db,context);return {issues,counts:{error:issues.filter(issue=>issue.severity==='error').length,warning:issues.filter(issue=>issue.severity==='warning').length,total:issues.length}};}
   function decimal(){const api=getDecimal();if(api?.apiVersion!==1)throw Object.assign(Error('Не загружена десятичная арифметика'),{code:'MODULE_UNAVAILABLE'});return api;}
-  function generatorParameters(generator,row){
-    if(!generator||!own(generator,'fuelNorms'))return generator;
-    const api=getPeriods();if(api?.apiVersion!==1)throw Object.assign(Error('Не загружены датированные нормы'),{code:'MODULE_UNAVAILABLE'});
-    const selected=api.resolve('generators',generator,row.date,'fuelNorms');return selected.status==='known'?selected.parameters:null;
-  }
-  function generatorRate(generator,row){
-    const d=decimal(),power=number(generator?.power),n100=number(generator?.norm100),load=number(row.load),n50=number(generator?.norm50),idle=number(generator?.normIdle);
-    if(!(power>0)||!Number.isFinite(n100)||!Number.isFinite(load))return null;
-    const share=d.div(load,power,{scale:12,rounding:'half-away-from-zero'}),twice=d.mul(share,2);
-    const rate=Number.isFinite(n50)?d.compare(share,'0.5')<=0&&Number.isFinite(idle)
-      ?d.add(idle,d.mul(d.sub(n50,idle),twice))
-      :d.add(n50,d.mul(d.sub(n100,n50),d.sub(twice,1)))
-      :d.mul(n100,share);
-    return d.compare(rate,0)<0?'0':rate;
-  }
-  function generatorRounded(value){const d=decimal();return d.toNumberExact(d.quantize(value,{scale:3,rounding:'half-away-from-zero'}));}
-  function generatorIssueOnly(row){return row?.hours===0&&!present(row.fuelUsed)&&!present(row.fuelActual)&&
-    (typeof row.fuelMovementId==='string'&&row.fuelMovementId.trim()!==''||typeof row.fuelMovementId==='number'&&Number.isFinite(row.fuelMovementId));}
-  function generatorSpent(generator,row){
-    if(!row)return 0;
-    if(present(row.fuelActual))return quantity(row.fuelActual);if(present(row.fuelUsed))return quantity(row.fuelUsed);
-    if(generatorIssueOnly(row))return 0;
-    const parameters=generatorParameters(generator,row);if(parameters===null)return null;
-    const hours=quantity(row.hours);if(!generator||!hours)return 0;const rate=generatorRate(parameters,row);
-    return rate===null?(own(generator,'fuelNorms')?null:0):generatorRounded(decimal().mul(rate,hours));
-  }
-  function generatorNormSpent(generator,row){
-    if(!generator||!row)return 0;if(present(row.fuelUsed))return quantity(row.fuelUsed);
-    if(generatorIssueOnly(row))return 0;
-    const parameters=generatorParameters(generator,row);if(parameters===null)return null;
-    const hours=quantity(row.hours);if(!hours)return 0;
-    const rate=present(row.load)?generatorRate(parameters,row):null;
-    if(rate!==null)return generatorRounded(decimal().mul(rate,hours));
-    const flat=present(parameters.norm)?number(parameters.norm):number(parameters.norm100);
-    return Number.isFinite(flat)?generatorRounded(decimal().mul(flat,hours)):(own(generator,'fuelNorms')?null:0);
-  }
-  function generatorNormKnown(generator,row){
-    if(!generator||!row)return false;if(present(row.fuelUsed)&&Number.isFinite(number(row.fuelUsed)))return true;
-    if(generatorIssueOnly(row))return true;
-    const parameters=generatorParameters(generator,row);return parameters!==null&&(Number.isFinite(number(parameters.norm))||Number.isFinite(number(parameters.norm100)));
-  }
+  function generatorModule(){const api=getGenerator();if(api?.apiVersion!==1)throw Object.assign(Error('Не загружен общий расчёт топлива ДЭС'),{code:'MODULE_UNAVAILABLE'});return api;}
+  function generatorParameters(generator,row){return generatorModule().generatorParameters(generator,row);}
+  function generatorRate(generator,row){return generatorModule().generatorRate(generator,row);}
+  function generatorSpent(generator,row){return generatorModule().generatorSpent(generator,row);}
+  function generatorNormSpent(generator,row){return generatorModule().generatorNormSpent(generator,row);}
+  function generatorNormKnown(generator,row){return generatorModule().generatorNormKnown(generator,row);}
   function assetBalances(db,ref){
     const target=asset(db,ref),vehicle=String(ref).startsWith('v:'),section=vehicle?'records':'genRecords',assetField=vehicle?'vehicleId':'generatorId';
     const boundary=accounting(vehicle?'vehicles':'generators',target);

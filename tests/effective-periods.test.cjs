@@ -148,7 +148,7 @@ test('v2 ledger, journal, preview, full posted snapshot and fingerprint match ha
 });
 
 test('actual browser modules match Node, and missing dependency only fails when dated metadata is used',()=>{
-  const browser=vm.createContext({});for(const name of ['decimal-core','accounting-boundary','effective-periods','temporal-policy','fuel-engine','writeoff-engine','fuel-movement-policy'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name+'.js'),'utf8'),browser,{filename:name});
+  const browser=vm.createContext({});for(const name of ['decimal-core','accounting-boundary','effective-periods','generator-fuel','temporal-policy','fuel-engine','writeoff-engine','fuel-movement-policy'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name+'.js'),'utf8'),browser,{filename:name});
   assert.equal(hash(browser.TvsWriteoffEngine.prepare(db(),request)),hash(writeoff.prepare(db(),request)));assert.equal(browser.FuelMovementPolicy.generatorSpent({fuelNorms:container(generator(1.126))},{date:'2026-09-01',hours:1,load:75}),.845);
   const noPeriods=vm.createContext({});for(const name of ['decimal-core','fuel-engine'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name+'.js'),'utf8'),noPeriods);
   assert.equal(noPeriods.TvsFuelEngine.fqRecord({km:100},{norm:10}).norm,10);assert.throws(()=>noPeriods.TvsFuelEngine.fqRecord({date:'2026-09-01',km:100},{fuelNorms:container(vehicle(10))}),{code:'MODULE_UNAVAILABLE'});
