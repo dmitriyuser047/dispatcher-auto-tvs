@@ -124,3 +124,15 @@ test('valid decimal legacy precision stays exact and explicit while invalid actu
   assert.equal(fuel.recordBalanceAt(fuel.recordBalances(db,'v'),0),null);
   assert.ok(writeoff.prepare(db,request).issues.some(issue=>issue.code==='invalid-number'&&issue.field==='fuelActual'));
 });
+
+test('diagnostics merge only the same numeric source field and retain separate fields and orphan causes',()=>{
+  const audit=require('../assets/core/fuel-audit.js'),db=fixtures().normal;
+  db.records=[{id:'orphan',vehicleId:'missing',date:'2026-09-01',km:1,fuelGrade:'ДТ',fuelOrg:'A'}];
+  db.fuelPurchases=[{id:0,vehicleId:'v',date:'2026-09-01',qty:'bad',sum:-1,price:'0x10',grade:'ДТ',sourceOrg:'A'}];
+  const before=JSON.stringify(db),model=audit.buildModel(db,{...range,coverage:false});
+  const numeric=model.items.filter(issue=>['source-number','invalid-value'].includes(issue.code));
+  assert.equal(numeric.length,3);assert.deepEqual(new Set(numeric.map(issue=>issue.impact.field)),new Set(['qty','sum','price']));
+  for(const issue of numeric){assert.equal(issue.category,'error');assert.ok(issue.sourceRefs.some(ref=>ref.type==='purchase'&&ref.id===0));}
+  assert.ok(model.items.some(issue=>issue.code==='record-vehicle-missing'&&issue.recordId==='orphan'));
+  assert.equal(model.summary.error,4);assert.equal(JSON.stringify(db),before);
+});

@@ -1,0 +1,3 @@
+# Frozen actual v3 sources are pinned by raw SHA256 in source-sha256.json.
+# Preserve the original Git blob bytes on Windows checkouts.
+*.cjs -text

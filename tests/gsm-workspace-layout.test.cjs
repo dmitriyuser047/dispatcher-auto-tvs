@@ -28,7 +28,7 @@ function harness(db=database(),options={}){
     dispatcherBackgroundNeeded:()=>false,gsmBuildLedger:()=>ledger,
     gsmOrgKey:fuel.gsmOrgKey,gsmGrade:fuel.gsmGrade,
     gsmMonthRange:fuel.gsmMonthRange,
-    fmtDate:value=>value,document:{addEventListener(){},getElementById:id=>id==='mainContent'?main:null},
+    fmtDate:value=>value,document:{addEventListener(){},querySelector(){return null;},getElementById:id=>id==='mainContent'?main:null},
     saveData:forbidden,platformExecuteCommand:forbidden,
     window:{electronAPI:{writeSections:forbidden,executeCommand:forbidden}},
     switchSection:section=>{calls.navigation.push(['section',section]);context.activeSection=section;},

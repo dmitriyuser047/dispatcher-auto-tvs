@@ -38,7 +38,7 @@ function thread(t){
   const waiting=new Map();worker.on('message',message=>{const waiter=waiting.get(message.requestId);if(waiter){waiting.delete(message.requestId);clearTimeout(waiter.timer);waiter.resolve(message);}});
   worker.on('error',error=>{for(const waiter of waiting.values()){clearTimeout(waiter.timer);waiter.reject(error);}waiting.clear();});
   t.after(()=>worker.terminate());
-  return message=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>{waiting.delete(message.requestId);reject(Error('Synthetic worker timed out'));},20000);waiting.set(message.requestId,{resolve,reject,timer});worker.postMessage(message);});
+  return (message,{timeoutMs=20000}={})=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>{waiting.delete(message.requestId);reject(Error('Synthetic worker timed out: '+message.requestId+' after '+timeoutMs+' ms'));},timeoutMs);waiting.set(message.requestId,{resolve,reject,timer});worker.postMessage(message);});
 }
 
 test('the 10000-record fuel result remains cached below the existing 8m budget and repeats exactly',t=>{
@@ -142,12 +142,18 @@ test('real worker_threads execute current calculations including valuation and p
   const stale=await send({type:'query',requestId:'thread-stale',generation:0,identity:context.identity,sourceFingerprint:loaded.sourceFingerprint,name:'fuel',options:range});assert.equal(stale.error.code,'STALE_QUERY');
 });
 
-test('heavy real worker calculation leaves the host timer runnable and repeats without recalculating its source',async t=>{
+test('heavy real worker calculation leaves the host timer runnable and repeats without recalculating its source',{timeout:90000},async t=>{
   const send=thread(t),db=fixture(10000),loaded=await send({type:'load',requestId:'heavy-load',generation:1,database:db,context});assert.equal(loaded.ok,true);
   const query={type:'query',generation:1,identity:context.identity,sourceFingerprint:loaded.sourceFingerprint,name:'fuel',options:range};
-  let timerFired=false;const timer=new Promise(resolve=>setTimeout(()=>{timerFired=true;resolve();},0));const first=await send({...query,requestId:'heavy-first'});
-  assert.equal(first.ok,true);assert.equal(timerFired,true);await timer;const repeat=await send({...query,requestId:'heavy-repeat'});
+  // Windows CI's independently measured synchronous 10k cold oracle takes
+  // 25-30 seconds under the full four-process suite. A 20s protocol watchdog
+  // cannot certify that same workload; use a bounded cold-only 60s deadline.
+  // The 90s test limit and the usual 20s cache-hit/load deadlines stay active.
+  let timerFired=false;const timer=new Promise(resolve=>setTimeout(()=>{timerFired=true;resolve();},0));const coldStart=performance.now(),first=await send({...query,requestId:'heavy-first'},{timeoutMs:60000});
+  const coldMs=performance.now()-coldStart;
+  assert.equal(first.ok,true);assert.equal(timerFired,true);await timer;const repeatStart=performance.now(),repeat=await send({...query,requestId:'heavy-repeat'});
   assert.equal(repeat.ok,true);assert.deepEqual(repeat.value,first.value);assert.equal(repeat.stats.calculations,1);assert.equal(repeat.stats.hits,1);assert.equal(repeat.stats.sourceFingerprints,1);assert.ok(repeat.stats.cachedCharacters<=8000000);
+  t.diagnostic(JSON.stringify({records:10000,workerColdMs:Math.round(coldMs),workerRepeatMs:Math.round(performance.now()-repeatStart),cachedCharacters:repeat.stats.cachedCharacters}));
 });
 
 test('browser UMD worker imports only the bundled pure core and matches financial and fuel oracles without DOM or network APIs',()=>{

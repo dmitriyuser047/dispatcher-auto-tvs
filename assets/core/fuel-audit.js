@@ -97,8 +97,22 @@ function gsmAuditModel(input, options) {
       gsmGrade(candidate.fuelGrade, gsmVehicleGrade(v)) === grade);
     return candidates.length === 1 && candidates[0].id === recordId;
   });
+  const numericIssues=new Map();
+  const numericKey=item=>{
+    if(!['source-number','invalid-value'].includes(item.code)||!item.impact?.field)return null;
+    const type=present(item.purchaseId)?'purchase':present(item.recordId)?'record':null;if(!type)return null;
+    const sourceId=type==='purchase'?item.purchaseId:item.recordId;
+    return JSON.stringify([type,typeof sourceId,sourceId,typeof item.vehicleId,item.vehicleId,item.impact.field]);
+  };
   const add = value => {
-    const id = value.id || JSON.stringify([value.code, value.vehicleId || '', gsmOrgKey(value.org), value.grade || '', value.recordId || '', value.purchaseId || '', value.observedDate || '']);
+    const key=numericKey(value),candidate=key&&numericIssues.get(key),same=candidate&&candidate.code!==value.code?candidate:null;
+    if(same){
+      const sources=uniqueRefs(value.sourceRefs||refsFor(value));
+      same.sourceRefs=uniqueRefs([...same.sourceRefs,...sources]);
+      same.repairRefs=uniqueRefs([...same.repairRefs,...(value.repairRefs||sources)]);
+      return;
+    }
+    const id = value.id || JSON.stringify([value.code, value.vehicleId || '', gsmOrgKey(value.org), value.grade || '', value.recordId || '', value.purchaseId || '', value.observedDate || '',...(value.code==='source-number'?[value.impact?.field||'']:[])]);
     if (seen.has(id)) return;
     seen.add(id);
     const category = value.category || 'evidence';
@@ -108,6 +122,7 @@ function gsmAuditModel(input, options) {
       vehicleId: '', impact: {}, chronology: [], chronologyCount: 0, ...value, id, category,
       severity: category === 'error' ? 'error' : category === 'warning' ? 'info' : 'warning',
       sourceRefs, repairRefs: uniqueRefs(value.repairRefs || [...sourceRefs, ...vehicleRefs]) });
+    if(key&&!numericIssues.has(key))numericIssues.set(key,items[items.length-1]);
   };
   const history = from && ledger.rows.some(row => row.start < -GSM_EPS || row.end < -GSM_EPS)
     ? gsmBuildLedger(db, { to }) : ledger;
@@ -183,7 +198,7 @@ function gsmAuditModel(input, options) {
       vehicleId, org: issue.org || sourceScopeValue.org, orgs: (issue.orgs || []).length ? issue.orgs : sourceScopeValue.orgs,
       grade: issue.grade || sourceScopeValue.grade, recordId: issue.recordId, purchaseId: issue.purchaseId,
       observedDate: issue.date || (issue.purchaseId ? purchases.get(issue.purchaseId)?.date : '') || '',
-      impact: { kind: issue.code, qty: issue.qty, journalQty: issue.journalQty }, sourceRefs,
+      impact: { kind: issue.code, qty: issue.qty, journalQty: issue.journalQty,...(issue.field?{field:issue.field}:{}) }, sourceRefs,
       repairRefs: uniqueRefs([...repairRefs, ...(vehicles.has(vehicleId) ? [ref('vehicle', vehicleId, 'Карточка ТС', { vehicleId })] : [])]) });
   });
   shortageGroups.forEach(group => {
@@ -222,7 +237,7 @@ function gsmAuditModel(input, options) {
   function validateSource(row, type) {
     if (type === 'purchase' && row.deleted || !inPeriod(row.date)) return;
     const vehicle = vehicles.get(row.vehicleId);
-    const details = { vehicleId: row.vehicleId || '', ...sourceScope(row, type), observedDate: row.date || '',
+    const details = { vehicleId: corrected?idOr(row.vehicleId):row.vehicleId || '', ...sourceScope(row, type), observedDate: row.date || '',
       purchaseId: type === 'purchase' ? row.id : '', recordId: type === 'record' ? row.id : '' };
     if (!vehicle && type === 'record') add({ ...details, code: 'record-vehicle-missing', category: 'error', title: 'Запись журнала без существующей машины',
       message: 'Эта запись не участвует в расчёте ГСМ, поскольку её машина не найдена.', whatToCheck: 'Восстановите связь с подтверждённой карточкой ТС отдельным действием. Покупки при этом автоматически не переносятся; не создавайте повторный приход.' });

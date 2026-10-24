@@ -223,7 +223,7 @@ test('standing vehicles follow their own organization and canonical grade rather
   assert.equal(ctx.gsmActRows(result,'B','').length,0);assert.equal(JSON.stringify(db),before);
 });
 
-test('source errors omitted by the ledger require a marked draft and retain editable source identifiers', () => {
+test('v6 ledger numeric errors and audit-only sources require one marked draft issue per independent source', () => {
   const context = createContext(['assets/js/25m-gsm-diagnostics.js']), db = database();
   db.fuelPurchases = ['bad', -2, ''].map((qty, index) => ({ id: 'invalid-source-' + index, vehicleId: 'synthetic-v',
     date: '2026-10-01', cardNo: '111111', grade: 'АИ-100', qty }));
@@ -231,7 +231,9 @@ test('source errors omitted by the ledger require a marked draft and retain edit
   const before = JSON.stringify(db); context.inputData = db;
   vm.runInContext('data=inputData', context);
   const result = context.gsmBuildLedger(db, { from: '2026-10-01', to: '2026-10-31' });
-  assert.equal(result.errors.length, 0, 'the ledger excludes these sources instead of reporting them');
+  assert.equal(result.errors.length, 2, 'v6 reports malformed and negative numeric sources before excluding them');
+  assert.deepEqual(new Set(result.errors.map(issue=>issue.purchaseId)),new Set(['invalid-source-0','invalid-source-1']));
+  assert.ok(result.errors.every(issue=>issue.code==='source-number'&&issue.field==='qty'));
   const errors = context.gsmRelevantIssues(result, 'A', 'АИ-100').filter(issue => issue.severity === 'error');
   assert.equal(errors.length, 4);
   assert.equal(context.gsmRelevantIssues(result, 'B', 'АИ-100').length, 0);

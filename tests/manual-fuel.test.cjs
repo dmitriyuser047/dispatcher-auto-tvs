@@ -13,7 +13,7 @@ for (const file of ['55-precision-input.js', '01-core.js', '29-fuel-quality.js',
 vm.runInContext(fs.readFileSync(path.join(root, 'vendor/xlsx.bundle.js'), 'utf8'), ctx);
 function base() {
   return { vehicles: [{ id: 'v', plate: 'CAR', org: 'A', object: 'УНГКМ', fuel: 'gasoline', fuelGrade: 'АИ-95', fuelBalance: 0 },
-    { id: 'holder', plate: 'HOLDER', org: 'B', object: 'УНГКМ', fuel: 'gasoline', fuelGrade: 'АИ-95' }],
+    { id: 'holder', plate: 'HOLDER', org: 'B', object: 'УНГКМ', fuel: 'gasoline', fuelGrade: 'АИ-95', fuelBalance: 0 }],
     records: [], fuelPurchases: [], fuelPeriods: [], fuelCards: [{ number: '111111', org: 'A', assignments: [{ vehicleId: 'v', from: '', to: '' }] },
       { number: '222222', org: 'B', assignments: [{ vehicleId: 'holder', from: '', to: '' }] }] };
 }

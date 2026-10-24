@@ -142,9 +142,12 @@ test('invalid dates retain the possible historical organization scope and editab
 test('valid historical records use their dated organization instead of the current card', () => {
   const db = database(); db.vehicles[0].orgHistory = [{ org: 'B', from: '', to: '2026-08-31' }];
   record(db, 'bad-number', '2026-08-01', { fuelIdle: -1 });
-  const item = codes(model(db, { from: '', to: '' }), 'invalid-value')[0];
+  const result=model(db,{from:'',to:''}),matches=codes(result,'source-number').filter(item=>item.recordId==='bad-number'&&item.impact.field==='fuelIdle');
+  assert.equal(matches.length,1);const item=matches[0];
   assert.equal(item.org, 'B');
-  assert.match(item.message, /Холостой ход/);
+  assert.equal(item.category,'error');assert.equal(item.impact.field,'fuelIdle');
+  assert.ok(item.sourceRefs.some(ref=>ref.type==='record'&&ref.id==='bad-number'&&ref.vehicleId===db.vehicles[0].id));
+  assert.equal(codes(result,'invalid-value').filter(issue=>issue.recordId==='bad-number'&&issue.impact.field==='fuelIdle').length,0);
 });
 
 test('orphan records expose the dedicated repair route rather than an ordinary journal editor', () => {
