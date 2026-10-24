@@ -1,11 +1,11 @@
 /* Shared business-section catalog. No application state, storage or DOM access. */
 (function(root,factory){'use strict';const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.PlatformSchema=api;})(typeof globalThis==='object'?globalThis:this,function(){
   'use strict';
-  const sections=['vehicles','records','generators','genRecords','toRecords','tanks','tankIncomes','vehicleTo','repairs','reestrRows','savedReestrs','payments','budget','contragents','fuelPurchases','fuelImports','fuelCards','fuelPeriods','fuelWriteoffs','monthlyFuel','appMeta','dispatchJobs','drivers','assetAssignments','workOrders','opsTasks','assetDocuments','fuelMovements','parts','partMovements','shiftReports','connectors','auditLog','savedViews','glonassTrips','glonassImports','costEntries','costProfiles','procurementOrders','procurementRules','documentDrafts'];
+  const sections=['vehicles','records','generators','genRecords','toRecords','tanks','tankIncomes','vehicleTo','repairs','reestrRows','savedReestrs','payments','budget','contragents','fuelPurchases','fuelImports','fuelCards','fuelPeriods','fuelWriteoffs','monthlyFuel','appMeta','dispatchJobs','drivers','assetAssignments','workOrders','opsTasks','assetDocuments','fuelMovements','parts','partMovements','shiftReports','connectors','auditLog','savedViews','glonassTrips','glonassImports','costEntries','costProfiles','procurementOrders','procurementRules','documentDrafts','generatorMaintenancePlans'];
   const moduleDefinitions=[
     ['fleet','Транспорт',['vehicles','records']],
     ['power','ДЭС и ёмкости',['generators','genRecords','tanks','tankIncomes']],
-    ['maintenance','ТО и ремонт',['vehicleTo','toRecords','repairs','workOrders']],
+    ['maintenance','ТО и ремонт',['vehicleTo','toRecords','repairs','workOrders','generatorMaintenancePlans']],
     ['finance','Финансы и реестры',['payments','budget','contragents','reestrRows','savedReestrs','costEntries','costProfiles']],
     ['fuel','ГСМ и списание',['fuelPurchases','fuelImports','fuelCards','fuelPeriods','fuelWriteoffs','monthlyFuel']],
     ['dispatch','Диспетчерская',['dispatchJobs','drivers','assetAssignments','shiftReports']],
@@ -23,7 +23,15 @@
   descriptors.fuelCards.unique=[{field:'number',normalize:'card'}];
   const date=(section,fields,kind='date')=>fields.split(' ').filter(Boolean).forEach(field=>descriptors[section].dates.push({field,kind}));
   const number=(section,fields,options={})=>fields.split(' ').filter(Boolean).forEach(field=>descriptors[section].numbers.push({field,...options}));
+  labels.generatorMaintenancePlans='Графики ТО ДЭС';
+  descriptors.generatorMaintenancePlans.label=labels.generatorMaintenancePlans;
   sections.forEach(section=>date(section,'createdAt updatedAt archivedAt','datetime'));
+  date('generatorMaintenancePlans','rows[].plannedDate approval.date');
+  date('generatorMaintenancePlans','approval.at','datetime');
+  number('generatorMaintenancePlans','year',{integer:true,min:1900,max:9999});
+  number('generatorMaintenancePlans','revision',{integer:true,min:1});
+  number('generatorMaintenancePlans','rows[].plannedHours rows[].components[].qty',{min:0});
+  descriptors.generatorMaintenancePlans.enums.push({field:'status',values:['draft','approved']});
   date('records','date');date('vehicles','orgHistory[].from orgHistory[].to');date('genRecords','date');date('vehicleTo','date nextDate');date('toRecords','date nextDate');date('vehicleTo','completedAt','dateOrDatetime');date('toRecords','completedAt','dateOrDatetime');date('repairs','invoiceDate');date('tankIncomes','date');
   date('payments','date dueDate paidDate');date('fuelPurchases','date');date('fuelImports','at','datetime');date('fuelCards','assignments[].from assignments[].to orgHistory[].from orgHistory[].to');date('fuelPeriods','month','month');date('fuelPeriods','closedAt reopenedAt','datetime');date('fuelWriteoffs','date');date('fuelWriteoffs','postedAt voidedAt','datetime');date('monthlyFuel','month','month');date('appMeta','at','datetime');
   date('dispatchJobs','start end actualStart actualEnd','datetime');date('assetAssignments','from to');date('workOrders','downtimeFrom downtimeTo completedAt repairProcess.events[].at','datetime');date('workOrders','warrantyUntil');date('opsTasks','due','date');date('assetDocuments','date expires');date('fuelMovements','date');date('partMovements','date');date('shiftReports','date');date('auditLog','at','datetime');date('glonassTrips','date');date('glonassImports','at','datetime');date('costEntries','date');date('procurementOrders','deliveryDate');
@@ -54,6 +62,11 @@
   asset('costEntries','assetRef',{v:'vehicles',g:'generators'});asset('costProfiles','assetRef',{v:'vehicles',g:'generators'});
   for(const section of ['dispatchJobs','assetAssignments','assetDocuments','shiftReports'])direct(section,'driverId','drivers');
   for(const section of ['payments','budget','repairs','vehicleTo','toRecords','workOrders'])direct(section,'contragentId','contragents');
+  direct('parts','generatorId','generators');
+  direct('generatorMaintenancePlans','rows[].generatorId','generators');
+  direct('generatorMaintenancePlans','rows[].components[].partId','parts');
+  direct('generatorMaintenancePlans','rootId','generatorMaintenancePlans');
+  direct('generatorMaintenancePlans','previousId','generatorMaintenancePlans');
   direct('partMovements','partId','parts');direct('partMovements','workOrderId','workOrders');direct('workOrders','repeatOf','workOrders');direct('workOrders','repairId','repairs');direct('workOrders','vehicleToId','vehicleTo');direct('workOrders','toRecordId','toRecords');direct('shiftReports','jobId','dispatchJobs');direct('dispatchJobs','partRequirements[].partId','parts');
   direct('workOrders','defectSource.id','shiftReports');direct('partMovements','repairReturn.issueId','partMovements');
   direct('drivers','personnelPlanning.qualifications[].documentId','assetDocuments');

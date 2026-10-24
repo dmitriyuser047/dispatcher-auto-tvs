@@ -23,10 +23,10 @@ function validGraph(){
 }
 
 test('one immutable platform registry covers every current section and ten application modules',()=>{
-  assert.equal(schema.apiVersion,1);assert.equal(schema.sections.length,41);assert.ok(Object.isFrozen(schema.relations));
+  assert.equal(schema.apiVersion,1);assert.equal(schema.sections.length,42);assert.ok(Object.isFrozen(schema.relations));
   assert.deepEqual([...new Set(schema.modules.flatMap(module=>module.sections))].sort(),[...schema.sections].sort());
   assert.equal(schema.modules.flatMap(module=>module.sections).length,schema.sections.length);assert.ok(schema.relations.length>=70);
-  const description=schema.describe();description.sections.pop();assert.equal(schema.sections.length,41);
+  const description=schema.describe();description.sections.pop();assert.equal(schema.sections.length,42);
   assert.deepEqual(integrity.inspect(validGraph()).counts,{error:0,warning:0,total:0});
 });
 

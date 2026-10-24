@@ -279,6 +279,8 @@ function toPlanOverview() {
 
 // ─── Окно «Регламенты ТО» ─────────────────────────────────
 
+function toGeneratorMaintenanceEntryHtml(){return typeof generatorMaintenanceOpen==='function'?gmUiButton('plans',[''],'График ТО ДЭС по организации'):'';}
+
 function toShowRegs() {
   const list = toPlanOverview();
   const n = (x, d) => (+x || 0).toLocaleString('ru', { maximumFractionDigits: d ?? 0 });
@@ -309,6 +311,7 @@ function toShowRegs() {
     <div style="display:flex;justify-content:space-between;gap:8px;margin-top:12px">
       <button class="btn btn-ghost" onclick="toExportRegs()">Выгрузить в Excel</button>
       <button class="btn btn-ghost" onclick="toOpenRules()">Настроить виды ТО</button>
+      ${toGeneratorMaintenanceEntryHtml()}
       <span>
         <button class="btn btn-ghost" onclick="closeModal('genericModal')">Закрыть</button>
         <button class="btn btn-primary" onclick="closeModal('genericModal');toRebuildPlanClick()">Построить план</button>

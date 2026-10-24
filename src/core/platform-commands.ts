@@ -3,6 +3,7 @@ import type { AssetTarget, CalendarActionInput, CostActionInput, DocumentActionI
 export type {CommandActor,CommandContext,CommandPlan} from './command-source';
 import type {CommandContext,CommandPlan,CommandSourceAPI} from './command-source';
 import type {IssueFuelAPI} from './issue-fuel';
+import type {GeneratorMaintenanceActionInput} from './generator-maintenance';
 interface PersonnelRules { apiVersion: number; validateChanges(previous: unknown, next: unknown, context?: unknown): unknown }
 interface CatalogMerge { apiVersion: number; footprint(input: MergeCatalogInput): string[]; plan(database: unknown,input: MergeCatalogInput,context: CommandContext): CommandPlan }
 interface SectionRegistry { sections: readonly string[] }
@@ -17,10 +18,11 @@ interface BusinessCalendar {apiVersion:number;context(database:unknown,context:C
 interface PersonnelPlanning {apiVersion:number;dependencies():string[];captureShiftContext(database:unknown,shift:JsonRow,context:CommandContext):{snapshot:JsonRow}}
 interface DocumentPrint {apiVersion:number;dependencies(request:unknown):string[];prepare(database:unknown,request:unknown,context:unknown):{canCapture:boolean;sourceFingerprint:string;blockers:unknown[]};capture(database:unknown,request:unknown,context:unknown):unknown}
 interface ImportEngine {apiVersion:number;dependencies(input:ImportActionInput):string[];footprint(input:ImportActionInput):string[];plan(database:unknown,input:ImportActionInput,context:CommandContext):CommandPlan}
+interface GeneratorMaintenance {apiVersion:number;dependencies(input?:GeneratorMaintenanceActionInput):string[];footprint(input?:GeneratorMaintenanceActionInput):string[];plan(database:unknown,input:GeneratorMaintenanceActionInput,context:CommandContext):CommandPlan}
 type Contracts = ReturnType<typeof createPlatformContracts>;
 
 /** Pure semantic actions. Storage still owns ACL, CAS, audit and atomic commit. */
-export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, commandSource:CommandSourceAPI, issueFuel:IssueFuelAPI,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions,calendarActions?:CalendarActions,calendar?:BusinessCalendar,planning?:PersonnelPlanning,getPrinting?:()=>DocumentPrint,getImports?:()=>ImportEngine) {
+export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, commandSource:CommandSourceAPI, issueFuel:IssueFuelAPI,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions,calendarActions?:CalendarActions,calendar?:BusinessCalendar,planning?:PersonnelPlanning,getPrinting?:()=>DocumentPrint,getImports?:()=>ImportEngine,getGeneratorMaintenance?:()=>GeneratorMaintenance) {
   if (!contracts || contracts.apiVersion !== 1 || !personnel || personnel.apiVersion !== 1 || commandSource?.apiVersion!==1 || issueFuel?.apiVersion!==1)
     throw new Error('Не загружены общие правила команд платформы');
   const fail:(code:string,message:string,field?:string)=>never=commandSource.fail;
@@ -39,8 +41,10 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   function calendarOperations():CalendarActions {if(!calendarActions||calendarActions.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила учётного календаря');return calendarActions;}
   function printModule():DocumentPrint {const printing=getPrinting?.();if(!printing||printing.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены печатные модели документов');return printing;}
   function importModule():ImportEngine {const imports=getImports?.();if(!imports||imports.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила подтверждённого импорта');return imports;}
+  function maintenanceModule():GeneratorMaintenance {const api=getGeneratorMaintenance?.();if(api?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила графиков ТО ДЭС');return api;}
   function footprint(value: unknown): string[] {
     const command=parseCommand(value);
+    if(command.type==='GeneratorMaintenanceAction')return maintenanceModule().footprint(command.input);
     if(command.type==='ImportAction')return importModule().footprint(command.input);
     if(command.type==='PrintAction')return ['appMeta'];
     if(command.type==='DocumentAction')return documentModule().footprint(command.input);
@@ -60,6 +64,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   }
   function commandDependencies(value: unknown): string[] {
     const command=parseCommand(value);
+    if(command.type==='GeneratorMaintenanceAction')return maintenanceModule().dependencies(command.input);
     if(command.type==='ImportAction')return importModule().dependencies(command.input);
     if(command.type==='PrintAction')return printModule().dependencies(command.input.request);
     if(command.type==='DocumentAction')return documentModule().dependencies(command.input);
@@ -136,7 +141,8 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     const ctx=context(metadata),db=database(source,dependencies(command));
     calendar?.context(db,ctx);
     let result:CommandPlan;
-    if(command.type==='ImportAction')result=importModule().plan(db,command.input,ctx);
+    if(command.type==='GeneratorMaintenanceAction')result=maintenanceModule().plan(db,command.input,ctx);
+    else if(command.type==='ImportAction')result=importModule().plan(db,command.input,ctx);
     else if(command.type==='PrintAction'){
       const prepared=printModule().prepare(db,command.input.request,{...ctx,timing:command.input.request.mode==='manual'?'manual':'late'});
       if(!prepared.canCapture)fail('PRINT_SOURCE_UNAVAILABLE','Печатная модель недоступна; проверьте исходный документ');

@@ -1,0 +1,26 @@
+[
+  {
+    "name": "storage-format-v4.cjs",
+    "source": "electron/storage-format.cjs",
+    "commit": "35e7fc4a72573bfa6400d0089e8352c0c71cafb9",
+    "sha256": "d4610b477aaad0d713f27a5b3b8423c48ea0cf9b8af99f04c9691cb00a0014a3"
+  },
+  {
+    "name": "sqlite-storage-v4.cjs",
+    "source": "electron/sqlite-storage.cjs",
+    "commit": "35e7fc4a72573bfa6400d0089e8352c0c71cafb9",
+    "sha256": "bb7daf327e854f0d8e6790e9bf51b7d763cfd26380233d29d89b7751a1ced5aa"
+  },
+  {
+    "name": "storage-v4.cjs",
+    "source": "electron/storage.js",
+    "commit": "35e7fc4a72573bfa6400d0089e8352c0c71cafb9",
+    "sha256": "ce3c24f8dfdffac2d153afdc2fd3ffa0fcba9605b14a677f161e8b3bdf24164c"
+  },
+  {
+    "name": "platform-schema-v4.js",
+    "source": "assets/core/platform-schema.js",
+    "commit": "35e7fc4a72573bfa6400d0089e8352c0c71cafb9",
+    "sha256": "e27432a39534acd2d3dcba134e696b34647312adef67c02134d88a36ab30b7f7"
+  }
+]

@@ -92,7 +92,7 @@ function renderGenDetail(g) {
   const stColor = g.status === 'В работе' ? 'var(--green)' : g.status === 'Резерв' ? 'var(--accent)' : g.status ? 'var(--red)' : null;
 
   document.getElementById('mainContent').innerHTML = `
-    <div class="vehicle-detail-header">
+    <div class="vehicle-detail-header generator-detail-header">
       <div class="vdh-left">
         <div class="vdh-make">${htmlEsc(g.name)}</div>
         <div class="vdh-meta">
@@ -111,6 +111,7 @@ function renderGenDetail(g) {
         <button class="btn btn-ghost btn-sm" onclick="fuelAccountingOpen('generators',${htmlEsc(JSON.stringify(g.id))})">Начало учёта ГСМ</button>
         <button class="btn btn-ghost btn-sm" onclick="fuelNormsOpen('generators',${htmlEsc(JSON.stringify(g.id))})">Нормы по датам</button>
         ${typeof seasonalFuelCardButton === 'function' ? seasonalFuelCardButton('generators',g.id) : ''}
+        ${typeof generatorMaintenanceCardButtons === 'function' ? generatorMaintenanceCardButtons(g.id) : ''}
         <button class="btn btn-ghost btn-sm" onclick="personnelRequirementsOpen('generators',${htmlEsc(JSON.stringify(g.id))})">Допуски оператора</button>
         <button class="btn btn-ghost btn-sm" onclick="openGenExportOneModal(${htmlJs(g.id)})">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -187,7 +188,8 @@ function renderGenDetail(g) {
       </div>
     </div>
 
-    ${renderToSection(g.id, totalHours + (g.hoursInit || 0))}`;
+    ${renderToSection(g.id, totalHours + (g.hoursInit || 0))}
+    ${typeof generatorSparesSectionHtml === 'function' ? generatorSparesSectionHtml(g.id) : ''}`;
   if(typeof personnelMountAssetPeople==='function')personnelMountAssetPeople(document.querySelector('#mainContent .vehicle-detail-header'),'g:'+g.id);
   if(typeof costValuationMountCards==='function')void costValuationMountCards();
 }

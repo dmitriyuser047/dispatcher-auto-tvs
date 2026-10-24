@@ -4,8 +4,17 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const facts=require('../assets/core/integrity-facts.js'),fingerprint=require('../assets/core/request-fingerprint.js'),kernel=require('../assets/core/platform-kernel.js');
 const baseline=require('./fixtures/integrity-facts-baseline.json'),hash=value=>crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
+// The literal extraction oracle predates the new registry section. Check that
+// one declaration explicitly, then retain every original issue and hash byte.
+function originalRegistryProjection(report,restricted){
+ const section='generatorMaintenancePlans',added=report.sections.filter(value=>value.section===section),warnings=report.issues.filter(value=>value.section===section);
+ assert.deepEqual(added,[{section,label:'Графики ТО ДЭС',module:'maintenance',readable:!restricted,rows:restricted?null:0}]);
+ assert.deepEqual(warnings,restricted?[{code:'section-unavailable',severity:'warning',section,recordId:'',rowIndex:-1,field:'',message:'Раздел недоступен для проверки: Графики ТО ДЭС'}]:[]);
+ return {...report,issues:report.issues.filter(value=>value.section!==section),sections:report.sections.filter(value=>value.section!==section),counts:{...report.counts,warning:report.counts.warning-warnings.length,total:report.counts.total-warnings.length}};
+}
+
 test('structural facts and delta failures match golden results captured before extraction, including restricted views',()=>{
- for(const {db,all,restricted}of baseline.inspections){const before=JSON.stringify(db);assert.equal(hash(facts.inspect(db)),all);assert.equal(hash(facts.inspect(db,{readable:['vehicles','records']})),restricted);assert.equal(JSON.stringify(db),before);}
+ for(const {db,all,restricted}of baseline.inspections){const before=JSON.stringify(db);assert.equal(Object.hasOwn(db,'generatorMaintenancePlans'),false);assert.equal(hash(originalRegistryProjection(facts.inspect(db),false)),all);assert.equal(hash(originalRegistryProjection(facts.inspect(db,{readable:['vehicles','records']}),true)),restricted);assert.equal(JSON.stringify(db),before);}
  for(const {before,after,context,hash:expected}of baseline.deltas){const bytes=JSON.stringify([before,after]);let result;try{result={ok:facts.validateChanges(before,after,context||{})};}catch(error){result={name:error.name,code:error.code,message:error.message,issues:error.issues};}assert.equal(hash(result),expected);assert.equal(JSON.stringify([before,after]),bytes);}
 });
 

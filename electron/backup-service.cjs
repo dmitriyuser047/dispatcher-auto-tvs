@@ -142,11 +142,14 @@ function sourceSnapshot(source, files) {
         if (!plain(versions) || !Object.hasOwn(versions, 'vehicles') || !Object.hasOwn(versions, 'records'))
             fail('BACKUP_REVISIONS', 'Неполные версии JSON базы');
         const data = {};
+        const sourceSections = require('./storage-format.cjs').sectionsFor(decoded.schemaVersion);
         for (const name of SECTIONS) {
-            if (expected.has('sections/' + name + '.json'))
+            if (expected.has('sections/' + name + '.json')) {
+                if(!sourceSections.includes(name))fail('BACKUP_DATABASE','Исходная схема не поддерживает раздел базы');
                 data[name] = read('sections/' + name + '.json');
+            }
             else {
-                if (decoded.schemaVersion>=2 || Object.hasOwn(rawVersions, name) || ['vehicles', 'records'].includes(name))
+                if (sourceSections.includes(name)&&(decoded.schemaVersion>=2 || Object.hasOwn(rawVersions, name) || ['vehicles', 'records'].includes(name)))
                     fail('BACKUP_DATABASE', 'Отсутствует исходный раздел базы');
                 data[name] = [];
             }
@@ -259,11 +262,13 @@ function readPackage(archivePath) {
     const primary = files.find(entry => entry.name === 'database.json');
     if (!primary)
         fail('BACKUP_DATABASE', 'В пакете нет базы');
-    const data = database(json(primary.bytes, 'database.json')), settings = files.find(entry => entry.name === 'settings.json');
+    const rawDatabase=json(primary.bytes,'database.json');
+    if((sourceDescriptor?.schemaVersion??1)<5&&plain(rawDatabase)&&Object.hasOwn(rawDatabase,'generatorMaintenancePlans'))fail('BACKUP_DATABASE','Исходная схема не поддерживает планы обслуживания ДЭС');
+    const data = database(rawDatabase), settings = files.find(entry => entry.name === 'settings.json');
     if (manifest.sourceFormat !== undefined && !['json', 'sqlite'].includes(manifest.sourceFormat))
         fail('BACKUP_MANIFEST', 'Неизвестный исходный формат базы');
     const checked = { version:manifest.version,sourceDescriptor,sourceIdentity,files, data, settings: settings ? jsonObject(json(settings.bytes, 'settings.json'), 'settings.json') : null, revisions: revisions(manifest.revisions), sourceFormat: manifest.sourceFormat === 'sqlite' ? 'sqlite' : 'json', sourceFingerprint: typeof manifest.sourceFingerprint === 'string' && /^[a-f0-9]{64}$/.test(manifest.sourceFingerprint) ? manifest.sourceFingerprint : null, archiveSha256: sha(archive) };
-    if(sourceDescriptor?.schemaVersion>=4&&manifest.version!==3||manifest.version===3&&sourceDescriptor?.schemaVersion!==4||manifest.version<3&&entries.some(entry=>entry.entryName==='operation-state.json'||entry.entryName.startsWith('operation-ledger/')))fail('BACKUP_OPERATION_STATE','Версия пакета не сохраняет историю операций исходной базы');
+    if(sourceDescriptor?.schemaVersion>=4&&manifest.version!==3||manifest.version===3&&!(sourceDescriptor?.schemaVersion>=4)||manifest.version<3&&entries.some(entry=>entry.entryName==='operation-state.json'||entry.entryName.startsWith('operation-ledger/')))fail('BACKUP_OPERATION_STATE','Версия пакета не сохраняет историю операций исходной базы');
     if(manifest.version===3){checked.operationSeed=readOperations(files);if(JSON.stringify(checked.operationSeed.hotRows)!==JSON.stringify(data.auditLog))fail('BACKUP_OPERATION_STATE','Горячая история не соответствует полному журналу операций');}
     checked.referencedFileCount = references(data, files);
     require('./document-archive.cjs').validateManaged(data,name=>files.find(entry=>entry.name===name)?.bytes);validateSources(data,name=>files.find(entry=>entry.name===name)?.bytes);
@@ -303,7 +308,8 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir,all
         let total = 0;
         const add = (name, bytes) => { total += bytes.length; if (total > MAX_BYTES || files.length >= MAX_FILES - 2)
             fail('BACKUP_LIMIT', 'Резервный пакет превышает допустимый размер'); zip.addFile(name, bytes); files.push({ name, size: bytes.length, sha256: sha(bytes) }); };
-        add('database.json', Buffer.from(JSON.stringify(snapshot.data)));
+        const packageSections=SECTIONS.filter(name=>snapshot.sourceDescriptor.schemaVersion>=5||name!=='generatorMaintenancePlans'),packageData=Object.fromEntries(packageSections.map(name=>[name,snapshot.data[name]])),packageRevisions=Object.fromEntries(packageSections.map(name=>[name,snapshot.revisions[name]]));
+        add('database.json', Buffer.from(JSON.stringify(packageData)));
         add('settings.json', Buffer.from(JSON.stringify(settings)));
         if(snapshot.operationSeed)for(const entry of operationFiles(snapshot.operationSeed))add(entry.name,entry.bytes);
         for (const entry of before) {
@@ -317,7 +323,7 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir,all
         references(snapshot.data, files);
         require('./document-archive.cjs').validateManaged(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null);validateSources(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null);
         const sourceFingerprint = sha(JSON.stringify(before));
-        zip.addFile('manifest.json', Buffer.from(JSON.stringify({ format: 'tvs-backup', version: snapshot.operationSeed?3:2, database:{descriptor:snapshot.sourceDescriptor,identity:snapshot.sourceIdentity}, createdAt: new Date().toISOString(), files, revisions: snapshot.revisions, sourceFormat: snapshot.sourceFormat, sourceFingerprint })));
+        zip.addFile('manifest.json', Buffer.from(JSON.stringify({ format: 'tvs-backup', version: snapshot.operationSeed?3:2, database:{descriptor:snapshot.sourceDescriptor,identity:snapshot.sourceIdentity}, createdAt: new Date().toISOString(), files, revisions: packageRevisions, sourceFormat: snapshot.sourceFormat, sourceFingerprint })));
         stage = path.join(parent, '.tvs-backup-package-' + crypto.randomUUID() + '.zip');
         writeFile(stage, zip.toBuffer());
         identity = fs.lstatSync(stage);

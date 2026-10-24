@@ -1,0 +1,7 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),Module=require('node:module');
+const ROOT=path.resolve(__dirname,'../..'),directory=path.join(ROOT,'tests/fixtures/schema-v4'),manifest=JSON.parse(fs.readFileSync(path.join(directory,'source-sha256.json'),'utf8'));
+function load(name,overrides={}){const entry=manifest.find(value=>value.name===name),file=path.join(directory,name),bytes=fs.readFileSync(file);if(!entry||crypto.createHash('sha256').update(bytes).digest('hex')!==entry.sha256)throw Error('Frozen actual schema4 source hash mismatch: '+name);const mod=new Module(file,module),base=Module.createRequire(path.join(ROOT,entry.source));mod.filename=file;mod.paths=Module._nodeModulePaths(ROOT);mod.require=request=>Object.hasOwn(overrides,request)?overrides[request]:base(request);mod._compile(bytes.toString('utf8'),file);return mod.exports;}
+const schema=load('platform-schema-v4.js');
+function frozen4({DatabaseSync}={}){const overrides={'../assets/core/platform-schema.js':schema},format=load('storage-format-v4.cjs',overrides),sqlite=load('sqlite-storage-v4.cjs',{...overrides,'./storage-format.cjs':format,...(DatabaseSync?{'node:sqlite':{DatabaseSync}}:{})}),storage=load('storage-v4.cjs',{...overrides,'./storage-format.cjs':format,'./sqlite-storage.cjs':sqlite});return {schema,format,sqlite,storage};}
+module.exports={ROOT,manifest,schema,frozen4};

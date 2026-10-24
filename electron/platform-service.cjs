@@ -238,7 +238,7 @@ function prepareTransaction(previous, supplied, options = {}) {
   if (!Number.isFinite(Date.parse(at))) fail('INVALID_CLOCK', 'Некорректное время операции');
   const id = info?.id || 'backend:' + crypto.randomUUID();
   const calendar=require('../assets/core/business-calendar.js'),clock=calendar.resolve(previous,at);
-  const commandProof=['MergeCatalog','AcceptShift','DocumentAction','PeriodAction','FuelAction','ProcurementAction','CostAction','RepairAction','CalendarAction','ImportAction'].includes(options.commandIntent?.command?.type)
+  const commandProof=['MergeCatalog','AcceptShift','DocumentAction','PeriodAction','FuelAction','ProcurementAction','CostAction','RepairAction','CalendarAction','ImportAction','GeneratorMaintenanceAction'].includes(options.commandIntent?.command?.type)
     ? {commandIntent:contracts().parseCommandEnvelope(options.commandIntent,registry)} : {};
   const importProof=commandProof.commandIntent?.command?.type==='ImportAction'&&options.importSource?{importSource:options.importSource}:{};
   const temporalContext={id,now:at,today:clock.today,calendar:clock,actor,...commandProof,...importProof};

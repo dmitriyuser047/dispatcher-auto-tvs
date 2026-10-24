@@ -1,3 +1,5 @@
+import type {GeneratorMaintenanceActionInput,GeneratorMaintenancePayload,GeneratorMaintenanceRow} from './generator-maintenance';
+export type {GeneratorMaintenanceActionInput} from './generator-maintenance';
 /** Runtime contracts shared by browser commands and the trusted storage boundary. */
 export type Identifier = string | number;
 export type JsonPrimitive = null | boolean | number | string;
@@ -91,6 +93,7 @@ export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelI
   | { type: 'ProcurementAction'; version: 1; input: ProcurementActionInput }
   | { type: 'CostAction'; version: 1; input: CostActionInput }
   | { type: 'RepairAction'; version: 1; input: RepairActionInput }
+  | { type: 'GeneratorMaintenanceAction'; version: 1; input: GeneratorMaintenanceActionInput }
   | { type: 'CalendarAction'; version: 1; input: CalendarActionInput }
   | { type: 'PrintAction'; version: 1; input: PrintActionInput }
   | { type: 'ImportAction'; version: 1; input: ImportActionInput };
@@ -275,12 +278,41 @@ export function createPlatformContracts() {
     const row = commandObject(commandJson(value,'command'),'command'); keys(row,['type','version','input'],'command');
     if (row.version !== 1) fail('COMMAND_VERSION', 'command.version', 'Версия команды не поддерживается');
     const input = commandObject(row.input,'command.input'), path = 'command.input.';
+    if(row.type==='GeneratorMaintenanceAction'){
+      const reason=commandText(input.reason,path+'reason',true),fingerprint=reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint');
+      let result:GeneratorMaintenanceActionInput;
+      if(input.action==='saveDraft'){
+        keys(input,['action','planId','payload','reason','reviewFingerprint'],'command.input');
+        const p=commandObject(input.payload,path+'payload');keys(p,['org','year','title','rows','commission'],path+'payload');
+        if(p.year!==null&&(typeof p.year!=='number'||!Number.isSafeInteger(p.year)||p.year<1900||p.year>9999))fail('INVALID_COMMAND',path+'payload.year','Укажите год графика');
+        if(!Array.isArray(p.rows)||p.rows.length>1000)fail('INVALID_COMMAND',path+'payload.rows','Слишком много строк графика');
+        const planned:GeneratorMaintenanceRow[]=p.rows.map((item,index)=>{
+          const f=path+'payload.rows.'+index,r=commandObject(item,f);keys(r,['id','generatorId','site','type','plannedHours','plannedDate','work','note','components'],f);
+          if(r.plannedHours!==null&&(typeof r.plannedHours!=='number'||!Number.isFinite(r.plannedHours)||r.plannedHours<0))fail('INVALID_COMMAND',f+'.plannedHours','Проверьте плановые моточасы');
+          if(!Array.isArray(r.components)||r.components.length>500)fail('INVALID_COMMAND',f+'.components','Проверьте комплектующие');
+          const components=r.components.map((item,componentIndex)=>{const c=commandObject(item,f+'.components.'+componentIndex);keys(c,['partId','qty'],f+'.components.'+componentIndex);if(c.qty!==null&&(typeof c.qty!=='number'||!Number.isFinite(c.qty)||c.qty<0))fail('INVALID_COMMAND',f+'.components.'+componentIndex+'.qty','Проверьте количество комплектующих');return {partId:commandId(c.partId,f+'.components.'+componentIndex+'.partId'),qty:c.qty as number|null};});
+          return {id:commandId(r.id,f+'.id'),generatorId:commandId(r.generatorId,f+'.generatorId'),site:commandText(r.site,f+'.site',false,500),type:commandText(r.type,f+'.type',false,500),plannedHours:r.plannedHours as number|null,plannedDate:commandDate(r.plannedDate,f+'.plannedDate',true),work:commandText(r.work,f+'.work',false),note:commandText(r.note,f+'.note',false),components};
+        });
+        const c=commandObject(p.commission,path+'payload.commission');keys(c,['chairman','members'],path+'payload.commission');
+        const person=(value:unknown,field:string):{name:string;position:string}=>{const x=commandObject(value,field);keys(x,['name','position'],field);return {name:commandText(x.name,field+'.name',false,500),position:commandText(x.position,field+'.position',false,500)};};
+        if(!Array.isArray(c.members)||c.members.length>100)fail('INVALID_COMMAND',path+'payload.commission.members','Проверьте состав комиссии');
+        const payload:GeneratorMaintenancePayload={org:commandText(p.org,path+'payload.org',false,500),year:p.year as number|null,title:commandText(p.title,path+'payload.title',false,500),rows:planned,commission:{chairman:person(c.chairman,path+'payload.commission.chairman'),members:c.members.map((value,index)=>person(value,path+'payload.commission.members.'+index))}};
+        result={action:'saveDraft',payload,reason,reviewFingerprint:fingerprint,...(input.planId===undefined?{}:{planId:commandId(input.planId,path+'planId')})};
+      }else if(input.action==='approve'){
+        keys(input,['action','planId','date','document','reason','reviewFingerprint'],'command.input');
+        result={action:'approve',planId:commandId(input.planId,path+'planId'),date:commandDate(input.date,path+'date'),document:commandText(input.document,path+'document',true),reason,reviewFingerprint:fingerprint};
+      }else if(input.action==='revise'){
+        keys(input,['action','planId','reason','reviewFingerprint'],'command.input');
+        result={action:'revise',planId:commandId(input.planId,path+'planId'),reason,reviewFingerprint:fingerprint};
+      }else return fail('INVALID_COMMAND',path+'action','Неизвестное действие с графиком ТО');
+      return {type:'GeneratorMaintenanceAction',version:1,input:result};
+    }
     if(row.type==='ImportAction'){
       keys(input,['sourceId','profile','sections','decisions','reviewFingerprint','reason'],'command.input');
       if(typeof input.sourceId!=='string'||!/^[a-f0-9]{64}$/.test(input.sourceId))fail('INVALID_COMMAND',path+'sourceId','Нужен сохранённый исходник импорта');
       const profiles:readonly string[]=['glonass','fuel-statement','section-data','vehicles','catalog','personnel','registry','provider-totals'];
       if(typeof input.profile!=='string'||!profiles.includes(input.profile))fail('INVALID_COMMAND',path+'profile','Неизвестный профиль импорта');
-      if(!Array.isArray(input.sections)||!input.sections.length||input.sections.length>41||input.sections.some(name=>typeof name!=='string'||!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name))||new Set(input.sections).size!==input.sections.length)fail('INVALID_COMMAND',path+'sections','Нужны уникальные разделы импорта');
+      if(!Array.isArray(input.sections)||!input.sections.length||input.sections.length>128||input.sections.some(name=>typeof name!=='string'||!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name))||new Set(input.sections).size!==input.sections.length)fail('INVALID_COMMAND',path+'sections','Нужны уникальные разделы импорта');
       if(!Array.isArray(input.decisions)||input.decisions.length>50000)fail('INVALID_COMMAND',path+'decisions','Недопустимое число решений импорта');
       const decisions:ImportDecision[]=input.decisions.map((value,index)=>{const key=path+'decisions.'+index,decision=commandObject(value,key);keys(decision,['rowId','action','target','existing','basis'],key);const rowId=commandText(decision.rowId,key+'.rowId',true,500);if(!['skip','create','map','keep','correct','fill','replace'].includes(decision.action as string))fail('INVALID_COMMAND',key+'.action','Выберите явное действие со строкой');const result:ImportDecision={rowId,action:decision.action as ImportDecision['action']};for(const field of ['target','existing'] as const)if(decision[field]!==undefined){const reference=commandObject(decision[field],key+'.'+field);keys(reference,['section','id'],key+'.'+field);if(typeof reference.section!=='string'||!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(reference.section))fail('INVALID_COMMAND',key+'.'+field+'.section','Неизвестный вид ссылки');result[field]={section:reference.section,id:commandId(reference.id,key+'.'+field+'.id')};}if(decision.basis!==undefined)result.basis=costText(decision.basis,key+'.basis');return result;});
       if(new Set(decisions.map(decision=>decision.rowId)).size!==decisions.length)fail('INVALID_COMMAND',path+'decisions','Для строки выбрано несколько решений');

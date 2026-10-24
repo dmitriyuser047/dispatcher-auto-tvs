@@ -64,7 +64,8 @@ test('browser worker imports the same core dependency chain as index and matches
  const posts=[],tasks=[],imports=[],context=vm.createContext({structuredClone,setTimeout:action=>tasks.push(action),postMessage:value=>posts.push(value)});
  context.importScripts=(...files)=>{for(const name of files){imports.push(name);vm.runInContext(fs.readFileSync(path.join(coreDir,name),'utf8'),context,{filename:name});}};
  vm.runInContext(fs.readFileSync(path.join(coreDir,'health-worker.js'),'utf8'),context,{filename:'health-worker.js'});
- const index=fs.readFileSync(path.resolve(__dirname,'../index.html'),'utf8'),all=[...index.matchAll(/<script src="assets\/core\/([^"]+)"/g)].map(match=>match[1]),until=all.indexOf('platform-integrity.js');assert.deepEqual(imports,all.slice(0,until+1).map(name=>'./'+name));
+ // This standalone renderer is intentionally absent from diagnostic workers.
+ const index=fs.readFileSync(path.resolve(__dirname,'../index.html'),'utf8'),all=[...index.matchAll(/<script src="assets\/core\/([^"]+)"/g)].map(match=>match[1]).filter(name=>name!=='generator-maintenance-print.js'),until=all.indexOf('platform-integrity.js');assert.deepEqual(imports,all.slice(0,until+1).map(name=>'./'+name));
  assert.equal(context.RecordIdentity.apiVersion,1);assert.equal(context.IntegrityFacts.apiVersion,1);
  assert.equal(typeof context.onmessage,'function');const message=request();context.onmessage({data:message});assert.equal(posts.length,0);tasks.shift()();assert.equal(posts[0].ok,true);assert.ok(posts[0].value.issues.some(issue=>issue.code==='PART_STOCK_DEFICIT'));assert.deepEqual(JSON.parse(JSON.stringify(posts[0].value)),publicReport(message.source,message.context));
 });

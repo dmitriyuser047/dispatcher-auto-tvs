@@ -56,6 +56,8 @@
     "src/core/database-lifecycle.ts",
     "src/core/platform-compatibility.ts",
     "src/core/command-source.ts",
-    "src/core/issue-fuel.ts"
+    "src/core/issue-fuel.ts",
+    "src/core/generator-spares.ts",
+    "src/core/generator-maintenance.ts"
   ]
 }

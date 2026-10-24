@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="assets/css/gsm-statement.css">
 <link rel="stylesheet" href="assets/css/gsm-act-steps.css">
 <link rel="stylesheet" href="assets/css/seasonal-fuel.css">
+<link rel="stylesheet" href="assets/css/generator-maintenance.css">
 <link rel="stylesheet" href="assets/css/gsm-workspace-v2.css">
 <link rel="stylesheet" href="assets/css/workflows.css">
 <link rel="stylesheet" href="assets/css/experience.css">
@@ -1159,6 +1160,12 @@
       </div>
       <div class="form-row">
         <div class="form-group">
+          <label>Организация ДЭС</label>
+          <input type="text" id="gm_org" placeholder="Для графика ТО и отдельного запаса">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
           <label>Ответственное лицо</label>
           <input type="text" id="gm_responsible" placeholder="Иванов Иван Иванович...">
         </div>
@@ -1746,6 +1753,9 @@
 <script src="assets/core/financial-recognition.js"></script>
 <script src="assets/core/cost-valuation.js"></script>
 <script src="assets/core/cost-operations.js"></script>
+<script src="assets/core/generator-spares.js"></script>
+<script src="assets/core/generator-maintenance.js"></script>
+<script src="assets/core/generator-maintenance-print.js"></script>
 <script src="assets/core/repair-process.js"></script>
 <script src="assets/core/repair-operations.js"></script>
 <script src="assets/core/document-facts.js"></script>
@@ -1836,6 +1846,8 @@
 <script src="assets/js/61-procurement-control.js"></script>
 <script src="assets/js/62-cost-control.js"></script>
 <script src="assets/js/63-repair-control.js"></script>
+<script src="assets/js/68-generator-maintenance.js"></script>
+<script src="assets/js/68a-generator-maintenance-print.js"></script>
 <script src="assets/js/64-personnel-planning.js"></script>
 <script src="assets/js/65-document-print.js"></script>
 <script src="assets/js/66-reviewed-import.js"></script>

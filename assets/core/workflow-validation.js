@@ -1,9 +1,9 @@
 /* Business workflow validation over lower domain planners. No public integrity facade. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'),()=>require('./catalog-policy.js'),()=>require('./period-policy.js'),()=>require('./inventory-stock.js'),()=>require('./procurement-operations.js'),()=>require('./cost-operations.js'),()=>require('./repair-process.js'),()=>require('./repair-operations.js'),()=>require('./calendar-operations.js'),()=>require('./import-planner.js'),require('./workflow-inspection.js'),require('./record-identity.js'));
-  else root.WorkflowValidation = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy,()=>root.CatalogPolicy,()=>root.PeriodPolicy,()=>root.InventoryStock,()=>root.ProcurementOperations,()=>root.CostOperations,()=>root.RepairProcess,()=>root.RepairOperations,()=>root.CalendarOperations,()=>root.ImportPlanner,root.WorkflowInspection,root.RecordIdentity);
-})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal,getCatalog,getPeriods,getInventory,getProcurement,getCosts,getRepairs,getRepairOperations,getCalendarOperations,getImports,inspection,recordIdentity) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-engine.js'),() => require('./fuel-movement-policy.js'),() => require('./document-lifecycle.js'),() => require('./workflow-policy.js'),()=>require('./temporal-policy.js'),()=>require('./catalog-policy.js'),()=>require('./period-policy.js'),()=>require('./inventory-stock.js'),()=>require('./procurement-operations.js'),()=>require('./cost-operations.js'),()=>require('./repair-process.js'),()=>require('./repair-operations.js'),()=>require('./calendar-operations.js'),()=>require('./import-planner.js'),require('./workflow-inspection.js'),require('./record-identity.js'),()=>require('./generator-spares.js'),()=>require('./generator-maintenance.js'));
+  else root.WorkflowValidation = factory(() => root.TvsPersonnelEngine,() => root.FuelMovementPolicy,() => root.DocumentLifecycle,() => root.WorkflowPolicy,()=>root.TemporalPolicy,()=>root.CatalogPolicy,()=>root.PeriodPolicy,()=>root.InventoryStock,()=>root.ProcurementOperations,()=>root.CostOperations,()=>root.RepairProcess,()=>root.RepairOperations,()=>root.CalendarOperations,()=>root.ImportPlanner,root.WorkflowInspection,root.RecordIdentity,()=>root.GeneratorSpares,()=>root.GeneratorMaintenance);
+})(typeof globalThis === 'object' ? globalThis : this, function (getPersonnel,getFuelMovements,getDocuments,getWorkflow,getTemporal,getCatalog,getPeriods,getInventory,getProcurement,getCosts,getRepairs,getRepairOperations,getCalendarOperations,getImports,inspection,recordIdentity,getGeneratorSpares,getGeneratorMaintenance) {
   'use strict';
   const rows = (db, section) => Array.isArray(db?.[section]) ? db[section] : [];
   const present = value => value != null && String(value).trim() !== '';
@@ -55,6 +55,11 @@
       const error = new Error('Не загружено ядро сотрудников');error.code='MODULE_UNAVAILABLE';throw error;
     }
     personnel.validateChanges(previous,next,context);
+    const spares=getGeneratorSpares?.(),maintenance=getGeneratorMaintenance?.();
+    if(spares?.apiVersion===1)spares.validateChanges(previous,next,context);
+    else if([previous,next].some(db=>rows(db,'parts').some(row=>Object.hasOwn(row,'generatorId'))))throw Object.assign(Error('Не загружена защита запаса ДЭС'),{code:'MODULE_UNAVAILABLE'});
+    if(maintenance?.apiVersion===1)maintenance.validateChanges(previous,next,context);
+    else if(rows(previous,'generatorMaintenancePlans').length||rows(next,'generatorMaintenancePlans').length)throw Object.assign(Error('Не загружена защита графиков ТО ДЭС'),{code:'MODULE_UNAVAILABLE'});
     validateStockChanges(previous,next,context);
     for (const module of [getDocuments(),getFuelMovements(),getWorkflow(),getTemporal(),periodsModule()]) {
       if (!module || module.apiVersion !== 1) {

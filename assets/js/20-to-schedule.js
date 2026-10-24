@@ -189,6 +189,7 @@ function renderToScheduleSection() {
         <button class="btn btn-ghost btn-sm ${tssFilter==='vehicle'?'active':''}" onclick="tssSetFilter('vehicle')" style="${tssFilter==='vehicle'?'background:var(--accent);color:#fff':''}">Транспорт</button>
         <button class="btn btn-ghost btn-sm ${tssFilter==='generator'?'active':''}" onclick="tssSetFilter('generator')" style="${tssFilter==='generator'?'background:var(--accent);color:#fff':''}">ДЭС</button>
         <div style="flex:1"></div>
+        ${typeof toGeneratorMaintenanceEntryHtml==='function'?toGeneratorMaintenanceEntryHtml():''}
         <button class="btn btn-ghost btn-sm" onclick="toShowRegs()" title="Регламенты ТО по маркам и ближайшие сроки">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
           Регламенты

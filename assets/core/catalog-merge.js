@@ -50,6 +50,7 @@
  function compatibility(section,source,target){
   const blockers=[],warnings=[],text=value=>typeof value==='string'?value.trim().replace(/\s+/g,' ').toUpperCase():'';
   if(section==='parts'){
+   if(own(source,'generatorId')!==own(target,'generatorId')||source.generatorId!==target.generatorId)blockers.push({code:'INCOMPATIBLE_STOCK_OWNER',field:'generatorId',message:'Позиции относятся к разным складам. Общий запас и запас ДЭС нельзя объединять изменением карточки.'});
    const left=text(source.unit),right=text(target.unit);if(left&&right&&left!==right)blockers.push({code:'INCOMPATIBLE_UNIT',field:'unit',message:'Единицы измерения номенклатуры различаются. Сначала подтвердите совместимые единицы; объединение не пересчитывает количество.'});
    else if(left!==right)warnings.push({code:'UNKNOWN_UNIT',field:'unit',message:'У одной карточки не указана единица измерения. Она не подставляется и не копируется автоматически; подтвердите номенклатуру перед дальнейшими операциями.'});
   }

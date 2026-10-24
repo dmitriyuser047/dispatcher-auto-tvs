@@ -139,9 +139,9 @@ function readSource(source,manifest) {
     if (decoded.schemaVersion>=4) operationSeed=operations().fromClosure(operations().exportClosure(source),{operationState:decoded.operationState});
     for (const section of sections) {
       const relative = 'sections/' + section + '.json';
-      if (byPath.has(relative)) data[section] = read(relative);
+      if (byPath.has(relative)) {if(!require('./storage-format.cjs').sectionsFor(decoded.schemaVersion).includes(section))fail('MIGRATION_SOURCE_INCOMPLETE','Исходная схема не поддерживает раздел: '+section);data[section] = read(relative);}
       else {
-        if (decoded.schemaVersion>=2 || Object.hasOwn(rawRevisions,section) || ['vehicles','records'].includes(section)) fail('MIGRATION_SOURCE_INCOMPLETE','Не хватает обязательного файла раздела: ' + section);
+        if (require('./storage-format.cjs').sectionsFor(decoded.schemaVersion).includes(section)&&(decoded.schemaVersion>=2 || Object.hasOwn(rawRevisions,section) || ['vehicles','records'].includes(section))) fail('MIGRATION_SOURCE_INCOMPLETE','Не хватает обязательного файла раздела: ' + section);
         data[section] = [];
       }
       if (!Object.hasOwn(revisions,section)) revisions[section] = 0;

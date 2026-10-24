@@ -1,7 +1,7 @@
 import type { JsonRow, JsonValue } from './platform-contracts';
 
 export interface DatabaseIdentity { format: 'tvs-database-identity'; version: 1; uuid: string; generation: number }
-export interface DatabaseDescriptor { schemaVersion: 1 | 2 | 3 | 4; minReader: number; minWriter: 3 | 4; features: readonly string[] }
+export interface DatabaseDescriptor { schemaVersion: 1 | 2 | 3 | 4 | 5; minReader: number; minWriter: 3 | 4 | 5; features: readonly string[] }
 export type DatabaseLifecycleAction = 'relocate' | 'clone' | 'restoreContinuation';
 export interface DatabaseLifecycleHead { identity: DatabaseIdentity; physicalKey: string; metadataStamp: string }
 export interface DatabaseLifecycleSource { format: 'json' | 'sqlite' | 'backup'; identity: DatabaseIdentity | null; descriptor: DatabaseDescriptor | null; fingerprint: string; physicalKey: string }
@@ -33,7 +33,8 @@ interface Contracts { apiVersion: number }
 interface Hash { sha256(value: string): string }
 interface LifecycleError extends Error { code: string; status: number }
 const featuresV3 = ['controlled-import-v1', 'document-lifecycle-v1', 'row-scope-v1', 'sealed-print-v1'];
-const features = ['controlled-import-v1', 'document-lifecycle-v1', 'operation-receipts-v1', 'row-scope-v1', 'sealed-print-v1'];
+const featuresV4 = ['controlled-import-v1', 'document-lifecycle-v1', 'operation-receipts-v1', 'row-scope-v1', 'sealed-print-v1'];
+const features = ['controlled-import-v1', 'document-lifecycle-v1', 'generator-maintenance-v1', 'generator-spares-v1', 'operation-receipts-v1', 'row-scope-v1', 'sealed-print-v1'];
 const actions: readonly DatabaseLifecycleAction[] = ['relocate', 'clone', 'restoreContinuation'];
 const uuidPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
@@ -77,10 +78,10 @@ export function createDatabaseLifecycle(contracts: Contracts, getHash?: () => Ha
   }
   function descriptor(value: JsonValue | undefined): DatabaseDescriptor {
     const input = row(value); keys(input, ['schemaVersion', 'minReader', 'minWriter', 'features']);
-    if (![1, 2, 3, 4].includes(input.schemaVersion as number) || input.minReader !== input.schemaVersion || input.minWriter !== (input.schemaVersion === 4 ? 4 : 3) || !Array.isArray(input.features) || input.features.some(item => typeof item !== 'string') || new Set(input.features).size !== input.features.length) fail('IDENTITY_DESCRIPTOR', 'Не подтверждена совместимость базы');
-    const expected = input.schemaVersion === 4 ? features : input.schemaVersion === 3 ? featuresV3 : [];
+    if (![1, 2, 3, 4, 5].includes(input.schemaVersion as number) || input.minReader !== input.schemaVersion || input.minWriter !== (input.schemaVersion === 5 ? 5 : input.schemaVersion === 4 ? 4 : 3) || !Array.isArray(input.features) || input.features.some(item => typeof item !== 'string') || new Set(input.features).size !== input.features.length) fail('IDENTITY_DESCRIPTOR', 'Не подтверждена совместимость базы');
+    const expected = input.schemaVersion === 5 ? features : input.schemaVersion === 4 ? featuresV4 : input.schemaVersion === 3 ? featuresV3 : [];
     if (stable(input.features) !== stable(expected)) fail('IDENTITY_DESCRIPTOR', 'Неизвестные или отсутствующие возможности базы');
-    return { schemaVersion: input.schemaVersion as 1 | 2 | 3 | 4, minReader: input.minReader as number, minWriter: input.schemaVersion === 4 ? 4 : 3, features: input.features as string[] };
+    return { schemaVersion: input.schemaVersion as 1 | 2 | 3 | 4 | 5, minReader: input.minReader as number, minWriter: input.schemaVersion === 5 ? 5 : input.schemaVersion === 4 ? 4 : 3, features: input.features as string[] };
   }
   function head(value: JsonValue | undefined): DatabaseLifecycleHead { const input = row(value); keys(input, ['identity', 'physicalKey', 'metadataStamp']); return { identity: identity(input.identity), physicalKey: text(input.physicalKey, 'физический каталог'), metadataStamp: fingerprint(input.metadataStamp) }; }
   function build(raw: unknown, rawContext: unknown): DatabaseLifecyclePlan {
@@ -94,7 +95,7 @@ export function createDatabaseLifecycle(contracts: Contracts, getHash?: () => Ha
     if (!['json', 'sqlite', 'backup'].includes(sourceRow.format as string) || !['json', 'sqlite'].includes(targetRow.format as string)) fail('IDENTITY_FORMAT', 'Не поддерживается формат источника или цели');
     const source: DatabaseLifecycleSource = { format: sourceRow.format as DatabaseLifecycleSource['format'], identity: sourceRow.identity === null ? null : identity(sourceRow.identity), descriptor: sourceRow.descriptor === null ? null : descriptor(sourceRow.descriptor), fingerprint: fingerprint(sourceRow.fingerprint), physicalKey: text(sourceRow.physicalKey, 'каталог источника') };
     const target: DatabaseLifecycleTarget = { format: targetRow.format as DatabaseLifecycleTarget['format'], descriptor: descriptor(targetRow.descriptor), physicalKey: text(targetRow.physicalKey, 'целевой каталог') };
-    if (target.descriptor.schemaVersion !== 4) fail('IDENTITY_TARGET_SCHEMA', 'Новая копия должна использовать текущую схему 4');
+    if (target.descriptor.schemaVersion !== 5) fail('IDENTITY_TARGET_SCHEMA', 'Новая копия должна использовать текущую схему 5');
     if (source.physicalKey === target.physicalKey) fail('IDENTITY_TARGET_SOURCE', 'Для операции нужна отдельная новая цель');
     if (!Array.isArray(input.knownHeads ?? [])) fail('IDENTITY_INPUT', 'Некорректные метаданные известных профилей');
     const heads = ((input.knownHeads ?? []) as JsonValue[]).map(head).sort((a, b) => stable(a) < stable(b) ? -1 : stable(a) > stable(b) ? 1 : 0);
@@ -108,7 +109,7 @@ export function createDatabaseLifecycle(contracts: Contracts, getHash?: () => Ha
       if (uuid === source.identity?.uuid || heads.some(item => item.identity.uuid === uuid)) fail('IDENTITY_UUID_REUSED', 'Независимой копии нужен новый UUID');
       targetIdentity = { format: 'tvs-database-identity', version: 1, uuid, generation: 1 };
     } else if (action === 'relocate') {
-      if (!source.identity || source.descriptor?.schemaVersion !== 4 || source.format === 'backup') fail('IDENTITY_SOURCE_UNVERIFIED', 'Перемещение требует текущую базу с подтверждённой идентичностью');
+      if (!source.identity || source.descriptor?.schemaVersion !== 5 || source.format === 'backup') fail('IDENTITY_SOURCE_UNVERIFIED', 'Перемещение требует текущую базу с подтверждённой идентичностью');
       if (input.continuationOf !== undefined) fail('IDENTITY_INPUT', 'Перемещение сохраняет текущее поколение');
       if (heads.some(item => item.identity.uuid === source.identity!.uuid && item.identity.generation > source.identity!.generation)) fail('IDENTITY_SOURCE_SUPERSEDED', 'Известно более новое поколение этой базы');
       targetIdentity = { ...source.identity };
@@ -134,6 +135,6 @@ export function createDatabaseLifecycle(contracts: Contracts, getHash?: () => Ha
     catch (caught) { const error = caught as LifecycleError; return freeze({ canApply: false, issues: [{ severity: 'error', code: error.code || 'IDENTITY_INVALID', message: error.message }], warnings: [], reviewFingerprint: null, sourceIdentity: null, targetIdentity: null, sourceDescriptor: null, targetDescriptor: null, history: null, plan: null }); }
   }
   function plan(input: unknown, ctx: unknown): DatabaseLifecyclePlan { const value = row(safe(input)), result = build(value, ctx); if (value.reviewFingerprint !== result.reviewFingerprint) fail('STALE_REVIEW', 'План базы изменился после просмотра'); return result; }
-  return freeze({ apiVersion: 1 as const, describe: () => freeze({ actions: actions.slice(), currentSchemaVersion: 4, copyOnly: true, sourceRemoval: false, automaticProfileSwitch: false, receiptRetargeting: false }), preview, plan });
+  return freeze({ apiVersion: 1 as const, describe: () => freeze({ actions: actions.slice(), currentSchemaVersion: 5, copyOnly: true, sourceRemoval: false, automaticProfileSwitch: false, receiptRetargeting: false }), preview, plan });
 }
 export type DatabaseLifecycleAPI = ReturnType<typeof createDatabaseLifecycle>;

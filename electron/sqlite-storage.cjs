@@ -74,9 +74,9 @@ function validateFormat(db){
   if(version!==VERSION||!storageFormat.SUPPORTED_READ_SCHEMAS.includes(schemaVersion)||metadata.format_version!==String(VERSION)||metadata.schema_version!==String(schemaVersion)||fileVersion!==schemaVersion)fail('SQLITE_FORMAT','Не поддерживается версия формата SQLite');
   if(schemaVersion>=3){let descriptor;try{descriptor=JSON.parse(metadata.compatibility);}catch{fail('SQLITE_FORMAT','Отсутствует подтверждение совместимости SQLite');}storageFormat.validateDescriptor(descriptor,schemaVersion);}
   else if(own(metadata,'compatibility'))fail('SQLITE_FORMAT','Подтверждение совместимости не соответствует версии SQLite');
-  if(schemaVersion===4){let operationState;try{operationState=JSON.parse(metadata.operation_state);}catch{fail('SQLITE_OPERATION_STATE','Отсутствует состояние истории операций');}storageFormat.validateOperationState(operationState);if(db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name IN('operation_ledger_objects','operation_ledger_receipts')").get().n!==2)fail('SQLITE_OPERATION_STATE','Отсутствуют служебные таблицы истории');}
+  if(schemaVersion>=4){let operationState;try{operationState=JSON.parse(metadata.operation_state);}catch{fail('SQLITE_OPERATION_STATE','Отсутствует состояние истории операций');}storageFormat.validateOperationState(operationState);if(db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name IN('operation_ledger_objects','operation_ledger_receipts')").get().n!==2)fail('SQLITE_OPERATION_STATE','Отсутствуют служебные таблицы истории');}
   const sections=db.prepare('SELECT name,revision FROM sections').all();
-  const names=schemaVersion===1?storageFormat.legacySections():schema.sections;
+  const names=storageFormat.sectionsFor(schemaVersion);
   if(sections.length!==names.length||sections.some(row=>!names.includes(row.name)||!Number.isSafeInteger(row.revision)||row.revision<0))fail('SQLITE_REVISIONS','Каталог или версии разделов SQLite не соответствуют формату программы');
   return schemaVersion;
 }
@@ -161,11 +161,11 @@ function queryRows(dataDir,input){
   },{readOnly:true});
 }
 function readAll(dataDir){return transaction(dataDir,()=>{
-  const result=Object.fromEntries(schema.sections.map(name=>[name,[]]));
+  const version=validateFormat(connection(dataDir)),names=storageFormat.sectionsFor(version),result=Object.fromEntries(schema.sections.map(name=>[name,[]]));
   for(const row of connection(dataDir).prepare('SELECT section,row_json FROM section_rows ORDER BY section,position').all()){
-    if(!own(result,row.section))fail('SQLITE_SECTION','База содержит неизвестный раздел');result[row.section].push(JSON.parse(row.row_json));
+    if(!names.includes(row.section))fail('SQLITE_SECTION','База содержит неизвестный раздел');result[row.section].push(JSON.parse(row.row_json));
   }
-  if(validateFormat(connection(dataDir))===4){require('./operation-store.cjs').validateHot(dataDir,result.auditLog);const platform=require('./platform-service.cjs');if(typeof platform.bindHistory==='function')platform.bindHistory(result,dataDir);}
+  if(version>=4){require('./operation-store.cjs').validateHot(dataDir,result.auditLog);const platform=require('./platform-service.cjs');if(typeof platform.bindHistory==='function')platform.bindHistory(result,dataDir);}
   return result;
 },{readOnly:true});}
 function readRevisions(dataDir){return transaction(dataDir,()=>{
@@ -174,7 +174,7 @@ function readRevisions(dataDir){return transaction(dataDir,()=>{
 },{readOnly:true});}
 function schemaVersion(dataDir){return transaction(dataDir,()=>validateFormat(connection(dataDir)),{readOnly:true});}
 function readDescriptor(dataDir){return transaction(dataDir,()=>{const db=connection(dataDir),version=validateFormat(db);return version>=3?storageFormat.validateDescriptor(JSON.parse(db.prepare("SELECT value FROM metadata WHERE key='compatibility'").get().value),version):storageFormat.describe(version);},{readOnly:true});}
-function readOperationState(dataDir){return transaction(dataDir,()=>{const db=connection(dataDir);if(validateFormat(db)!==4)fail('SQLITE_OPERATION_STATE','История операций доступна только в схеме4');return storageFormat.validateOperationState(JSON.parse(db.prepare("SELECT value FROM metadata WHERE key='operation_state'").get().value));},{readOnly:true});}
+function readOperationState(dataDir){return transaction(dataDir,()=>{const db=connection(dataDir);if(validateFormat(db)<4)fail('SQLITE_OPERATION_STATE','История операций доступна начиная со схемы4');return storageFormat.validateOperationState(JSON.parse(db.prepare("SELECT value FROM metadata WHERE key='operation_state'").get().value));},{readOnly:true});}
 function readOperationObject(dataDir,id){if(typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id))fail('SQLITE_OPERATION_HASH','Некорректный ключ истории');return transaction(dataDir,()=>{const row=connection(dataDir).prepare('SELECT json FROM operation_ledger_objects WHERE hash=?').get(id);return row?Buffer.from(row.json):null;},{readOnly:true});}
 function operationWriter(dataDir){const session=held.get(location(dataDir).key);if(!session||session.scopes.some(Boolean))fail('SQLITE_OPERATION_TRANSACTION','История записывается только внутри текущей физической транзакции');return session.db;}
 function putOperationObjects(dataDir,objects){const db=operationWriter(dataDir);if(!Array.isArray(objects))fail('SQLITE_OPERATION_HASH','Некорректный набор объектов истории');const put=db.prepare('INSERT OR IGNORE INTO operation_ledger_objects VALUES(?,?)');for(const object of objects){if(!plain(object)||typeof object.id!=='string'||!/^[a-f0-9]{64}$/.test(object.id)||typeof object.json!=='string'||Buffer.byteLength(object.json)>8*1024*1024||crypto.createHash('sha256').update(object.json).digest('hex')!==object.id)fail('SQLITE_OPERATION_HASH','Повреждён объект истории');put.run(object.id,object.json);if(db.prepare('SELECT json FROM operation_ledger_objects WHERE hash=?').get(object.id).json!==object.json)fail('SQLITE_OPERATION_HASH','Объект истории изменился');}}
@@ -264,7 +264,7 @@ function commitSections(dataDir,sections,revisions,options={}){
 }
 const ddl=`
   PRAGMA application_id=0x54565331;
-  PRAGMA user_version=4;
+  PRAGMA user_version=${SCHEMA_VERSION};
   CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL) STRICT;
   CREATE TABLE sections(name TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>=0 AND revision<=9007199254740991)) STRICT;
   CREATE TABLE section_rows(
@@ -295,7 +295,7 @@ function writeGuard(directory){
 }
 function create(dataDir,input,options={}){
   if(!plain(input)||!plain(input.data)||Object.keys(input.data).some(name=>!schema.sections.includes(name)))fail('SQLITE_CREATE','Для создания нужны разделы данных и их версии');
-  const descriptor=storageFormat.validateDescriptor(input.descriptor===undefined?storageFormat.describe(4):input.descriptor,4),identity=require('./database-identity.cjs').validate(input.identity===undefined?{format:'tvs-database-identity',version:1,uuid:crypto.randomUUID(),generation:1}:input.identity);
+  const descriptor=storageFormat.validateDescriptor(input.descriptor===undefined?storageFormat.describe(SCHEMA_VERSION):input.descriptor,SCHEMA_VERSION),identity=require('./database-identity.cjs').validate(input.identity===undefined?{format:'tvs-database-identity',version:1,uuid:crypto.randomUUID(),generation:1}:input.identity);
   const data=Object.fromEntries(schema.sections.map(name=>[name,own(input.data,name)?input.data[name]:[]]));for(const [name,rows]of Object.entries(data))validateRows(name,rows);
   const store=require('./operation-store.cjs'),provided=own(input,'operationState')||own(input,'operationObjects'),seed=provided?store.validateSeed({operationState:input.operationState,operationObjects:input.operationObjects,hotRows:data.auditLog}):store.bootstrap({auditRows:data.auditLog});data.auditLog=seed.hotRows;
   const revisions=revisionsOf(input.revisions===undefined?{}:input.revisions),target=location(dataDir);let madeDirectory=false,claimed=false,db=null,began=false;

@@ -2,13 +2,13 @@
 // Выделено из index.html
 
 // ─── GENERATOR CRUD ──────────────────────────────────────
-function genCardSourceFields(){return JSON.stringify(Object.fromEntries(['gm_serial','gm_power','gm_location','gm_responsible','gm_fuel','gm_norm','gm_norm100','gm_norm50','gm_norm_idle','gm_hours_init','gm_fuel_balance','gm_cost','gm_status'].map(id=>[id,document.getElementById(id).value]).concat([['tankId',document.getElementById('gm_tank').selectedOptions[0]?.dataset.typedId??null]])));}
+function genCardSourceFields(){return JSON.stringify(Object.fromEntries(['gm_org','gm_serial','gm_power','gm_location','gm_responsible','gm_fuel','gm_norm','gm_norm100','gm_norm50','gm_norm_idle','gm_hours_init','gm_fuel_balance','gm_cost','gm_status'].map(id=>[id,document.getElementById(id).value]).concat([['tankId',document.getElementById('gm_tank').selectedOptions[0]?.dataset.typedId??null]])));}
 function openAddGenerator() {
   if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   editingGeneratorId = null;
   document.getElementById('generatorModal')._generatorEditState=null;
   document.getElementById('generatorModalTitle').textContent = 'Добавить дизельный генератор';
-  ['gm_name','gm_serial','gm_location','gm_responsible','gm_status','gm_note'].forEach(id => document.getElementById(id).value = '');
+  ['gm_name','gm_org','gm_serial','gm_location','gm_responsible','gm_status','gm_note'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('gm_fuel').value = 'diesel';
   ['gm_norm','gm_norm100','gm_norm50','gm_norm_idle','gm_power','gm_hours_init','gm_fuel_balance','gm_cost'].forEach(id => document.getElementById(id).value = '');
   populateGenTankSelect('');
@@ -26,6 +26,7 @@ function openEditGenerator(id) {
   document.getElementById('gm_serial').value       = g.serial      || '';
   document.getElementById('gm_power').value        = g.power       ?? '';
   document.getElementById('gm_location').value     = g.location    || '';
+  document.getElementById('gm_org').value          = g.org         || '';
   document.getElementById('gm_responsible').value  = g.responsible || '';
   document.getElementById('gm_fuel').value         = g.fuel        || 'diesel';
   document.getElementById('gm_norm').value         = g.norm        ?? '';
@@ -56,8 +57,9 @@ async function saveGenerator() {
   if(tankOption?.value!==''){try{tankId=JSON.parse(tankOption?.dataset.typedId);}catch{showFieldError('Выберите ёмкость с подтверждённым ID','gm_tank');return;}
     const previous=data.generators.find(row=>row.id===editingGeneratorId);
     if(!EntityIdentity.identifier(tankId)||!tanksAll().some(row=>row.id===tankId)&&previous?.tankId!==tankId){showFieldError('Ёмкость не найдена. Откройте карточку заново.','gm_tank');return;}}
+  const existingGenerator=data.generators.find(row=>row.id===editingGeneratorId),organization=document.getElementById('gm_org').value.trim();
   let obj = {
-    name, location, ...Object.fromEntries(Object.entries(numeric).filter(([,value])=>value!==undefined)),
+    name, location, ...(organization!==''||typeof existingGenerator?.org==='string'?{org:organization}:{}), ...Object.fromEntries(Object.entries(numeric).filter(([,value])=>value!==undefined)),
     serial:      document.getElementById('gm_serial').value.trim(),
     responsible: document.getElementById('gm_responsible').value.trim(),
     fuel:        document.getElementById('gm_fuel').value,

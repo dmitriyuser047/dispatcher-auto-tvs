@@ -24,6 +24,8 @@ const ENTRIES=Object.freeze([
   Object.freeze({source:'src/core/decimal-core.ts',output:'assets/core/decimal-core.js',global:'DecimalCore',factory:'createDecimalCore'}),
   Object.freeze({source:'src/core/effective-periods.ts',output:'assets/core/effective-periods.js',global:'EffectivePeriods',factory:'createEffectivePeriods',dependencies:[{path:'./decimal-core.js',global:'DecimalCore'}]}),
   Object.freeze({source:'src/core/generator-fuel.ts',output:'assets/core/generator-fuel.js',global:'GeneratorFuel',factory:'createGeneratorFuel',dependencies:[{path:'./decimal-core.js',global:'DecimalCore'},{path:'./effective-periods.js',global:'EffectivePeriods'}]}),
+  Object.freeze({source:'src/core/generator-spares.ts',output:'assets/core/generator-spares.js',global:'GeneratorSpares',factory:'createGeneratorSpares',dependencies:[{path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./entity-identity.js',global:'EntityIdentity'}]}),
+  Object.freeze({source:'src/core/generator-maintenance.ts',output:'assets/core/generator-maintenance.js',global:'GeneratorMaintenance',factory:'createGeneratorMaintenance',dependencies:[{path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./entity-identity.js',global:'EntityIdentity'},{path:'./request-fingerprint.js',global:'RequestFingerprint'},{path:'./inventory-stock.js',global:'InventoryStock',lazy:true},{path:'./business-calendar.js',global:'BusinessCalendar',lazy:true}]}),
   Object.freeze({source:'src/core/seasonal-fuel.ts',output:'assets/core/seasonal-fuel.js',global:'SeasonalFuel',factory:'createSeasonalFuel',dependencies:[{path:'./decimal-core.js',global:'DecimalCore'},{path:'./effective-periods.js',global:'EffectivePeriods'},{path:'./generator-fuel.js',global:'GeneratorFuel',lazy:true}]}),
   Object.freeze({source:'src/core/financial-recognition.ts',output:'assets/core/financial-recognition.js',global:'DomainSources',factory:'createDomainSources',dependencies:[{path:'./accounting-boundary.js',global:'AccountingBoundary'},{path:'./document-state.js',global:'DocumentState',lazy:true},{path:'./fuel-stock.js',global:'FuelStock',lazy:true},{path:'./decimal-core.js',global:'DecimalCore'},{path:'./entity-identity.js',global:'EntityIdentity'},{path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true}]}),
   Object.freeze({source:'src/core/accounting-boundary.ts',output:'assets/core/accounting-boundary.js',global:'AccountingBoundary',factory:'createAccountingBoundary'}),
@@ -158,6 +160,7 @@ const ENTRIES=Object.freeze([
     {path:'./personnel-planning.js',global:'PersonnelPlanning'},
     {path:'./document-print.js',global:'DocumentPrint',lazy:true},
     {path:'./import-engine.js',global:'ImportEngine',lazy:true},
+    {path:'./generator-maintenance.js',global:'GeneratorMaintenance',lazy:true},
   ]}),
 ]);
 const normalize=text=>text.replace(/\r\n?/g,'\n');

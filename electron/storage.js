@@ -165,10 +165,16 @@ function readRevisions(dataDir) {
   return storageFormat.decodeRevisions(readJson(revisionsFile(dataDir))).revisions;
 }
 
-function readRows(dataDir, name) {
+function readRows(dataDir, name, knownVersion) {
   const sqlite = sqliteBackend(dataDir);
   if (sqlite) return sqlite.readRows(dataDir,name);
-  if(!fs.existsSync(sectionFile(dataDir,name))&&schemaVersion(dataDir)===1){
+  const version=knownVersion??schemaVersion(dataDir);
+  if(!storageFormat.sectionsFor(version).includes(name)){
+    if(fs.existsSync(sectionFile(dataDir,name)))throw Object.assign(Error('В старой базе обнаружен раздел нового формата. Восстановите согласованную копию базы; раздел не был скрыт.'),{code:'STORAGE_FORMAT'});
+    if(fs.existsSync(legacyFile(dataDir))){const legacy=readJson(legacyFile(dataDir));if(Object.hasOwn(legacy,name))throw Object.assign(Error('Неверсионированный файл содержит раздел нового формата. Восстановите согласованную копию базы.'),{code:'STORAGE_FORMAT'});}
+    return [];
+  }
+  if(!fs.existsSync(sectionFile(dataDir,name))&&version===1){
     if(name==='documentDrafts')return [];
     if(!fs.existsSync(revisionsFile(dataDir))){const legacy=readJson(legacyFile(dataDir),null);if(legacy)return Array.isArray(legacy[name])?legacy[name]:[];}
     const versions=readJson(revisionsFile(dataDir),{});if(!Object.hasOwn(versions,name)&&!['vehicles','records'].includes(name))return [];
@@ -275,7 +281,7 @@ function commitSections(dataDir, sections, revisions, options={}) {
     if(!base)throw Object.assign(Error('Отсутствует состояние текущей базы'),{code:'OPERATION_STATE_MISSING'});
     const previousHotRows=changed.includes('auditLog')?JSON.parse(Buffer.from(before.auditLog,'base64')):readRows(dataDir,'auditLog'),plan=store.validateCommit(dataDir,{expectedOperationState:options.expectedOperationState??store.readState(dataDir),nextOperationState:options.nextOperationState??storageFormat.createOperationState(store.readState(dataDir).head),operationPlans:options.operationPlans??[]},{previousHotRows,nextHotRows:sections.auditLog??previousHotRows});store.putObjects(dataDir,plan.objects);operation=plan.reference;operationState=plan.nextOperationState;
   }
-  const encoded=Buffer.from(JSON.stringify(storageFormat.encodeRevisions(revisions,storageFormat.describe(4),operationState))),tx={version:2,schemaVersion:4,initial:!!options.initialSeed,before,after,base:base?.bytes.toString('base64')??null,next:encoded.toString('base64'),operation},journalBytes=Buffer.from(JSON.stringify(tx));
+  const encoded=Buffer.from(JSON.stringify(storageFormat.encodeRevisions(revisions,storageFormat.describe(storageFormat.SCHEMA_VERSION),operationState))),tx={version:2,schemaVersion:storageFormat.SCHEMA_VERSION,initial:!!options.initialSeed,before,after,base:base?.bytes.toString('base64')??null,next:encoded.toString('base64'),operation},journalBytes=Buffer.from(JSON.stringify(tx));
   const journalSnapshot=managed.atomic(journal,journalBytes,null,192*1024*1024);
   try {
     // Revalidate the complete durable intent before the first business change.
@@ -294,8 +300,8 @@ function transactionFailure(){throw Object.assign(Error('Журнал сохра
 function journalBytes(value,nullable=false){if(value===null&&nullable)return null;if(typeof value!=='string'||value.length>256*1024*1024||! /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value))transactionFailure();const bytes=Buffer.from(value,'base64');if(bytes.toString('base64')!==value)transactionFailure();return bytes;}
 function validateCurrentTransaction(dataDir,managed,snapshot,tx){
   const object=value=>value&&typeof value==='object'&&!Array.isArray(value),keys=value=>Object.keys(value).sort().join('|');
-  if(!object(tx)||keys(tx)!==['version','schemaVersion','initial','before','after','base','next','operation'].sort().join('|')||tx.version!==2||tx.schemaVersion!==4||typeof tx.initial!=='boolean'||!object(tx.before)||!object(tx.after)||keys(tx.before)!==keys(tx.after)||Object.keys(tx.before).some(name=>!SECTIONS.includes(name)))transactionFailure();
-  const before={},after={},files={},base=journalBytes(tx.base,true),next=journalBytes(tx.next),decode=bytes=>{const value=storageFormat.decodeRevisions(JSON.parse(bytes));if(value.schemaVersion!==4)transactionFailure();return value;},nextDecoded=decode(next),baseDecoded=base?decode(base):null;
+  if(!object(tx)||keys(tx)!==['version','schemaVersion','initial','before','after','base','next','operation'].sort().join('|')||tx.version!==2||tx.schemaVersion!==storageFormat.SCHEMA_VERSION||typeof tx.initial!=='boolean'||!object(tx.before)||!object(tx.after)||keys(tx.before)!==keys(tx.after)||Object.keys(tx.before).some(name=>!SECTIONS.includes(name)))transactionFailure();
+  const before={},after={},files={},base=journalBytes(tx.base,true),next=journalBytes(tx.next),decode=bytes=>{const value=storageFormat.decodeRevisions(JSON.parse(bytes));if(value.schemaVersion!==storageFormat.SCHEMA_VERSION)transactionFailure();return value;},nextDecoded=decode(next),baseDecoded=base?decode(base):null;
   for(const name of Object.keys(tx.before)){before[name]=journalBytes(tx.before[name],true);after[name]=journalBytes(tx.after[name]);for(const bytes of [before[name],after[name]])if(bytes!==null){if(bytes.length>64*1024*1024)transactionFailure();validateRows(name,JSON.parse(bytes));}files[name]=managed.read(sectionFile(dataDir,name),64*1024*1024);const bytes=files[name]?.bytes??null;if(!(bytes===null&&before[name]===null)&&!bytes?.equals(before[name]??Buffer.alloc(0))&&!bytes?.equals(after[name]))transactionFailure();}
   const revisionSnapshot=managed.read(revisionsFile(dataDir)),actual=revisionSnapshot?.bytes??null,committed=!!actual?.equals(next);if(!committed&&!(actual===null&&base===null)&&!actual?.equals(base??Buffer.alloc(0)))transactionFailure();
   const store=require('./operation-store.cjs');
@@ -316,14 +322,14 @@ function recoverCurrentTransaction(dataDir,managed,snapshot,tx){
 // not reinterpret or repair old domain facts through a new-transaction planner.
 function createJson(dataDir,input){
   if(!input||typeof input!=='object'||Array.isArray(input)||!input.data||typeof input.data!=='object'||Array.isArray(input.data)||Object.keys(input.data).some(name=>!SECTIONS.includes(name)))throw Object.assign(Error('Для создания нужны исходные разделы базы'),{code:'JSON_CREATE'});
-  const safe=require('./safe-file.cjs'),store=require('./operation-store.cjs'),location=path.resolve(dataDir),parent=safe.verifiedDirectory(path.dirname(location)),descriptor=storageFormat.validateDescriptor(input.descriptor??storageFormat.describe(4),4),identity=require('./database-identity.cjs').validate(input.identity??{format:'tvs-database-identity',version:1,uuid:crypto.randomUUID(),generation:1});
+  const safe=require('./safe-file.cjs'),store=require('./operation-store.cjs'),location=path.resolve(dataDir),parent=safe.verifiedDirectory(path.dirname(location)),descriptor=storageFormat.validateDescriptor(input.descriptor??storageFormat.describe(storageFormat.SCHEMA_VERSION),storageFormat.SCHEMA_VERSION),identity=require('./database-identity.cjs').validate(input.identity??{format:'tvs-database-identity',version:1,uuid:crypto.randomUUID(),generation:1});
   const data=require('../assets/core/platform-contracts.js').validateSections(Object.fromEntries(SECTIONS.map(name=>[name,Object.hasOwn(input.data,name)?input.data[name]:[]])),SECTIONS),raw=input.revisions??{};
   if(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.keys(raw).some(name=>!SECTIONS.includes(name))||Object.values(raw).some(value=>!Number.isSafeInteger(value)||value<0))throw Object.assign(Error('Некорректные исходные версии разделов'),{code:'JSON_CREATE'});
   const revisions=Object.fromEntries(SECTIONS.map(name=>[name,raw[name]??0])),provided=Object.hasOwn(input,'operationState')||Object.hasOwn(input,'operationObjects'),seed=provided?store.validateSeed({operationState:input.operationState,operationObjects:input.operationObjects,hotRows:data.auditLog}):store.bootstrap({auditRows:data.auditLog});data.auditLog=seed.hotRows;
   safe.assertDirectory(parent);if(fs.existsSync(location)){safe.verifiedDirectory(location);if(fs.readdirSync(location).length)throw Object.assign(Error('База создаётся только в новом или пустом отдельном каталоге'),{code:'JSON_TARGET_NOT_EMPTY'});}else fs.mkdirSync(location,{mode:0o700});
   const files=store.managedFiles(location);store.putObjects(location,seed.objects);files.atomic(path.join(location,'database-identity.json'),Buffer.from(JSON.stringify(identity)),null,4096);files.verifyDirectory(path.join(location,'sections'),true);
   for(const name of SECTIONS)files.atomic(sectionFile(location,name),Buffer.from(JSON.stringify(data[name])),null,64*1024*1024);
-  files.atomic(revisionsFile(location),Buffer.from(JSON.stringify(storageFormat.encodeRevisions(revisions,descriptor,seed.operationState))),null);return {ok:true,path:location,schemaVersion:4,descriptor,identity};
+  files.atomic(revisionsFile(location),Buffer.from(JSON.stringify(storageFormat.encodeRevisions(revisions,descriptor,seed.operationState))),null);return {ok:true,path:location,schemaVersion:storageFormat.SCHEMA_VERSION,descriptor,identity};
 }
 
 // PeriodPolicy, registered in the shared kernel, owns fuel/stock/finance
@@ -379,10 +385,11 @@ function readAll(dataDir) {
   recoverTransaction(dataDir);
   if (!isSplit(dataDir)) migrate(dataDir);
   readRevisions(dataDir);
+  const version=schemaVersion(dataDir);
   const out = {};
-  SECTIONS.forEach(name => { out[name] = readRows(dataDir, name); });
+  SECTIONS.forEach(name => { out[name] = readRows(dataDir, name, version); });
   require('../assets/core/platform-contracts.js').validateSections(out,SECTIONS);
-  if(schemaVersion(dataDir)===4){require('./operation-store.cjs').validateHot(dataDir,out.auditLog);require('./platform-service.cjs').bindHistory(out,dataDir);}
+  if(version>=4){require('./operation-store.cjs').validateHot(dataDir,out.auditLog);require('./platform-service.cjs').bindHistory(out,dataDir);}
   return out;
 }
 
@@ -494,7 +501,7 @@ function readSnapshot(dataDir,options={}) {
   return {data,revisions:options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?revisions[name]:0])):revisions,databaseToken:databaseToken(dataDir),...(options.principal?{scopeViews:platform.scopeViews(database,revisions,options.principal)}:{}),platform:{apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,...(require('./access-context.cjs').hasNarrowing(options.principal)?{scopedAccess:1}:{}),schemaVersion:version,currentSchemaVersion:storageFormat.SCHEMA_VERSION,descriptor:descriptor(dataDir),readOnly:version<storageFormat.SCHEMA_VERSION,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,calendar:version>=2?1:0,personnelPlanning:version>=2?1:0,documentPrint:version>=2?1:0,controlledImports:version>=2?1:0,needsSchemaUpgrade:version<storageFormat.SCHEMA_VERSION}};
 }
 function readOperation(dataDir,query,principal){
-  if(schemaVersion(dataDir)===4)return require('./platform-service.cjs').readReceipt(dataDir,query,principal);
+  if(schemaVersion(dataDir)>=4)return require('./platform-service.cjs').readReceipt(dataDir,query,principal);
   const token=databaseToken(dataDir),database=readAll(dataDir);
   return {ok:true,databaseToken:token,operationReceipt:require('./platform-service.cjs').findReceipt(database.auditLog,query,principal,token,database)};
 }

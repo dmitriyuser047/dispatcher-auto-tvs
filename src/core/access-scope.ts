@@ -12,7 +12,7 @@ const operationalAssets=['vehicles','generators','tanks'];
 const documents=['shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords','tankIncomes'];
 const sourceKinds:Record<string,string>={repair:'repairs',to:'vehicleTo',vehicleTo:'vehicleTo',toRecord:'toRecords',workOrder:'workOrders',fuelPurchase:'fuelPurchases',tankIncome:'tankIncomes',partReceipt:'partMovements'};
 const sharedCatalogs=['parts','contragents'];
-const directTargets:Record<string,string>={vehicleId:'vehicles',generatorId:'generators',tankId:'tanks',driverId:'drivers',workOrderId:'workOrders',jobId:'dispatchJobs'};
+const directTargets:Record<string,string>={vehicleId:'vehicles',generatorId:'generators',tankId:'tanks',driverId:'drivers',workOrderId:'workOrders',jobId:'dispatchJobs',partId:'parts'};
 
 /** Factual ownership only. Unknown history never becomes the current card's owner. */
 export function createAccessScope(contracts:Contracts,schema:Registry,identity:EntityIdentityAPI){
@@ -39,6 +39,8 @@ export function createAccessScope(contracts:Contracts,schema:Registry,identity:E
   function copy(value:unknown):JsonRow {if(!object(value))fail('Нужна строка принадлежности');const cached=copies.get(value);if(cached)return cached;const owned=safe(value);if(!object(owned))fail('Нужна строка принадлежности');copies.set(value,owned);copies.set(owned,owned);return owned;}
   function table(name:string):JsonRow[] {readSections.add(name);const cached=tables.get(name);if(cached)return cached;const descriptor=Object.getOwnPropertyDescriptor(db,name);if(descriptor?.get||descriptor?.set)fail('Исполняемый раздел принадлежности');if(!descriptor||!Array.isArray(descriptor.value))return [];const rows:JsonRow[]=[];for(let index=0;index<descriptor.value.length;index++){const entry=Object.getOwnPropertyDescriptor(descriptor.value,String(index));if(!entry||entry.get||entry.set)fail('Исполняемая строка принадлежности');rows.push(copy(entry.value));}tables.set(name,rows);return rows;}
   function find(section:string,id:unknown):JsonRow|null {if(!contracts.identifier(id)||!names.has(section))return null;let index=indexes.get(section);if(!index){index=new Map();for(const row of table(section))if(contracts.identifier(row.id)){const key=identity.typedKey(section,row.id),list=index.get(key)||[];list.push(row);index.set(key,list);}indexes.set(section,index);}const rows=index.get(identity.typedKey(section,id))||[];return rows.length===1?rows[0]!:null;}
+  let privateParts:Set<string>|null=null;
+  function privatePart(id:unknown):boolean {if(!contracts.identifier(id))return false;if(!privateParts){privateParts=new Set();for(const row of table('parts'))if(contracts.identifier(row.id)&&own(row,'generatorId'))privateParts.add(identity.typedKey('parts',row.id));}return privateParts.has(identity.typedKey('parts',id));}
   function grouped(name:string,key:string,select:(row:JsonRow)=>string[]):Map<string,JsonRow[]> {let index=groups.get(key);if(!index){index=new Map();for(const row of table(name))for(const value of new Set(select(row))){const members=index.get(value)||[];members.push(row);index.set(value,members);}groups.set(key,index);}return index;}
   const assetTexts=new Map<string,Map<string,JsonRow[]>>();
   function asset(ref:unknown):{section:string;row:JsonRow}|null {if(typeof ref!=='string')return null;const match=/^([vgt]):([\s\S]+)$/.exec(ref);if(!match)return null;const section=({v:'vehicles',g:'generators',t:'tanks'} as Record<string,string>)[match[1]!]!;let index=assetTexts.get(section);if(!index){index=new Map();for(const row of table(section))if(contracts.identifier(row.id)){const key=String(row.id),list=index.get(key)||[];list.push(row);index.set(key,list);}assetTexts.set(section,index);}const matches=index.get(match[2]!)||[];return matches.length===1?{section,row:matches[0]!}:null;}
@@ -57,7 +59,27 @@ export function createAccessScope(contracts:Contracts,schema:Registry,identity:E
   function resolveOwned(section:string,value:JsonRow,stack:Set<string>):Resolved {
    const row=copy(value),marker=section+':'+(contracts.identifier(row.id)?identity.typedKey(section,row.id):stable(row));if(stack.has(marker)||stack.size>40)return result(undefined,false,{issues:['scope-reference-cycle']});const remembered=cache.get(row)?.get(section);if(remembered)return remembered;const next=new Set(stack);next.add(marker);let resolved:Resolved;
    const frozen=snapshot(row),accepted=personnelSnapshot(row),saved=ownSaved(row),on=date(row);
-   if(frozen)resolved=frozen;
+   // A spare stock card belongs to its typed generator. A row's free-text
+   // organisation or a supplied snapshot cannot turn private stock into a
+   // shared catalogue item. Movements and purchases retain that requirement.
+   if(section==='parts'&&own(row,'generatorId'))resolved=reference('generators',row.generatorId,next,null,false);
+   else if(section==='partMovements'&&privatePart(row.partId)){
+    const items=[reference('parts',row.partId,next,null,false)];
+    if(frozen)items.push(frozen);if(saved)items.push(saved);
+    resolved=combine(items);
+   }
+   else if((section==='procurementOrders'||section==='procurementRules')&&row.kind==='part'&&privatePart(row.itemId))resolved=reference('parts',row.itemId,next,null,false);
+   else if(section==='generatorMaintenancePlans'){
+    const items:Resolved[]=[],planRows=Array.isArray(row.rows)?row.rows:[];
+    for(const entry of planRows){
+     if(!object(entry)){items.push(result());continue;}
+     items.push(result([{org:fact(row.org),site:fact(entry.site)}],true,{evidence:[evidence('maintenance-plan-site',true)]}));
+     items.push(reference('generators',entry.generatorId,next,null,false));
+     if(Array.isArray(entry.components))for(const component of entry.components)items.push(object(component)?reference('parts',component.partId,next,null,false):result());
+    }
+    resolved=items.length?combine(items):result([{org:fact(row.org),site:unknown()}],true);
+   }
+   else if(frozen)resolved=frozen;
    else if(section==='auditLog'){
     const changes:Resolved[]=[];if(typeof row.section==='string'&&names.has(row.section)&&row.section!=='auditLog'){for(const field of ['before','after'])if(object(row[field]))changes.push(resolveOwned(row.section,row[field],next));}
     else if(row.type==='transaction'&&typeof row.operationId==='string'){const entries=grouped('auditLog','audit-by-operation',entry=>entry.type!=='transaction'&&typeof entry.operationId==='string'?[entry.operationId]:[]).get(row.operationId)||[];for(const entry of entries)changes.push(resolveOwned('auditLog',entry,next));const changed=Array.isArray(row.changedSections)?row.changedSections.filter(name=>typeof name==='string'&&!['appMeta','auditLog'].includes(name)):[];if(changed.some(name=>!entries.some(entry=>entry.section===name)))changes.push(result());}

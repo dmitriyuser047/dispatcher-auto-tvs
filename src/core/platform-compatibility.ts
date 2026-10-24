@@ -19,9 +19,9 @@ export interface PlatformCompatibilityServerProfile {
   readonly readOnly: boolean;
 }
 export interface CompatibilityDatabaseDescriptor {
-  readonly schemaVersion: 1 | 2 | 3 | 4;
-  readonly minReader: 1 | 2 | 3 | 4;
-  readonly minWriter: 3 | 4;
+  readonly schemaVersion: 1 | 2 | 3 | 4 | 5;
+  readonly minReader: 1 | 2 | 3 | 4 | 5;
+  readonly minWriter: 3 | 4 | 5;
   readonly features: readonly string[];
 }
 export type CompatibilityMode = 'read-write' | 'read-only' | 'unsupported';
@@ -42,8 +42,8 @@ export interface CompatibilityReason {
 export interface CompatibilityAcceptedCapability { readonly name: string; readonly version: number }
 export interface CompatibilitySelectedProfile {
   readonly protocolVersion: number | null;
-  readonly readerSchemaVersion: 1 | 2 | 3 | 4;
-  readonly writerSchemaVersion: 4 | null;
+  readonly readerSchemaVersion: 1 | 2 | 3 | 4 | 5;
+  readonly writerSchemaVersion: 5 | null;
   readonly capabilities: readonly CompatibilityAcceptedCapability[];
 }
 export interface PlatformCompatibilityResult {
@@ -72,10 +72,12 @@ interface Schema { readonly apiVersion: number; readonly sections: readonly stri
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 type Row = { [key: string]: Json };
 const FEATURES_V3 = ['controlled-import-v1', 'document-lifecycle-v1', 'row-scope-v1', 'sealed-print-v1'] as const;
-const FEATURES = ['controlled-import-v1', 'document-lifecycle-v1', 'operation-receipts-v1', 'row-scope-v1', 'sealed-print-v1'] as const;
-const CAPABILITIES = ['commands', 'controlledImports', 'documentPrint', 'fuelCalculationsV5', 'fuelCalculationsV6', 'operations', 'outbox', 'scopedAccess', 'seasonalFuelNormsV1', ...FEATURES].slice().sort();
+const FEATURES_V4 = ['controlled-import-v1', 'document-lifecycle-v1', 'operation-receipts-v1', 'row-scope-v1', 'sealed-print-v1'] as const;
+const FEATURES = ['controlled-import-v1', 'document-lifecycle-v1', 'generator-maintenance-v1', 'generator-spares-v1', 'operation-receipts-v1', 'row-scope-v1', 'sealed-print-v1'] as const;
+const CAPABILITIES = ['commands', 'controlledImports', 'documentPrint', 'fuelCalculationsV5', 'fuelCalculationsV6', 'generatorSparesV1', 'generatorMaintenanceV1', 'operations', 'outbox', 'scopedAccess', 'seasonalFuelNormsV1', ...FEATURES].slice().sort();
 const LIMITS = Object.freeze({ maxBytes: 32768, maxNodes: 4096, maxDepth: 8, maxCapabilities: 64, maxVersions: 8, maxNameLength: 64, maxVersion: 65535 });
 const BASE_READ: readonly CompatibilityRequirement[] = [{ name: 'scopedAccess', version: 1 }];
+const GENERATOR_READ: readonly CompatibilityRequirement[] = [{ name: 'generatorSparesV1', version: 1 }, { name: 'generatorMaintenanceV1', version: 1 }];
 const BASE_WRITE: readonly CompatibilityRequirement[] = [{ name: 'commands', version: 1 }, { name: 'fuelCalculationsV5', version: 1 }, { name: 'fuelCalculationsV6', version: 1 }, { name: 'operations', version: 1 }, { name: 'outbox', version: 1 }];
 const CONSTRAINTS = Object.freeze({ compatibilityOnly: true as const, requiresCurrentAccess: true as const, requiresWriteTicket: true as const, preserveIntent: true as const, retargetOutbox: false as const });
 class CompatibilityValidationError extends Error {
@@ -173,11 +175,11 @@ export function createPlatformCompatibility(contracts: Contracts, schema?: Schem
   }
   function descriptor(input: unknown): CompatibilityDatabaseDescriptor {
     const data = row(safe(input, 'DATABASE_DESCRIPTOR_INVALID', 'database'), ['schemaVersion', 'minReader', 'minWriter', 'features'], 'DATABASE_DESCRIPTOR_INVALID', 'database');
-    if (![1, 2, 3, 4].includes(data.schemaVersion as number)) fail('DATABASE_SCHEMA_UNSUPPORTED', 'database');
-    if (data.minReader !== data.schemaVersion || data.minWriter !== (data.schemaVersion === 4 ? 4 : 3) || !Array.isArray(data.features) || data.features.some(item => typeof item !== 'string') || new Set(data.features).size !== data.features.length) fail('DATABASE_DESCRIPTOR_INVALID', 'database');
-    const expected: readonly string[] = data.schemaVersion === 4 ? FEATURES : data.schemaVersion === 3 ? FEATURES_V3 : [];
+    if (![1, 2, 3, 4, 5].includes(data.schemaVersion as number)) fail('DATABASE_SCHEMA_UNSUPPORTED', 'database');
+    if (data.minReader !== data.schemaVersion || data.minWriter !== (data.schemaVersion === 5 ? 5 : data.schemaVersion === 4 ? 4 : 3) || !Array.isArray(data.features) || data.features.some(item => typeof item !== 'string') || new Set(data.features).size !== data.features.length) fail('DATABASE_DESCRIPTOR_INVALID', 'database');
+    const expected: readonly string[] = data.schemaVersion === 5 ? FEATURES : data.schemaVersion === 4 ? FEATURES_V4 : data.schemaVersion === 3 ? FEATURES_V3 : [];
     if (data.features.length !== expected.length || data.features.some((item, index) => item !== expected[index])) fail('DATABASE_FEATURE_UNSUPPORTED', 'database');
-    return { schemaVersion: data.schemaVersion as 1 | 2 | 3 | 4, minReader: data.schemaVersion as 1 | 2 | 3 | 4, minWriter: data.schemaVersion === 4 ? 4 : 3, features: data.features as string[] };
+    return { schemaVersion: data.schemaVersion as 1 | 2 | 3 | 4 | 5, minReader: data.schemaVersion as 1 | 2 | 3 | 4 | 5, minWriter: data.schemaVersion === 5 ? 5 : data.schemaVersion === 4 ? 4 : 3, features: data.features as string[] };
   }
   function result(mode: CompatibilityMode, databaseDescriptor: CompatibilityDatabaseDescriptor | null, selectedProfile: CompatibilitySelectedProfile | null, reasons: readonly CompatibilityReason[]): PlatformCompatibilityResult {
     return freeze({ version: 1, mode, readCompatible: mode !== 'unsupported', writeCompatible: mode === 'read-write', databaseDescriptor, selectedProfile, reasons, constraints: CONSTRAINTS });
@@ -213,16 +215,16 @@ export function createPlatformCompatibility(contracts: Contracts, schema?: Schem
         return result('read-only', database, { protocolVersion: null, readerSchemaVersion: database.minReader, writerSchemaVersion: null, capabilities: [] }, [{ code: 'LEGACY_SERVER_READ_ONLY', scope: 'server' }, { code: 'DATABASE_READ_ONLY', scope: 'database' }]);
       }
       const remote = server(rawServerProfile), readReasons: CompatibilityReason[] = [];
-      const readRequirements = requiredMap([...BASE_READ, ...database.features.map(item => ({ name: item, version: 1 })), ...remote.requiredReadCapabilities], 'read', readReasons), readCapabilities = accepted(client, remote, readRequirements, 'read', readReasons);
+      const readRequirements = requiredMap([...BASE_READ, ...(database.schemaVersion === 5 ? GENERATOR_READ : []), ...database.features.map(item => ({ name: item, version: 1 })), ...remote.requiredReadCapabilities], 'read', readReasons), readCapabilities = accepted(client, remote, readRequirements, 'read', readReasons);
       if (readReasons.length) return result('unsupported', database, null, readReasons);
       const writeReasons: CompatibilityReason[] = [], protocolVersion = client.protocolVersions.includes(1) && remote.protocolVersions.includes(1) ? 1 : null;
-      if (database.schemaVersion !== 4) writeReasons.push({ code: 'DATABASE_READ_ONLY', scope: 'database' });
+      if (database.schemaVersion !== 5) writeReasons.push({ code: 'DATABASE_READ_ONLY', scope: 'database' });
       if (remote.readOnly) writeReasons.push({ code: 'SERVER_READ_ONLY', scope: 'server' });
       if (protocolVersion === null) writeReasons.push({ code: 'PROTOCOL_UNSUPPORTED', scope: 'write' });
       if (!client.writerSchemaVersions.includes(database.minWriter) || !remote.writerSchemaVersions.includes(database.minWriter)) writeReasons.push({ code: 'WRITER_SCHEMA_UNSUPPORTED', scope: 'write' });
       const writeRequirements = requiredMap([...readRequirements].map(([name, version]) => ({ name, version })).concat(BASE_WRITE, remote.requiredWriteCapabilities), 'write', writeReasons), writeCapabilities = accepted(client, remote, writeRequirements, 'write', writeReasons);
       const mode = writeReasons.length ? 'read-only' : 'read-write';
-      return result(mode, database, { protocolVersion, readerSchemaVersion: database.minReader, writerSchemaVersion: mode === 'read-write' ? 4 : null, capabilities: mode === 'read-write' ? writeCapabilities : readCapabilities }, writeReasons);
+      return result(mode, database, { protocolVersion, readerSchemaVersion: database.minReader, writerSchemaVersion: mode === 'read-write' ? 5 : null, capabilities: mode === 'read-write' ? writeCapabilities : readCapabilities }, writeReasons);
     } catch (caught) {
       const reason = caught instanceof CompatibilityValidationError ? caught.reason : { code: stage === 'database' ? 'DATABASE_DESCRIPTOR_INVALID' as const : stage === 'hello' ? 'HELLO_INVALID' as const : 'SERVER_PROFILE_INVALID' as const, scope: stage };
       return result('unsupported', null, null, [reason]);
@@ -231,8 +233,8 @@ export function createPlatformCompatibility(contracts: Contracts, schema?: Schem
   function describe(): PlatformCompatibilityDescription {
     const capabilities = CAPABILITIES.map(name => ({ name, versions: [1] }));
     return freeze({ apiVersion: 1 as const, profileVersion: 1 as const,
-      hello: { version: 1 as const, protocolVersions: [1], readerSchemaVersions: [1, 2, 3, 4], writerSchemaVersions: [4], capabilities },
-      serverProfile: { version: 1 as const, protocolVersions: [1], writerSchemaVersions: [4], capabilities, requiredReadCapabilities: BASE_READ.map(item => ({ ...item })), requiredWriteCapabilities: BASE_WRITE.map(item => ({ ...item })), readOnly: false },
+      hello: { version: 1 as const, protocolVersions: [1], readerSchemaVersions: [1, 2, 3, 4, 5], writerSchemaVersions: [5], capabilities },
+      serverProfile: { version: 1 as const, protocolVersions: [1], writerSchemaVersions: [5], capabilities, requiredReadCapabilities: BASE_READ.map(item => ({ ...item })), requiredWriteCapabilities: BASE_WRITE.map(item => ({ ...item })), readOnly: false },
       databaseFeatures: FEATURES.slice(), limits: { ...LIMITS }, constraints: CONSTRAINTS });
   }
   return freeze({ apiVersion: 1 as const, describe, negotiate });

@@ -253,6 +253,8 @@ function platformExecuteCommand(value,options={}){
         if(context.blocked||!_sync.enabled||!_sync.databaseToken)throw platformPrepareError('COMMAND_CONNECTION_REQUIRED','Для команды нужно подтверждённое подключение к основной базе.');
         if(_sync.platform?.apiVersion!==1||_sync.platform?.commands!==1||_sync.platform?.operations!==1||_sync.platform?.outbox!==1||!window.electronAPI?.executeCommand)
           throw platformPrepareError('UNSUPPORTED_COMMANDS','Подключение не поддерживает атомарные команды. Загрузите данные из совместимой версии программы.');
+        if(command.type==='GeneratorMaintenanceAction'&&!_sync.platform?.negotiation?.selectedProfile?.capabilities?.some(item=>item.name==='generatorMaintenanceV1'&&item.version===1))
+          throw platformPrepareError('UNSUPPORTED_GENERATOR_MAINTENANCE','Подключение не поддерживает график ТО ДЭС. Обновите основную программу.');
         if(command.type==='PeriodAction'&&_sync.platform?.periods!==1)
           throw platformPrepareError('UNSUPPORTED_PERIODS','Подключение не поддерживает проверенное закрытие периодов. Загрузите данные из совместимой версии программы.');
         if((command.type==='FuelAction'||command.type==='DocumentAction'&&command.input.section==='tankIncomes')&&_sync.platform?.fuelOperations!==1)
@@ -326,6 +328,7 @@ async function platformFlushForClose(){
   let ready=typeof frcFlush==='function'?await frcFlush():true;
   if(typeof personnelPlanningFlush==='function'&&!await personnelPlanningFlush())ready=false;
   if(typeof documentPrintFlush==='function'&&!await documentPrintFlush())ready=false;
+  if(typeof generatorMaintenanceFlush==='function'&&!await generatorMaintenanceFlush())ready=false;
   if(typeof accessPolicyFlush==='function'&&!await accessPolicyFlush())ready=false;
   if(typeof reviewedImportFlush==='function'&&!await reviewedImportFlush())ready=false;
   if(typeof reestrImportFlush==='function'&&!await reestrImportFlush())ready=false;
@@ -337,6 +340,7 @@ async function platformFlushForClose(){
   if(typeof frcHasPendingEdits==='function'&&frcHasPendingEdits())ready=false;
   if(typeof personnelPlanningHasPendingEdits==='function'&&personnelPlanningHasPendingEdits())ready=false;
   if(typeof documentPrintHasPendingEdits==='function'&&documentPrintHasPendingEdits())ready=false;
+  if(typeof generatorMaintenanceHasPendingEdits==='function'&&generatorMaintenanceHasPendingEdits())ready=false;
   if(typeof reviewedImportHasPendingEdits==='function'&&reviewedImportHasPendingEdits())ready=false;
   if(typeof reestrImportHasPendingEdits==='function'&&reestrImportHasPendingEdits())ready=false;
   return ready;
