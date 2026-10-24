@@ -2,7 +2,7 @@
 const {test,before,after,beforeEach,afterEach}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),http=require('node:http'),{createRequire}=require('node:module');
 const snapshots=require('./helpers/ui-snapshot-fixture.cjs');
-let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/package.json'))('playwright');}
+let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
 const root=path.resolve(__dirname,'..');let browser,server,origin,page,errors;
 function database(){return {vehicles:[{id:0,plate:'SYNTHETIC ZERO',org:'A',fuel:'diesel',fuelGrade:'ДТ',fuelBalance:30,norm:10}],records:[{id:'r',vehicleId:0,date:'2026-09-10',km:10,fuelActual:1}],tanks:[{id:0,name:'SYNTHETIC TANK A',org:'A',location:'Synthetic yard',fuel:'diesel',fuelGrade:'ДТ',balanceInit:20,capacity:100}],tankIncomes:[{id:'in',tankId:0,date:'2026-09-01',amount:5,source:'SYNTHETIC HIDDEN RECEIPT DETAIL'}],fuelPurchases:[],appMeta:[{id:'meta',toPlanInit:'synthetic'}]};}
 before(async()=>{
