@@ -329,6 +329,7 @@ async function platformFlushForClose(){
   if(typeof personnelPlanningFlush==='function'&&!await personnelPlanningFlush())ready=false;
   if(typeof documentPrintFlush==='function'&&!await documentPrintFlush())ready=false;
   if(typeof generatorMaintenanceFlush==='function'&&!await generatorMaintenanceFlush())ready=false;
+  if(typeof generatorMaintenancePrintFlush==='function'&&!await generatorMaintenancePrintFlush())ready=false;
   if(typeof accessPolicyFlush==='function'&&!await accessPolicyFlush())ready=false;
   if(typeof reviewedImportFlush==='function'&&!await reviewedImportFlush())ready=false;
   if(typeof reestrImportFlush==='function'&&!await reestrImportFlush())ready=false;
@@ -341,6 +342,7 @@ async function platformFlushForClose(){
   if(typeof personnelPlanningHasPendingEdits==='function'&&personnelPlanningHasPendingEdits())ready=false;
   if(typeof documentPrintHasPendingEdits==='function'&&documentPrintHasPendingEdits())ready=false;
   if(typeof generatorMaintenanceHasPendingEdits==='function'&&generatorMaintenanceHasPendingEdits())ready=false;
+  if(typeof generatorMaintenancePrintHasPendingEdits==='function'&&generatorMaintenancePrintHasPendingEdits())ready=false;
   if(typeof reviewedImportHasPendingEdits==='function'&&reviewedImportHasPendingEdits())ready=false;
   if(typeof reestrImportHasPendingEdits==='function'&&reestrImportHasPendingEdits())ready=false;
   return ready;

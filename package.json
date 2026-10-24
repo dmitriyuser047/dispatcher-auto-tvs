@@ -19,7 +19,7 @@
     "test:electron": "node --test --test-concurrency=1 tests/unified-electron.cjs tests/semantic-command-electron.cjs tests/document-lifecycle-electron.cjs tests/period-control-electron.cjs tests/tank-stock-electron.cjs tests/procurement-electron.cjs tests/cost-electron.cjs tests/repair-electron.cjs tests/personnel-planning-electron.cjs tests/document-print-electron.cjs tests/controlled-import-electron.cjs tests/access-policy-electron.cjs tests/safe-html-pdf-electron.cjs tests/archive-decoder-electron.cjs tests/database-maintenance-electron.cjs tests/platform-compatibility-electron.cjs tests/storage-executor-electron.cjs tests/seasonal-fuel-electron.cjs",
     "start": "electron .",
     "build": "node scripts/build-installer.cjs",
-    "test:generator-maintenance": "node --test tests/generator-maintenance.test.cjs tests/generator-spares.test.cjs tests/generator-maintenance-print.test.cjs tests/generator-maintenance-storage.test.cjs tests/schema5-compatibility.test.cjs tests/schema5-copy.test.cjs"
+    "test:generator-maintenance": "node --test tests/generator-maintenance.test.cjs tests/generator-spares.test.cjs tests/generator-maintenance-print.test.cjs tests/generator-maintenance-storage.test.cjs tests/schema5-compatibility.test.cjs tests/schema5-copy.test.cjs tests/generator-maintenance-spares.test.cjs"
   },
   "devDependencies": {
     "electron": "44.9.0",

@@ -7,6 +7,7 @@ dist/
 .recovery/
 audit/
 outputs/
+/output/pdf/
 .builder-afterpack.cjs
 *.log
 .DS_Store

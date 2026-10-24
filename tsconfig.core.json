@@ -58,6 +58,7 @@
     "src/core/command-source.ts",
     "src/core/issue-fuel.ts",
     "src/core/generator-spares.ts",
-    "src/core/generator-maintenance.ts"
+    "src/core/generator-maintenance.ts",
+    "src/core/generator-maintenance-spares.ts"
   ]
 }

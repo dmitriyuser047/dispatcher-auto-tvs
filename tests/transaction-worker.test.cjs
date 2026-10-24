@@ -55,7 +55,7 @@ test('browser UMD imports the complete index core chain through platform-kernel 
  const realm=vm.createContext(sandbox);realm.importScripts=(...names)=>{for(const name of names){imports.push(name);vm.runInContext(fs.readFileSync(path.join(coreDir,name),'utf8'),realm,{filename:name});}};
  vm.runInContext(fs.readFileSync(path.join(coreDir,'transaction-worker.js'),'utf8'),realm,{filename:'transaction-worker.js'});
  // This standalone renderer is intentionally absent from transaction workers.
- const all=[...fs.readFileSync(path.resolve(__dirname,'../index.html'),'utf8').matchAll(/<script src="assets\/core\/([^"]+)"/g)].map(match=>match[1]).filter(name=>name!=='generator-maintenance-print.js'),until=all.indexOf('platform-kernel.js');assert.deepEqual(imports,all.slice(0,until+1).map(name=>'./'+name));
+ const all=[...fs.readFileSync(path.resolve(__dirname,'../index.html'),'utf8').matchAll(/<script src="assets\/core\/([^"]+)"/g)].map(match=>match[1]).filter(name=>!['generator-maintenance-print.js','generator-maintenance-spares.js'].includes(name)),until=all.indexOf('platform-kernel.js');assert.deepEqual(imports,all.slice(0,until+1).map(name=>'./'+name));
  const message=request();realm.onmessage({data:message});assert.equal(posts.length,0);tasks.shift()();assert.equal(posts[0].ok,true);assert.deepEqual(JSON.parse(JSON.stringify(posts[0].plan)),kernel.prepare(message.previous,message.next,message.context));
 });
 
