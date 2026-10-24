@@ -63,7 +63,7 @@ function renderGenDetail(g) {
       const factDevHtml = factDev !== null
         ? ` <span style="font-size:11px;color:${factDev>0?'var(--red)':'var(--green)'};font-weight:600">${factDev>0?'+':''}${factDev.toFixed(1)}</span>`
         : '';
-      const bal      = balMap[r.id];
+      const bal      = TvsFuelEngine.recordBalanceAt(balMap,r.id);
       const balColor = bal < 0 ? 'var(--red)' : bal === 0 ? 'var(--text3)' : 'var(--green)';
       tableRows += `<tr>
         <td class="td-day">${fmtDate(r.date)} <span style="color:var(--text3)">${dayName}</span></td>
@@ -359,13 +359,14 @@ function computeGenFuelBalances(gid) {
   const gen  = (data.generators || []).find(g => g.id === gid);
   const recs = genRecsFor(gid).slice().sort((a,b) => cmpDateAsc(a.date, b.date));
   let balance = fuelAccountingOpening('generators',gen);
-  const balMap = {};
+  const balanceEntries = [];
   recs.forEach(r => {
     if(!fuelAccountingIncludes('generators',gen,r.date))return;
     const spent = genActualSpent(gen, r);
     balance = balance===null||spent===null?null:DecimalCore.toNumberExact(DecimalCore.sub(DecimalCore.add(balance,fqValue(r.fuelIssued)||0),spent));
-    balMap[r.id] = balance;
+    balanceEntries.push([r.id,balance]);
   });
+  const balMap=TvsFuelEngine.recordBalanceMap(balanceEntries);
   _genBalCache[cacheKey] = balMap;
   return balMap;
 }

@@ -8,8 +8,36 @@
   else root.TvsFuelEngine = api;
 })(typeof globalThis === 'object' ? globalThis : this, function (getAccounting,getDecimal,getPeriods) {
   'use strict';
-  function makeEngine(calculationVersion){
-  const modern=calculationVersion>=2,temporal=calculationVersion>=3,corrected=calculationVersion>=4;
+  // JSON-safe typed index survives calculation caches, structured cloning and
+  // worker transport. Ordinary unique IDs keep their former property aliases.
+  const balanceIndexField='$fuelRecordBalances';
+  const balanceId=id=>typeof id==='string'||typeof id==='number'&&Number.isFinite(id);
+  const balanceKey=id=>JSON.stringify([typeof id,id]);
+  function recordBalanceMap(entries){
+    const values={},aliases=new Map();
+    for(const [id,value] of entries){
+      if(!balanceId(id))continue;
+      const key=balanceKey(id),alias=String(id);
+      values[key]=value;
+      const group=aliases.get(alias)||new Set();group.add(key);aliases.set(alias,group);
+    }
+    if(!Object.keys(values).length)return {};
+    const result={[balanceIndexField]:{version:1,values}};
+    for(const [alias,keys]of aliases)if(keys.size===1&&![balanceIndexField,'__proto__','constructor','prototype'].includes(alias))
+      Object.defineProperty(result,alias,{value:values[[...keys][0]],enumerable:true,configurable:true,writable:true});
+    return result;
+  }
+  function recordBalanceAt(balances,id){
+    if(!balances||typeof balances!=='object'||!balanceId(id))return undefined;
+    const index=Object.prototype.hasOwnProperty.call(balances,balanceIndexField)?balances[balanceIndexField]:null;
+    if(index&&typeof index==='object'&&index.version===1&&index.values&&typeof index.values==='object'){
+      const key=balanceKey(id);return Object.prototype.hasOwnProperty.call(index.values,key)?index.values[key]:undefined;
+    }
+    // Frozen historical readers and older generator adapters return plain maps.
+    return Object.prototype.hasOwnProperty.call(balances,id)?balances[id]:undefined;
+  }
+  function makeEngine(calculationVersion,liveJournal=false){
+  const modern=calculationVersion>=2,temporal=calculationVersion>=3,corrected=calculationVersion>=4,allocated=calculationVersion>=5,verified=calculationVersion>=6;
   const has=(row,key)=>row&&Object.prototype.hasOwnProperty.call(row,key);
   const live=row=>!row.deleted&&!row.cancelled&&row.status!=='cancelled';
   const idOr=(id,fallback='')=>corrected?(id??fallback):(id||fallback);
@@ -45,6 +73,13 @@
   const minus=(a,b)=>modern?fixedAdd(a,b,true):a-b;
   const times=(a,b)=>!modern?a*b:Number.isFinite(a)&&Number.isFinite(b)&&(a===0||b===0||a===1||b===1)?a===0||b===0?0:a===1?b:a:decimalNumber(decimal().mul(a,b));
   const ratio=(a,b)=>!modern?a/b:Number.isFinite(a)&&Number.isFinite(b)&&b!==0&&(a===0||a===b)?a===0?0:1:decimalNumber(decimal().div(a,b,{scale:12,rounding:'half-away-from-zero'}));
+  // Allocation is derived data, unlike the exact source litres above. Keep its
+  // twelve-place intermediates in decimal form until the public 0.001 quantum.
+  // Converting a long accumulated fraction to Number sooner can reject ordinary
+  // kilometre totals even though their final three-place result is representable.
+  const allocatedPart=(value,qty,total)=>total>0?decimal().div(decimal().mul(value,qty),total,{scale:12,rounding:'half-away-from-zero'}):decimal().parse(value);
+  const allocatedNumber=value=>decimal().toNumberExact(decimal().quantize(value,{scale:3,rounding:'half-away-from-zero'}));
+  const allocatedOutput=value=>{const number=Number(value);return Number.isFinite(number)&&decimal().parse(number)===value?number:allocatedNumber(value);};
 
 function fuelAccounting(section,asset) {
   const api=getAccounting();
@@ -86,6 +121,7 @@ function recordFuelGrade(r, v, db) {
 
 function fqValue(value) {
   if (value == null || typeof value === 'string' && value.trim() === '') return null;
+  if(verified)return sourceNumber(value);
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -96,7 +132,7 @@ function fqRecord(record, vehicle) {
     (typeof record.fuelMovementId==='string'&&record.fuelMovementId.trim()!==''||typeof record.fuelMovementId==='number'&&Number.isFinite(record.fuelMovementId));
   const selected=temporal&&has(vehicle,'fuelNorms')&&storedNorm==null&&!issueOnly?periods().resolve('vehicles',vehicle,record.date,'fuelNorms'):null;
   const rate=selected?(selected.status==='known'?fqValue(selected.parameters.norm):null):fqValue(vehicle && vehicle.norm);
-  const norm = storedNorm != null ? storedNorm : issueOnly?0:rate != null ? (modern?gsmRound(ratio(times(km,rate),100)):km * rate / 100) : null;
+  const norm = storedNorm != null ? storedNorm : issueOnly?0:rate != null ? (allocated?allocatedNumber(decimal().div(decimal().mul(km,rate),100,{scale:12,rounding:'half-away-from-zero'})):modern?gsmRound(ratio(times(km,rate),100)):km * rate / 100) : null;
   const actual = fqValue(record.fuelActual), idleValue = fqValue(record.fuelIdle), idle = idleValue || 0;
   const driving = actual != null ? actual : norm;
   return { driving, norm, idle, total: driving == null ? idleValue : plus(driving,idle), partial:driving == null && idleValue != null,
@@ -115,7 +151,7 @@ function fqRecordFuelFamily(record, vehicle) {
 function fqMeasurementPlan(records, vehicle) {
   const keyFor = record => record.date + '|' + fqRecordFuelFamily(record, vehicle);
   const lastOnDate = new Map(records.map(record => [keyFor(record), record.id]));
-  const measurements = new Map(records.filter(record => fqValue(record.tankMeasured) != null && Number(record.tankMeasured) >= 0)
+  const measurements = new Map(records.filter(record => verified ? sourceQuantity(record.tankMeasured) !== null && fqDate(record.date) : fqValue(record.tankMeasured) != null && Number(record.tankMeasured) >= 0)
     .map(record => [keyFor(record), record]));
   return { keyFor, lastOnDate, measurements };
 }
@@ -138,8 +174,8 @@ const GSM_EPS = corrected?0:modern?0.0000001:0.001;
 const SOURCE_EPS = corrected?0:modern?0.0000001:0.011;
 const LOT_EPS=corrected?0:0.0000001;
 
-function gsmNumber(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
-function gsmRound(value) { const number=gsmNumber(value);return modern?(millilitres(number)!==null?number===0?0:number:decimalNumber(number,3)):Math.round(number * 1000) / 1000; }
+function gsmNumber(value) { if(verified)return fqValue(value)??0;const n = Number(value); return Number.isFinite(n) ? n : 0; }
+function gsmRound(value) { const number=gsmNumber(value);return allocated&&(typeof value==='number'&&Number.isFinite(value)||typeof value==='string'&&/^[+-]?(?:\d+)(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(value)&&Number.isFinite(Number(value)))?allocatedNumber(value):modern?(millilitres(number)!==null?number===0?0:number:decimalNumber(number,3)):Math.round(number * 1000) / 1000; }
 function gsmCardKey(value) {
   const text = String(corrected?(value??''):(value || '')).trim();
   return text.replace(/\D/g, '') || text.toUpperCase();
@@ -183,6 +219,29 @@ function gsmCardAt(db, number, date) {
   return { card, org, provider: card && card.provider || '', vehicleId: corrected?(vehicle?vehicle.id:idOr(assignment?.vehicleId)):vehicle && vehicle.id || assignment && assignment.vehicleId || '', vehicle };
 }
 
+function sourceNumber(value) {
+  if(typeof value==='number')return Number.isFinite(value)?value:null;
+  if(typeof value!=='number'&&typeof value!=='string'||typeof value==='string'&&!value.trim())return null;
+  try{return decimal().toNumberExact(decimal().parse(value));}catch{return null;}
+}
+function sourceQuantity(value) { const number=sourceNumber(value);return number!==null&&number>=0?number:null; }
+function openingEvidence(db,vehicleId,options={}) {
+  const vehicle=(db.vehicles||[]).find(row=>row.id===vehicleId),family=options.family||fqRecordFuelFamily({},vehicle),before=options.before||'';
+  if(!vehicle)return {status:'missing',family,reason:'vehicle-missing'};
+  const boundary=fuelAccounting('vehicles',vehicle);
+  if(boundary.mode==='explicit')return before&&before<boundary.from?{status:'outside-accounting',family,date:boundary.from}:{status:'known',source:'accounting',family,date:boundary.from,value:boundary.opening};
+  const legacy=sourceQuantity(vehicle.fuelBalance);
+  if(legacy!==null)return {status:'known',source:'legacy',family,value:legacy};
+  if(before){
+    const records=(db.records||[]).filter(row=>row.vehicleId===vehicleId&&live(row)&&fqDate(row.date)&&row.date<before).slice().sort((a,b)=>a.date.localeCompare(b.date));
+    const plan=fqMeasurementPlan(records,vehicle);
+    const measurement=[...plan.measurements.values()].filter(row=>fqRecordFuelFamily(row,vehicle)===family&&
+      (!row.fuelGrade||parseFuelGrade(row.fuelGrade)||String(row.fuelGrade).trim()==='Бензин')).sort((a,b)=>b.date.localeCompare(a.date))[0];
+    if(measurement)return {status:'known',source:'measurement',family,date:measurement.date,recordId:measurement.id,value:sourceQuantity(measurement.tankMeasured)};
+  }
+  return {status:'missing',family,reason:'opening-not-confirmed'};
+}
+
 function gsmBuildLedger(db, options) {
   options = options || {};
   const from = options.from || '', to = options.to || '';
@@ -198,20 +257,31 @@ function gsmBuildLedger(db, options) {
   const receipts = [], issues = [], rows = new Map(), movements = [], journal = [];
   const issueKeys = new Set();
   const issue = (code, severity, details) => {
-    const parts=[code,idOr(details.recordId),idOr(details.purchaseId),idOr(details.vehicleId),details.date||'',details.org||'',details.grade||''];const key=corrected?JSON.stringify(parts):parts.join('|');
+    const parts=[code,idOr(details.recordId),idOr(details.purchaseId),idOr(details.vehicleId),details.date||'',details.org||'',details.grade||''];if(allocated&&code==='rounding-allocation'||verified&&code==='source-number')parts.push(details.field||'');const key=corrected?JSON.stringify(parts):parts.join('|');
     if (!issueKeys.has(key)) { issues.push(Object.assign({ code, severity }, details)); issueKeys.add(key); }
   };
   if(modern){
     const inspectPrecision=(section,list,fields)=>list.forEach(row=>Object.entries(fields).forEach(([field,places])=>{
-      const value=fqValue(row[field]);if(value===null)return;
+      const raw=row[field],value=fqValue(raw);
+      if(verified&&raw!=null&&!(typeof raw==='string'&&!raw.trim())&&(value===null||value<0)){
+        issue('source-number','error',{section,sourceId:row.id,vehicleId:section==='vehicles'?row.id:row.vehicleId,date:row.date||'',field,
+          ...(section==='records'?{recordId:row.id}:section==='fuelPurchases'?{purchaseId:row.id}:{}),...(row.org?{org:row.org}:{}),...(row.grade?{grade:row.grade}:{}),
+          message:'Некорректное числовое значение '+field+'. Укажите полное неотрицательное десятичное число по первоисточнику; исходное значение сохранено'});
+        return;
+      }
+      if(value===null)return;
       try{decimal().parse(value,{scale:places});}catch(error){if(error.code!=='PRECISION')throw error;
         issue('source-precision','warning',{section,sourceId:row.id,vehicleId:section==='vehicles'?row.id:row.vehicleId,date:row.date||'',field,qty:value,
           message:'Сохранённый источник содержит расширенную точность '+field+' = '+String(value)+'; исходное значение сохранено, отображение округлено явно'});
       }
     }));
     inspectPrecision('records',records,{fuelIssued:3,fuelActual:3,fuelUsed:3,fuelIdle:3,tankMeasured:3,km:3,kmGlonass:3});
-    inspectPrecision('fuelPurchases',purchases,{qty:3});
+    inspectPrecision('fuelPurchases',purchases,{qty:3,...(verified?{sum:2,price:6}:{})});
     inspectPrecision('vehicles',[...vehicles.values()].filter(row=>boundaries.get(row.id).mode==='legacy'),{fuelBalance:3});
+    if(verified){
+      inspectPrecision('vehicles',[...vehicles.values()],{norm:6,normCity:6,normHighway:6,normIdle:6,tankVolume:3});
+      for(const vehicle of vehicles.values())if(boundaries.get(vehicle.id).mode==='legacy'&&Array.isArray(vehicle.fuelBalanceSources))inspectPrecision('opening',vehicle.fuelBalanceSources.map(source=>({...source,id:vehicle.id,vehicleId:vehicle.id})),{qty:3});
+    }
   }
   const rowFor = (vehicleId, org, grade) => {
     const key = [vehicleId, gsmOrgKey(org), grade].join('|');
@@ -330,6 +400,7 @@ function gsmBuildLedger(db, options) {
       if(coverage.status==='outside-accounting'){issue('outside-accounting','warning',{vehicleId:v.id,date:to,message:'Период полностью предшествует началу учёта ГСМ '+boundary.from});return;}
     }
     const lots = [], defaultGrade = gsmVehicleGrade(v), defaultOrg = (temporal&&boundary.mode!=='explicit'?String(v.org||'').trim():gsmVehicleOrgAt(v, boundary.mode==='explicit'?boundary.from:'')) || GSM_UNKNOWN_ORG;
+    const initialKnown=!verified||openingEvidence(db,v.id,{family:gsmFamily(defaultGrade)}).status==='known',measuredFamilies=new Set();
     let lotTotal=0;const familyTotals=new Map();
     const changeStock=(grade,qty)=>{if(modern){lotTotal=plus(lotTotal,qty);const family=gsmFamily(grade);familyTotals.set(family,plus(familyTotals.get(family)||0,qty));}};
     const initial = boundary.mode==='explicit'?boundary.opening:gsmNumber(v.fuelBalance);
@@ -428,6 +499,9 @@ function gsmBuildLedger(db, options) {
       if (appliedMeasurement) {
         const available = modern?(familyTotals.get(gsmFamily(grade))||0):lots.filter(l => gsmFamily(l.grade) === gsmFamily(grade)).reduce((s, l) => plus(s,l.qty), 0);
         const measuredSpent = minus(available,Number(appliedMeasurement.tankMeasured));
+        if(verified&&(initialKnown||measuredFamilies.has(gsmFamily(grade)))&&measuredSpent>=0&&measuredSpent<idle)issue('measurement-idle-conflict','error',{
+          vehicleId:v.id,date:r.date,recordId:r.id,measurementRecordId:appliedMeasurement.id,section:'records',sourceId:r.id,org:defaultOrg,grade,qty:measuredSpent,idle,
+          message:'Расход по замеру '+decimal().parse(measuredSpent)+' л меньше введённого расхода на холостом ходу '+decimal().parse(idle)+' л. Проверьте замер и запись расхода; исходные значения сохранены'});
         if (measuredSpent >= 0) spent = measuredSpent;
         else {
           const correction = -measuredSpent;
@@ -441,14 +515,35 @@ function gsmBuildLedger(db, options) {
           issue('measurement-surplus', 'error', { vehicleId: v.id, date: r.date, recordId: r.id, org: defaultOrg, grade,
             qty: gsmRound(correction), message: 'Замер выше расчётного остатка: нужен приход ' + gsmRound(correction) + ' л' });
         }
+        if(verified)measuredFamilies.add(gsmFamily(grade));
       } else if (measured) issue('multiple-measurements', 'warning', { vehicleId: v.id, recordId: r.id, date: r.date, grade,
         message: 'Замер дня применяется после всех строк дня; при нескольких замерах берётся последний' });
       const used = consume(spent, grade, r.date, r.id);
       if (included) {
         const shares = used.length ? used : [{ org: defaultOrg, grade, qty: 0 }];
-        shares.forEach(part => {
+        let allocations;
+        if(allocated){
+          const source={idle:verified?idle:Math.min(idle,spent),norm,totalNorm:norm==null?null:plus(norm,idle),km:gsmNumber(r.km),glonass:(!canonicalDays.has(JSON.stringify([r.vehicleId,r.date]))||r.glonassCanonical?gsmNumber(r.kmGlonass):0)};
+          allocations=shares.map(part=>Object.fromEntries(Object.entries(source).map(([field,value])=>[field,value==null?null:allocatedPart(value,part.qty,spent)])));
+          // Give one stable part the exact decimal residual. A repeating ratio
+          // must not multiply its twelve-place truncation by a large distance.
+          const last=shares.map((part,index)=>({index,key:JSON.stringify([gsmOrgKey(part.org),part.grade,index])})).sort((a,b)=>a.key<b.key?-1:a.key>b.key?1:0)[0].index;
+          for(const [field,value]of Object.entries(source))if(value!=null)allocations[last][field]=decimal().sub(value,decimal().sum(allocations.filter((_,index)=>index!==last).map(item=>item[field])));
+          allocations=allocations.map(value=>Object.freeze({version:1,scale:12,rounding:'half-away-from-zero',...value}));
+        }
+        shares.forEach((part,partIndex) => {
           const share = spent > 0 ? ratio(part.qty,spent) : 1;
           const row = rowFor(v.id, part.org, part.grade); row.active = true;
+          if(allocated){
+            const allocation=allocations[partIndex];
+            row.spent=plus(row.spent,part.qty);
+            for(const field of ['idle','norm','km','glonass'])row[field]=decimal().add(row[field],allocation[field]??0);
+            const movement={kind:'consumption',source:appliedMeasurement?'measurement':fuel.source,date:r.date,vehicleId:v.id,recordId:r.id,org:part.org,grade:part.grade,qty:part.qty,
+              idle:allocatedOutput(allocation.idle),norm:allocation.norm==null?null:allocatedOutput(allocation.norm),totalNorm:allocation.totalNorm==null?null:allocatedOutput(allocation.totalNorm),km:allocatedOutput(allocation.km),...(shares.length>1?{allocation}:{}),
+              ...(temporal&&fuel.normPeriod?{normPeriod:fuel.normPeriod}:{})};
+            movements.push(movement);
+            return;
+          }
           row.spent=plus(row.spent,part.qty); row.idle=plus(row.idle,times(Math.min(idle,spent),share));
           row.norm=plus(row.norm,times(norm||0,share)); row.km=plus(row.km,times(gsmNumber(r.km),share)); row.glonass=plus(row.glonass,times((!canonicalDays.has(JSON.stringify([r.vehicleId,r.date]))||r.glonassCanonical?gsmNumber(r.kmGlonass):0),share));
           movements.push({ kind: 'consumption', source:appliedMeasurement?'measurement':fuel.source, date: r.date, vehicleId: v.id, recordId: r.id, org: part.org, grade: part.grade, qty: part.qty,
@@ -468,6 +563,31 @@ function gsmBuildLedger(db, options) {
   });
 
   const resultRows = [...rows.values()].filter(r => r.active || Math.abs(r.start) > GSM_EPS || Math.abs(r.end) > GSM_EPS);
+  if(verified){
+    const evidenceByVehicle=new Map();
+    for(const row of resultRows){
+      let families=evidenceByVehicle.get(row.vehicleId);if(!families)evidenceByVehicle.set(row.vehicleId,families=new Map());
+      const family=gsmFamily(row.grade);if(!families.has(family))families.set(family,openingEvidence(db,row.vehicleId,{before:from,family}));
+      if(families.get(family).status==='missing')issue('opening-missing','error',{vehicleId:row.vehicleId,org:row.org,grade:row.grade,date:from,section:'vehicles',sourceId:row.vehicleId,field:'fuelBalance',message:'Входящий остаток не подтверждён. Укажите начальный остаток, включая явный ноль, начало учёта или подтвердите остаток замером до начала периода'});
+    }
+  }
+  if(allocated){
+    // Reconcile presentation across every source organisation/grade of the same
+    // vehicle, before an act selects its organisation. Only display quanta move;
+    // the unrounded decimal allocation remains on each source movement.
+    const groups=new Map();for(const row of resultRows){if(!groups.has(row.vehicleId))groups.set(row.vehicleId,[]);groups.get(row.vehicleId).push(row);}
+    for(const [vehicleId,group]of groups)for(const field of ['idle','norm','km','glonass']){
+      const d=decimal(),parts=group.map(row=>({row,raw:d.parse(row[field]),rounded:allocatedNumber(row[field]),key:JSON.stringify([typeof vehicleId,vehicleId,gsmOrgKey(row.org),row.grade])}));
+      const target=d.quantize(d.sum(parts.map(part=>part.raw)),{scale:3,rounding:'half-away-from-zero'}),units=d.toNumberExact(d.mul(d.sub(target,d.sum(parts.map(part=>part.rounded))),1000));
+      if(!Number.isSafeInteger(units)||Math.abs(units)>parts.length)throw Object.assign(Error('Не удалось распределить точность производных итогов ГСМ'),{code:'ALLOCATION_RANGE'});
+      for(const part of parts)part.row[field]=part.rounded;
+      if(!units)continue;
+      const sign=units<0?-1:1;parts.sort((a,b)=>sign*d.compare(d.sub(b.raw,b.rounded),d.sub(a.raw,a.rounded))||(a.key<b.key?-1:a.key>b.key?1:0));
+      for(const part of parts.slice(0,Math.abs(units))){const delta=sign*.001;part.row[field]=d.toNumberExact(d.add(part.rounded,delta));(part.row.roundingAdjustment||(part.row.roundingAdjustment={}))[field]=delta;}
+      const label={km:'пробега',norm:'нормативного расхода',idle:'расхода на холостом ходу',glonass:'пробега ГЛОНАСС'}[field],unit=field==='km'||field==='glonass'?'км':'л';
+      issue('rounding-allocation','warning',{vehicleId,date:from||to,field,qty:d.toNumberExact(d.div(units,1000,{scale:3,rounding:'half-away-from-zero'})),message:'Округление '+label+' согласовано между организациями и марками с точностью до 0,001 '+unit+'. Исходные данные сохранены.'});
+    }
+  }
   // Preserve published legacy keys unless their string representation collides.
   // Numeric 7 and string '7' remain different assets and different UI/report keys.
   const exposedKeys=new Map();for(const row of resultRows){if(!exposedKeys.has(row.key))exposedKeys.set(row.key,[]);exposedKeys.get(row.key).push(row);}
@@ -517,21 +637,25 @@ function recordBalances(db, vehicleId, options) {
     });
   }
   const { keyFor, lastOnDate, measurements } = fqMeasurementPlan(recs, vehicle);
-  const balMap = {},unknownFamilies=new Set();
+  const initialKnown=!verified||openingEvidence(db,vehicleId,{family:defaultFamily}).status==='known',confirmedFamilies=new Set();
+  const balMap = {},balanceEntries=[],unknownFamilies=new Set(verified&&!initialKnown?[defaultFamily]:[]);
   recs.forEach(r => {
     // Остаток считается по фактическому расходу; если не введён — по норме
     const fuel = fqRecord(r, vehicle);
     const family = fqRecordFuelFamily(r, vehicle);
-    if(temporal&&fuel.normPeriod&&fuel.source==='missing'&&gsmNumber(r.km)>0)unknownFamilies.add(family);
+    if(verified&&!initialKnown&&!confirmedFamilies.has(family))unknownFamilies.add(family);
+    if(verified&&['km','kmGlonass','fuelIssued','fuelActual','fuelUsed','fuelIdle','tankMeasured'].some(field=>r[field]!=null&&!(typeof r[field]==='string'&&!r[field].trim())&&fqValue(r[field])===null))unknownFamilies.add(family);
+    if(temporal&&(liveJournal||fuel.normPeriod)&&fuel.source==='missing'&&gsmNumber(r.km)>0)unknownFamilies.add(family);
     let balance = minus(plus((familyBalances.get(family) || 0),(fqValue(r.fuelIssued) || 0)),(fuel.total || 0));
     // Замер остатка в баке — фактическое значение: расчёт с него начинается заново
     const key = keyFor(r);
-    if (lastOnDate.get(key) === r.id && measurements.has(key)) {balance = Number(measurements.get(key).tankMeasured);unknownFamilies.delete(family);}
+    if (lastOnDate.get(key) === r.id && measurements.has(key)) {balance = Number(measurements.get(key).tankMeasured);unknownFamilies.delete(family);if(verified)confirmedFamilies.add(family);}
     familyBalances.set(family, balance);
     const total=[...familyBalances.values()].reduce((sum,qty)=>plus(sum,qty),0);
-    balMap[r.id] = temporal&&unknownFamilies.size?null:corrected?total:modern?gsmRound(total):boundary.mode==='explicit'?total:+total.toFixed(2);
+    const value=temporal&&unknownFamilies.size?null:corrected?total:modern?gsmRound(total):boundary.mode==='explicit'?total:+total.toFixed(2);
+    if(liveJournal)balanceEntries.push([r.id,value]);else balMap[r.id]=value;
   });
-  return balMap;
+  return liveJournal?recordBalanceMap(balanceEntries):balMap;
 }
 
 
@@ -564,10 +688,13 @@ function recordBalances(db, vehicleId, options) {
     gsmVehicleOrgAt,
     gsmCardAt,
     recordBalances,
+    ...(verified?{openingEvidence}:{}),
     buildLedger: gsmBuildLedger
   });
   }
-  const legacy=makeEngine(1),decimalVersion=makeEngine(2),temporalVersion=makeEngine(3),current=makeEngine(4);
-  function forVersion(version){if(version!==1&&version!==2&&version!==3&&version!==4)throw Object.assign(Error('Неизвестная версия расчёта ГСМ'),{code:'CALCULATION_VERSION'});return version===1?legacy:version===2?decimalVersion:version===3?temporalVersion:current;}
-  return Object.freeze({...current,forVersion});
+  // Posted acts keep all historical algorithms. Journal presentation evolves
+  // separately, without rewriting an act's source contract or version.
+  const legacy=makeEngine(1),decimalVersion=makeEngine(2),temporalVersion=makeEngine(3),correctedVersion=makeEngine(4),allocatedVersion=makeEngine(5),current=makeEngine(6,true),live=current;
+  function forVersion(version){if(version!==1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6)throw Object.assign(Error('Неизвестная версия расчёта ГСМ'),{code:'CALCULATION_VERSION'});return version===1?legacy:version===2?decimalVersion:version===3?temporalVersion:version===4?correctedVersion:version===5?allocatedVersion:current;}
+  return Object.freeze({...current,recordBalances:live.recordBalances,recordBalanceMap,recordBalanceAt,forVersion});
 });

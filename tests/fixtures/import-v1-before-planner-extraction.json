@@ -1,0 +1,1122 @@
+{
+  "description": "Synthetic import v1 outputs captured before extracting ImportPlanner. Exact normalized sources, preview/plan JSON and fingerprints are retained.",
+  "source": {
+    "vehicles": [
+      {
+        "id": 0,
+        "plate": "SYNTHETIC NUMERIC",
+        "fuel": "diesel",
+        "fuelGrade": "ДТ",
+        "fuelBalance": 0,
+        "norm": 0
+      },
+      {
+        "id": "0",
+        "plate": "SYNTHETIC TEXT",
+        "fuel": "diesel",
+        "fuelGrade": "ДТ",
+        "fuelBalance": 0,
+        "norm": 0
+      }
+    ],
+    "records": [],
+    "generators": [],
+    "genRecords": [],
+    "toRecords": [],
+    "tanks": [],
+    "tankIncomes": [],
+    "vehicleTo": [],
+    "repairs": [],
+    "reestrRows": [],
+    "savedReestrs": [],
+    "payments": [],
+    "budget": [],
+    "contragents": [],
+    "fuelPurchases": [],
+    "fuelImports": [],
+    "fuelCards": [
+      {
+        "id": "provider-fixture",
+        "number": "999",
+        "provider": "Synthetic provider",
+        "assignments": []
+      }
+    ],
+    "fuelPeriods": [],
+    "fuelWriteoffs": [],
+    "monthlyFuel": [],
+    "appMeta": [],
+    "dispatchJobs": [],
+    "drivers": [],
+    "assetAssignments": [],
+    "workOrders": [],
+    "opsTasks": [],
+    "assetDocuments": [],
+    "fuelMovements": [],
+    "parts": [],
+    "partMovements": [],
+    "shiftReports": [],
+    "connectors": [],
+    "auditLog": [],
+    "savedViews": [],
+    "glonassTrips": [],
+    "glonassImports": [],
+    "costEntries": [],
+    "costProfiles": [],
+    "procurementOrders": [],
+    "procurementRules": [],
+    "documentDrafts": []
+  },
+  "metadata": {
+    "id": "synthetic-import-fixture",
+    "now": "2026-10-22T12:00:00.000Z",
+    "today": "2026-10-22",
+    "actor": {
+      "id": "synthetic-admin",
+      "name": "Synthetic import administrator",
+      "role": "admin"
+    }
+  },
+  "cases": [
+    {
+      "profile": "glonass",
+      "decoded": {
+        "version": 1,
+        "sourceId": "synthetic-source-cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba",
+        "profile": "glonass",
+        "sections": [
+          "glonassTrips"
+        ],
+        "sourceArchive": {
+          "id": "cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba.json",
+          "sha256": "cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba",
+          "size": 100,
+          "name": "SYNTHETIC.json"
+        },
+        "parser": {
+          "id": "synthetic-parser",
+          "version": 1
+        },
+        "decodedFingerprint": "sha256:cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba",
+        "rows": [
+          {
+            "rowId": "row-0",
+            "section": "glonassTrips",
+            "locator": {
+              "row": 2
+            },
+            "raw": {
+              "object": "SYNTHETIC",
+              "date": "2026-09-01",
+              "kind": "trip",
+              "start": "2026-09-01T10:00:00Z",
+              "end": "2026-09-01T11:00:00Z",
+              "km": 0.001,
+              "fuel": 0
+            },
+            "normalized": {
+              "object": "SYNTHETIC",
+              "date": "2026-09-01",
+              "kind": "trip",
+              "start": "2026-09-01T10:00:00Z",
+              "end": "2026-09-01T11:00:00Z",
+              "km": 0.001,
+              "fuel": 0
+            }
+          }
+        ]
+      },
+      "context": {
+        "id": "synthetic-import-fixture",
+        "now": "2026-10-22T12:00:00.000Z",
+        "today": "2026-10-22",
+        "actor": {
+          "id": "synthetic-admin",
+          "name": "Synthetic import administrator",
+          "role": "admin"
+        },
+        "importSource": {
+          "version": 1,
+          "sourceId": "synthetic-source-cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba",
+          "profile": "glonass",
+          "sections": [
+            "glonassTrips"
+          ],
+          "sourceArchive": {
+            "id": "cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba.json",
+            "sha256": "cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba",
+            "size": 100,
+            "name": "SYNTHETIC.json"
+          },
+          "parser": {
+            "id": "synthetic-parser",
+            "version": 1
+          },
+          "decodedFingerprint": "sha256:cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba",
+          "rows": [
+            {
+              "rowId": "row-0",
+              "section": "glonassTrips",
+              "locator": {
+                "row": 2
+              },
+              "raw": {
+                "object": "SYNTHETIC",
+                "date": "2026-09-01",
+                "kind": "trip",
+                "start": "2026-09-01T10:00:00Z",
+                "end": "2026-09-01T11:00:00Z",
+                "km": 0.001,
+                "fuel": 0
+              },
+              "normalized": {
+                "object": "SYNTHETIC",
+                "date": "2026-09-01",
+                "kind": "trip",
+                "start": "2026-09-01T10:00:00Z",
+                "end": "2026-09-01T11:00:00Z",
+                "km": 0.001,
+                "fuel": 0
+              }
+            }
+          ]
+        }
+      },
+      "input": {
+        "sourceId": "synthetic-source-cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba",
+        "profile": "glonass",
+        "sections": [
+          "glonassTrips"
+        ],
+        "decisions": [
+          {
+            "rowId": "row-0",
+            "action": "map",
+            "target": {
+              "section": "vehicles",
+              "id": 0
+            },
+            "basis": "Confirmed source association"
+          }
+        ],
+        "reason": "Synthetic reviewed source"
+      },
+      "action": {
+        "sourceId": "synthetic-source-cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba",
+        "profile": "glonass",
+        "sections": [
+          "glonassTrips"
+        ],
+        "decisions": [
+          {
+            "rowId": "row-0",
+            "action": "map",
+            "target": {
+              "section": "vehicles",
+              "id": 0
+            },
+            "basis": "Confirmed source association"
+          }
+        ],
+        "reason": "Synthetic reviewed source",
+        "reviewFingerprint": "sha256:310671c8e4c562b552222384b63fafd52ef13a0dcc7d965abee1bcab66a87a9b"
+      },
+      "normalizedSource": "{\"version\":1,\"sourceId\":\"synthetic-source-cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"profile\":\"glonass\",\"sections\":[\"glonassTrips\"],\"sourceArchive\":{\"id\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba.json\",\"sha256\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mapping\":{},\"decodedFingerprint\":\"sha256:cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"normalizedFingerprint\":\"sha256:e001ded4aa8640cb1f880f7ca1e5bdd677276ca85e0ebde2350e72c1411a7831\",\"rows\":[{\"rowId\":\"row-0\",\"section\":\"glonassTrips\",\"locator\":{\"row\":2},\"raw\":{\"object\":\"SYNTHETIC\",\"date\":\"2026-09-01\",\"kind\":\"trip\",\"start\":\"2026-09-01T10:00:00Z\",\"end\":\"2026-09-01T11:00:00Z\",\"km\":0.001,\"fuel\":0},\"normalized\":{\"object\":\"SYNTHETIC\",\"date\":\"2026-09-01\",\"kind\":\"trip\",\"start\":\"2026-09-01T10:00:00Z\",\"end\":\"2026-09-01T11:00:00Z\",\"km\":0.001,\"fuel\":0},\"rawHash\":\"sha256:bbe7e5399288cd5efca8309c4a6da3970ec48dc3e11ac80a82fc69aeaf854f89\",\"normalizedHash\":\"sha256:bbe7e5399288cd5efca8309c4a6da3970ec48dc3e11ac80a82fc69aeaf854f89\",\"externalKey\":null,\"issues\":[]}],\"attestation\":null,\"sourceScopes\":[\"glonassTrips\"]}",
+      "serializedPreview": "{\"sections\":{\"glonassImports\":[{\"id\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\",\"at\":\"2026-10-22T12:00:00.000Z\",\"fileName\":\"SYNTHETIC.json\",\"sourceArchive\":{\"id\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba.json\",\"sha256\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"rows\":1,\"importBatch\":{\"version\":1,\"sourceId\":\"synthetic-source-cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"profile\":\"glonass\",\"sourceScopes\":[\"glonassTrips\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"normalizedFingerprint\":\"sha256:e001ded4aa8640cb1f880f7ca1e5bdd677276ca85e0ebde2350e72c1411a7831\",\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"decisions\":[{\"rowId\":\"row-0\",\"action\":\"map\",\"target\":{\"section\":\"vehicles\",\"id\":0},\"basis\":\"Confirmed source association\"}],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}],\"glonassTrips\":[{\"object\":\"SYNTHETIC\",\"date\":\"2026-09-01\",\"kind\":\"trip\",\"start\":\"2026-09-01T10:00:00Z\",\"end\":\"2026-09-01T11:00:00Z\",\"km\":0.001,\"fuel\":0,\"id\":\"im_ddf244bea175911454aad1f5716b1fa71e697ea6d70c25a4fe473fa62eaa4384\",\"vehicleId\":0,\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"sourceArchive\":{\"id\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba.json\",\"sha256\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"glonassTrips\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:bbe7e5399288cd5efca8309c4a6da3970ec48dc3e11ac80a82fc69aeaf854f89\"],\"normalizedHashes\":[\"sha256:bbe7e5399288cd5efca8309c4a6da3970ec48dc3e11ac80a82fc69aeaf854f89\"],\"batchRef\":{\"section\":\"glonassImports\",\"id\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\"},\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"importId\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\"}],\"records\":[{\"id\":\"im_5682b1d2f352be24a8bdc6cf290f625c1171ef991d02dd05d82153693df5acd6\",\"vehicleId\":0,\"date\":\"2026-09-01\",\"kmGlonass\":0.001,\"glonassFuel\":0,\"glonassFuelIdle\":null,\"glonassEngineH\":null,\"glonassIdleH\":null,\"glonassFuelKm\":0.001,\"glonassCanonical\":true,\"glonassCoverage\":{\"version\":1,\"rows\":1,\"fields\":{\"km\":{\"knownRows\":1,\"totalRows\":1,\"complete\":true},\"fuel\":{\"knownRows\":1,\"totalRows\":1,\"complete\":true},\"fuelIdle\":{\"knownRows\":0,\"totalRows\":1,\"complete\":false},\"engine\":{\"knownRows\":0,\"totalRows\":1,\"complete\":false},\"idle\":{\"knownRows\":0,\"totalRows\":1,\"complete\":false}}},\"glonassProvenance\":{\"version\":1,\"rawIds\":[\"im_ddf244bea175911454aad1f5716b1fa71e697ea6d70c25a4fe473fa62eaa4384\"],\"importId\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\",\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"glonassHistory\":[{\"version\":1,\"mode\":\"source-projection\",\"legacyUnverified\":false,\"before\":{\"kmGlonass\":null,\"glonassFuel\":null,\"glonassFuelIdle\":null,\"glonassEngineH\":null,\"glonassIdleH\":null,\"glonassFuelKm\":null,\"glonassCoverage\":null,\"glonassProvenance\":null,\"glonassCanonical\":null},\"after\":{\"kmGlonass\":0.001,\"glonassFuel\":0,\"glonassFuelIdle\":null,\"glonassEngineH\":null,\"glonassIdleH\":null,\"glonassFuelKm\":0.001,\"glonassCoverage\":{\"version\":1,\"rows\":1,\"fields\":{\"km\":{\"knownRows\":1,\"totalRows\":1,\"complete\":true},\"fuel\":{\"knownRows\":1,\"totalRows\":1,\"complete\":true},\"fuelIdle\":{\"knownRows\":0,\"totalRows\":1,\"complete\":false},\"engine\":{\"knownRows\":0,\"totalRows\":1,\"complete\":false},\"idle\":{\"knownRows\":0,\"totalRows\":1,\"complete\":false}}},\"glonassProvenance\":{\"version\":1,\"rawIds\":[\"im_ddf244bea175911454aad1f5716b1fa71e697ea6d70c25a4fe473fa62eaa4384\"],\"importId\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\",\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"glonassCanonical\":true},\"basis\":[\"Confirmed source association\"],\"sourceId\":\"synthetic-source-cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}]}]},\"readSections\":[\"appMeta\",\"fuelPeriods\",\"glonassImports\",\"glonassTrips\",\"records\",\"vehicles\"],\"writeSections\":[\"glonassImports\",\"glonassTrips\",\"records\"],\"entityIds\":[\"[\\\"glonassTrips\\\",\\\"string\\\",\\\"im_ddf244bea175911454aad1f5716b1fa71e697ea6d70c25a4fe473fa62eaa4384\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"glonassTrips\",\"action\":\"create\",\"before\":null,\"after\":{\"object\":\"SYNTHETIC\",\"date\":\"2026-09-01\",\"kind\":\"trip\",\"start\":\"2026-09-01T10:00:00Z\",\"end\":\"2026-09-01T11:00:00Z\",\"km\":0.001,\"fuel\":0,\"id\":\"im_ddf244bea175911454aad1f5716b1fa71e697ea6d70c25a4fe473fa62eaa4384\",\"vehicleId\":0,\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"sourceArchive\":{\"id\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba.json\",\"sha256\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"glonassTrips\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:bbe7e5399288cd5efca8309c4a6da3970ec48dc3e11ac80a82fc69aeaf854f89\"],\"normalizedHashes\":[\"sha256:bbe7e5399288cd5efca8309c4a6da3970ec48dc3e11ac80a82fc69aeaf854f89\"],\"batchRef\":{\"section\":\"glonassImports\",\"id\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\"},\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"importId\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\"},\"target\":{\"section\":\"vehicles\",\"id\":0},\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":0.001,\"observedFuel\":0,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:c9fa4f41ae78842897c01eef89fabfc7db49ccc77ea7679bddacb2bbdc1e7ec0\",\"issues\":[],\"blockers\":[],\"canApply\":true,\"fingerprint\":\"sha256:310671c8e4c562b552222384b63fafd52ef13a0dcc7d965abee1bcab66a87a9b\"}",
+      "serializedPlan": "{\"sections\":{\"glonassImports\":[{\"id\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\",\"at\":\"2026-10-22T12:00:00.000Z\",\"fileName\":\"SYNTHETIC.json\",\"sourceArchive\":{\"id\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba.json\",\"sha256\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"rows\":1,\"importBatch\":{\"version\":1,\"sourceId\":\"synthetic-source-cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"profile\":\"glonass\",\"sourceScopes\":[\"glonassTrips\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"normalizedFingerprint\":\"sha256:e001ded4aa8640cb1f880f7ca1e5bdd677276ca85e0ebde2350e72c1411a7831\",\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"decisions\":[{\"rowId\":\"row-0\",\"action\":\"map\",\"target\":{\"section\":\"vehicles\",\"id\":0},\"basis\":\"Confirmed source association\"}],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}],\"glonassTrips\":[{\"object\":\"SYNTHETIC\",\"date\":\"2026-09-01\",\"kind\":\"trip\",\"start\":\"2026-09-01T10:00:00Z\",\"end\":\"2026-09-01T11:00:00Z\",\"km\":0.001,\"fuel\":0,\"id\":\"im_ddf244bea175911454aad1f5716b1fa71e697ea6d70c25a4fe473fa62eaa4384\",\"vehicleId\":0,\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"sourceArchive\":{\"id\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba.json\",\"sha256\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"glonassTrips\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:bbe7e5399288cd5efca8309c4a6da3970ec48dc3e11ac80a82fc69aeaf854f89\"],\"normalizedHashes\":[\"sha256:bbe7e5399288cd5efca8309c4a6da3970ec48dc3e11ac80a82fc69aeaf854f89\"],\"batchRef\":{\"section\":\"glonassImports\",\"id\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\"},\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"importId\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\"}],\"records\":[{\"id\":\"im_5682b1d2f352be24a8bdc6cf290f625c1171ef991d02dd05d82153693df5acd6\",\"vehicleId\":0,\"date\":\"2026-09-01\",\"kmGlonass\":0.001,\"glonassFuel\":0,\"glonassFuelIdle\":null,\"glonassEngineH\":null,\"glonassIdleH\":null,\"glonassFuelKm\":0.001,\"glonassCanonical\":true,\"glonassCoverage\":{\"version\":1,\"rows\":1,\"fields\":{\"km\":{\"knownRows\":1,\"totalRows\":1,\"complete\":true},\"fuel\":{\"knownRows\":1,\"totalRows\":1,\"complete\":true},\"fuelIdle\":{\"knownRows\":0,\"totalRows\":1,\"complete\":false},\"engine\":{\"knownRows\":0,\"totalRows\":1,\"complete\":false},\"idle\":{\"knownRows\":0,\"totalRows\":1,\"complete\":false}}},\"glonassProvenance\":{\"version\":1,\"rawIds\":[\"im_ddf244bea175911454aad1f5716b1fa71e697ea6d70c25a4fe473fa62eaa4384\"],\"importId\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\",\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"glonassHistory\":[{\"version\":1,\"mode\":\"source-projection\",\"legacyUnverified\":false,\"before\":{\"kmGlonass\":null,\"glonassFuel\":null,\"glonassFuelIdle\":null,\"glonassEngineH\":null,\"glonassIdleH\":null,\"glonassFuelKm\":null,\"glonassCoverage\":null,\"glonassProvenance\":null,\"glonassCanonical\":null},\"after\":{\"kmGlonass\":0.001,\"glonassFuel\":0,\"glonassFuelIdle\":null,\"glonassEngineH\":null,\"glonassIdleH\":null,\"glonassFuelKm\":0.001,\"glonassCoverage\":{\"version\":1,\"rows\":1,\"fields\":{\"km\":{\"knownRows\":1,\"totalRows\":1,\"complete\":true},\"fuel\":{\"knownRows\":1,\"totalRows\":1,\"complete\":true},\"fuelIdle\":{\"knownRows\":0,\"totalRows\":1,\"complete\":false},\"engine\":{\"knownRows\":0,\"totalRows\":1,\"complete\":false},\"idle\":{\"knownRows\":0,\"totalRows\":1,\"complete\":false}}},\"glonassProvenance\":{\"version\":1,\"rawIds\":[\"im_ddf244bea175911454aad1f5716b1fa71e697ea6d70c25a4fe473fa62eaa4384\"],\"importId\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\",\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"glonassCanonical\":true},\"basis\":[\"Confirmed source association\"],\"sourceId\":\"synthetic-source-cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}]}]},\"readSections\":[\"appMeta\",\"fuelPeriods\",\"glonassImports\",\"glonassTrips\",\"records\",\"vehicles\"],\"writeSections\":[\"glonassImports\",\"glonassTrips\",\"records\"],\"entityIds\":[\"[\\\"glonassTrips\\\",\\\"string\\\",\\\"im_ddf244bea175911454aad1f5716b1fa71e697ea6d70c25a4fe473fa62eaa4384\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"glonassTrips\",\"action\":\"create\",\"before\":null,\"after\":{\"object\":\"SYNTHETIC\",\"date\":\"2026-09-01\",\"kind\":\"trip\",\"start\":\"2026-09-01T10:00:00Z\",\"end\":\"2026-09-01T11:00:00Z\",\"km\":0.001,\"fuel\":0,\"id\":\"im_ddf244bea175911454aad1f5716b1fa71e697ea6d70c25a4fe473fa62eaa4384\",\"vehicleId\":0,\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"sourceArchive\":{\"id\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba.json\",\"sha256\":\"cc166a4991e34f690395e2a86194edcc2de6d53cacbac8956df360699de1bbba\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"glonassTrips\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:bbe7e5399288cd5efca8309c4a6da3970ec48dc3e11ac80a82fc69aeaf854f89\"],\"normalizedHashes\":[\"sha256:bbe7e5399288cd5efca8309c4a6da3970ec48dc3e11ac80a82fc69aeaf854f89\"],\"batchRef\":{\"section\":\"glonassImports\",\"id\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\"},\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"importId\":\"im_c5ba4d92c49aab87c687921ece4bcdc42e6eb149c22fbb1973726fe110b914ca\"},\"target\":{\"section\":\"vehicles\",\"id\":0},\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":0.001,\"observedFuel\":0,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:c9fa4f41ae78842897c01eef89fabfc7db49ccc77ea7679bddacb2bbdc1e7ec0\"}",
+      "previewHash": "91de983317110f14755d65ab5af9221027bd5d5369ff4450e82fe6172c2fddb4",
+      "planHash": "28a3a98f2510a9aba9fcfddbe875e7d179543e6eb0c90af72e2633c3c9d3869c",
+      "fingerprint": "sha256:310671c8e4c562b552222384b63fafd52ef13a0dcc7d965abee1bcab66a87a9b"
+    },
+    {
+      "profile": "fuel-statement",
+      "decoded": {
+        "version": 1,
+        "sourceId": "synthetic-source-e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2",
+        "profile": "fuel-statement",
+        "sections": [
+          "fuelPurchases"
+        ],
+        "sourceArchive": {
+          "id": "e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2.json",
+          "sha256": "e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2",
+          "size": 100,
+          "name": "SYNTHETIC.json"
+        },
+        "parser": {
+          "id": "synthetic-parser",
+          "version": 1
+        },
+        "decodedFingerprint": "sha256:e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2",
+        "rows": [
+          {
+            "rowId": "row-0",
+            "section": "fuelPurchases",
+            "locator": {
+              "row": 2
+            },
+            "raw": {
+              "date": "2026-09-01",
+              "time": "12:00",
+              "qty": 0.003,
+              "sum": 0,
+              "product": "ДТ",
+              "fuel": "ДТ",
+              "grade": "ДТ",
+              "cardNo": "123",
+              "provider": "Synthetic",
+              "operationKind": "purchase",
+              "supplierTransactionId": "fixture-transaction"
+            },
+            "normalized": {
+              "date": "2026-09-01",
+              "time": "12:00",
+              "qty": 0.003,
+              "sum": 0,
+              "product": "ДТ",
+              "fuel": "ДТ",
+              "grade": "ДТ",
+              "cardNo": "123",
+              "provider": "Synthetic",
+              "operationKind": "purchase",
+              "supplierTransactionId": "fixture-transaction"
+            }
+          }
+        ]
+      },
+      "context": {
+        "id": "synthetic-import-fixture",
+        "now": "2026-10-22T12:00:00.000Z",
+        "today": "2026-10-22",
+        "actor": {
+          "id": "synthetic-admin",
+          "name": "Synthetic import administrator",
+          "role": "admin"
+        },
+        "importSource": {
+          "version": 1,
+          "sourceId": "synthetic-source-e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2",
+          "profile": "fuel-statement",
+          "sections": [
+            "fuelPurchases"
+          ],
+          "sourceArchive": {
+            "id": "e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2.json",
+            "sha256": "e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2",
+            "size": 100,
+            "name": "SYNTHETIC.json"
+          },
+          "parser": {
+            "id": "synthetic-parser",
+            "version": 1
+          },
+          "decodedFingerprint": "sha256:e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2",
+          "rows": [
+            {
+              "rowId": "row-0",
+              "section": "fuelPurchases",
+              "locator": {
+                "row": 2
+              },
+              "raw": {
+                "date": "2026-09-01",
+                "time": "12:00",
+                "qty": 0.003,
+                "sum": 0,
+                "product": "ДТ",
+                "fuel": "ДТ",
+                "grade": "ДТ",
+                "cardNo": "123",
+                "provider": "Synthetic",
+                "operationKind": "purchase",
+                "supplierTransactionId": "fixture-transaction"
+              },
+              "normalized": {
+                "date": "2026-09-01",
+                "time": "12:00",
+                "qty": 0.003,
+                "sum": 0,
+                "product": "ДТ",
+                "fuel": "ДТ",
+                "grade": "ДТ",
+                "cardNo": "123",
+                "provider": "Synthetic",
+                "operationKind": "purchase",
+                "supplierTransactionId": "fixture-transaction"
+              }
+            }
+          ]
+        }
+      },
+      "input": {
+        "sourceId": "synthetic-source-e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2",
+        "profile": "fuel-statement",
+        "sections": [
+          "fuelPurchases"
+        ],
+        "decisions": [
+          {
+            "rowId": "row-0",
+            "action": "map",
+            "target": {
+              "section": "vehicles",
+              "id": 0
+            },
+            "basis": "Confirmed source association"
+          }
+        ],
+        "reason": "Synthetic reviewed source"
+      },
+      "action": {
+        "sourceId": "synthetic-source-e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2",
+        "profile": "fuel-statement",
+        "sections": [
+          "fuelPurchases"
+        ],
+        "decisions": [
+          {
+            "rowId": "row-0",
+            "action": "map",
+            "target": {
+              "section": "vehicles",
+              "id": 0
+            },
+            "basis": "Confirmed source association"
+          }
+        ],
+        "reason": "Synthetic reviewed source",
+        "reviewFingerprint": "sha256:b56ff5c346ed7ae7627ef66b4d0e7615ab358a1b870e40a112f66659febbb2a6"
+      },
+      "normalizedSource": "{\"version\":1,\"sourceId\":\"synthetic-source-e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"profile\":\"fuel-statement\",\"sections\":[\"fuelPurchases\"],\"sourceArchive\":{\"id\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2.json\",\"sha256\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mapping\":{},\"decodedFingerprint\":\"sha256:e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"normalizedFingerprint\":\"sha256:c87edc942a8ad347657ba2c1a084a9dcb6596e0d3452a878a75674d008bc2726\",\"rows\":[{\"rowId\":\"row-0\",\"section\":\"fuelPurchases\",\"locator\":{\"row\":2},\"raw\":{\"date\":\"2026-09-01\",\"time\":\"12:00\",\"qty\":0.003,\"sum\":0,\"product\":\"ДТ\",\"fuel\":\"ДТ\",\"grade\":\"ДТ\",\"cardNo\":\"123\",\"provider\":\"Synthetic\",\"operationKind\":\"purchase\",\"supplierTransactionId\":\"fixture-transaction\"},\"normalized\":{\"date\":\"2026-09-01\",\"time\":\"12:00\",\"qty\":0.003,\"sum\":0,\"product\":\"ДТ\",\"fuel\":\"ДТ\",\"grade\":\"ДТ\",\"cardNo\":\"123\",\"provider\":\"Synthetic\",\"operationKind\":\"purchase\",\"supplierTransactionId\":\"fixture-transaction\"},\"rawHash\":\"sha256:566fb0f2ef52c7e146797de1dbcd7623a28bfa373ece5670fa80578e04920a2a\",\"normalizedHash\":\"sha256:566fb0f2ef52c7e146797de1dbcd7623a28bfa373ece5670fa80578e04920a2a\",\"externalKey\":\"[\\\"fuel-statement\\\",\\\"Synthetic\\\",\\\"purchase\\\",\\\"string\\\",\\\"fixture-transaction\\\"]\",\"issues\":[]}],\"attestation\":null,\"sourceScopes\":[\"fuelPurchases\"]}",
+      "serializedPreview": "{\"sections\":{\"fuelImports\":[{\"id\":\"im_aa46ad981d2184617a093cbad9ea3d0d8643b454cbcfe199609cf078dce8ac67\",\"at\":\"2026-10-22T12:00:00.000Z\",\"fileName\":\"SYNTHETIC.json\",\"sourceArchive\":{\"id\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2.json\",\"sha256\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"rows\":1,\"importBatch\":{\"version\":1,\"sourceId\":\"synthetic-source-e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"profile\":\"fuel-statement\",\"sourceScopes\":[\"fuelPurchases\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"normalizedFingerprint\":\"sha256:c87edc942a8ad347657ba2c1a084a9dcb6596e0d3452a878a75674d008bc2726\",\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"decisions\":[{\"rowId\":\"row-0\",\"action\":\"map\",\"target\":{\"section\":\"vehicles\",\"id\":0},\"basis\":\"Confirmed source association\"}],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"keyVersion\":4,\"litres\":0.003,\"sum\":0}],\"fuelPurchases\":[{\"date\":\"2026-09-01\",\"time\":\"12:00\",\"qty\":0.003,\"sum\":0,\"product\":\"ДТ\",\"fuel\":\"ДТ\",\"grade\":\"ДТ\",\"cardNo\":\"123\",\"provider\":\"Synthetic\",\"operationKind\":\"purchase\",\"supplierTransactionId\":\"fixture-transaction\",\"id\":\"im_8afb02e1e40668ced4094e6e544ea5559cd29559f5432cbdfc735a485132e9d7\",\"vehicleId\":0,\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"sourceArchive\":{\"id\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2.json\",\"sha256\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"fuelPurchases\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:566fb0f2ef52c7e146797de1dbcd7623a28bfa373ece5670fa80578e04920a2a\"],\"normalizedHashes\":[\"sha256:566fb0f2ef52c7e146797de1dbcd7623a28bfa373ece5670fa80578e04920a2a\"],\"externalKey\":\"[\\\"fuel-statement\\\",\\\"Synthetic\\\",\\\"purchase\\\",\\\"string\\\",\\\"fixture-transaction\\\"]\",\"batchRef\":{\"section\":\"fuelImports\",\"id\":\"im_aa46ad981d2184617a093cbad9ea3d0d8643b454cbcfe199609cf078dce8ac67\"},\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"importId\":\"im_aa46ad981d2184617a093cbad9ea3d0d8643b454cbcfe199609cf078dce8ac67\",\"recordId\":\"im_e958a0111c6ddf7bf72a333bab9fb23b7406c994763ff5ba0bd1afc8bc500561\"}],\"records\":[{\"id\":\"im_e958a0111c6ddf7bf72a333bab9fb23b7406c994763ff5ba0bd1afc8bc500561\",\"vehicleId\":0,\"date\":\"2026-09-01\",\"fuelIssued\":0.003,\"fuelGrade\":\"ДТ\",\"fuelSum\":0}]},\"readSections\":[\"appMeta\",\"fuelCards\",\"fuelImports\",\"fuelPeriods\",\"fuelPurchases\",\"records\",\"vehicles\"],\"writeSections\":[\"fuelImports\",\"fuelPurchases\",\"records\"],\"entityIds\":[\"[\\\"fuelPurchases\\\",\\\"string\\\",\\\"im_8afb02e1e40668ced4094e6e544ea5559cd29559f5432cbdfc735a485132e9d7\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"fuelPurchases\",\"action\":\"create\",\"before\":null,\"after\":{\"date\":\"2026-09-01\",\"time\":\"12:00\",\"qty\":0.003,\"sum\":0,\"product\":\"ДТ\",\"fuel\":\"ДТ\",\"grade\":\"ДТ\",\"cardNo\":\"123\",\"provider\":\"Synthetic\",\"operationKind\":\"purchase\",\"supplierTransactionId\":\"fixture-transaction\",\"id\":\"im_8afb02e1e40668ced4094e6e544ea5559cd29559f5432cbdfc735a485132e9d7\",\"vehicleId\":0,\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"sourceArchive\":{\"id\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2.json\",\"sha256\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"fuelPurchases\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:566fb0f2ef52c7e146797de1dbcd7623a28bfa373ece5670fa80578e04920a2a\"],\"normalizedHashes\":[\"sha256:566fb0f2ef52c7e146797de1dbcd7623a28bfa373ece5670fa80578e04920a2a\"],\"externalKey\":\"[\\\"fuel-statement\\\",\\\"Synthetic\\\",\\\"purchase\\\",\\\"string\\\",\\\"fixture-transaction\\\"]\",\"batchRef\":{\"section\":\"fuelImports\",\"id\":\"im_aa46ad981d2184617a093cbad9ea3d0d8643b454cbcfe199609cf078dce8ac67\"},\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"importId\":\"im_aa46ad981d2184617a093cbad9ea3d0d8643b454cbcfe199609cf078dce8ac67\",\"recordId\":\"im_e958a0111c6ddf7bf72a333bab9fb23b7406c994763ff5ba0bd1afc8bc500561\"},\"target\":{\"section\":\"vehicles\",\"id\":0},\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":0.003,\"purchaseSum\":0},\"sourceFingerprint\":\"sha256:d6f5c4ed37cb5d039b24bc18ba1b72171f1e0840dacc6523e8adf10c77d21a43\",\"issues\":[],\"blockers\":[],\"canApply\":true,\"fingerprint\":\"sha256:b56ff5c346ed7ae7627ef66b4d0e7615ab358a1b870e40a112f66659febbb2a6\"}",
+      "serializedPlan": "{\"sections\":{\"fuelImports\":[{\"id\":\"im_aa46ad981d2184617a093cbad9ea3d0d8643b454cbcfe199609cf078dce8ac67\",\"at\":\"2026-10-22T12:00:00.000Z\",\"fileName\":\"SYNTHETIC.json\",\"sourceArchive\":{\"id\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2.json\",\"sha256\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"rows\":1,\"importBatch\":{\"version\":1,\"sourceId\":\"synthetic-source-e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"profile\":\"fuel-statement\",\"sourceScopes\":[\"fuelPurchases\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"normalizedFingerprint\":\"sha256:c87edc942a8ad347657ba2c1a084a9dcb6596e0d3452a878a75674d008bc2726\",\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"decisions\":[{\"rowId\":\"row-0\",\"action\":\"map\",\"target\":{\"section\":\"vehicles\",\"id\":0},\"basis\":\"Confirmed source association\"}],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"keyVersion\":4,\"litres\":0.003,\"sum\":0}],\"fuelPurchases\":[{\"date\":\"2026-09-01\",\"time\":\"12:00\",\"qty\":0.003,\"sum\":0,\"product\":\"ДТ\",\"fuel\":\"ДТ\",\"grade\":\"ДТ\",\"cardNo\":\"123\",\"provider\":\"Synthetic\",\"operationKind\":\"purchase\",\"supplierTransactionId\":\"fixture-transaction\",\"id\":\"im_8afb02e1e40668ced4094e6e544ea5559cd29559f5432cbdfc735a485132e9d7\",\"vehicleId\":0,\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"sourceArchive\":{\"id\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2.json\",\"sha256\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"fuelPurchases\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:566fb0f2ef52c7e146797de1dbcd7623a28bfa373ece5670fa80578e04920a2a\"],\"normalizedHashes\":[\"sha256:566fb0f2ef52c7e146797de1dbcd7623a28bfa373ece5670fa80578e04920a2a\"],\"externalKey\":\"[\\\"fuel-statement\\\",\\\"Synthetic\\\",\\\"purchase\\\",\\\"string\\\",\\\"fixture-transaction\\\"]\",\"batchRef\":{\"section\":\"fuelImports\",\"id\":\"im_aa46ad981d2184617a093cbad9ea3d0d8643b454cbcfe199609cf078dce8ac67\"},\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"importId\":\"im_aa46ad981d2184617a093cbad9ea3d0d8643b454cbcfe199609cf078dce8ac67\",\"recordId\":\"im_e958a0111c6ddf7bf72a333bab9fb23b7406c994763ff5ba0bd1afc8bc500561\"}],\"records\":[{\"id\":\"im_e958a0111c6ddf7bf72a333bab9fb23b7406c994763ff5ba0bd1afc8bc500561\",\"vehicleId\":0,\"date\":\"2026-09-01\",\"fuelIssued\":0.003,\"fuelGrade\":\"ДТ\",\"fuelSum\":0}]},\"readSections\":[\"appMeta\",\"fuelCards\",\"fuelImports\",\"fuelPeriods\",\"fuelPurchases\",\"records\",\"vehicles\"],\"writeSections\":[\"fuelImports\",\"fuelPurchases\",\"records\"],\"entityIds\":[\"[\\\"fuelPurchases\\\",\\\"string\\\",\\\"im_8afb02e1e40668ced4094e6e544ea5559cd29559f5432cbdfc735a485132e9d7\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"fuelPurchases\",\"action\":\"create\",\"before\":null,\"after\":{\"date\":\"2026-09-01\",\"time\":\"12:00\",\"qty\":0.003,\"sum\":0,\"product\":\"ДТ\",\"fuel\":\"ДТ\",\"grade\":\"ДТ\",\"cardNo\":\"123\",\"provider\":\"Synthetic\",\"operationKind\":\"purchase\",\"supplierTransactionId\":\"fixture-transaction\",\"id\":\"im_8afb02e1e40668ced4094e6e544ea5559cd29559f5432cbdfc735a485132e9d7\",\"vehicleId\":0,\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"sourceArchive\":{\"id\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2.json\",\"sha256\":\"e00106badb03c5b0baba0bdf4175cbdd54656e28420675dcd1d1350cad6e45f2\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"fuelPurchases\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:566fb0f2ef52c7e146797de1dbcd7623a28bfa373ece5670fa80578e04920a2a\"],\"normalizedHashes\":[\"sha256:566fb0f2ef52c7e146797de1dbcd7623a28bfa373ece5670fa80578e04920a2a\"],\"externalKey\":\"[\\\"fuel-statement\\\",\\\"Synthetic\\\",\\\"purchase\\\",\\\"string\\\",\\\"fixture-transaction\\\"]\",\"batchRef\":{\"section\":\"fuelImports\",\"id\":\"im_aa46ad981d2184617a093cbad9ea3d0d8643b454cbcfe199609cf078dce8ac67\"},\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"},\"importId\":\"im_aa46ad981d2184617a093cbad9ea3d0d8643b454cbcfe199609cf078dce8ac67\",\"recordId\":\"im_e958a0111c6ddf7bf72a333bab9fb23b7406c994763ff5ba0bd1afc8bc500561\"},\"target\":{\"section\":\"vehicles\",\"id\":0},\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":0.003,\"purchaseSum\":0},\"sourceFingerprint\":\"sha256:d6f5c4ed37cb5d039b24bc18ba1b72171f1e0840dacc6523e8adf10c77d21a43\"}",
+      "previewHash": "83bbac3d2fb9a6ed1ebad1fc5cc3546573e1abbcb4a266fa07febb4c48c12a3f",
+      "planHash": "5680c4b6a23ac7ea5a4fb318e9042de72d53870118aa8dc7004e2873d1e169ff",
+      "fingerprint": "sha256:b56ff5c346ed7ae7627ef66b4d0e7615ab358a1b870e40a112f66659febbb2a6"
+    },
+    {
+      "profile": "section-data",
+      "decoded": {
+        "version": 1,
+        "sourceId": "synthetic-source-e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61",
+        "profile": "section-data",
+        "sections": [
+          "vehicles"
+        ],
+        "sourceArchive": {
+          "id": "e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61.json",
+          "sha256": "e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61",
+          "size": 100,
+          "name": "SYNTHETIC.json"
+        },
+        "parser": {
+          "id": "synthetic-parser",
+          "version": 1
+        },
+        "decodedFingerprint": "sha256:e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61",
+        "rows": [
+          {
+            "rowId": "row-0",
+            "section": "vehicles",
+            "locator": {
+              "row": 2
+            },
+            "raw": {
+              "id": "section-fixture",
+              "plate": "SYNTHETIC SECTION",
+              "fuel": "diesel"
+            },
+            "normalized": {
+              "id": "section-fixture",
+              "plate": "SYNTHETIC SECTION",
+              "fuel": "diesel"
+            }
+          }
+        ]
+      },
+      "context": {
+        "id": "synthetic-import-fixture",
+        "now": "2026-10-22T12:00:00.000Z",
+        "today": "2026-10-22",
+        "actor": {
+          "id": "synthetic-admin",
+          "name": "Synthetic import administrator",
+          "role": "admin"
+        },
+        "importSource": {
+          "version": 1,
+          "sourceId": "synthetic-source-e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61",
+          "profile": "section-data",
+          "sections": [
+            "vehicles"
+          ],
+          "sourceArchive": {
+            "id": "e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61.json",
+            "sha256": "e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61",
+            "size": 100,
+            "name": "SYNTHETIC.json"
+          },
+          "parser": {
+            "id": "synthetic-parser",
+            "version": 1
+          },
+          "decodedFingerprint": "sha256:e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61",
+          "rows": [
+            {
+              "rowId": "row-0",
+              "section": "vehicles",
+              "locator": {
+                "row": 2
+              },
+              "raw": {
+                "id": "section-fixture",
+                "plate": "SYNTHETIC SECTION",
+                "fuel": "diesel"
+              },
+              "normalized": {
+                "id": "section-fixture",
+                "plate": "SYNTHETIC SECTION",
+                "fuel": "diesel"
+              }
+            }
+          ]
+        }
+      },
+      "input": {
+        "sourceId": "synthetic-source-e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61",
+        "profile": "section-data",
+        "sections": [
+          "vehicles"
+        ],
+        "decisions": [],
+        "reason": "Synthetic reviewed source"
+      },
+      "action": {
+        "sourceId": "synthetic-source-e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61",
+        "profile": "section-data",
+        "sections": [
+          "vehicles"
+        ],
+        "decisions": [],
+        "reason": "Synthetic reviewed source",
+        "reviewFingerprint": "sha256:ec5201f304323abc7c99ca93ec217f7b3fc03ba21ad2a8786461fea31fc6aac1"
+      },
+      "normalizedSource": "{\"version\":1,\"sourceId\":\"synthetic-source-e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61\",\"profile\":\"section-data\",\"sections\":[\"vehicles\"],\"sourceArchive\":{\"id\":\"e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61.json\",\"sha256\":\"e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mapping\":{},\"decodedFingerprint\":\"sha256:e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61\",\"normalizedFingerprint\":\"sha256:8a89357fe7c20bac5833a248c84839f464a7df3808c3b30f3202f86ce21ccb76\",\"rows\":[{\"rowId\":\"row-0\",\"section\":\"vehicles\",\"locator\":{\"row\":2},\"raw\":{\"id\":\"section-fixture\",\"plate\":\"SYNTHETIC SECTION\",\"fuel\":\"diesel\"},\"normalized\":{\"id\":\"section-fixture\",\"plate\":\"SYNTHETIC SECTION\",\"fuel\":\"diesel\"},\"rawHash\":\"sha256:08aa3505edd935d563d34f900100d1a6f833a0ae2f72529160a95ba6b04c9048\",\"normalizedHash\":\"sha256:08aa3505edd935d563d34f900100d1a6f833a0ae2f72529160a95ba6b04c9048\",\"externalKey\":null,\"issues\":[]}],\"attestation\":null,\"sourceScopes\":[\"vehicles\"]}",
+      "serializedPreview": "{\"sections\":{\"vehicles\":[{\"id\":0,\"plate\":\"SYNTHETIC NUMERIC\",\"fuel\":\"diesel\",\"fuelGrade\":\"ДТ\",\"fuelBalance\":0,\"norm\":0},{\"id\":\"0\",\"plate\":\"SYNTHETIC TEXT\",\"fuel\":\"diesel\",\"fuelGrade\":\"ДТ\",\"fuelBalance\":0,\"norm\":0},{\"id\":\"section-fixture\",\"plate\":\"SYNTHETIC SECTION\",\"fuel\":\"diesel\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61\",\"sourceArchive\":{\"id\":\"e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61.json\",\"sha256\":\"e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"vehicles\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:08aa3505edd935d563d34f900100d1a6f833a0ae2f72529160a95ba6b04c9048\"],\"normalizedHashes\":[\"sha256:08aa3505edd935d563d34f900100d1a6f833a0ae2f72529160a95ba6b04c9048\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}]},\"readSections\":[\"appMeta\",\"vehicles\"],\"writeSections\":[\"vehicles\"],\"entityIds\":[\"[\\\"vehicles\\\",\\\"string\\\",\\\"section-fixture\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"vehicles\",\"action\":\"create\",\"before\":null,\"after\":{\"id\":\"section-fixture\",\"plate\":\"SYNTHETIC SECTION\",\"fuel\":\"diesel\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61\",\"sourceArchive\":{\"id\":\"e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61.json\",\"sha256\":\"e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"vehicles\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:08aa3505edd935d563d34f900100d1a6f833a0ae2f72529160a95ba6b04c9048\"],\"normalizedHashes\":[\"sha256:08aa3505edd935d563d34f900100d1a6f833a0ae2f72529160a95ba6b04c9048\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}},\"target\":null,\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:b0d62f4af0c6be46038c1cbff97d18be5508f0f2f23d53c54c47e6eb0c26cee8\",\"issues\":[],\"blockers\":[],\"canApply\":true,\"fingerprint\":\"sha256:ec5201f304323abc7c99ca93ec217f7b3fc03ba21ad2a8786461fea31fc6aac1\"}",
+      "serializedPlan": "{\"sections\":{\"vehicles\":[{\"id\":0,\"plate\":\"SYNTHETIC NUMERIC\",\"fuel\":\"diesel\",\"fuelGrade\":\"ДТ\",\"fuelBalance\":0,\"norm\":0},{\"id\":\"0\",\"plate\":\"SYNTHETIC TEXT\",\"fuel\":\"diesel\",\"fuelGrade\":\"ДТ\",\"fuelBalance\":0,\"norm\":0},{\"id\":\"section-fixture\",\"plate\":\"SYNTHETIC SECTION\",\"fuel\":\"diesel\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61\",\"sourceArchive\":{\"id\":\"e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61.json\",\"sha256\":\"e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"vehicles\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:08aa3505edd935d563d34f900100d1a6f833a0ae2f72529160a95ba6b04c9048\"],\"normalizedHashes\":[\"sha256:08aa3505edd935d563d34f900100d1a6f833a0ae2f72529160a95ba6b04c9048\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}]},\"readSections\":[\"appMeta\",\"vehicles\"],\"writeSections\":[\"vehicles\"],\"entityIds\":[\"[\\\"vehicles\\\",\\\"string\\\",\\\"section-fixture\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"vehicles\",\"action\":\"create\",\"before\":null,\"after\":{\"id\":\"section-fixture\",\"plate\":\"SYNTHETIC SECTION\",\"fuel\":\"diesel\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61\",\"sourceArchive\":{\"id\":\"e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61.json\",\"sha256\":\"e3f81a0d12fbd948aa29479bb07c95749ff3ab8a82422ffa3ff9f7214fdf8d61\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"vehicles\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:08aa3505edd935d563d34f900100d1a6f833a0ae2f72529160a95ba6b04c9048\"],\"normalizedHashes\":[\"sha256:08aa3505edd935d563d34f900100d1a6f833a0ae2f72529160a95ba6b04c9048\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}},\"target\":null,\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:b0d62f4af0c6be46038c1cbff97d18be5508f0f2f23d53c54c47e6eb0c26cee8\"}",
+      "previewHash": "bf77d0047553df15c492f1f7a6e919d23381780a3fbc272d23bb1e7ae5f9b7ee",
+      "planHash": "208ecc6d9012fc3945ff613d484eb668f59f1c681ceabee4a79480aee84f51e0",
+      "fingerprint": "sha256:ec5201f304323abc7c99ca93ec217f7b3fc03ba21ad2a8786461fea31fc6aac1"
+    },
+    {
+      "profile": "vehicles",
+      "decoded": {
+        "version": 1,
+        "sourceId": "synthetic-source-6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4",
+        "profile": "vehicles",
+        "sections": [
+          "vehicles"
+        ],
+        "sourceArchive": {
+          "id": "6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4.json",
+          "sha256": "6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4",
+          "size": 100,
+          "name": "SYNTHETIC.json"
+        },
+        "parser": {
+          "id": "synthetic-parser",
+          "version": 1
+        },
+        "decodedFingerprint": "sha256:6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4",
+        "rows": [
+          {
+            "rowId": "row-0",
+            "section": "vehicles",
+            "locator": {
+              "row": 2
+            },
+            "raw": {
+              "id": "vehicle-fixture",
+              "plate": "SYNTHETIC VEHICLE",
+              "fuel": "diesel"
+            },
+            "normalized": {
+              "id": "vehicle-fixture",
+              "plate": "SYNTHETIC VEHICLE",
+              "fuel": "diesel"
+            }
+          }
+        ]
+      },
+      "context": {
+        "id": "synthetic-import-fixture",
+        "now": "2026-10-22T12:00:00.000Z",
+        "today": "2026-10-22",
+        "actor": {
+          "id": "synthetic-admin",
+          "name": "Synthetic import administrator",
+          "role": "admin"
+        },
+        "importSource": {
+          "version": 1,
+          "sourceId": "synthetic-source-6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4",
+          "profile": "vehicles",
+          "sections": [
+            "vehicles"
+          ],
+          "sourceArchive": {
+            "id": "6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4.json",
+            "sha256": "6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4",
+            "size": 100,
+            "name": "SYNTHETIC.json"
+          },
+          "parser": {
+            "id": "synthetic-parser",
+            "version": 1
+          },
+          "decodedFingerprint": "sha256:6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4",
+          "rows": [
+            {
+              "rowId": "row-0",
+              "section": "vehicles",
+              "locator": {
+                "row": 2
+              },
+              "raw": {
+                "id": "vehicle-fixture",
+                "plate": "SYNTHETIC VEHICLE",
+                "fuel": "diesel"
+              },
+              "normalized": {
+                "id": "vehicle-fixture",
+                "plate": "SYNTHETIC VEHICLE",
+                "fuel": "diesel"
+              }
+            }
+          ]
+        }
+      },
+      "input": {
+        "sourceId": "synthetic-source-6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4",
+        "profile": "vehicles",
+        "sections": [
+          "vehicles"
+        ],
+        "decisions": [],
+        "reason": "Synthetic reviewed source"
+      },
+      "action": {
+        "sourceId": "synthetic-source-6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4",
+        "profile": "vehicles",
+        "sections": [
+          "vehicles"
+        ],
+        "decisions": [],
+        "reason": "Synthetic reviewed source",
+        "reviewFingerprint": "sha256:4c16f68defe973b83326733ef8f4adc5c03d5934271edb9f944af1640f67f73b"
+      },
+      "normalizedSource": "{\"version\":1,\"sourceId\":\"synthetic-source-6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4\",\"profile\":\"vehicles\",\"sections\":[\"vehicles\"],\"sourceArchive\":{\"id\":\"6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4.json\",\"sha256\":\"6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mapping\":{},\"decodedFingerprint\":\"sha256:6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4\",\"normalizedFingerprint\":\"sha256:9fb79e5e9c31fc169b1c8c5b3e8aef87f2384ca3029f931ebbcd72e0cbeab369\",\"rows\":[{\"rowId\":\"row-0\",\"section\":\"vehicles\",\"locator\":{\"row\":2},\"raw\":{\"id\":\"vehicle-fixture\",\"plate\":\"SYNTHETIC VEHICLE\",\"fuel\":\"diesel\"},\"normalized\":{\"id\":\"vehicle-fixture\",\"plate\":\"SYNTHETIC VEHICLE\",\"fuel\":\"diesel\"},\"rawHash\":\"sha256:4024eea6cc5824803142febdaae58d21eb60427607f95554e768e4e890fe0628\",\"normalizedHash\":\"sha256:4024eea6cc5824803142febdaae58d21eb60427607f95554e768e4e890fe0628\",\"externalKey\":null,\"issues\":[]}],\"attestation\":null,\"sourceScopes\":[\"vehicles\"]}",
+      "serializedPreview": "{\"sections\":{\"vehicles\":[{\"id\":0,\"plate\":\"SYNTHETIC NUMERIC\",\"fuel\":\"diesel\",\"fuelGrade\":\"ДТ\",\"fuelBalance\":0,\"norm\":0},{\"id\":\"0\",\"plate\":\"SYNTHETIC TEXT\",\"fuel\":\"diesel\",\"fuelGrade\":\"ДТ\",\"fuelBalance\":0,\"norm\":0},{\"id\":\"vehicle-fixture\",\"plate\":\"SYNTHETIC VEHICLE\",\"fuel\":\"diesel\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4\",\"sourceArchive\":{\"id\":\"6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4.json\",\"sha256\":\"6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"vehicles\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:4024eea6cc5824803142febdaae58d21eb60427607f95554e768e4e890fe0628\"],\"normalizedHashes\":[\"sha256:4024eea6cc5824803142febdaae58d21eb60427607f95554e768e4e890fe0628\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}]},\"readSections\":[\"appMeta\",\"vehicles\"],\"writeSections\":[\"vehicles\"],\"entityIds\":[\"[\\\"vehicles\\\",\\\"string\\\",\\\"vehicle-fixture\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"vehicles\",\"action\":\"create\",\"before\":null,\"after\":{\"id\":\"vehicle-fixture\",\"plate\":\"SYNTHETIC VEHICLE\",\"fuel\":\"diesel\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4\",\"sourceArchive\":{\"id\":\"6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4.json\",\"sha256\":\"6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"vehicles\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:4024eea6cc5824803142febdaae58d21eb60427607f95554e768e4e890fe0628\"],\"normalizedHashes\":[\"sha256:4024eea6cc5824803142febdaae58d21eb60427607f95554e768e4e890fe0628\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}},\"target\":null,\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:c04f231c5fe4e2f08a41d53bef9ac3cf027ff4bede6656cfaacfdd7fe1d346fb\",\"issues\":[],\"blockers\":[],\"canApply\":true,\"fingerprint\":\"sha256:4c16f68defe973b83326733ef8f4adc5c03d5934271edb9f944af1640f67f73b\"}",
+      "serializedPlan": "{\"sections\":{\"vehicles\":[{\"id\":0,\"plate\":\"SYNTHETIC NUMERIC\",\"fuel\":\"diesel\",\"fuelGrade\":\"ДТ\",\"fuelBalance\":0,\"norm\":0},{\"id\":\"0\",\"plate\":\"SYNTHETIC TEXT\",\"fuel\":\"diesel\",\"fuelGrade\":\"ДТ\",\"fuelBalance\":0,\"norm\":0},{\"id\":\"vehicle-fixture\",\"plate\":\"SYNTHETIC VEHICLE\",\"fuel\":\"diesel\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4\",\"sourceArchive\":{\"id\":\"6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4.json\",\"sha256\":\"6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"vehicles\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:4024eea6cc5824803142febdaae58d21eb60427607f95554e768e4e890fe0628\"],\"normalizedHashes\":[\"sha256:4024eea6cc5824803142febdaae58d21eb60427607f95554e768e4e890fe0628\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}]},\"readSections\":[\"appMeta\",\"vehicles\"],\"writeSections\":[\"vehicles\"],\"entityIds\":[\"[\\\"vehicles\\\",\\\"string\\\",\\\"vehicle-fixture\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"vehicles\",\"action\":\"create\",\"before\":null,\"after\":{\"id\":\"vehicle-fixture\",\"plate\":\"SYNTHETIC VEHICLE\",\"fuel\":\"diesel\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4\",\"sourceArchive\":{\"id\":\"6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4.json\",\"sha256\":\"6e9b02c34e0576520464ed01b7f04dec428d27903d3487c92686187682fae9d4\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"vehicles\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:4024eea6cc5824803142febdaae58d21eb60427607f95554e768e4e890fe0628\"],\"normalizedHashes\":[\"sha256:4024eea6cc5824803142febdaae58d21eb60427607f95554e768e4e890fe0628\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}},\"target\":null,\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:c04f231c5fe4e2f08a41d53bef9ac3cf027ff4bede6656cfaacfdd7fe1d346fb\"}",
+      "previewHash": "2269aebfefd0795d8e5276f67d93ff3ab0530d73b30b74ca91c40e03bb032aed",
+      "planHash": "3cd1c3987ac1998dd0e117aaf3fe96c389492f74028e89f809b0c771efe55e9f",
+      "fingerprint": "sha256:4c16f68defe973b83326733ef8f4adc5c03d5934271edb9f944af1640f67f73b"
+    },
+    {
+      "profile": "catalog",
+      "decoded": {
+        "version": 1,
+        "sourceId": "synthetic-source-7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5",
+        "profile": "catalog",
+        "sections": [
+          "parts"
+        ],
+        "sourceArchive": {
+          "id": "7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5.json",
+          "sha256": "7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5",
+          "size": 100,
+          "name": "SYNTHETIC.json"
+        },
+        "parser": {
+          "id": "synthetic-parser",
+          "version": 1
+        },
+        "decodedFingerprint": "sha256:7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5",
+        "rows": [
+          {
+            "rowId": "row-0",
+            "section": "parts",
+            "locator": {
+              "row": 2
+            },
+            "raw": {
+              "id": "part-fixture",
+              "name": "Synthetic filter",
+              "unit": "шт"
+            },
+            "normalized": {
+              "id": "part-fixture",
+              "name": "Synthetic filter",
+              "unit": "шт"
+            }
+          }
+        ]
+      },
+      "context": {
+        "id": "synthetic-import-fixture",
+        "now": "2026-10-22T12:00:00.000Z",
+        "today": "2026-10-22",
+        "actor": {
+          "id": "synthetic-admin",
+          "name": "Synthetic import administrator",
+          "role": "admin"
+        },
+        "importSource": {
+          "version": 1,
+          "sourceId": "synthetic-source-7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5",
+          "profile": "catalog",
+          "sections": [
+            "parts"
+          ],
+          "sourceArchive": {
+            "id": "7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5.json",
+            "sha256": "7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5",
+            "size": 100,
+            "name": "SYNTHETIC.json"
+          },
+          "parser": {
+            "id": "synthetic-parser",
+            "version": 1
+          },
+          "decodedFingerprint": "sha256:7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5",
+          "rows": [
+            {
+              "rowId": "row-0",
+              "section": "parts",
+              "locator": {
+                "row": 2
+              },
+              "raw": {
+                "id": "part-fixture",
+                "name": "Synthetic filter",
+                "unit": "шт"
+              },
+              "normalized": {
+                "id": "part-fixture",
+                "name": "Synthetic filter",
+                "unit": "шт"
+              }
+            }
+          ]
+        }
+      },
+      "input": {
+        "sourceId": "synthetic-source-7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5",
+        "profile": "catalog",
+        "sections": [
+          "parts"
+        ],
+        "decisions": [],
+        "reason": "Synthetic reviewed source"
+      },
+      "action": {
+        "sourceId": "synthetic-source-7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5",
+        "profile": "catalog",
+        "sections": [
+          "parts"
+        ],
+        "decisions": [],
+        "reason": "Synthetic reviewed source",
+        "reviewFingerprint": "sha256:94b63311a35d3b8931badcac7773dcc368e4448a4fa1d7b769226d0f6cb9c3f2"
+      },
+      "normalizedSource": "{\"version\":1,\"sourceId\":\"synthetic-source-7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5\",\"profile\":\"catalog\",\"sections\":[\"parts\"],\"sourceArchive\":{\"id\":\"7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5.json\",\"sha256\":\"7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mapping\":{},\"decodedFingerprint\":\"sha256:7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5\",\"normalizedFingerprint\":\"sha256:e3109a9f7c3f979acdc0d9e642ed6add7057b2dd90588a987b2bdd18fead7d01\",\"rows\":[{\"rowId\":\"row-0\",\"section\":\"parts\",\"locator\":{\"row\":2},\"raw\":{\"id\":\"part-fixture\",\"name\":\"Synthetic filter\",\"unit\":\"шт\"},\"normalized\":{\"id\":\"part-fixture\",\"name\":\"Synthetic filter\",\"unit\":\"шт\"},\"rawHash\":\"sha256:4616d03dc89a2d97b7ff1c1576f181630b339851f0880065fc7d75709169af12\",\"normalizedHash\":\"sha256:4616d03dc89a2d97b7ff1c1576f181630b339851f0880065fc7d75709169af12\",\"externalKey\":null,\"issues\":[]}],\"attestation\":null,\"sourceScopes\":[\"parts\"]}",
+      "serializedPreview": "{\"sections\":{\"parts\":[{\"id\":\"part-fixture\",\"name\":\"Synthetic filter\",\"unit\":\"шт\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5\",\"sourceArchive\":{\"id\":\"7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5.json\",\"sha256\":\"7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"parts\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:4616d03dc89a2d97b7ff1c1576f181630b339851f0880065fc7d75709169af12\"],\"normalizedHashes\":[\"sha256:4616d03dc89a2d97b7ff1c1576f181630b339851f0880065fc7d75709169af12\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}]},\"readSections\":[\"appMeta\",\"parts\"],\"writeSections\":[\"parts\"],\"entityIds\":[\"[\\\"parts\\\",\\\"string\\\",\\\"part-fixture\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"parts\",\"action\":\"create\",\"before\":null,\"after\":{\"id\":\"part-fixture\",\"name\":\"Synthetic filter\",\"unit\":\"шт\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5\",\"sourceArchive\":{\"id\":\"7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5.json\",\"sha256\":\"7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"parts\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:4616d03dc89a2d97b7ff1c1576f181630b339851f0880065fc7d75709169af12\"],\"normalizedHashes\":[\"sha256:4616d03dc89a2d97b7ff1c1576f181630b339851f0880065fc7d75709169af12\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}},\"target\":null,\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:309961ff8f260d9ece032f253ac0c6c220756121427326037bdfb052ce0bd999\",\"issues\":[],\"blockers\":[],\"canApply\":true,\"fingerprint\":\"sha256:94b63311a35d3b8931badcac7773dcc368e4448a4fa1d7b769226d0f6cb9c3f2\"}",
+      "serializedPlan": "{\"sections\":{\"parts\":[{\"id\":\"part-fixture\",\"name\":\"Synthetic filter\",\"unit\":\"шт\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5\",\"sourceArchive\":{\"id\":\"7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5.json\",\"sha256\":\"7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"parts\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:4616d03dc89a2d97b7ff1c1576f181630b339851f0880065fc7d75709169af12\"],\"normalizedHashes\":[\"sha256:4616d03dc89a2d97b7ff1c1576f181630b339851f0880065fc7d75709169af12\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}]},\"readSections\":[\"appMeta\",\"parts\"],\"writeSections\":[\"parts\"],\"entityIds\":[\"[\\\"parts\\\",\\\"string\\\",\\\"part-fixture\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"parts\",\"action\":\"create\",\"before\":null,\"after\":{\"id\":\"part-fixture\",\"name\":\"Synthetic filter\",\"unit\":\"шт\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5\",\"sourceArchive\":{\"id\":\"7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5.json\",\"sha256\":\"7f5ec71fb7b45294c0e9874977fa4696d35b2eac93a665d6d97a470866562ac5\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"parts\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:4616d03dc89a2d97b7ff1c1576f181630b339851f0880065fc7d75709169af12\"],\"normalizedHashes\":[\"sha256:4616d03dc89a2d97b7ff1c1576f181630b339851f0880065fc7d75709169af12\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}},\"target\":null,\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:309961ff8f260d9ece032f253ac0c6c220756121427326037bdfb052ce0bd999\"}",
+      "previewHash": "aa097d8c09afc4052700fc7153d543a1a81a99bce4ff9c86a8f89e0512eb754b",
+      "planHash": "a1adea571ee9e4e5a8644c764a40013ff18b704f6189c1583b1f635b64e8cfb1",
+      "fingerprint": "sha256:94b63311a35d3b8931badcac7773dcc368e4448a4fa1d7b769226d0f6cb9c3f2"
+    },
+    {
+      "profile": "personnel",
+      "decoded": {
+        "version": 1,
+        "sourceId": "synthetic-source-9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c",
+        "profile": "personnel",
+        "sections": [
+          "drivers"
+        ],
+        "sourceArchive": {
+          "id": "9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c.json",
+          "sha256": "9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c",
+          "size": 100,
+          "name": "SYNTHETIC.json"
+        },
+        "parser": {
+          "id": "synthetic-parser",
+          "version": 1
+        },
+        "decodedFingerprint": "sha256:9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c",
+        "rows": [
+          {
+            "rowId": "row-0",
+            "section": "drivers",
+            "locator": {
+              "row": 2
+            },
+            "raw": {
+              "id": "person-fixture",
+              "name": "Synthetic employee",
+              "personnelRoles": [
+                "driver"
+              ],
+              "employmentStatus": "active"
+            },
+            "normalized": {
+              "id": "person-fixture",
+              "name": "Synthetic employee",
+              "personnelRoles": [
+                "driver"
+              ],
+              "employmentStatus": "active"
+            }
+          }
+        ]
+      },
+      "context": {
+        "id": "synthetic-import-fixture",
+        "now": "2026-10-22T12:00:00.000Z",
+        "today": "2026-10-22",
+        "actor": {
+          "id": "synthetic-admin",
+          "name": "Synthetic import administrator",
+          "role": "admin"
+        },
+        "importSource": {
+          "version": 1,
+          "sourceId": "synthetic-source-9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c",
+          "profile": "personnel",
+          "sections": [
+            "drivers"
+          ],
+          "sourceArchive": {
+            "id": "9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c.json",
+            "sha256": "9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c",
+            "size": 100,
+            "name": "SYNTHETIC.json"
+          },
+          "parser": {
+            "id": "synthetic-parser",
+            "version": 1
+          },
+          "decodedFingerprint": "sha256:9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c",
+          "rows": [
+            {
+              "rowId": "row-0",
+              "section": "drivers",
+              "locator": {
+                "row": 2
+              },
+              "raw": {
+                "id": "person-fixture",
+                "name": "Synthetic employee",
+                "personnelRoles": [
+                  "driver"
+                ],
+                "employmentStatus": "active"
+              },
+              "normalized": {
+                "id": "person-fixture",
+                "name": "Synthetic employee",
+                "personnelRoles": [
+                  "driver"
+                ],
+                "employmentStatus": "active"
+              }
+            }
+          ]
+        }
+      },
+      "input": {
+        "sourceId": "synthetic-source-9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c",
+        "profile": "personnel",
+        "sections": [
+          "drivers"
+        ],
+        "decisions": [],
+        "reason": "Synthetic reviewed source"
+      },
+      "action": {
+        "sourceId": "synthetic-source-9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c",
+        "profile": "personnel",
+        "sections": [
+          "drivers"
+        ],
+        "decisions": [],
+        "reason": "Synthetic reviewed source",
+        "reviewFingerprint": "sha256:177b6eefa0e2bfa9f11357f16f13e83bca314fb81ed811e6caf535629f93b4ed"
+      },
+      "normalizedSource": "{\"version\":1,\"sourceId\":\"synthetic-source-9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c\",\"profile\":\"personnel\",\"sections\":[\"drivers\"],\"sourceArchive\":{\"id\":\"9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c.json\",\"sha256\":\"9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mapping\":{},\"decodedFingerprint\":\"sha256:9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c\",\"normalizedFingerprint\":\"sha256:1d063d120ef484ceaaadaf39e7d4fc64eefc0b4974499a55224cbd2544dc398e\",\"rows\":[{\"rowId\":\"row-0\",\"section\":\"drivers\",\"locator\":{\"row\":2},\"raw\":{\"id\":\"person-fixture\",\"name\":\"Synthetic employee\",\"personnelRoles\":[\"driver\"],\"employmentStatus\":\"active\"},\"normalized\":{\"id\":\"person-fixture\",\"name\":\"Synthetic employee\",\"personnelRoles\":[\"driver\"],\"employmentStatus\":\"active\"},\"rawHash\":\"sha256:a6f7328e5625a79944572b23c7ba8c2126de6c56c33f4c7551e5b700ade316ce\",\"normalizedHash\":\"sha256:a6f7328e5625a79944572b23c7ba8c2126de6c56c33f4c7551e5b700ade316ce\",\"externalKey\":null,\"issues\":[]}],\"attestation\":null,\"sourceScopes\":[\"drivers\"]}",
+      "serializedPreview": "{\"sections\":{\"drivers\":[{\"id\":\"person-fixture\",\"name\":\"Synthetic employee\",\"personnelRoles\":[\"driver\"],\"employmentStatus\":\"active\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c\",\"sourceArchive\":{\"id\":\"9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c.json\",\"sha256\":\"9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"drivers\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:a6f7328e5625a79944572b23c7ba8c2126de6c56c33f4c7551e5b700ade316ce\"],\"normalizedHashes\":[\"sha256:a6f7328e5625a79944572b23c7ba8c2126de6c56c33f4c7551e5b700ade316ce\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}]},\"readSections\":[\"appMeta\",\"drivers\"],\"writeSections\":[\"drivers\"],\"entityIds\":[\"[\\\"drivers\\\",\\\"string\\\",\\\"person-fixture\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"drivers\",\"action\":\"create\",\"before\":null,\"after\":{\"id\":\"person-fixture\",\"name\":\"Synthetic employee\",\"personnelRoles\":[\"driver\"],\"employmentStatus\":\"active\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c\",\"sourceArchive\":{\"id\":\"9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c.json\",\"sha256\":\"9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"drivers\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:a6f7328e5625a79944572b23c7ba8c2126de6c56c33f4c7551e5b700ade316ce\"],\"normalizedHashes\":[\"sha256:a6f7328e5625a79944572b23c7ba8c2126de6c56c33f4c7551e5b700ade316ce\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}},\"target\":null,\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:536e672fe5cec2dd643fbe61fea5e3c14a58e5a90dafccf9ca0c256e79a98a03\",\"issues\":[],\"blockers\":[],\"canApply\":true,\"fingerprint\":\"sha256:177b6eefa0e2bfa9f11357f16f13e83bca314fb81ed811e6caf535629f93b4ed\"}",
+      "serializedPlan": "{\"sections\":{\"drivers\":[{\"id\":\"person-fixture\",\"name\":\"Synthetic employee\",\"personnelRoles\":[\"driver\"],\"employmentStatus\":\"active\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c\",\"sourceArchive\":{\"id\":\"9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c.json\",\"sha256\":\"9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"drivers\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:a6f7328e5625a79944572b23c7ba8c2126de6c56c33f4c7551e5b700ade316ce\"],\"normalizedHashes\":[\"sha256:a6f7328e5625a79944572b23c7ba8c2126de6c56c33f4c7551e5b700ade316ce\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}]},\"readSections\":[\"appMeta\",\"drivers\"],\"writeSections\":[\"drivers\"],\"entityIds\":[\"[\\\"drivers\\\",\\\"string\\\",\\\"person-fixture\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"drivers\",\"action\":\"create\",\"before\":null,\"after\":{\"id\":\"person-fixture\",\"name\":\"Synthetic employee\",\"personnelRoles\":[\"driver\"],\"employmentStatus\":\"active\",\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c\",\"sourceArchive\":{\"id\":\"9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c.json\",\"sha256\":\"9fd8a8271eb4b2e0d11abccac44d509a2bc2858e3f381eb09c52ff01d103966c\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"drivers\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:a6f7328e5625a79944572b23c7ba8c2126de6c56c33f4c7551e5b700ade316ce\"],\"normalizedHashes\":[\"sha256:a6f7328e5625a79944572b23c7ba8c2126de6c56c33f4c7551e5b700ade316ce\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}},\"target\":null,\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:536e672fe5cec2dd643fbe61fea5e3c14a58e5a90dafccf9ca0c256e79a98a03\"}",
+      "previewHash": "7148915138221be65854e700eaa90f6d43e879a814df9b103c1b27f0dc487912",
+      "planHash": "7720c072ea86111def6fdd5ebbe0b54298e7ceeb3cee1f991e19f44020672375",
+      "fingerprint": "sha256:177b6eefa0e2bfa9f11357f16f13e83bca314fb81ed811e6caf535629f93b4ed"
+    },
+    {
+      "profile": "registry",
+      "decoded": {
+        "version": 1,
+        "sourceId": "synthetic-source-6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9",
+        "profile": "registry",
+        "sections": [
+          "reestrRows"
+        ],
+        "sourceArchive": {
+          "id": "6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9.json",
+          "sha256": "6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9",
+          "size": 100,
+          "name": "SYNTHETIC.json"
+        },
+        "parser": {
+          "id": "synthetic-parser",
+          "version": 1
+        },
+        "decodedFingerprint": "sha256:6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9",
+        "rows": [
+          {
+            "rowId": "row-0",
+            "section": "reestrRows",
+            "locator": {
+              "row": 2
+            },
+            "raw": {
+              "id": "registry-fixture",
+              "name": "Synthetic registry line",
+              "sum": 10
+            },
+            "normalized": {
+              "id": "registry-fixture",
+              "name": "Synthetic registry line",
+              "sum": 10
+            }
+          }
+        ]
+      },
+      "context": {
+        "id": "synthetic-import-fixture",
+        "now": "2026-10-22T12:00:00.000Z",
+        "today": "2026-10-22",
+        "actor": {
+          "id": "synthetic-admin",
+          "name": "Synthetic import administrator",
+          "role": "admin"
+        },
+        "importSource": {
+          "version": 1,
+          "sourceId": "synthetic-source-6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9",
+          "profile": "registry",
+          "sections": [
+            "reestrRows"
+          ],
+          "sourceArchive": {
+            "id": "6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9.json",
+            "sha256": "6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9",
+            "size": 100,
+            "name": "SYNTHETIC.json"
+          },
+          "parser": {
+            "id": "synthetic-parser",
+            "version": 1
+          },
+          "decodedFingerprint": "sha256:6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9",
+          "rows": [
+            {
+              "rowId": "row-0",
+              "section": "reestrRows",
+              "locator": {
+                "row": 2
+              },
+              "raw": {
+                "id": "registry-fixture",
+                "name": "Synthetic registry line",
+                "sum": 10
+              },
+              "normalized": {
+                "id": "registry-fixture",
+                "name": "Synthetic registry line",
+                "sum": 10
+              }
+            }
+          ]
+        }
+      },
+      "input": {
+        "sourceId": "synthetic-source-6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9",
+        "profile": "registry",
+        "sections": [
+          "reestrRows"
+        ],
+        "decisions": [
+          {
+            "rowId": "row-0",
+            "action": "create",
+            "basis": "Confirmed recognized registry details"
+          }
+        ],
+        "reason": "Synthetic reviewed source"
+      },
+      "action": {
+        "sourceId": "synthetic-source-6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9",
+        "profile": "registry",
+        "sections": [
+          "reestrRows"
+        ],
+        "decisions": [
+          {
+            "rowId": "row-0",
+            "action": "create",
+            "basis": "Confirmed recognized registry details"
+          }
+        ],
+        "reason": "Synthetic reviewed source",
+        "reviewFingerprint": "sha256:364332297920662949ac95dd7ad926b491b601b35647064d94daf7a3cd166d8a"
+      },
+      "normalizedSource": "{\"version\":1,\"sourceId\":\"synthetic-source-6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9\",\"profile\":\"registry\",\"sections\":[\"reestrRows\"],\"sourceArchive\":{\"id\":\"6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9.json\",\"sha256\":\"6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mapping\":{},\"decodedFingerprint\":\"sha256:6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9\",\"normalizedFingerprint\":\"sha256:8c36558fb19c455dfa068751023781aa3d6fa4aa0b934a0c960b7b6bcf7c384b\",\"rows\":[{\"rowId\":\"row-0\",\"section\":\"reestrRows\",\"locator\":{\"row\":2},\"raw\":{\"id\":\"registry-fixture\",\"name\":\"Synthetic registry line\",\"sum\":10},\"normalized\":{\"id\":\"registry-fixture\",\"name\":\"Synthetic registry line\",\"sum\":10},\"rawHash\":\"sha256:d25733dda6711ae4611d1c33b814b0fb1ba2be839f2eae0ff149ceb87c0511ae\",\"normalizedHash\":\"sha256:d25733dda6711ae4611d1c33b814b0fb1ba2be839f2eae0ff149ceb87c0511ae\",\"externalKey\":null,\"issues\":[]}],\"attestation\":null,\"sourceScopes\":[\"reestrRows\"]}",
+      "serializedPreview": "{\"sections\":{\"reestrRows\":[{\"id\":\"registry-fixture\",\"name\":\"Synthetic registry line\",\"sum\":10,\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9\",\"sourceArchive\":{\"id\":\"6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9.json\",\"sha256\":\"6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"reestrRows\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:d25733dda6711ae4611d1c33b814b0fb1ba2be839f2eae0ff149ceb87c0511ae\"],\"normalizedHashes\":[\"sha256:d25733dda6711ae4611d1c33b814b0fb1ba2be839f2eae0ff149ceb87c0511ae\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}]},\"readSections\":[\"appMeta\",\"reestrRows\"],\"writeSections\":[\"reestrRows\"],\"entityIds\":[\"[\\\"reestrRows\\\",\\\"string\\\",\\\"registry-fixture\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"reestrRows\",\"action\":\"create\",\"before\":null,\"after\":{\"id\":\"registry-fixture\",\"name\":\"Synthetic registry line\",\"sum\":10,\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9\",\"sourceArchive\":{\"id\":\"6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9.json\",\"sha256\":\"6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"reestrRows\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:d25733dda6711ae4611d1c33b814b0fb1ba2be839f2eae0ff149ceb87c0511ae\"],\"normalizedHashes\":[\"sha256:d25733dda6711ae4611d1c33b814b0fb1ba2be839f2eae0ff149ceb87c0511ae\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}},\"target\":null,\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:b79ba49f364a0be980981da361830fb20a4e2560273fd343d56359cbe253cc46\",\"issues\":[],\"blockers\":[],\"canApply\":true,\"fingerprint\":\"sha256:364332297920662949ac95dd7ad926b491b601b35647064d94daf7a3cd166d8a\"}",
+      "serializedPlan": "{\"sections\":{\"reestrRows\":[{\"id\":\"registry-fixture\",\"name\":\"Synthetic registry line\",\"sum\":10,\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9\",\"sourceArchive\":{\"id\":\"6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9.json\",\"sha256\":\"6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"reestrRows\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:d25733dda6711ae4611d1c33b814b0fb1ba2be839f2eae0ff149ceb87c0511ae\"],\"normalizedHashes\":[\"sha256:d25733dda6711ae4611d1c33b814b0fb1ba2be839f2eae0ff149ceb87c0511ae\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}]},\"readSections\":[\"appMeta\",\"reestrRows\"],\"writeSections\":[\"reestrRows\"],\"entityIds\":[\"[\\\"reestrRows\\\",\\\"string\\\",\\\"registry-fixture\\\"]\"],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"reestrRows\",\"action\":\"create\",\"before\":null,\"after\":{\"id\":\"registry-fixture\",\"name\":\"Synthetic registry line\",\"sum\":10,\"importProvenance\":{\"version\":1,\"sourceId\":\"synthetic-source-6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9\",\"sourceArchive\":{\"id\":\"6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9.json\",\"sha256\":\"6c5963a597533b8de923415c9c583b02cfe6301a07f967545316611d7d2708e9\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"reestrRows\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:d25733dda6711ae4611d1c33b814b0fb1ba2be839f2eae0ff149ceb87c0511ae\"],\"normalizedHashes\":[\"sha256:d25733dda6711ae4611d1c33b814b0fb1ba2be839f2eae0ff149ceb87c0511ae\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}},\"target\":null,\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:b79ba49f364a0be980981da361830fb20a4e2560273fd343d56359cbe253cc46\"}",
+      "previewHash": "79ad0891174f6e9a5f6b9c5ae5de8eaace5d6592117cbe9a5efd614546a28137",
+      "planHash": "1df342fbcb51072c0bf4e8f7fe0fe758785945a209094030d44eb286317e97b8",
+      "fingerprint": "sha256:364332297920662949ac95dd7ad926b491b601b35647064d94daf7a3cd166d8a"
+    },
+    {
+      "profile": "provider-totals",
+      "decoded": {
+        "version": 1,
+        "sourceId": "synthetic-source-f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa",
+        "profile": "provider-totals",
+        "sections": [
+          "fuelPeriods"
+        ],
+        "sourceArchive": {
+          "id": "f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa.json",
+          "sha256": "f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa",
+          "size": 100,
+          "name": "SYNTHETIC.json"
+        },
+        "parser": {
+          "id": "synthetic-parser",
+          "version": 1
+        },
+        "decodedFingerprint": "sha256:f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa",
+        "rows": [
+          {
+            "rowId": "row-0",
+            "section": "fuelPeriods",
+            "locator": {
+              "row": 2
+            },
+            "raw": {
+              "month": "2026-09",
+              "provider": "Synthetic provider",
+              "litres": 0,
+              "sum": 0
+            },
+            "normalized": {
+              "month": "2026-09",
+              "provider": "Synthetic provider",
+              "litres": 0,
+              "sum": 0
+            }
+          }
+        ]
+      },
+      "context": {
+        "id": "synthetic-import-fixture",
+        "now": "2026-10-22T12:00:00.000Z",
+        "today": "2026-10-22",
+        "actor": {
+          "id": "synthetic-admin",
+          "name": "Synthetic import administrator",
+          "role": "admin"
+        },
+        "importSource": {
+          "version": 1,
+          "sourceId": "synthetic-source-f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa",
+          "profile": "provider-totals",
+          "sections": [
+            "fuelPeriods"
+          ],
+          "sourceArchive": {
+            "id": "f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa.json",
+            "sha256": "f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa",
+            "size": 100,
+            "name": "SYNTHETIC.json"
+          },
+          "parser": {
+            "id": "synthetic-parser",
+            "version": 1
+          },
+          "decodedFingerprint": "sha256:f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa",
+          "rows": [
+            {
+              "rowId": "row-0",
+              "section": "fuelPeriods",
+              "locator": {
+                "row": 2
+              },
+              "raw": {
+                "month": "2026-09",
+                "provider": "Synthetic provider",
+                "litres": 0,
+                "sum": 0
+              },
+              "normalized": {
+                "month": "2026-09",
+                "provider": "Synthetic provider",
+                "litres": 0,
+                "sum": 0
+              }
+            }
+          ]
+        }
+      },
+      "input": {
+        "sourceId": "synthetic-source-f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa",
+        "profile": "provider-totals",
+        "sections": [
+          "fuelPeriods"
+        ],
+        "decisions": [
+          {
+            "rowId": "row-0",
+            "action": "fill",
+            "basis": "Confirmed provider source"
+          }
+        ],
+        "reason": "Synthetic reviewed source"
+      },
+      "action": {
+        "sourceId": "synthetic-source-f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa",
+        "profile": "provider-totals",
+        "sections": [
+          "fuelPeriods"
+        ],
+        "decisions": [
+          {
+            "rowId": "row-0",
+            "action": "fill",
+            "basis": "Confirmed provider source"
+          }
+        ],
+        "reason": "Synthetic reviewed source",
+        "reviewFingerprint": "sha256:cb78b919701f20f038917ac72b9848602ea97333589a56396c605aa2cfe28a56"
+      },
+      "normalizedSource": "{\"version\":1,\"sourceId\":\"synthetic-source-f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"profile\":\"provider-totals\",\"sections\":[\"fuelPeriods\"],\"sourceArchive\":{\"id\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa.json\",\"sha256\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mapping\":{},\"decodedFingerprint\":\"sha256:f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"normalizedFingerprint\":\"sha256:c9027a128cdad1451c197cfdddd5e18642dd18b1138ba6a581356864d16ac741\",\"rows\":[{\"rowId\":\"row-0\",\"section\":\"fuelPeriods\",\"locator\":{\"row\":2},\"raw\":{\"month\":\"2026-09\",\"provider\":\"Synthetic provider\",\"litres\":0,\"sum\":0},\"normalized\":{\"month\":\"2026-09\",\"provider\":\"Synthetic provider\",\"litres\":0,\"sum\":0},\"rawHash\":\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\",\"normalizedHash\":\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\",\"externalKey\":null,\"issues\":[]}],\"attestation\":null,\"sourceScopes\":[\"fuelPeriods\"]}",
+      "serializedPreview": "{\"sections\":{\"fuelPeriods\":[{\"month\":\"2026-09\",\"recon\":{\"Synthetic provider\":{\"litres\":0,\"sum\":0,\"importHistory\":[{\"before\":{\"litres\":null,\"sum\":null},\"after\":{\"litres\":0,\"sum\":0},\"basis\":\"Confirmed provider source\",\"source\":{\"version\":1,\"sourceId\":\"synthetic-source-f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"sourceArchive\":{\"id\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa.json\",\"sha256\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"fuelPeriods\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"normalizedHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}],\"importSource\":{\"version\":1,\"sourceId\":\"synthetic-source-f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"sourceArchive\":{\"id\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa.json\",\"sha256\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"fuelPeriods\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"normalizedHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}}}]},\"readSections\":[\"appMeta\",\"fuelCards\",\"fuelPeriods\",\"fuelPurchases\"],\"writeSections\":[\"fuelPeriods\"],\"entityIds\":[],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"fuelPeriods\",\"action\":\"update-reference\",\"before\":{},\"after\":{\"litres\":0,\"sum\":0,\"importHistory\":[{\"before\":{\"litres\":null,\"sum\":null},\"after\":{\"litres\":0,\"sum\":0},\"basis\":\"Confirmed provider source\",\"source\":{\"version\":1,\"sourceId\":\"synthetic-source-f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"sourceArchive\":{\"id\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa.json\",\"sha256\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"fuelPeriods\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"normalizedHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}],\"importSource\":{\"version\":1,\"sourceId\":\"synthetic-source-f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"sourceArchive\":{\"id\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa.json\",\"sha256\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"fuelPeriods\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"normalizedHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}},\"target\":null,\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:4fbede4bd76de2aac3452134903fcefd57da85827ba2ccba2ea630a68f404820\",\"issues\":[],\"blockers\":[],\"canApply\":true,\"fingerprint\":\"sha256:cb78b919701f20f038917ac72b9848602ea97333589a56396c605aa2cfe28a56\"}",
+      "serializedPlan": "{\"sections\":{\"fuelPeriods\":[{\"month\":\"2026-09\",\"recon\":{\"Synthetic provider\":{\"litres\":0,\"sum\":0,\"importHistory\":[{\"before\":{\"litres\":null,\"sum\":null},\"after\":{\"litres\":0,\"sum\":0},\"basis\":\"Confirmed provider source\",\"source\":{\"version\":1,\"sourceId\":\"synthetic-source-f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"sourceArchive\":{\"id\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa.json\",\"sha256\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"fuelPeriods\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"normalizedHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}],\"importSource\":{\"version\":1,\"sourceId\":\"synthetic-source-f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"sourceArchive\":{\"id\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa.json\",\"sha256\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"fuelPeriods\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"normalizedHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}}}]},\"readSections\":[\"appMeta\",\"fuelCards\",\"fuelPeriods\",\"fuelPurchases\"],\"writeSections\":[\"fuelPeriods\"],\"entityIds\":[],\"rows\":[{\"rowId\":\"row-0\",\"section\":\"fuelPeriods\",\"action\":\"update-reference\",\"before\":{},\"after\":{\"litres\":0,\"sum\":0,\"importHistory\":[{\"before\":{\"litres\":null,\"sum\":null},\"after\":{\"litres\":0,\"sum\":0},\"basis\":\"Confirmed provider source\",\"source\":{\"version\":1,\"sourceId\":\"synthetic-source-f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"sourceArchive\":{\"id\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa.json\",\"sha256\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"fuelPeriods\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"normalizedHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}}],\"importSource\":{\"version\":1,\"sourceId\":\"synthetic-source-f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"sourceArchive\":{\"id\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa.json\",\"sha256\":\"f1be7bcb6aef1389edd01a83a4bdc931409493618234f976e363ad9c867f7efa\",\"size\":100,\"name\":\"SYNTHETIC.json\"},\"sourceScopes\":[\"fuelPeriods\"],\"parser\":{\"id\":\"synthetic-parser\",\"version\":1},\"mappingFingerprint\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"rowIds\":[\"row-0\"],\"locators\":[{\"row\":2}],\"rawHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"normalizedHashes\":[\"sha256:d87e74d19541f4de5a97a39b126df3fecd4e2903020339d56da1dfbc63325e1e\"],\"at\":\"2026-10-22T12:00:00.000Z\",\"actor\":{\"id\":\"synthetic-admin\",\"name\":\"Synthetic import administrator\",\"role\":\"admin\"},\"operationId\":\"synthetic-import-fixture\"}},\"target\":null,\"candidates\":[],\"issues\":[]}],\"aggregates\":{\"created\":1,\"kept\":0,\"skipped\":0,\"quarantined\":0,\"observedKm\":null,\"observedFuel\":null,\"purchaseQty\":null,\"purchaseSum\":null},\"sourceFingerprint\":\"sha256:4fbede4bd76de2aac3452134903fcefd57da85827ba2ccba2ea630a68f404820\"}",
+      "previewHash": "161fbff9bbf4c69b00e0997c9c7d74d8a1abf296f290799150f052ede879bdf7",
+      "planHash": "e88805a4ac16cd311bd4f7f1fc2c4502b70e948c71af4a16f540030887e6f4b7",
+      "fingerprint": "sha256:cb78b919701f20f038917ac72b9848602ea97333589a56396c605aa2cfe28a56"
+    }
+  ]
+}

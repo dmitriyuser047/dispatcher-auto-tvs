@@ -8,12 +8,12 @@ interface Contracts {apiVersion:number;identifier(value:unknown):value is Identi
 interface Registry {sections:readonly string[]}
 interface Hasher {sha256(value:string):string}
 interface FuelRules {validateChanges(before:unknown,after:unknown,ctx?:unknown):unknown;isValidReversal(db:unknown,original:unknown):boolean}
-interface Policies {validatePeriodChanges(before:unknown,after:unknown,ctx?:unknown):unknown}
+interface Periods {validateChanges(before:unknown,after:unknown,ctx?:unknown):unknown}
 interface Documents {postedMetadata(ctx:unknown):JsonRow;voidMetadata(row:unknown,reason:unknown,ctx:unknown):JsonRow}
 interface FuelError extends Error {code:string;status:number;issues:StockIssue[]}
 
 /** Semantic observations and paired corrections; no storage or side effects. */
-export function createFuelOperations(contracts:Contracts,schema:Registry,identity:EntityIdentityAPI,decimal:DecimalCoreAPI,stock:FuelStockAPI,getWriteoff?:()=>Hasher,getFuelRules?:()=>FuelRules,getPolicies?:()=>Policies,getDocuments?:()=>Documents,getCalendar?:()=>BusinessCalendarAPI) {
+export function createFuelOperations(contracts:Contracts,schema:Registry,identity:EntityIdentityAPI,decimal:DecimalCoreAPI,stock:FuelStockAPI,getWriteoff?:()=>Hasher,getFuelRules?:()=>FuelRules,getPeriods?:()=>Periods,getDocuments?:()=>Documents,getCalendar?:()=>BusinessCalendarAPI) {
  const readSections=Object.freeze(['appMeta','fuelMovements','fuelPeriods','genRecords','generators','records','tankIncomes','tanks','vehicles']);
  const own=(value:object,key:string):boolean=>Object.prototype.hasOwnProperty.call(value,key),object=(value:unknown):value is JsonRow=>value!==null&&typeof value==='object'&&!Array.isArray(value);
  function fail(code:string,message:string,issues:StockIssue[]=[]):never {const error=new Error(message) as FuelError;error.name='FuelOperationError';error.code=code;error.status=400;error.issues=issues;throw error;}
@@ -56,7 +56,7 @@ export function createFuelOperations(contracts:Contracts,schema:Registry,identit
    added={id:ctx.id,kind:'transfer',date:out.date,fromTankId:incoming.tankId!,toTankId:out.tankId!,qty:decimal.toNumberExact(received),reason:input.reason,legacyTransferReversal:{version:1,outId:out.id!,inId:incoming.id!,linkId:out.linkId!,sourceFingerprint:hash({out,in:incoming})},lifecycle:documents.postedMetadata(ctx),createdAt:ctx.now,createdBy:{...ctx.actor}};
   }
   if(added)updated=[...all,added];const sections:SectionRows=noOp?{}:{fuelMovements:updated},next={...db,...sections};
-  if(!noOp){getPolicies?.().validatePeriodChanges(db,next,{today:ctx.today,now:ctx.now,readable:readSections});getFuelRules?.().validateChanges(db,next,{today:ctx.today,now:ctx.now,readable:readSections});}
+  if(!noOp){getPeriods?.().validateChanges(db,next,{today:ctx.today,now:ctx.now,readable:readSections});getFuelRules?.().validateChanges(db,next,{today:ctx.today,now:ctx.now,readable:readSections});}
   return {sections,readSections:[...readSections],writeSections:['fuelMovements'],entityIds:{documentId:added?.id as Identifier??('measurementId'in input?input.measurementId:ctx.id)},...(details?{measurement:details}:{}),...(noOp?{noOp:true}:{})};
  }
  function preview(databaseValue:unknown,value:unknown,contextValue:unknown={}):{issues:StockIssue[];blockers:StockIssue[];warnings:StockIssue[];canApply:boolean;fingerprint:string;readSections:string[];writeSections:string[];diff:JsonRow[];measurement?:JsonRow;noOp?:boolean} {

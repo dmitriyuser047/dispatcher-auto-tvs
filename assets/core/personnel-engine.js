@@ -1,9 +1,9 @@
 /* Shared personnel directory and assignment rules. No storage, DOM or clock writes. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory(() => require('./personnel-planning.js'));
-  else root.TvsPersonnelEngine = factory(() => root.PersonnelPlanning);
-})(typeof globalThis === 'object' ? globalThis : this, function (getPlanning) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./personnel-kinds.js'),() => require('./personnel-planning.js'));
+  else root.TvsPersonnelEngine = factory(root.PersonnelKinds,() => root.PersonnelPlanning);
+})(typeof globalThis === 'object' ? globalThis : this, function (roleFacts,getPlanning) {
   'use strict';
   const own = (row, field) => !!row && Object.prototype.hasOwnProperty.call(row, field);
   const object = row => row !== null && typeof row === 'object' && !Array.isArray(row);
@@ -21,20 +21,7 @@
     const parsed = new Date(value + 'T12:00:00Z');
     return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0,10) === value;
   }
-  function rolesOf(row) {
-    if (!object(row)) return [];
-    // Old directory entries were drivers. Do not rewrite their rows during reads.
-    if (!own(row, 'personnelRoles')) return ['driver'];
-    if (!Array.isArray(row.personnelRoles)) return [];
-    return kinds.filter(kind => row.personnelRoles.includes(kind));
-  }
-  function kindForAsset(assetRef) {
-    if (typeof assetRef !== 'string') return null;
-    if (/^v:.+$/.test(assetRef)) return 'driver';
-    if (/^g:.+$/.test(assetRef)) return 'operator';
-    return null;
-  }
-  function matchesRole(row, kind) { return kinds.includes(kind) && rolesOf(row).includes(kind); }
+  const {rolesOf,kindForAsset,matchesRole}=roleFacts;
   function planning(db) {let api;try{api=getPlanning();}catch{}if(api?.apiVersion===1)return api;const explicit=rows(db,'drivers').some(row=>own(row,'personnelPlanning'))||['vehicles','generators','dispatchJobs'].some(section=>rows(db,section).some(row=>own(row,'personnelRequirements')));if(explicit)throw Object.assign(Error('Не загружены правила датированного планирования сотрудников'),{code:'MODULE_UNAVAILABLE'});return null;}
   function availability(row, date) {
     if (!object(row)) return { available:false, status:'unavailable', reason:'Сотрудник не найден' };

@@ -2,11 +2,11 @@ let gsmOrg = '', gsmFuel = '', gsmActNo = '', gsmActDate = '';
 function gsmActDateValue(){return gsmActDate||BusinessCalendar.resolve(data,new Date().toISOString()).today;}
 let gsmMovementSearch = '', gsmMovementType = '', gsmMovementLimit = 30, gsmMovementLedger = null;
 let gsmBackgroundRequest = null, gsmBackgroundReady = null;
-const GSM_MAIN_VIEWS = [['barrels', 'Бочки и остатки'], ['diagnostics', 'Проверка данных'], ['receipts', 'Выписка'], ['manual', 'Добавить вручную'], ['journal', 'Журнал и остатки'], ['writeoff', 'Списание']];
-const GSM_EXTRA_VIEWS = [['fcards', 'Топливные карты'], ['cards', 'По машинам'], ['doubles', 'Повторные заправки'], ['checks', 'Проверки'],
+const GSM_MAIN_VIEWS = [['statement', 'Ведомость по машинам'], ['operations', 'Операции'], ['tanks', 'Ёмкости'], ['diagnostics', 'Проверка данных'], ['writeoff', 'Акты по шагам']];
+const GSM_EXTRA_VIEWS = [['receipts', 'Выписка'], ['journal', 'Подробный журнал'], ['barrels', 'Сводные остатки по организациям'], ['fcards', 'Топливные карты'], ['cards', 'Карточки заправок'], ['doubles', 'Повторные заправки'], ['checks', 'Проверки'],
   ['measures', 'Замеры'], ['compare', 'Сравнение месяцев'], ['negative', 'Отрицательные остатки'], ['recon', 'Сверка с 1С'],
   ['monthly', 'Старая месячная сверка'], ['close', 'Закрытие месяца'], ['unmatched', 'Без машины'], ['history', 'История загрузок'], ['glonass', 'ГЛОНАСС']];
-function gsmArg(value) { return fpEsc(JSON.stringify(String(value || ''))); }
+function gsmArg(value) { return fpEsc(JSON.stringify(value ?? '')); }
 function gsmVisible(row) { return (!gsmOrg || gsmOrgKey(row.org) === gsmOrgKey(gsmOrg)) && (!gsmFuel || row.grade === gsmFuel); }
 function gsmVehicle(id) { return (data.vehicles || []).find(v => v.id === id); }
 function gsmBackgroundRequired() { return typeof dispatcherBackgroundNeeded === 'function' && dispatcherBackgroundNeeded(); }
@@ -27,12 +27,13 @@ function gsmPrepareWorkspaceBackground(months) {
     '<p role="status">Подготавливаю расчёт ГСМ… Можно перейти в другой раздел.</p><button type="button" class="btn btn-ghost" data-gsm-background-cancel>Отменить расчёт</button>';
   document.getElementById('mainContent').replaceChildren(panel);
   const controller=new AbortController(),request={stamp,panel,controller,databaseRef:data};gsmBackgroundRequest=request;
-  const ownsPanel=()=>gsmBackgroundRequest===request&&panel.isConnected&&activeSection==='fuelPurchases';
-  const current=()=>ownsPanel()&&data===request.databaseRef&&gsmBackgroundStamp()===stamp;
+  const ownsRequest=()=>gsmBackgroundRequest===request&&activeSection==='fuelPurchases';
+  const current=()=>ownsRequest()&&data===request.databaseRef&&gsmBackgroundStamp()===stamp;
   const failed=error=>{
-    if(!ownsPanel()){if(gsmBackgroundRequest===request)gsmBackgroundRequest=null;return;}
+    if(!ownsRequest()){if(gsmBackgroundRequest===request)gsmBackgroundRequest=null;return;}
     const message=current()?error.message||'Не удалось подготовить расчёт. Повторите попытку.':'Данные, фильтры или сеанс изменились. Повторите расчёт.';
-    gsmBackgroundRequest=null;
+    gsmBackgroundRequest=null;gsmBackgroundReady=null;
+    if(!panel.isConnected)document.getElementById('mainContent').replaceChildren(panel);
     panel.querySelector('[role="status"]').textContent=message;
     const button=panel.querySelector('button');button.removeAttribute('data-gsm-background-cancel');button.dataset.gsmBackgroundRetry='';button.textContent='Повторить расчёт';button.onclick=()=>renderFuelPurchases();
   };
@@ -42,8 +43,9 @@ function gsmPrepareWorkspaceBackground(months) {
   const audit=fpView==='diagnostics'?dispatcherQueryAsync('fuelAudit',gsmMonthRange(fpMonth),{signal:controller.signal}):Promise.resolve(null);
   void Promise.all([fuel,writeoff,audit]).then(([ledger,model,auditModel])=>{
     if(!current()){failed(Error('Расчёт устарел'));return;}
-    gsmBackgroundReady={stamp,databaseRef:data,ledger,model,audit:auditModel};gsmBackgroundRequest=null;
+    gsmBackgroundReady={stamp,databaseRef:data,ledger,model,audit:auditModel};
     gsmRenderWorkspace();
+    if(gsmBackgroundRequest===request)gsmBackgroundRequest=null;
   }).catch(failed);
 }
 function gsmTable(head, rows, footer) {
@@ -60,7 +62,7 @@ function gsmGradeReconciliationHtml(ledger) {
   if (!movements.length) return '';
   const rows = movements.map(row => '<tr>' + gsmCell(fmtDate(row.date)) + gsmCell(fpVehicleTitle(gsmVehicle(row.vehicleId))) + gsmCell(row.org) + gsmCell(row.fromGrade + ' → ' + row.toGrade) + gsmCell(row.grade) +
     '<td class="gsm-number">' + (row.delta > 0 ? '+' : '') + fpNum(row.delta, 3) + '</td><td>' +
-    fpEsc((row.purchaseId ? 'Заправка' : 'Замер остатка') + ' от ' + fmtDate(row.date) + '; ранее учтённый расход' + (row.debtDate ? ' от ' + fmtDate(row.debtDate) : '')) +
+    fpEsc((row.purchaseId != null ? 'Заправка' : 'Замер остатка') + ' от ' + fmtDate(row.date) + '; ранее учтённый расход' + (row.debtDate ? ' от ' + fmtDate(row.debtDate) : '')) +
     '<details><summary>Связанные записи</summary>' + fpEsc(gsmReconciliationBasis(row)) + '<small>Пара: ' + fpEsc(row.pairId) + '</small></details></td></tr>');
   return '<section class="gsm-band" aria-label="Сверка марок топлива"><h3>Сверка марок <span>аналитическое перераспределение остатков</span></h3>' +
     '<p class="gsm-status">Корректировки идут парой −/+ в одной машине и организации. Они не меняют марку покупки, приход или расход. При фильтре по топливу показана только сторона выбранной марки; направление и номер пары сохранены.</p>' +
@@ -121,16 +123,16 @@ function gsmBarrelDateLabel(ledger) {
 function gsmMovementSource(row) {
   if (row.kind === 'consumption') return gsmConsumptionSourceLabel(row.source) + (row.idle ? ' · х/х включён' : '');
   if (row.kind === 'measurement-correction') return 'Замер остатка от ' + fmtDate(row.date) + (row.reason ? ' · ' + row.reason : '');
-  if (row.kind === 'grade-reconciliation') return (row.purchaseId ? 'Заправка' : 'Замер остатка') + ' от ' + fmtDate(row.date) +
+  if (row.kind === 'grade-reconciliation') return (row.purchaseId != null ? 'Заправка' : 'Замер остатка') + ' от ' + fmtDate(row.date) +
     '; ранее учтённый расход' + (row.debtDate ? ' от ' + fmtDate(row.debtDate) : '') + ' · ' + row.fromGrade + ' → ' + row.toGrade;
   return [row.manual ? 'Ручная заправка' : 'Выписка', row.cardNo ? 'карта ' + row.cardNo : '', row.provider].filter(Boolean).join(' · ');
 }
 function gsmMovementLinks(row) {
   const buttons = [];
-  const recordId = row.kind === 'measurement-correction' ? row.measurementRecordId || row.recordId : row.recordId;
-  if (row.purchaseId && fpById(row.purchaseId)) buttons.push('<button type="button" class="btn btn-ghost btn-sm" onclick="fpEdit(' + gsmArg(row.purchaseId) + ')">Покупка</button>');
-  else if (recordId && (data.records || []).some(r => r.id === recordId)) buttons.push('<button type="button" class="btn btn-ghost btn-sm" onclick="gsmEditRecord(' + gsmArg(recordId) + ')">Журнал</button>');
-  if (row.kind === 'grade-reconciliation' && row.debtRecordId && row.debtRecordId !== row.recordId && (data.records || []).some(r => r.id === row.debtRecordId)) {
+  const recordId = row.kind === 'measurement-correction' ? row.measurementRecordId ?? row.recordId : row.recordId;
+  if (row.purchaseId != null && fpById(row.purchaseId)) buttons.push('<button type="button" class="btn btn-ghost btn-sm" onclick="fpEdit(' + gsmArg(row.purchaseId) + ')">Покупка</button>');
+  else if (recordId != null && (data.records || []).some(r => r.id === recordId)) buttons.push('<button type="button" class="btn btn-ghost btn-sm" onclick="gsmEditRecord(' + gsmArg(recordId) + ')">Журнал</button>');
+  if (row.kind === 'grade-reconciliation' && row.debtRecordId != null && row.debtRecordId !== row.recordId && (data.records || []).some(r => r.id === row.debtRecordId)) {
     buttons.push('<button type="button" class="btn btn-ghost btn-sm" onclick="gsmEditRecord(' + gsmArg(row.debtRecordId) + ')">Расход</button>');
   }
   return buttons.join('');
@@ -141,7 +143,7 @@ function gsmBarrelMovements(ledger) {
     if (row.kind === 'consumption' && gsmNumber(row.qty) === 0) return false;
     if (!gsmVisible(row) || (gsmMovementType && row.kind !== gsmMovementType)) return false;
     if (!query) return true;
-    const purchase = row.purchaseId && fpById(row.purchaseId);
+    const purchase = row.purchaseId != null && fpById(row.purchaseId);
     return [fpVehicleTitle(gsmVehicle(row.vehicleId)), row.org, row.grade, row.cardNo, row.provider,
       gsmMovementSource(row), purchase ? fpPlace(purchase) : '', row.date, fmtDate(row.date)]
       .join(' ').toLocaleLowerCase('ru').replace(/ё/g, 'е').includes(query);
@@ -149,7 +151,7 @@ function gsmBarrelMovements(ledger) {
 }
 function gsmMovementListHtml(ledger) {
   const movements = gsmBarrelMovements(ledger), shown = movements.slice(0, gsmMovementLimit);
-  const labels = { receipt: 'Приход', consumption: 'К списанию', 'grade-reconciliation': 'Сверка марок', 'measurement-correction': 'Корректировка по замеру' };
+  const labels = { receipt: 'Приход', consumption: 'Расход', 'grade-reconciliation': 'Сверка марок', 'measurement-correction': 'Корректировка по замеру' };
   const rows = shown.map(row => {
     const qty = row.kind === 'grade-reconciliation' || row.kind === 'measurement-correction' ? row.delta : row.kind === 'consumption' ? -row.qty : row.qty;
     return '<tr data-movement-kind="' + fpEsc(row.kind) + '"><td class="gsm-date">' + fpEsc(fmtDate(row.date)) + (row.time ? '<small>' + fpEsc(row.time) + '</small>' : '') + '</td>' +
@@ -182,7 +184,7 @@ function gsmBarrelOverviewHtml(ledger) {
   const barrels = ledger.barrels.filter(gsmVisible), vehicles = ledger.rows.filter(gsmVisible), dateLabel = gsmBarrelDateLabel(ledger);
   const unassigned = ledger.receipts.filter(row => !gsmVehicle(row.vehicleId) && gsmVisible(row));
   const cards = barrels.map(row => '<button type="button" class="gsm-barrel-card' + (row.end < -GSM_EPS ? ' is-negative' : '') + (gsmOrg && gsmFuel ? ' is-selected' : '') + '" data-org="' + fpEsc(row.org) + '" data-grade="' + fpEsc(row.grade) +
-    '" aria-label="' + fpEsc('Открыть бочку: ' + row.org + ', ' + row.grade) + '" onclick="gsmOpenBarrel(' + gsmArg(row.org) + ',' + gsmArg(row.grade) + ')">' +
+    '" aria-label="' + fpEsc('Открыть сводку: ' + row.org + ', ' + row.grade) + '" onclick="gsmOpenBarrel(' + gsmArg(row.org) + ',' + gsmArg(row.grade) + ')">' +
     '<span class="gsm-barrel-card-heading"><strong>' + fpEsc(row.org) + '</strong><span class="gsm-barrel-grade">' + fpEsc(row.grade) + '</span></span>' +
     '<span class="gsm-barrel-date">Остаток в баках машин<br>' + fpEsc(dateLabel) + '</span><span class="gsm-barrel-value">' + fpNum(row.end, 3) + '<small>л</small></span>' +
     (row.end < -GSM_EPS ? '<span class="gsm-barrel-deficit">Дефицит: проверьте поступления и начальный остаток</span>' : '') +
@@ -191,12 +193,12 @@ function gsmBarrelOverviewHtml(ledger) {
   const vehicleRows = vehicles.map(row => '<tr data-vehicle-id="' + fpEsc(row.vehicleId) + '"><td>' + fpEsc(fpVehicleTitle(row.vehicle)) + '</td>' + gsmCell(row.org) + gsmCell(row.grade) +
     ['start', 'issued', 'spent', 'correction', 'end'].map(key => '<td class="gsm-number' + (key === 'end' && row.end < -GSM_EPS ? ' gsm-error' : '') + '">' + (key === 'correction' && row[key] > 0 ? '+' : '') + fpNum(row[key], 3) + '</td>').join('') + '</tr>');
   const reconciliation = gsmGradeReconciliationHtml(ledger);
-  return '<section class="gsm-barrel-intro"><div><h3>Где находится топливо</h3><p>«Бочка» — общее топливо одной организации в баках машин, отдельно по каждой марке. Это сводный учёт, а не отдельная физическая ёмкость. Поступление показывает топливо, которым заправлены машины.</p></div>' +
+  return '<section class="gsm-barrel-intro"><div><h3>Где находится топливо</h3><p>Здесь суммируются остатки в баках машин по организациям и маркам топлива. Физические места хранения и движения между ёмкостями показываются отдельно.</p></div>' +
     '<button type="button" class="btn btn-ghost btn-sm" onclick="switchSection(\'tanks\')">Физические ёмкости →</button></section>' +
-    '<div class="gsm-section-title gsm-barrel-title"><h3>Остатки по организациям и топливу <span>' + fpEsc(fpMonthLabel(fpMonth)) + '</span></h3><button type="button" class="btn btn-ghost btn-sm" onclick="gsmResetBarrels()">Показать все бочки</button></div>' +
+    '<div class="gsm-section-title gsm-barrel-title"><h3>Остатки по организациям и топливу <span>' + fpEsc(fpMonthLabel(fpMonth)) + '</span></h3><button type="button" class="btn btn-ghost btn-sm" onclick="gsmResetBarrels()">Все сводные остатки</button></div>' +
     '<div class="gsm-barrel-cards" id="gsmBarrelCards">' + (cards.join('') || '<div class="gsm-overview-empty">За выбранный период и фильтры остатков в машинах нет. Выбор организации и топлива сохранён.</div>') + '</div>' +
     (unassigned.length ? '<div class="gsm-unassigned-notice"><span>Поступления без машины: ' + unassigned.length + ' · ' + fpNum(unassigned.reduce((sum, row) => sum + row.qty, 0), 3) + ' л. Не включены в остатки в машинах.</span><button type="button" class="btn btn-ghost btn-sm" onclick="gsmScrollTo(\'gsmUnassignedReceipts\')">Разобрать поступления</button></div>' : '') + gsmIssuesHtml(ledger) +
-    '<section class="gsm-band gsm-barrel-movements" id="gsmBarrelMovements" aria-label="Операции с топливом"><div class="gsm-section-title"><h3>Операции с топливом <span>' + fpEsc([gsmOrg || 'Все организации', gsmFuel || 'Все марки', fpMonthLabel(fpMonth)].join(' · ')) + '</span></h3><div class="gsm-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="gsmResetBarrels()">Все бочки ↑</button><button type="button" class="btn btn-ghost btn-sm" onclick="gsmScrollTo(\'gsmBarrelVehicles\')">Остатки по машинам ↓</button></div></div><div class="gsm-movement-filters">' +
+    '<section class="gsm-band gsm-barrel-movements" id="gsmBarrelMovements" aria-label="Операции с топливом"><div class="gsm-section-title"><h3>Операции с топливом <span>' + fpEsc([gsmOrg || 'Все организации', gsmFuel || 'Все марки', fpMonthLabel(fpMonth)].join(' · ')) + '</span></h3><div class="gsm-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="gsmResetBarrels()">Все сводные остатки ↑</button><button type="button" class="btn btn-ghost btn-sm" onclick="gsmScrollTo(\'gsmBarrelVehicles\')">Остатки по машинам ↓</button></div></div><div class="gsm-movement-filters">' +
     '<label class="gsm-movement-search"><span>Найти операцию</span><input type="search" aria-label="Поиск операций" placeholder="Машина, карта, организация, топливо, АЗС…" value="' + fpEsc(gsmMovementSearch) + '" oninput="gsmSetMovementSearch(this.value)"></label>' +
     '<label><span>Вид операции</span><select class="fsel" aria-label="Вид операции" onchange="gsmSetMovementType(this.value)">' + [['', 'Все операции'], ['receipt', 'Приход'], ['consumption', 'К списанию'], ['grade-reconciliation', 'Сверка марок'], ['measurement-correction', 'Корректировка по замеру']].map(([value, label]) => '<option value="' + value + '"' + (gsmMovementType === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select></label></div>' +
     '<p class="gsm-overview-note">Сверка марок перераспределяет остаток между марками. Корректировка по замеру требует проверки источника топлива. Эти операции не являются приходом или расходом. Расход включает х/х; основание указано в строке.</p>' +
@@ -208,7 +210,7 @@ function gsmBarrelOverviewHtml(ledger) {
 function gsmBarrelsHtml(ledger) {
   const rows = ledger.barrels.filter(gsmVisible).map(b => '<tr>' + gsmCell(b.org) + gsmCell(b.grade) +
     ['start', 'issued', 'spent', 'correction', 'end'].map(k => gsmCell(b[k], true)).join('') + '</tr>');
-  return '<section class="gsm-band"><h3>Общие бочки организаций <span>литры</span></h3>' +
+  return '<section class="gsm-band"><h3>Сводные остатки по организациям <span>литры</span></h3>' +
     gsmTable(['Организация', 'Топливо', 'На начало', 'Поступило', 'К списанию', 'Корректировка/сверка, л', 'Остаток в машинах'], rows) + '</section>' + gsmGradeReconciliationHtml(ledger);
 }
 function gsmIssuesHtml(ledger) {
@@ -218,8 +220,8 @@ function gsmIssuesHtml(ledger) {
   return '<details class="gsm-issues"><summary>Расхождения: ' + errors + ' · На проверку: ' + (issues.length - errors) + '</summary>' +
     gsmTable(['Дата', 'Машина', 'Организация', 'Проверка', ''], issues.map(i => '<tr>' + gsmCell(i.date ? fmtDate(i.date) : 'Входящий остаток') +
       gsmCell(fpVehicleTitle(gsmVehicle(i.vehicleId))) + gsmCell(i.org || (i.orgs || []).join(', ')) + '<td class="' + (i.severity === 'error' ? 'gsm-error' : '') + '">' + fpEsc(i.message) + '</td><td>' +
-      (i.purchaseId && fpById(i.purchaseId) ? '<button class="btn btn-ghost btn-sm" onclick="fpEdit(' + gsmArg(i.purchaseId) + ')">Покупка</button>' : '') +
-      (i.recordId ? '<button class="btn btn-ghost btn-sm" onclick="gsmEditRecord(' + gsmArg(i.recordId) + ')">Журнал</button>' : '') + '</td></tr>')) + '</details>';
+      (i.purchaseId != null && fpById(i.purchaseId) ? '<button class="btn btn-ghost btn-sm" onclick="fpEdit(' + gsmArg(i.purchaseId) + ')">Покупка</button>' : '') +
+      (i.recordId != null ? '<button class="btn btn-ghost btn-sm" onclick="gsmEditRecord(' + gsmArg(i.recordId) + ')">Журнал</button>' : '') + '</td></tr>')) + '</details>';
 }
 function gsmReceiptsHtml(ledger) {
   return gsmStatementHtml(ledger);
@@ -234,25 +236,29 @@ function gsmJournalHtml(ledger) {
         (r.hasPurchases && Math.abs(r.issued - r.statement) > 0.011 ? '<button class="btn btn-ghost btn-sm" onclick="fpSyncRecord(' + gsmArg(r.recordId) + ')">По выписке</button>' : '') + '</td></tr>'));
 }
 function gsmWriteoffHtml(ledger) {
-  return gsmWriteoffWorkspaceHtml(ledger);
+  return typeof gsmActStepsHtml === 'function' ? gsmActStepsHtml(ledger) : gsmWriteoffWorkspaceHtml(ledger);
 }
 function gsmRenderWorkspace() {
   if (fpView === 'vehicle' && fpVehicle) return fpRenderVehicle();
-  const months = [...new Set([...(data.records || []).map(r => (r.date || '').slice(0, 7)), ...fpLive().map(p => (p.date || '').slice(0, 7))])].filter(m => /^\d{4}-\d{2}$/.test(m)).sort().reverse();
+  const months = [...new Set([...(data.records || []).map(r => (r.date || '').slice(0, 7)), ...fpLive().map(p => (p.date || '').slice(0, 7)),
+    ...(data.tankIncomes || []).map(r => (r.date || '').slice(0, 7)), ...(data.fuelMovements || []).map(r => (r.date || '').slice(0, 7)), ...(data.fuelWriteoffs || []).map(r => r.scope?.month)])].filter(m => /^\d{4}-\d{2}$/.test(m)).sort().reverse();
   if (!fpMonth) fpMonth = fpView === 'receipts' ? 'all' : months[0] || 'all';
   const background=gsmBackgroundRequired(),prepared=background?gsmPreparedWorkspace():null;
   if(background&&!prepared){gsmPrepareWorkspaceBackground(months);return;}
   if(!background){gsmBackgroundRequest?.controller.abort();gsmBackgroundRequest=null;gsmBackgroundReady=null;}
   const ledger = background ? prepared.ledger : gsmBuildLedger(data, gsmMonthRange(fpMonth));
   const orgs = [...new Map([gsmOrg, ...ledger.organizations, ...ledger.receipts.map(p => p.org), ...(data.vehicles || []).map(v => v.org), ...(data.fuelCards || []).map(c => c.org),
-    ...fpLive().map(p => p.sourceOrg), ...(data.records || []).map(r => r.fuelOrg), ...(data.vehicles || []).flatMap(v => (v.fuelBalanceSources || []).map(s => s.org))].filter(Boolean).map(org =>
+    ...fpLive().map(p => p.sourceOrg), ...(data.records || []).map(r => r.fuelOrg), ...(data.tanks || []).map(t => t.org), ...(data.vehicles || []).flatMap(v => (v.fuelBalanceSources || []).map(s => s.org))].filter(Boolean).map(org =>
     [gsmOrgKey(org), String(org).trim().replace(/\s+/g, ' ')])).values()].sort((a, b) => a.localeCompare(b, 'ru'));
   const grades = [...new Set([gsmFuel, ...FP_GRADES, ...ledger.rows.map(r => r.grade), ...ledger.receipts.map(p => p.grade),
-    ...fpLive().map(p => p.grade || p.product), ...(data.records || []).map(r => r.fuelGrade)].filter(Boolean).map(g => gsmGrade(g)))].sort();
+    ...fpLive().map(p => p.grade || p.product), ...(data.records || []).map(r => r.fuelGrade), ...(data.tanks || []).map(t => typeof tankFuelGrade === 'function' ? tankFuelGrade(t) : t.fuelGrade)].filter(Boolean).map(g => gsmGrade(g)))].sort();
   if (gsmOrg) gsmOrg = orgs.find(org => gsmOrgKey(org) === gsmOrgKey(gsmOrg)) || gsmOrg;
-  const mainView = GSM_MAIN_VIEWS.some(([id]) => id === fpView) && fpView !== 'manual';
+  const mainView = GSM_MAIN_VIEWS.some(([id]) => id === fpView) || ['barrels', 'receipts', 'journal'].includes(fpView);
   let body;
-  if (fpView === 'barrels') body = gsmBarrelOverviewHtml(ledger);
+  if (fpView === 'statement') body = gsmVehicleStatementHtml(ledger);
+  else if (fpView === 'operations') body = gsmOperationsHtml(ledger);
+  else if (fpView === 'tanks') body = gsmPhysicalTanksHtml(ledger);
+  else if (fpView === 'barrels') body = gsmBarrelOverviewHtml(ledger);
   else if (fpView === 'diagnostics') body = typeof gsmDiagnosticsHtml === 'function' ? gsmDiagnosticsHtml(ledger) : '<p class="gsm-status">Модуль проверки данных не подключён.</p>';
   else if (fpView === 'manual') body = gsmManualHtml();
   else if (fpView === 'receipts') body = gsmReceiptsHtml(ledger);
@@ -263,18 +269,19 @@ function gsmRenderWorkspace() {
       negative: fpNegativeHtml, recon: frcHtml, fcards: fcCardsHtml, monthly: fpMonthlyHtml, close: fcCloseHtml, unmatched: () => fpUnmatchedHtml(fpLive().filter(p => !p.vehicleId)), history: fpHistoryHtml, glonass: fgHtml };
     body = (renderers[fpView] || fpCardsHtml)();
   }
-  document.getElementById('mainContent').innerHTML = '<div class="gsm-workspace"><div class="gsm-heading"><h2>ГСМ</h2><div class="gsm-actions">' +
-    '<button type="button" class="btn btn-primary" onclick="gsmOpenDiagnostics()">Проверить ГСМ</button>' +
+  document.getElementById('mainContent').innerHTML = '<div class="gsm-workspace" data-gsm-workspace data-gsm-current-view="' + fpEsc(fpView) + '"><div class="gsm-heading"><h2>ГСМ</h2><div class="gsm-actions">' +
+    '<button type="button" class="btn btn-primary" onclick="gsmAddOperationDialog()">Добавить операцию</button>' +
     '<button class="btn btn-ghost" onclick="document.getElementById(\'fuelImportInput\').click()">Загрузить выписку</button>' +
-    '<button class="btn btn-ghost" onclick="document.getElementById(\'officeFuelImportInput\').click()">Машины офис</button>' +
-    '<button class="btn btn-ghost" onclick="gsmExportReconciliation()">Выгрузить сверку</button></div></div>' +
-    '<div class="gsm-nav">' + GSM_MAIN_VIEWS.map(([id, label]) => '<button class="sec-tab ' + (fpView === id ? 'active' : '') + '" onclick="fpView=' + gsmArg(id) + ';renderFuelPurchases()">' + label + '</button>').join('') +
-    '<select aria-label="Дополнительно" class="fsel" onchange="if(this.value){fpView=this.value;renderFuelPurchases()}"><option value="">Дополнительно</option>' +
-    GSM_EXTRA_VIEWS.map(([id, label]) => '<option value="' + id + '"' + (fpView === id ? ' selected' : '') + '>' + label + '</option>').join('') + '</select></div>' +
+    '<button type="button" class="btn btn-ghost" onclick="gsmSwitchView(\'manual\')">Добавить вручную</button>' +
+    '<details class="gsm-workspace-menu"><summary class="btn btn-ghost">Ещё</summary><div class="gsm-workspace-menu-content"><button type="button" class="btn btn-ghost" onclick="gsmExportReconciliation()">Выгрузить сверку</button>' +
+    '<button type="button" class="btn btn-ghost" onclick="document.getElementById(\'officeFuelImportInput\').click()">Машины офис</button>' +
+    '<label>Сервис и архив<select aria-label="Дополнительно" class="fsel" onchange="if(this.value)gsmSwitchView(this.value)"><option value="">Выберите раздел</option>' +
+    GSM_EXTRA_VIEWS.map(([id, label]) => '<option value="' + id + '"' + (fpView === id ? ' selected' : '') + '>' + label + '</option>').join('') + '</select></label></div></details></div></div>' +
+    '<div class="gsm-nav" role="navigation" aria-label="Разделы ГСМ">' + GSM_MAIN_VIEWS.map(([id, label]) => '<button type="button" class="sec-tab ' + (fpView === id ? 'active' : '') + '" data-gsm-view="' + id + '"' + (fpView === id ? ' aria-current="page"' : '') + ' onclick="gsmSwitchView(' + gsmArg(id) + ')">' + label + '</button>').join('') + '</div>' +
     (fpView === 'manual' ? '' : '<div class="gsm-filters"><select aria-label="Месяц" class="fsel" onchange="fpMonth=this.value;renderFuelPurchases()">' + [...new Set([fpMonth, ...months, 'all'])].map(m => '<option value="' + fpEsc(m) + '"' + (m === fpMonth ? ' selected' : '') + '>' + fpMonthLabel(m) + '</option>').join('') + '</select>' +
     (mainView ? '<select aria-label="Организация" class="fsel" onchange="gsmOrg=this.value;renderFuelPurchases()"><option value="">Все организации</option>' + orgs.map(o => '<option' + (o === gsmOrg ? ' selected' : '') + '>' + fpEsc(o) + '</option>').join('') + '</select>' +
       '<select aria-label="Топливо" class="fsel" onchange="gsmFuel=this.value;renderFuelPurchases()"><option value="">Все марки топлива</option>' + grades.map(g => '<option' + (g === gsmFuel ? ' selected' : '') + '>' + fpEsc(g) + '</option>').join('') + '</select>' : '') + '</div>') +
-    (mainView && !['barrels', 'diagnostics', 'writeoff'].includes(fpView) ? (fpView === 'receipts' ? gsmReceiptSummaryHtml(ledger) : gsmBarrelsHtml(ledger)) + gsmIssuesHtml(ledger) : '') + '<div id="fpBody">' + body + '</div></div>';
+    (['receipts', 'journal'].includes(fpView) ? (fpView === 'receipts' ? gsmReceiptSummaryHtml(ledger) : gsmBarrelsHtml(ledger)) + gsmIssuesHtml(ledger) : '') + '<div id="fpBody">' + body + '</div></div>';
   if (fpView === 'manual') gsmManualTotals();
 }
 function gsmEditRecord(id) {
@@ -298,10 +305,10 @@ async function gsmSaveReceipt() {
   const sourceOrg = cardNo ? gsmCardAt(data, cardNo, date).org : val('org').trim();
   if (!gsmValidDate(date) || !gsmVehicle(vehicleId) || !Number.isFinite(qty) || qty <= 0 || !sourceOrg) { alert('Укажите дату, машину, литры и организацию поступления. Для карты проверьте её организацию.'); return; }
   if (!fuelEditAllowed(date)) return;
-  const before = JSON.stringify(data);
+  const rollback = captureSaveRollback();
   const p = fpCreate({ date, qty, cardNo, fuel: grade }, { vehicleId, date, grade });
   Object.assign(p, { manual: true, sourceOrg }); fpApply(p, 1);
-  if (await saveData(data) === false) { data = JSON.parse(before); rebuildIndex(); return; }
+  if (await saveData(data) === false) { restoreSaveRollback(rollback); return; }
   fpMonth = date.slice(0, 7); closeModal('genericModal'); renderFuelPurchases();
 }
 function gsmOpeningDialog(vid,fromSelect=false) {
@@ -327,7 +334,7 @@ async function gsmSaveOpening() {
   const sources = [...document.querySelectorAll('#gsm_open_rows .gsm-opening-row')].map(el => ({ org: el.querySelector('[data-field="org"]').value.trim(), grade: el.querySelector('[data-field="grade"]').value, qty: Number(el.querySelector('[data-field="qty"]').value) }));
   if (!sources.length || sources.some(s => !s.org || !Number.isFinite(s.qty) || s.qty < 0) || Math.abs(sources.reduce((sum, s) => sum + s.qty, 0) - gsmNumber(v.fuelBalance)) > 0.001) { alert('Укажите организации и распределите весь начальный остаток без изменения общей суммы.'); return; }
   if ((data.fuelPeriods || []).some(p => p.closed)) { alert('Начальный остаток влияет на закрытые месяцы. Сначала откройте их.'); return; }
-  const before = v.fuelBalanceSources; v.fuelBalanceSources = sources;
-  if (await saveData(data) === false) { v.fuelBalanceSources = before; rebuildIndex(); return; }
+  const rollback = captureSaveRollback(); v.fuelBalanceSources = sources;
+  if (await saveData(data) === false) { restoreSaveRollback(rollback); return; }
   closeModal('genericModal'); renderFuelPurchases();
 }

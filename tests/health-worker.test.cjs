@@ -65,7 +65,14 @@ test('browser worker imports the same core dependency chain as index and matches
  context.importScripts=(...files)=>{for(const name of files){imports.push(name);vm.runInContext(fs.readFileSync(path.join(coreDir,name),'utf8'),context,{filename:name});}};
  vm.runInContext(fs.readFileSync(path.join(coreDir,'health-worker.js'),'utf8'),context,{filename:'health-worker.js'});
  const index=fs.readFileSync(path.resolve(__dirname,'../index.html'),'utf8'),all=[...index.matchAll(/<script src="assets\/core\/([^"]+)"/g)].map(match=>match[1]),until=all.indexOf('platform-integrity.js');assert.deepEqual(imports,all.slice(0,until+1).map(name=>'./'+name));
- assert.equal(typeof context.onmessage,'function');const message=request();context.onmessage({data:message});assert.equal(posts.length,0);tasks.shift()();assert.equal(posts[0].ok,true);assert.deepEqual(JSON.parse(JSON.stringify(posts[0].value)),publicReport(message.source,message.context));
+ assert.equal(context.RecordIdentity.apiVersion,1);assert.equal(context.IntegrityFacts.apiVersion,1);
+ assert.equal(typeof context.onmessage,'function');const message=request();context.onmessage({data:message});assert.equal(posts.length,0);tasks.shift()();assert.equal(posts[0].ok,true);assert.ok(posts[0].value.issues.some(issue=>issue.code==='PART_STOCK_DEFICIT'));assert.deepEqual(JSON.parse(JSON.stringify(posts[0].value)),publicReport(message.source,message.context));
+});
+
+test('isolated CommonJS bootstrap binds the complete diagnostic facade and retains business-rule findings',()=>{
+ const posts=[],tasks=[],loaded=[],context=vm.createContext({module:{exports:{}},structuredClone,setTimeout:action=>tasks.push(action),require(...args){assert.equal(args.length,1,'each bootstrap dependency must be resolved independently');loaded.push(args[0]);return require(path.join(coreDir,args[0]));}});
+ vm.runInContext(fs.readFileSync(path.join(coreDir,'health-worker.js'),'utf8'),context,{filename:'health-worker.js'});
+ assert.deepEqual(loaded,['./platform-schema.js','./platform-integrity.js']);const message=request(),endpoint=context.module.exports.createHandler({postMessage:value=>posts.push(value)});assert.equal(endpoint.handle(message),true);assert.equal(posts.length,0);tasks.shift()();assert.equal(posts[0].ok,true);assert.ok(posts[0].value.issues.some(issue=>issue.code==='PART_STOCK_DEFICIT'));assert.deepEqual(JSON.parse(JSON.stringify(posts[0].value)),publicReport(message.source,message.context));
 });
 
 test('a real worker thread runs the same pure endpoint and returns no private diagnostic payload',async t=>{

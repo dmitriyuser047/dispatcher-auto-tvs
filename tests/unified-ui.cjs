@@ -186,6 +186,11 @@ test('transport summary export remains visible and exports the chosen period at 
  }
 });
 
+async function openGsmExtra(view){
+ await page.locator('.gsm-workspace-menu > summary').click();
+ await page.getByRole('combobox',{name:'Дополнительно',exact:true}).selectOption(view);
+}
+
 test('GSM write-off preserves the measured carry and exports its source without a phantom grade deficit',async()=>{
  await page.evaluate(()=>{
   Object.assign(data.vehicles[0],{fuelGrade:'АИ-100',fuel:'gasoline',fuelBalance:0,norm:10});
@@ -205,8 +210,9 @@ test('GSM write-off preserves the measured carry and exports its source without 
  for(const [width,theme] of [[1280,'light'],[960,'dark']]){
   await page.setViewportSize({width,height:width===960?700:900});await page.evaluate(theme=>applyTheme(theme),theme);
   await page.locator('#unifiedNav [data-section="fuelPurchases"]').click();
-  await page.getByRole('button',{name:'Списание',exact:true}).click();
+  await page.locator('[data-gsm-view="writeoff"]').click();
   await page.getByRole('combobox',{name:'Месяц',exact:true}).selectOption('2026-09');
+  await page.locator('[data-gsm-act-step="4"]').click();
   const rows=page.locator('#fpBody tbody tr').filter({hasText:'ТЕСТ001'});
   assert.equal(await rows.count(),1);assert.match(await rows.innerText(),/17,252/);assert.doesNotMatch(await rows.innerText(),/-210/);
   await page.evaluate(()=>{window.__gsmExport=null;});
@@ -216,7 +222,7 @@ test('GSM write-off preserves the measured carry and exports its source without 
   assert.ok(exported.sheets.includes('Основание расхода'));
   assert.equal(Math.round(exported.basis.filter(row=>row[6]==='Расчёт по норме').reduce((sum,row)=>sum+row[4],0)*1000)/1000,318.3);
   await page.getByRole('combobox',{name:'Месяц',exact:true}).selectOption('2026-08');
-  await page.getByRole('button',{name:'Бочки и остатки',exact:true}).click();
+  await openGsmExtra('barrels');
   await page.locator('.gsm-barrel-reconciliation > summary').click();
   const reconciliation=page.getByRole('region',{name:'Сверка марок топлива'});
   assert.equal(await reconciliation.count(),1);assert.match(await reconciliation.innerText(),/\+210,588/);assert.match(await reconciliation.innerText(),/-210,588/);
@@ -256,11 +262,13 @@ async function loadBarrelOverviewFixture(){
  await page.locator('#unifiedNav [data-section="fuelPurchases"]').click();
 }
 
-test('GSM opens barrel stocks first and drill-down exposes real movements and their sources without writes',async()=>{
+test('GSM opens the vehicle statement first and archived stock drill-down retains real movements and sources without writes',async()=>{
  await loadBarrelOverviewFixture();
- assert.deepEqual(await page.evaluate(()=>({view:fpView,month:fpMonth})),{view:'barrels',month:'2026-09'});
- assert.equal(await page.locator('.gsm-nav .sec-tab').first().innerText(),'Бочки и остатки');
- assert.equal(await page.locator('.gsm-nav .sec-tab.active').innerText(),'Бочки и остатки');
+ assert.deepEqual(await page.evaluate(()=>({view:fpView,month:fpMonth})),{view:'statement',month:'2026-09'});
+ assert.equal(await page.locator('.gsm-nav .sec-tab').first().innerText(),'Ведомость по машинам');
+ assert.equal(await page.locator('.gsm-nav .sec-tab.active').innerText(),'Ведомость по машинам');
+ assert.equal(await page.locator('[data-gsm-statement="statement"]').count(),1);
+ await openGsmExtra('barrels');
  await page.getByRole('combobox',{name:'Месяц',exact:true}).selectOption('2026-08');
  const barrel=page.locator('#gsmBarrelCards [data-org="A"][data-grade="АИ-95"]');
  assert.match(await barrel.locator('.gsm-barrel-value').innerText(),/25,000/);
@@ -291,7 +299,7 @@ test('GSM opens barrel stocks first and drill-down exposes real movements and th
  assert.equal(await movements.count(),1);
  assert.match(await movements.innerText(),/АИ-95 → АИ-100/);
  await page.locator('#gsmBarrelMovements').getByRole('button',{name:'Расход',exact:true}).click();
- await page.getByRole('button',{name:'Показать все бочки',exact:true}).click();
+ await page.getByRole('button',{name:'Все сводные остатки',exact:true}).click();
  await page.locator('#gsmBarrelCards [data-org="D"][data-grade="АИ-95"]').click();
  await page.getByRole('combobox',{name:'Вид операции',exact:true}).selectOption('measurement-correction');
  assert.equal(await movements.count(),1);
@@ -306,12 +314,13 @@ test('barrel filters survive an empty month and stocks and operations fit 1280 l
  for(const [width,theme]of[[1280,'light'],[960,'dark']]){
   await page.setViewportSize({width,height:width===960?700:900});await page.evaluate(theme=>applyTheme(theme),theme);
   await page.getByRole('combobox',{name:'Месяц',exact:true}).selectOption('2026-08');
-  await page.getByRole('button',{name:'Показать все бочки',exact:true}).click();
+  await openGsmExtra('barrels');
+  await page.getByRole('button',{name:'Все сводные остатки',exact:true}).click();
   const geometry=await page.evaluate(()=>{const cards=document.getElementById('gsmBarrelCards').getBoundingClientRect();return{overflow:document.documentElement.scrollWidth>innerWidth,cardsInside:cards.left>=0&&cards.right<=innerWidth};});
   assert.deepEqual(geometry,{overflow:false,cardsInside:true});
   await page.locator('#gsmBarrelCards [data-org="C"][data-grade="АИ-95"]').click();
   await page.getByRole('combobox',{name:'Месяц',exact:true}).selectOption('2026-09');
-  await page.getByRole('button',{name:'Бочки и остатки',exact:true}).click();
+  await openGsmExtra('barrels');
   assert.deepEqual(await page.evaluate(()=>({view:fpView,month:fpMonth,org:gsmOrg,grade:gsmFuel})),{view:'barrels',month:'2026-09',org:'C',grade:'АИ-95'});
   assert.equal(await page.getByRole('combobox',{name:'Организация',exact:true}).inputValue(),'C');
   assert.equal(await page.getByRole('combobox',{name:'Топливо',exact:true}).inputValue(),'АИ-95');
@@ -359,7 +368,7 @@ async function loadGsmDiagnosticsFixture(controlledRoutes=false){
   window.__writes=0;window.__disk=JSON.stringify(data);data=await syncLoad();window.__disk=JSON.stringify(data);window.__diagBefore=window.__disk;_lastPersisted=window.__disk;
  },controlledRoutes);
  await page.locator('#unifiedNav [data-section="fuelPurchases"]').click();
- await page.getByRole('button',{name:'Проверить ГСМ',exact:true}).click();
+ await page.locator('[data-gsm-view="diagnostics"]').click();
 }
 
 test('GSM diagnostics shows source causes and keeps live search, scope and supported viewports read-only',async()=>{
@@ -415,10 +424,10 @@ test('GSM diagnostic typed repair links open existing source forms and cancellat
   assert.deepEqual(await page.evaluate(()=>({same:JSON.stringify(data)===window.__diagBefore,writes:window.__writes})),{same:true,writes:0});
  }
  await page.getByRole('button',{name:'Открыть выписку',exact:true}).click();assert.equal(await page.locator('#gsmReceiptOperations').count(),1);
- await page.getByRole('button',{name:'Проверить ГСМ',exact:true}).click();
+ await page.locator('[data-gsm-view="diagnostics"]').click();
  await page.getByRole('button',{name:'Открыть месячную сверку',exact:true}).click();
  assert.deepEqual(await page.evaluate(()=>({view:fpView,month:fpMonth})),{view:'monthly',month:'2026-09'});
- await page.getByRole('button',{name:'Проверить ГСМ',exact:true}).click();
+ await page.locator('[data-gsm-view="diagnostics"]').click();
  await page.getByRole('button',{name:'Открыть историю машины',exact:true}).click();
  assert.equal(await page.evaluate(()=>activeSection),'vehicles');
  assert.deepEqual(await page.evaluate(()=>({year:selectedYear,month:selectedMonth})),{year:2026,month:8});

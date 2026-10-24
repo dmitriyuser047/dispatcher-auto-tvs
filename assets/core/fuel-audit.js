@@ -17,11 +17,14 @@ const GSM_AUDIT_RULES = {
   'journal-missing': ['error', 'Покупка не связана с журналом', 'Проверьте дату, фактическую машину и марку покупки; затем сохраните исправленную покупку.'],
   'journal-ambiguous': ['evidence', 'Несколько возможных записей журнала', 'Сверьте записи одного дня и привяжите покупку к правильной машине и виду топлива.'],
   'opening-difference': ['error', 'Начальные источники не равны остатку карточки', 'Сначала проверьте общий начальный остаток в карточке ТС, затем распределение этого же остатка. Это не остаток выбранного месяца.'],
+  'opening-missing': ['error', 'Входящий остаток не подтверждён', 'Укажите подтверждённое начало учёта или явный начальный остаток, включая ноль. Замер подтверждает перенос только для своего семейства топлива и после своей даты.'],
+  'measurement-idle-conflict': ['error', 'Замер противоречит расходу на холостом ходу', 'Сверьте замер и введённый расход на холостом ходу по первоисточникам. Расход на холостом ходу входит в общий расход и не может быть больше него.'],
   'outside-accounting': ['warning','Период до начала учёта ГСМ','Выберите период начиная с указанной в карточке даты. Входящий остаток не является остатком на более раннюю дату.'],
   'accounting-partial-month': ['warning','Месяц начинается до учёта ГСМ','Полная месячная сверка не сравнивается с частью месяца после начала учёта.'],
   'measurement-surplus': ['evidence', 'Замер выше расчётного остатка', 'Сверьте сам замер, заправки до него и ранее введённый расход. Корректировка не заменяет документ поступления.'],
   'consumption-missing': ['error', 'Есть пробег без основания расхода', 'Проверьте введённый расход или норму. Пробег не требуется менять.'],
   'negative-input': ['error', 'Отрицательное значение в журнале', 'Сверьте литры и пробег с источником; не заменяйте их целевым остатком.'],
+  'source-number': ['error', 'Некорректное число в источнике', 'Откройте исходную запись и укажите подтверждённое десятичное значение. Некорректная запись не является нулём или разрешением применить норму.'],
   'negative-measurement': ['error', 'Отрицательный замер остатка', 'Уточните фактический замер по его источнику.'],
   'multiple-measurements': ['warning', 'Несколько замеров за день', 'В расчёте используется последний замер данного вида топлива после всех строк дня. Сверьте даты и порядок записей.'],
   'fuel-grade': ['warning', 'Марка отличается от карточки машины', 'Другая марка бензина может быть допустима. Изменяйте только подтверждённую ошибку выписки или карточки.'],
@@ -78,6 +81,8 @@ function gsmAuditModel(input, options) {
     if (p) out.push(ref('purchase', p.id, 'Покупка', { date: p.date, vehicleId: p.vehicleId }));
     if (r) out.push(ref(vehicles.has(r.vehicleId) ? 'record' : 'orphan-record', r.id,
       vehicles.has(r.vehicleId) ? 'Журнал' : 'Восстановить связь с ТС', { date: r.date, vehicleId: r.vehicleId }));
+    const measurement=present(row.measurementRecordId)&&row.measurementRecordId!==row.recordId&&records.get(row.measurementRecordId);
+    if(measurement)out.push(ref('record',measurement.id,'Проверить замер',{date:measurement.date,vehicleId:measurement.vehicleId}));
     const cardNo = row.cardNo || p && p.cardNo || r && r.fuelCardNum;
     const card = cardNo && db.fuelCards.find(card => gsmCardKey(card.number) === gsmCardKey(cardNo));
     if (card) out.push(ref('card', card.id, 'Карта и история', { cardNo: card.number }));
@@ -172,6 +177,7 @@ function gsmAuditModel(input, options) {
       linkedPurchasesFor(issue.recordId).forEach(p => sourceRefs.push(...refsFor({ purchaseId: p.id })));
     const repairRefs = sourceRefs.slice();
     if (issue.code === 'opening-difference' && vehicles.has(vehicleId)) repairRefs.push(ref('vehicle', vehicleId, 'Общий начальный остаток', { vehicleId }), ref('opening', vehicleId, 'Распределение источников', { vehicleId }));
+    if (issue.code === 'opening-missing' && vehicles.has(vehicleId)) repairRefs.push(ref('opening', vehicleId, 'Подтвердить начало учёта', { vehicleId }));
     if (issue.code === 'monthly-difference') repairRefs.push(ref('monthly', vehicleId, 'Месячная сверка', { vehicleId, month: String(issue.date || '').slice(0, 7) }));
     add({ code: issue.code, category: rule[0], title: rule[1], message: issue.message, whatToCheck: rule[2],
       vehicleId, org: issue.org || sourceScopeValue.org, orgs: (issue.orgs || []).length ? issue.orgs : sourceScopeValue.orgs,

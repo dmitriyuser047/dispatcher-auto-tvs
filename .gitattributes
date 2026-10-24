@@ -12,3 +12,6 @@
 /vendor/tesseract-core/** -text
 /assets/ocr/models-manifest.json -text
 /scripts/ocr-native/patches/** text eol=lf
+
+# Frozen print runtime participates in byte-level compatibility fixtures.
+/tests/fixtures/document-print-v1-before-v5.cjs -text

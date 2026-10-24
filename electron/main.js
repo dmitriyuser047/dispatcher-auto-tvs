@@ -164,6 +164,17 @@ async function freshDataCacheContext(event){
   }catch(error){assertCache();invalidateDataBinding(event);if([401,403].includes(error.status)||error.code==='ACCESS_REVOKED')return {version:1,unavailable:'ACCESS_REVOKED'};throw Object.assign(new Error('Не удалось подтвердить текущие права сервера'),{code:error.code||'ACCESS_UNVERIFIED',status:error.status||0});}
 }
 let recoveryService=null;
+let storageExecutor=null;
+function localStorageExecutor(){
+  if(!storageExecutor)storageExecutor=require('./storage-executor.cjs').createStorageExecutor({onEvent:diagnosticBoundary.record});
+  return storageExecutor;
+}
+function localStorageWrite(kind,context,input,options={}){
+  return localStorageExecutor().run(kind,context.directory,input,{...options,principal:context.principal},{
+    assertCurrent:()=>assertOperationContext(context),
+    backup:{directory:path.join(context.directory,'backups'),keep:30,optional:true}
+  });
+}
 let writeSessions=null;
 function invalidateWriteSession(senderId){if(typeof writeSessions!=='undefined')writeSessions?.invalidate(senderId);}
 function mainWriteSessions(){
@@ -276,8 +287,7 @@ function operationRecovery(){
         if(context.client){if(networkConfigError)throw Error(networkConfigError);const proof=await mainWriteSessions().remoteOptions(context);assertOperationContext(context);return command?server.postCommands(context.host,context.port,json,proof):server.postSections(context.host,context.port,json,proof);}
         const proof=mainWriteSessions().localOptions(context);
         diagnosticBoundary.record({phase:'host-received',code:'pending',operationId:payload.operation?.id,databaseToken:context.databaseToken,backend:'local'});
-        if(command)return storage.executeCommand(context.directory,payload,{principal:context.principal,...proof,beforeCommit:()=>{ensureDirs();createDailyBackup();}});
-        return storage.writeSections(context.directory,payload,{principal:context.principal,...proof,beforeCommit:()=>{ensureDirs();createDailyBackup();}});
+        return localStorageWrite(command?'executeCommand':'writeSections',context,payload,proof);
       },
       lookup:async(context,id,digest)=>{
         assertOperationContext(context);
@@ -562,9 +572,10 @@ app.whenReady().then(() => {
       }
     }
     try {
-      const res = storage.writeAll(getDataDir(), data, { databaseToken:payload.databaseToken, operation:payload.operation,
-        base:payload.base, scopeViews:payload.scopeViews, requireBase:true,...mainWriteSessions().localOptions(capturedOperationContext(_event,binding)),beforeCommit:()=>{ensureDirs();createDailyBackup();},
-        principal:{ id:'local-profile', name:getActiveUser().name || 'Локальный пользователь', role:'admin' } });
+      const context=capturedOperationContext(_event,binding);
+      const res = await localStorageWrite('writeAll', context, data, { databaseToken:payload.databaseToken, operation:payload.operation,
+        base:payload.base, scopeViews:payload.scopeViews, requireBase:true,...mainWriteSessions().localOptions(context) });
+      assertOperationContext(context);
       if (!res.ok) return false;
       binding.revisions = { ...res.revisions };
       if (res.changed.length) console.log('[write-data] разделы: ' + res.changed.join(', '));
@@ -868,7 +879,7 @@ app.whenReady().then(() => {
     return await server.start({
       port,
       dataDir: startupDir,
-      backupFn: () => { storage.makeDailyBackup(startupDir,path.join(startupDir,'backups'),30); },
+      backup: {directory:path.join(startupDir,'backups'),keep:30},
       serverName: user.name || os.hostname(),
       renderPdf:renderArchivedDocumentPdf,
       key: settings.networkKey,
@@ -1372,7 +1383,7 @@ app.whenReady().then(() => {
   createWindow();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (!storageShutdown && BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 }).catch(error => {
   console.error('[startup]', error && error.stack || error);
@@ -1380,6 +1391,24 @@ app.whenReady().then(() => {
   app.exit(1);
 });
 
+let storageShutdown=null,storageQuitApproved=false;
+app.on('before-quit', event => {
+  if (storageQuitApproved) return;
+  event.preventDefault();
+  if (storageShutdown) return;
+  // Confirm renderer saves before closing their windows. No new edits can be
+  // admitted while the server and its remaining physical transaction drain.
+  storageShutdown=(async()=>{
+    const windows=BrowserWindow.getAllWindows().filter(win=>!win.isDestroyed());
+    if (!(await Promise.all(windows.map(requestSaveBarrier))).every(Boolean)) { storageShutdown=null; return; }
+    for (const win of windows) if (!win.isDestroyed()) { approvedCloseWindows.add(win.id); win.close(); }
+    try { await server.stop(); } catch(error) { console.error('[server stop] '+error.message); }
+    await storageExecutor?.close();
+    try { flushDiagnostics(true); } catch(error) { console.warn('[diagnostics shutdown] '+error.message); }
+    storageQuitApproved=true;
+    app.quit();
+  })().catch(error=>{storageShutdown=null;console.error('[storage shutdown] '+error.message);});
+});
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });

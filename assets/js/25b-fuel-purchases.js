@@ -13,7 +13,7 @@
 // Удалённая покупка не стирается, а помечается deleted: иначе повторная
 // загрузка той же выписки вернула бы её обратно.
 
-let fpView    = 'barrels';
+let fpView    = 'statement';
 let fpMonth   = '';        // 'ГГГГ-ММ' или 'all'
 let fpVehicle = null;
 let fpSearch  = '';
@@ -678,30 +678,31 @@ async function fpEditSave(id) {
     cardNo, ...sourceChanges, sourceProvider: sameSource && p.sourceProvider ? p.sourceProvider : owner.provider,
     cardVehicleId: sameSource && p.cardVehicleId ? p.cardVehicleId : owner.vehicleId,
   };
-  let submitted = data;
+  let rollback = captureSaveRollback(before), committed = false;
   fpEditSaving = true;
   const button = document.getElementById('fpe_save'); if (button) button.disabled = true;
   try {
     if (vehicleId && typeof gsmStatementPlan === 'function') {
       const plan = gsmStatementPlan(data, id, { ...changes, sourceOrgOverride, sourceOrgReason });
       data = gsmStatementApply(data, plan);
-      submitted = data;
+      rollback = captureSaveRollback(before);
       const updated = data.fuelPurchases.find(x => x.id === id);
       Object.assign(updated, { time: changes.time, comment: changes.comment });
       rebuildIndex();
     } else fpUpdate(p, changes);
-    submitted = data;
+    rollback = captureSaveRollback(before);
     if (!await saveData(data, { noMerge: true })) {
-      if (data === submitted) { data = JSON.parse(before); rebuildIndex(); }
+      restoreSaveRollback(rollback);
       showFieldError('Не записано. Изменения сохранены в форме; проверьте соединение и повторите.', 'fpe_qty'); return;
     }
+    committed = true;
     if (typeof gsmStatementDrafts !== 'undefined') gsmStatementDrafts.delete(id);
     fpEditContext = null;
     closeModal('genericModal');
     if (fpView === 'vehicle' && vehicleId !== fpVehicle) showToast && showToast('Заправка перенесена на ' + fpVehicleTitle((data.vehicles || []).find(v => v.id === vehicleId)));
     renderFuelPurchases();
   } catch (e) {
-    if (data === submitted) { data = JSON.parse(before); rebuildIndex(); }
+    if (!committed) restoreSaveRollback(rollback);
     showFieldError(e.message, 'fpe_vehicle');
   } finally { fpEditSaving = false; if (button) button.disabled = false; }
 }
@@ -759,7 +760,8 @@ async function fpDeleteCommit() {
   if (mode === 'keep' && !fpDeleteRemaining(p, rec).length) { fail('Нельзя убрать последнюю связанную покупку с сохранением журнала. Сначала проверьте источник поступления'); return; }
   if (!reason) { fail('Укажите причину удаления'); return; }
   if (!document.getElementById('fpd_confirm')?.checked) { fail('Подтвердите действие после сверки с исходником'); return; }
-  const before = JSON.stringify(data), submitted = data, at = new Date().toISOString(), recordId = rec?.id || null, issuedBefore = rec?.fuelIssued ?? null;
+  const rollback = captureSaveRollback(), at = new Date().toISOString(), recordId = rec?.id || null, issuedBefore = rec?.fuelIssued ?? null;
+  let committed = false;
   const button = document.getElementById('fpd_commit');
   fpDeleteSaving = true; if (button) button.disabled = true;
   try {
@@ -768,12 +770,13 @@ async function fpDeleteCommit() {
     p.deletion = { mode: mode === 'keep' ? 'preserve-journal' : 'remove-journal', reason, at, recordId,
       journalIssuedBefore: issuedBefore, journalIssuedAfter: rec?.fuelIssued ?? null };
     if (!await saveData(data, { noMerge: true })) {
-      if (data === submitted) { data = JSON.parse(before); rebuildIndex(); }
+      restoreSaveRollback(rollback);
       fail('Не записано. Выбор и причина сохранены в форме; проверьте соединение и повторите.'); return;
     }
+    committed = true;
     fpDeletePending = null; closeModal('genericModal'); renderFuelPurchases();
   } catch (e) {
-    if (data === submitted) { data = JSON.parse(before); rebuildIndex(); }
+    if (!committed) restoreSaveRollback(rollback);
     fail(e.message || 'Не удалось удалить заправку');
   } finally { fpDeleteSaving = false; if (button) button.disabled = false; }
 }
@@ -1038,9 +1041,9 @@ function fpNegRows() {
     let min = Infinity, minDate = '', firstNeg = '', negRecs = 0, issued = 0, spent = 0;
     const monthEnd = {}, monthIssued = {}, monthKm = {};
     recs.forEach(r => {
-      const b = bal[r.id];
-      if (b < min) { min = b; minDate = r.date; }
-      if (b < -0.05) { negRecs++; if (!firstNeg) firstNeg = r.date; }
+      const b = TvsFuelEngine.recordBalanceAt(bal,r.id);
+      if (b != null && b < min) { min = b; minDate = r.date; }
+      if (b != null && b < -0.05) { negRecs++; if (!firstNeg) firstNeg = r.date; }
       const m = r.date.slice(0, 7);
       monthEnd[m] = b;
       monthIssued[m] = (monthIssued[m] || 0) + (+r.fuelIssued || 0);
@@ -1049,16 +1052,16 @@ function fpNegRows() {
       spent += (r.fuelActual != null ? +r.fuelActual : (+r.fuelUsed || 0)) + (+r.fuelIdle || 0);
     });
     if (!(min < -0.05)) return null;
-    const now = bal[recs[recs.length - 1].id];
-    if (now >= -0.05 && !fpNegWithRecovered) return null;
+    const now = TvsFuelEngine.recordBalanceAt(bal,recs[recs.length - 1].id);
+    if (now != null && now >= -0.05 && !fpNegWithRecovered) return null;
     // Подсказка: месяцы, где машина ездила, а выдачи нет
     const dryMonths = Object.keys(monthKm).filter(m => monthKm[m] > 0 && !monthIssued[m]).sort();
     const hint = !issued ? 'в журнале нет ни одной заправки'
       : dryMonths.length ? 'нет заправок за ' + dryMonths.map(m => fpMonthLabel(m).toLowerCase()).join(', ')
       : 'расход больше выдачи';
     return { v, now, min, minDate, firstNeg, negRecs, issued, spent, start: +v.fuelBalance || 0,
-             monthEnd, last: recs[recs.length - 1].date, hint, recovered: now >= -0.05 };
-  }).filter(Boolean).sort((a, b) => a.now - b.now);
+             monthEnd, last: recs[recs.length - 1].date, hint, recovered: now != null && now >= -0.05 };
+  }).filter(Boolean).sort((a, b) => (a.now ?? Infinity) - (b.now ?? Infinity));
 }
 
 function fpNegativeHtml() {

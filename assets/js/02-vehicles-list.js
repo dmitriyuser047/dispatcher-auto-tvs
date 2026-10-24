@@ -191,7 +191,7 @@ function renderDetail(v) {
       const factDevHtml = factDev !== null
         ? ` <span style="font-size:11px;color:${factDev > 0 ? 'var(--red)' : 'var(--green)'};font-weight:600">${factDev > 0 ? '+' : ''}${factDev.toFixed(1)}</span>`
         : '';
-      const balance = balMap[r.id];
+      const balance = TvsFuelEngine.recordBalanceAt(balMap,r.id);
       const balColor = balance < 0 ? 'var(--red)' : balance === 0 ? 'var(--text3)' : 'var(--green)';
       tableRows += `<tr>
         <td style="text-align:center;padding:0;width:28px"><input type="checkbox" class="rec-check" data-recid="${htmlEsc(r.id)}" onchange="recUpdateToolbar()"></td>
@@ -299,10 +299,10 @@ function renderDetail(v) {
         <div class="stat-value">${avgConsumption > 0 ? avgConsumption.toFixed(1) : '—'} <span class="stat-unit">л/100км</span></div>
         <div class="stat-sub">${v.norm ? 'Норма: ' + v.norm + ' л/100км' : 'Норма не задана'}</div>
       </div>
-      <div class="stat-card ${currentFuelBalance < 0 ? 'accent-red' : currentFuelBalance < 20 ? 'accent-yellow' : 'accent-green'}">
+      <div class="stat-card ${currentFuelBalance===null?'':currentFuelBalance < 0 ? 'accent-red' : currentFuelBalance < 20 ? 'accent-yellow' : 'accent-green'}">
         <div class="stat-label">Остаток топлива</div>
-        <div class="stat-value" style="color:${currentFuelBalance < 0 ? 'var(--red)' : currentFuelBalance < 20 ? 'var(--yellow)' : 'inherit'}">${currentFuelBalance===null?'—':currentFuelBalance.toLocaleString('ru', {maximumFractionDigits:3})} <span class="stat-unit">л</span></div>
-        <div class="stat-sub">${currentFuelBalance===null?'Учёт ещё не начат':fuelAccountingStatusHtml('vehicles',v)}</div>
+        <div class="stat-value" style="color:${currentFuelBalance===null?'var(--text3)':currentFuelBalance < 0 ? 'var(--red)' : currentFuelBalance < 20 ? 'var(--yellow)' : 'inherit'}">${currentFuelBalance===null?'—':currentFuelBalance.toLocaleString('ru', {maximumFractionDigits:3})} <span class="stat-unit">л</span></div>
+        <div class="stat-sub">${currentFuelBalance===null?(fuelReportBalanceLabel('vehicles',v)==='Учёт не начат'?'Учёт ещё не начат':fuelReportBalanceLabel('vehicles',v)):fuelAccountingStatusHtml('vehicles',v)}</div>
       </div>
     </div>`;
 

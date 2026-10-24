@@ -14,6 +14,13 @@ function validateMetadata(pkg){
 
 function writeAtomic(file,text){fs.writeFileSync(file+'.next',text);fs.renameSync(file+'.next',file);}
 
+const git=(root,args)=>execFileSync('git',args,{cwd:root,encoding:'utf8',windowsHide:true}).trim();
+function sourceDirty(root){return !!git(root,['status','--porcelain','--untracked-files=all']);}
+function assertCleanSource(root){
+  if(sourceDirty(root))throw Object.assign(Error('Production release requires a clean source commit, including all new non-ignored files'),{code:'DIRTY_RELEASE_SOURCE'});
+  return true;
+}
+
 function writeManifest(root){
   const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
   const installer=validateMetadata(pkg),directory=path.join(root,'dist');
@@ -24,14 +31,13 @@ function writeManifest(root){
   const bytes=fs.readFileSync(path.join(directory,installer));
   const sha256=crypto.createHash('sha256').update(bytes).digest('hex');
   const sha512=crypto.createHash('sha512').update(bytes).digest('base64');
-  const git=args=>execFileSync('git',args,{cwd:root,encoding:'utf8',windowsHide:true}).trim();
-  const sourceCommit=git(['rev-parse','HEAD']);
+  const sourceCommit=git(root,['rev-parse','HEAD']);
   if(!/^[a-f0-9]{40}$/i.test(sourceCommit))throw Error('Cannot identify the installer source commit');
-  const manifest={version:pkg.version,sourceVersion:pkg.version,sourceCommit,sourceDirty:!!git(['status','--porcelain','--untracked-files=no']),name:pkg.name,appId:pkg.build.appId,installer,bytes:bytes.length,sha256,sha512,archiveSha256:verification.archiveSha256,packageIntegrity:{files:verification.integrity.files,unpackedFiles:verification.integrity.unpackedFiles,mismatches:0},published:false};
+  const manifest={version:pkg.version,sourceVersion:pkg.version,sourceCommit,sourceDirty:sourceDirty(root),name:pkg.name,appId:pkg.build.appId,installer,bytes:bytes.length,sha256,sha512,archiveSha256:verification.archiveSha256,packageIntegrity:{files:verification.integrity.files,unpackedFiles:verification.integrity.unpackedFiles,mismatches:0},published:false};
   writeAtomic(path.join(directory,'release-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
   writeAtomic(path.join(directory,'SHA256SUMS.txt'),sha256+'  '+installer+'\n');
   return manifest;
 }
 
-module.exports={validateMetadata,writeManifest};
-if(require.main===module){try{process.stdout.write(JSON.stringify(writeManifest(path.resolve(__dirname,'..')),null,2)+'\n');}catch(error){console.error(error);process.exitCode=1;}}
+module.exports={validateMetadata,writeManifest,assertCleanSource};
+if(require.main===module){try{const root=path.resolve(__dirname,'..');assertCleanSource(root);process.stdout.write(JSON.stringify(writeManifest(root),null,2)+'\n');}catch(error){console.error(error);process.exitCode=1;}}

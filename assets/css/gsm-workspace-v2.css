@@ -1,0 +1,27 @@
+.gsm-workspace .gsm-heading { position: relative; }
+.gsm-workspace-menu { position: static; }
+.gsm-workspace-menu > summary { list-style: none; cursor: pointer; }
+.gsm-workspace-menu > summary::-webkit-details-marker { display: none; }
+.gsm-workspace-menu[open] > summary { border-color: var(--accent); }
+.gsm-workspace-menu-content { position: absolute; top: calc(100% + 6px); right: 0; z-index: 12; display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: min(300px, calc(100vw - 50px)); padding: 14px; border: 1px solid var(--border2); border-radius: 7px; background: var(--bg2); box-shadow: 0 8px 24px #0002; }
+.gsm-workspace-menu-content > label { display: flex; flex-direction: column; gap: 7px; color: var(--text2); font-size: 12px; }
+.gsm-workspace-menu-content select { width: 100%; min-width: 0; }
+.gsm-workspace .gsm-nav { gap: 6px; }
+.gsm-workspace .gsm-nav .sec-tab { white-space: normal; }
+.gsm-workspace .gsm-filters { padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.gsm-operation-choices { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.gsm-operation-choices p { margin: 0 0 12px; color: var(--text2); line-height: 1.6; }
+.gsm-operation-choices .btn { white-space: normal; }
+.gsm-physical-tanks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 14px; }
+.gsm-physical-tank { min-width: 0; padding: 17px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; }
+.gsm-physical-tank .gsm-section-title { align-items: flex-start; }
+.gsm-physical-tank .gsm-section-title h3 { margin-top: 0; overflow-wrap: anywhere; }
+.gsm-physical-tank dl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 12px; margin: 14px 0 18px; font-size: 13px; }
+.gsm-physical-tank dt { color: var(--text2); }
+.gsm-physical-tank dd { margin: 0; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.gsm-operations .gsm-section-title { margin-bottom: 14px; }
+@media (max-width: 600px) {
+  .gsm-workspace-menu-content { right: 0; left: auto; }
+  .gsm-workspace .gsm-filters > select { width: 100%; }
+  .gsm-workspace .gsm-actions > .btn { white-space: normal; }
+}

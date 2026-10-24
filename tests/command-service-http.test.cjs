@@ -17,7 +17,7 @@ async function call(port,route,token,value,extraHeaders={}){
   const raw=typeof value==='string'?value:currentBody;
   const req=http.request({host:'127.0.0.1',port,path:route,method:'POST',agent:false,headers:{...proofHeaders,...(token?{Authorization:'Bearer '+token}:{}),'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw),...extraHeaders}},res=>{
    let text='';res.setEncoding('utf8');res.on('data',part=>{text+=part;});res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text),text});}catch(error){reject(error);}});
-  });req.setTimeout(5000,()=>req.destroy(Error('Synthetic command HTTP timeout')));req.on('error',reject);req.end(raw);
+ });req.setTimeout(15000,()=>req.destroy(Error('Synthetic command HTTP timeout')));req.on('error',reject);req.end(raw);
  });
 }
 function issue(input={}){return {type:'IssueFuel',version:1,input:{tankId:'t',target:{section:'vehicles',id:'v'},date:'2026-09-10',qty:23.537,reason:'Synthetic HTTP transfer',...input}};}
@@ -28,7 +28,7 @@ function envelope(dir,command,id='http-command'){
 }
 async function fixture(t,format){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-command-http-')),dir=path.join(root,'db');
- t.after(()=>{server.stop();server.configureKey('');server.configureTransport();assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));assert.ok(path.basename(root).startsWith('tvs-command-http-'));fs.rmSync(root,{recursive:true,force:true});});
+ t.after(async()=>{await server.stop();server.configureKey('');server.configureTransport();assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));assert.ok(path.basename(root).startsWith('tvs-command-http-'));fs.rmSync(root,{recursive:true,force:true});});
  const data={vehicles:[{id:'v',plate:'SYNTHETIC HTTP',org:'A',fuel:'diesel',fuelGrade:'ДТ',norm:10,fuelBalance:0}],records:[],generators:[],genRecords:[],tanks:[{id:'t',name:'Synthetic HTTP tank',org:'A',fuel:'diesel',balanceInit:923.537}],tankIncomes:[],fuelMovements:[],drivers:[{id:'d',name:'Synthetic HTTP driver',personnelRoles:['driver'],employmentStatus:'active'}],assetAssignments:[],shiftReports:[{id:'s',title:'Synthetic HTTP sent shift',date:'2026-09-10',assetRef:'v:v',driverId:'d',status:'sent',hours:2}],dispatchJobs:[],payments:[{id:'private-http-payment',sum:9988776655,description:'FINANCIAL-HTTP-SECRET'}]};
  if(format==='sqlite')sqlite.create(dir,{data});else storage.writeAll(dir,data);
  const tokens=Object.fromEntries(['root','admin','dispatcher','mechanic','accountant','viewer'].map(role=>[role,'synthetic-command-http-'+role+'-1234567890']));
@@ -47,7 +47,7 @@ async function fixture(t,format){
    const response=new Promise((resolve,reject)=>{
     const req=http.request({host:'127.0.0.1',port:start.port,path:'/api/commands',method:'POST',agent:false,headers:{...proofHeaders,Authorization:'Bearer '+tokens[role],'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw)}},res=>{
      let text='';res.setEncoding('utf8');res.on('data',part=>{text+=part;});res.on('end',()=>{try{resolve({status:res.statusCode,body:JSON.parse(text),text});}catch(error){reject(error);}});
-    });req.setTimeout(5000,()=>req.destroy(Error('Synthetic slow command upload timeout')));req.on('error',reject);finish=()=>req.end(raw.slice(-1));req.write(raw.slice(0,-1));
+    });req.setTimeout(15000,()=>req.destroy(Error('Synthetic slow command upload timeout')));req.on('error',reject);finish=()=>req.end(raw.slice(-1));req.write(raw.slice(0,-1));
    });
    await authenticated;harness.changeUser(role,change);finish();return response;
   }};

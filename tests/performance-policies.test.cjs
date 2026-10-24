@@ -6,7 +6,7 @@ const policies=require('../assets/core/platform-policies.js');
 // Preserve the independent original dispatch pairwise algorithm as an oracle.
 // Inventory now has a strict exact Decimal projector with its own oracle cases.
 function legacyOracle(){
- const file=path.resolve(__dirname,'../assets/core/platform-policies.js');let source=fs.readFileSync(file,'utf8');
+ const file=path.resolve(__dirname,'../assets/core/workflow-inspection.js');let source=fs.readFileSync(file,'utf8');
  const replacements=[
   ["const jobs = rows(db,'dispatchJobs'), dispatchIndex=dispatchOverlapPeers(jobs,db);","const jobs = rows(db,'dispatchJobs'); const overlap=(a,b)=>date(a.start,true)&&date(a.end,true)&&date(b.start,true)&&date(b.end,true)&&Date.parse(a.start)<Date.parse(b.end)&&Date.parse(b.start)<Date.parse(a.end);"],
   ['const interval=dispatchIndex.intervals[jobIndex];',''],
@@ -24,7 +24,7 @@ function same(db,ctx=context){
 }
 function job(id,status='assigned',extra={}){return {...(id===undefined?{}:{id}),status,assetRef:'v:a',driverId:'d',start:'2026-10-22T08:00:00Z',end:'2026-10-22T17:00:00Z',...extra};}
 function countedPolicy(){
- const file=path.resolve(__dirname,'../assets/core/platform-policies.js'),load=createRequire(file),calendar=load('./business-calendar.js');let reads=0;
+ const file=path.resolve(__dirname,'../assets/core/workflow-inspection.js'),load=createRequire(file),calendar=load('./business-calendar.js');let reads=0;
  const module={exports:{}},counted={...calendar,timeAt(...args){reads++;return calendar.timeAt(...args);}};
  new Function('require','module','exports',fs.readFileSync(file,'utf8'))(name=>name==='./business-calendar.js'?counted:load(name),module,module.exports);
  return {api:module.exports,reads:()=>reads};

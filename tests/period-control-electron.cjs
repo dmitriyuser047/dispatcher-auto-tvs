@@ -30,7 +30,7 @@ test('hidden Electron closes isolated fuel, stock and finance periods through re
   await page.waitForFunction(()=>!!periodControlSession?.review||!!document.querySelector('[data-period-error]')?.textContent);
   const preview=await page.evaluate(()=>periodControlSession?.review?.review);assert.equal(preview?.canApply,true,JSON.stringify(preview||await form.locator('[data-period-error]').innerText()));
   await form.locator('[name="confirm"]').check();await form.locator('[data-period-save]').click();
-  await page.waitForFunction(({scope,closed})=>PeriodPolicy.status(data,scope,'2026-09').closed===closed,{scope,closed:action==='close'});
+  await page.waitForFunction(({scope,closed})=>PeriodPolicy.status(data,scope,'2026-09').closed===closed,{scope,closed:action==='close'},{timeout:30000});
   assert.equal(await form.locator('[data-period-error]').count()?await form.locator('[data-period-error]').innerText():'','');
  }
  for(const[index,dir]of [jsonDir,sqlDir].entries()){

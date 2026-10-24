@@ -233,7 +233,7 @@ function prepareWriteoffSections(previous, sections, options = {}) {
     const old = oldById.get(row.id);
     if (!old) {
       const withoutOwnDocument = { ...next, fuelWriteoffs:rows.filter(other => other.id !== row.id) };
-      return engine.forVersion(4).post(withoutOwnDocument, { ...row.scope, date:row.date, basisNote:row.basisNote },
+      return engine.post(withoutOwnDocument, { ...row.scope, date:row.date, basisNote:row.basisNote },
         { id:row.id, number:row.number, postedAt:at, postedBy:actor, expectedFingerprint:row.sourceFingerprint });
     }
     if (old.status === 'posted' && row.status === 'void')
@@ -391,7 +391,11 @@ function readAll(dataDir) {
  * Возвращает список записанных разделов и новые номера версий.
  */
 function writeAll(dataDir, data, options = {}) {
-  if (options.databaseToken != null && options.databaseToken !== databaseToken(dataDir)) throw new Error('База данных изменилась. Заново откройте её перед сохранением.');
+  if (options.databaseToken != null) {
+    const actualToken = databaseToken(dataDir);
+    if (options.databaseToken !== actualToken) throw Object.assign(new Error('База данных изменилась. Заново откройте её перед сохранением.'),
+      { code:'DATABASE_CHANGED',status:409,databaseChanged:true,databaseToken:actualToken });
+  }
   if (!data || !Array.isArray(data.vehicles) || !Array.isArray(data.records)) throw new Error('Неполная база: нужны vehicles и records');
   SECTIONS.forEach(n => { if (n in data) validateRows(n, data[n]); });
   const historyInputSections=Object.keys(data);

@@ -204,7 +204,7 @@ test('pure plan clock, metadata and source boundaries do not execute getters or 
 });
 
 test('browser UMD dependencies execute the same planners as CommonJS without I/O, application state or clock reads',()=>{
-  const browser=vm.createContext({});const files=['platform-contracts','entity-identity','decimal-core','accounting-boundary','business-calendar','personnel-planning','fuel-stock','personnel-engine','fuel-engine','fuel-movement-policy','platform-commands'];
+  const browser=vm.createContext({});const files=['platform-contracts','command-source','entity-identity','decimal-core','accounting-boundary','business-calendar','personnel-kinds','personnel-planning','fuel-stock','personnel-engine','fuel-engine','fuel-movement-policy','issue-fuel','platform-commands'];
   for(const name of files){const file=path.join(__dirname,'../assets/core',name+'.js');vm.runInContext(fs.readFileSync(file,'utf8'),browser,{filename:file});}
   assert.ok(Object.isFrozen(browser.PlatformCommands));assert.deepEqual(Object.keys(browser.PlatformCommands),Object.keys(commands));
   for(const command of [issue(),issue('generators',9),accept(),assign()])assert.deepEqual(copy(browser.PlatformCommands.plan(db(),command,ctx())),commands.plan(db(),command,ctx()));

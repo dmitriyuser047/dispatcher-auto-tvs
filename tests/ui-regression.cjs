@@ -97,6 +97,7 @@ test('act dialog rejects invalid dates without exporting or closing', async () =
 test('GSM workspace exports the restored act and does not change the database', async () => {
   await page.evaluate(() => { fpMonth = '2026-10'; fpView = 'writeoff'; switchSection('fuelPurchases'); window.__actBefore = JSON.stringify(data);
     XLSX.writeFile = (wb, name) => { window.__actWorkbook = wb; window.__actFilename = name; }; });
+  await page.locator('.gsm-act-steps').waitFor();await page.locator('[data-gsm-act-step="4"]').click();await page.locator('.gsm-writeoff').waitFor();
   await page.getByRole('button', { name: 'Выгрузить черновик', exact: true }).click();
   const out = await page.evaluate(() => {
     const wb = window.__actWorkbook, ws = wb.Sheets['Акт списания ГСМ'];

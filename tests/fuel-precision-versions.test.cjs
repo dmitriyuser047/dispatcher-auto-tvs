@@ -22,7 +22,7 @@ test('v1 reproduces the pre-step-8 ledger, journal, preview, fingerprint and ent
 
 test('immutable versions remain independent across interleaved calculations and v2 signed corrections conserve litres',()=>{
   assert.ok(Object.isFrozen(fuel.forVersion(1)));assert.ok(Object.isFrozen(fuel.forVersion(2)));assert.equal(fuel.forVersion(1),fuel.forVersion(1));
-  for(const version of [undefined,0,5,'1',null])assert.throws(()=>fuel.forVersion(version),{code:'CALCULATION_VERSION'});
+  for(const version of [undefined,0,7,'1',null])assert.throws(()=>fuel.forVersion(version),{code:'CALCULATION_VERSION'});
   const db=fixture();db.vehicles[0].fuelGrade='АИ-92';db.vehicles[0].fuelBalance=0;db.fuelPurchases=[];db.records=[{id:'a',vehicleId:'v',date:'2026-09-01',km:1,fuelActual:1.2345,fuelGrade:'АИ-92'},{id:'b',vehicleId:'v',date:'2026-09-02',fuelIssued:1.2345,fuelActual:0,fuelGrade:'АИ-95'}];
   const before=JSON.stringify(db),old=fuel.forVersion(1).buildLedger(db,period),modern=fuel.buildLedger(db,period);
   assert.ok(Math.abs(old.rows.reduce((sum,row)=>sum+row.correction,0)-.001)<1e-12);
@@ -30,12 +30,12 @@ test('immutable versions remain independent across interleaved calculations and 
   assert.equal(hash(fuel.forVersion(1).buildLedger(db,period)),hash(old));assert.equal(JSON.stringify(db),before);
 });
 
-test('new acts carry the current v4, old missing-version acts retain their source locks, and a client cannot insert a new v1 act',()=>{
+test('new acts carry the current v6, old missing-version acts retain their source locks, and a client cannot insert a new v1 act',()=>{
   const db=fixture(),legacy=posted(writeoff.forVersion(1),db),saved={...db,fuelWriteoffs:[legacy]},before=JSON.stringify(saved);
   assert.equal(legacy.calculationVersion,undefined);assert.equal(writeoff.validateDocuments(saved,copy(saved)),true);
   const future=copy(saved);future.records.push({...future.records[0],id:'future',date:'2026-10-01'});assert.equal(writeoff.validateDocuments(saved,future),true);
   const edited=copy(saved);edited.records[0].fuelActual+=.001;assert.throws(()=>writeoff.validateDocuments(saved,edited),{code:'POSTED_SOURCE_LOCKED'});
-  assert.equal(JSON.stringify(saved),before);const modern=posted(writeoff,db);assert.equal(modern.calculationVersion,4);assert.notEqual(modern.sourceFingerprint,legacy.sourceFingerprint);
+  assert.equal(JSON.stringify(saved),before);const modern=posted(writeoff,db);assert.equal(modern.calculationVersion,6);assert.notEqual(modern.sourceFingerprint,legacy.sourceFingerprint);
   assert.equal(writeoff.validateDocuments(db,{...db,fuelWriteoffs:[modern]}),true);assert.throws(()=>writeoff.validateDocuments(db,saved),{code:'STALE_SOURCES'});
   const forged=copy(saved);forged.fuelWriteoffs[0].calculationVersion=99;assert.throws(()=>writeoff.validateDocuments(forged,copy(forged)),{code:'CALCULATION_VERSION'});
 });

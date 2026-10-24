@@ -1,6 +1,56 @@
 // Переключение разделов и главное меню
 // Выделено из index.html
 
+// Navigation and incoming changes use the same screen registry. Refreshing a
+// screen retains its selection; opening a section starts its normal list view.
+const WORKSPACE_RENDERERS = Object.freeze({
+  home: () => renderMainMenu(),
+  system: () => renderPlatformSystem(),
+  drivers: () => renderPersonnelSection(),
+  operators: () => renderPersonnelSection(),
+  workflows: () => renderWorkflows(),
+  dispatch: () => renderWorkflows(),
+  toSchedule: () => renderToScheduleSection(),
+  reestr: () => renderReestrSection(),
+  vehicles: opening => {
+    const vehicle = !opening && data.vehicles.find(row => row.id === selectedVehicleId);
+    if (vehicle) renderDetail(vehicle); else renderVehicleCards();
+  },
+  generators: opening => {
+    const generator = !opening && data.generators.find(row => row.id === selectedGeneratorId);
+    if (generator) renderGenDetail(generator); else renderGeneratorCards();
+  },
+  tanks: opening => {
+    const tank = !opening && (data.tanks || []).find(row => row.id === selectedTankId);
+    if (!tank) {
+      selectedTankId = null;
+      document.getElementById('mainContent').innerHTML = `<div class="welcome">
+        <svg width="72" height="72" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <h2>Выберите ёмкость</h2><p>Выберите ёмкость из списка слева или добавьте новую</p></div>`;
+    }
+    renderTankList();
+    if (tank) renderTankDetail(tank);
+  },
+  finances: () => renderFinancesSection(),
+  costs: () => renderCostsSection(),
+  procurement: () => renderProcurementSection(),
+  contragents: () => renderContragentsSection(),
+  reports: () => renderReportsSection(),
+  repairs: () => repairsJournalSummaryMode ? renderRepairsSummary() : renderRepairsJournal(),
+  printForms: () => renderPrintFormsSection(),
+  fuelReport: () => renderFuelReport(),
+  fuelPurchases: opening => {
+    if (opening) { if (fpView === 'vehicle') fpView = 'receipts'; fpVehicle = null; }
+    renderFuelPurchases();
+  }
+});
+function renderWorkspaceSection(section, { opening = false } = {}) {
+  const render = Object.hasOwn(WORKSPACE_RENDERERS, section) && WORKSPACE_RENDERERS[section];
+  if (!render) return false;
+  render(opening);
+  return true;
+}
+
 // ─── SECTION SWITCHER ────────────────────────────────────
 function switchSection(section, options = {}) {
   showProgress();
@@ -65,46 +115,7 @@ function switchSection(section, options = {}) {
   // Sidebar visibility
   document.querySelector('.sidebar').style.display = hasSidebar ? '' : 'none';
 
-  if (isHome) {
-    renderMainMenu();
-  } else if (section === 'system') {
-    renderPlatformSystem();
-  } else if (section === 'drivers' || section === 'operators') {
-    renderPersonnelSection();
-  } else if (section === 'workflows' || section === 'dispatch') {
-    renderWorkflows();
-  } else if (section === 'toSchedule') {
-    renderToScheduleSection();
-  } else if (section === 'reestr') {
-    renderReestrSection();
-  } else if (section === 'vehicles') {
-    renderVehicleCards();
-  } else if (section === 'generators') {
-    renderGeneratorCards();
-  } else if (section === 'tanks') {
-    document.getElementById('mainContent').innerHTML = `<div class="welcome">
-      <svg width="72" height="72" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-      <h2>Выберите ёмкость</h2><p>Выберите ёмкость из списка слева или добавьте новую</p></div>`;
-    renderTankList();
-  } else if (section === 'finances') {
-    renderFinancesSection();
-  } else if (section === 'costs') {
-    renderCostsSection();
-  } else if (section === 'procurement') {
-    renderProcurementSection();
-  } else if (section === 'contragents') {
-    renderContragentsSection();
-  } else if (section === 'reports') {
-    renderReportsSection();
-  } else if (section === 'printForms') {
-    renderPrintFormsSection();
-  } else if (section === 'fuelReport') {
-    renderFuelReport();
-  } else if (section === 'fuelPurchases') {
-    if (fpView === 'vehicle') fpView = 'receipts';
-    fpVehicle = null;
-    renderFuelPurchases();
-  }
+  renderWorkspaceSection(section, { opening:true });
   hideProgress();
   setTimeout(() => animateCounters(), 50);
 }

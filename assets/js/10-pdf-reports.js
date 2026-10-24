@@ -110,7 +110,7 @@ function exportAllToPdf(dateFrom, dateTo){
     const bm=computeFuelBalances(v.id, dateFrom, dateTo);
     const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     if(_pdfFuelExplicit(v)){gExplicit[ft]=true;const value=fuelAccountingCurrentBalance('vehicles',v,recsFor(v.id),bm,dateTo||'');if(value==null)gMissing[ft]=true;else gBal[ft]+=value;}
-    else if(sorted.length) gBal[ft]+=bm[sorted[sorted.length-1].id]||0;
+    else if(sorted.length){const value=TvsFuelEngine.recordBalanceAt(bm,sorted[sorted.length-1].id);if(value==null)gMissing[ft]=true;else gBal[ft]+=value;}
     else if(!dateFrom) gBal[ft]+=v.fuelBalance||0;
   });
   const vFuelSet=new Set(data.vehicles.map(v=>v.fuel||'diesel'));
@@ -156,7 +156,8 @@ function exportAllToPdf(dateFrom, dateTo){
     const vAct=fuelReportSum(vFuelRecs.map(r=>fuelReportField('vehicles',v,r,'fuelActual')));
     const bm=computeFuelBalances(v.id, dateFrom, dateTo);
     const sorted=vRecs.slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
-    const vBal=explicit?fuelAccountingCurrentBalance('vehicles',v,recsFor(v.id),bm,dateTo||''):+(sorted.length?(bm[sorted[sorted.length-1].id]||0):0).toFixed(2);
+    const rawBalance=explicit?fuelAccountingCurrentBalance('vehicles',v,recsFor(v.id),bm,dateTo||''):sorted.length?TvsFuelEngine.recordBalanceAt(bm,sorted[sorted.length-1].id):0;
+    const vBal=rawBalance==null?null:explicit?rawBalance:+rawBalance.toFixed(2);
     const fuelKm=vFuelRecs.reduce((s,r)=>s+(r.km||0),0);
     const avg=fuelKm>0&&vAct!=null&&(v.fuelNorms!=null||vAct>0)?+(vAct/fuelKm*100).toFixed(2):null;
     const vGl=vRecs.reduce((s,r)=>s+(+r.kmGlonass||0),0);
@@ -218,7 +219,7 @@ function exportAllGensToPdf(dateFrom, dateTo){
     const bm=computeGenFuelBalances(g.id);
     const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     if(_pdfFuelExplicit(g)){gExplicit[ft]=true;const value=fuelAccountingCurrentBalance('generators',g,genRecsFor(g.id),bm,dateTo||'');if(value==null)gMissing[ft]=true;else gBal[ft]+=value;}
-    else gBal[ft]+=sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
+    else{const value=sorted.length?TvsFuelEngine.recordBalanceAt(bm,sorted[sorted.length-1].id):(g.fuelBalance||0);if(value==null)gMissing[ft]=true;else gBal[ft]+=value;}
   });
   const usedFuels=new Set(gens.map(g=>g.fuel||'diesel'));
   let fuelRows='';
@@ -262,7 +263,8 @@ function exportAllGensToPdf(dateFrom, dateTo){
     const actual=fuelReportSum(fuelRecs.map(r=>fuelReportField('generators',g,r,'fuelActual')));
     const bm=computeGenFuelBalances(g.id);
     const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
-    const bal=explicit?fuelAccountingCurrentBalance('generators',g,genRecsFor(g.id),bm,dateTo||''):+(sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0)).toFixed(2);
+    const rawBalance=explicit?fuelAccountingCurrentBalance('generators',g,genRecsFor(g.id),bm,dateTo||''):sorted.length?TvsFuelEngine.recordBalanceAt(bm,sorted[sorted.length-1].id):(g.fuelBalance||0);
+    const bal=rawBalance==null?null:explicit?rawBalance:+rawBalance.toFixed(2);
     if(bal==null)missingBalance=true;
     totH+=hours; totIss+=issued; totAct=fuelReportAdd(totAct,actual); totBal+=bal; if(g.cost!=null) totCost+=g.cost;
     rows+='<tr>'

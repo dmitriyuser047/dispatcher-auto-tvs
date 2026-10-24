@@ -1,11 +1,9 @@
 import type { AssetTarget, CalendarActionInput, CostActionInput, DocumentActionInput, FuelActionInput, Identifier, ImportActionInput, JsonRow, JsonValue, MergeCatalogInput, PeriodActionInput, PlatformCommand, ProcurementActionInput, RepairActionInput, SectionRows, createPlatformContracts } from './platform-contracts';
 
-export interface CommandActor { id: string; name: string; role: string }
-export interface CommandContext { id: string; now: string; today: string; actor: CommandActor; readable?:string[]; writable?:string[]; calendar?:{version:1;mode:'compatibility'|'configured';timeZone:string;stamp:string};importSource?:JsonRow }
-export interface CommandPlan { sections: SectionRows; readSections: string[]; writeSections: string[]; entityIds: Record<string, Identifier> }
+export type {CommandActor,CommandContext,CommandPlan} from './command-source';
+import type {CommandContext,CommandPlan,CommandSourceAPI} from './command-source';
+import type {IssueFuelAPI} from './issue-fuel';
 interface PersonnelRules { apiVersion: number; validateChanges(previous: unknown, next: unknown, context?: unknown): unknown }
-interface FuelRules { apiVersion: number; validateChanges(previous: unknown, next: unknown): unknown }
-interface FuelEngine { parseFuelGrade(value: unknown): string }
 interface CatalogMerge { apiVersion: number; footprint(input: MergeCatalogInput): string[]; plan(database: unknown,input: MergeCatalogInput,context: CommandContext): CommandPlan }
 interface SectionRegistry { sections: readonly string[] }
 interface DocumentActions {apiVersion:number;dependencies(input:DocumentActionInput):string[];footprint(input:DocumentActionInput):string[];plan(database:unknown,input:DocumentActionInput,context:CommandContext):CommandPlan}
@@ -20,21 +18,13 @@ interface PersonnelPlanning {apiVersion:number;dependencies():string[];captureSh
 interface DocumentPrint {apiVersion:number;dependencies(request:unknown):string[];prepare(database:unknown,request:unknown,context:unknown):{canCapture:boolean;sourceFingerprint:string;blockers:unknown[]};capture(database:unknown,request:unknown,context:unknown):unknown}
 interface ImportEngine {apiVersion:number;dependencies(input:ImportActionInput):string[];footprint(input:ImportActionInput):string[];plan(database:unknown,input:ImportActionInput,context:CommandContext):CommandPlan}
 type Contracts = ReturnType<typeof createPlatformContracts>;
-interface CommandError extends Error { code: string; status: number; field?: string }
 
 /** Pure semantic actions. Storage still owns ACL, CAS, audit and atomic commit. */
-export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, fuel: FuelRules, fuelEngine: FuelEngine,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions,calendarActions?:CalendarActions,calendar?:BusinessCalendar,planning?:PersonnelPlanning,getPrinting?:()=>DocumentPrint,getImports?:()=>ImportEngine) {
-  if (!contracts || contracts.apiVersion !== 1 || !personnel || personnel.apiVersion !== 1 || !fuel || fuel.apiVersion !== 1 || typeof fuelEngine?.parseFuelGrade !== 'function')
+export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, commandSource:CommandSourceAPI, issueFuel:IssueFuelAPI,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions,calendarActions?:CalendarActions,calendar?:BusinessCalendar,planning?:PersonnelPlanning,getPrinting?:()=>DocumentPrint,getImports?:()=>ImportEngine) {
+  if (!contracts || contracts.apiVersion !== 1 || !personnel || personnel.apiVersion !== 1 || commandSource?.apiVersion!==1 || issueFuel?.apiVersion!==1)
     throw new Error('Не загружены общие правила команд платформы');
-  function fail(code: string,message: string,field?: string): never {
-    const error=new Error(message) as CommandError;error.name='PlatformCommandError';error.code=code;error.status=400;
-    if(field!==undefined)error.field=field;throw error;
-  }
-  function copy(value: JsonValue): JsonValue {
-    if(value===null||typeof value!=='object')return value;
-    if(Array.isArray(value))return value.map(copy);
-    const result:JsonRow={};for(const key of Object.keys(value))result[key]=copy(value[key] as JsonValue);return result;
-  }
+  const fail:(code:string,message:string,field?:string)=>never=commandSource.fail;
+  const {database,rows,find,live,targetFor,validDate,context,noId,stamp}=commandSource;
   function parseCommand(value: unknown): PlatformCommand {return contracts.validateCommand(value);}
   function mergeModule(): CatalogMerge {
     if(!catalog||catalog.apiVersion!==1||!registry)fail('MODULE_UNAVAILABLE','Не загружены правила управляемого объединения');
@@ -65,7 +55,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
       if(names.includes('auditLog'))fail('INVALID_COMMAND','Исторические ссылки аудита нельзя выбирать для переноса','mutableRefs');
       return names;
     }
-    if(command.type==='IssueFuel')return ['fuelMovements',command.input.target.section==='vehicles'?'records':'genRecords'].sort();
+    if(command.type==='IssueFuel')return issueFuel.footprint(command);
     return [command.type==='AcceptShift'?'shiftReports':'assetAssignments'];
   }
   function commandDependencies(value: unknown): string[] {
@@ -80,100 +70,17 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     if(command.type==='RepairAction')return repairOperations().dependencies(command.input);
     if(command.type==='CalendarAction')return calendarOperations().dependencies(command.input);
     if(command.type==='MergeCatalog'){mergeModule();return [...(registry as SectionRegistry).sections].sort();}
-    if(command.type==='IssueFuel')return ['tanks','tankIncomes','genRecords','generators','fuelMovements','records','vehicles','assetAssignments','fuelPeriods','fuelWriteoffs','fuelPurchases','monthlyFuel'].sort();
+    if(command.type==='IssueFuel')return issueFuel.dependencies(command);
     if(command.type==='AcceptShift')return [...new Set(['shiftReports','vehicles','generators','drivers','dispatchJobs','assetAssignments',...(planning?.dependencies()||[])])].sort();
     return [...new Set(['assetAssignments','drivers','vehicles','generators','fuelPeriods',...(planning?.dependencies()||[])])].sort();
   }
   function dependencies(value:unknown,_database?:unknown):string[]{return [...new Set([...commandDependencies(value),'appMeta'])].sort();}
-  function database(value: unknown,names: string[]): SectionRows {
-    if(value===null||typeof value!=='object'||Array.isArray(value))fail('INVALID_COMMAND_SOURCE','Для команды нужен снимок базы');
-    const source=value as Record<string,unknown>, projection:Record<string,unknown>={};
-    for(const name of names){
-      const descriptor=Object.getOwnPropertyDescriptor(source,name);
-      if(descriptor?.get||descriptor?.set)fail('INVALID_COMMAND_SOURCE','Снимок содержит исполняемые свойства',name);
-      projection[name]=descriptor?descriptor.value:[];
-    }
-    const valid=contracts.validateSections(projection,names),result:SectionRows={};
-    for(const name of names)result[name]=copy(valid[name] as JsonRow[]) as JsonRow[];
-    return result;
-  }
-  function rows(db:SectionRows,name:string):JsonRow[]{return db[name]||[];}
-  function find(db:SectionRows,name:string,id:Identifier):JsonRow {
-    const matches=rows(db,name).filter(row=>row.id===id);
-    if(matches.length!==1)fail(matches.length?'AMBIGUOUS_REFERENCE':'COMMAND_NOT_FOUND',matches.length?'Идентификатор неоднозначен':'Не найдена запись команды',name);
-    return matches[0] as JsonRow;
-  }
-  function live(row:JsonRow):boolean{return !row.archived&&!row.deleted;}
-  function targetFor(db:SectionRows,target:AssetTarget,allowArchived=false):{row:JsonRow;ref:string} {
-    const row=find(db,target.section,target.id);
-    // Existing assetRef is a string. Even a typed command must not write a link
-    // whose persisted representation could resolve to either 7 or '7'.
-    if(rows(db,target.section).filter(item=>String(item.id)===String(target.id)).length!==1)
-      fail('AMBIGUOUS_ASSET','У техники совпадают строковые идентификаторы. Сначала устраните неоднозначность','target.id');
-    if(!allowArchived&&!live(row))fail('COMMAND_ARCHIVED','Нельзя выбрать технику из архива','target');
-    return {row,ref:(target.section==='vehicles'?'v:':'g:')+String(target.id)};
-  }
   function targetFromRef(db:SectionRows,ref:JsonValue|undefined):AssetTarget {
     if(typeof ref!=='string'||!/^([vg]):.+$/.test(ref))fail('INVALID_ASSET','Сменная форма должна быть связана с транспортом или ДЭС','assetRef');
     const section=ref.startsWith('v:')?'vehicles':'generators',matches=rows(db,section).filter(row=>String(row.id)===ref.slice(2));
     if(matches.length!==1)fail(matches.length?'AMBIGUOUS_ASSET':'COMMAND_NOT_FOUND','Не удалось однозначно найти технику смены','assetRef');
     const id=matches[0]?.id;if(!contracts.identifier(id))fail('INVALID_ASSET','Некорректный идентификатор техники','assetRef');
     return {section,id};
-  }
-  function validDate(value:unknown):value is string {
-    if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;
-    const day=new Date(value+'T12:00:00Z');return Number.isFinite(day.getTime())&&day.toISOString().slice(0,10)===value;
-  }
-  function context(value:unknown):CommandContext {
-    const checked=contracts.validateSections({appMeta:[value]},['appMeta']).appMeta?.[0];
-    if(!checked)fail('INVALID_COMMAND_CONTEXT','Нет контекста команды');
-    const id=contracts.validateOperation({id:checked.id}).id, actor=checked.actor;
-    if(typeof checked.now!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(checked.now)||!validDate(checked.now.slice(0,10))||Number(checked.now.slice(11,13))>23||Number(checked.now.slice(14,16))>59||Number(checked.now.slice(17,19))>59||!Number.isFinite(Date.parse(checked.now))||!validDate(checked.today)||actor===null||typeof actor!=='object'||Array.isArray(actor))
-      fail('INVALID_COMMAND_CONTEXT','Нужны время, дата и автор команды');
-    for(const field of ['id','name','role'])if(typeof actor[field]!=='string'||!(actor[field] as string).trim())fail('INVALID_COMMAND_CONTEXT','Некорректный автор команды');
-    const result:CommandContext={id,now:checked.now,today:checked.today,actor:{id:actor.id as string,name:actor.name as string,role:actor.role as string}};
-    if(checked.importSource!==undefined){if(checked.importSource===null||typeof checked.importSource!=='object'||Array.isArray(checked.importSource))fail('INVALID_COMMAND_CONTEXT','Некорректный проверенный исходник импорта','importSource');result.importSource=copy(checked.importSource) as JsonRow;}
-    if(checked.calendar!==undefined){
-      const value=checked.calendar;
-      if(value===null||typeof value!=='object'||Array.isArray(value)||value.version!==1||(value.mode!=='compatibility'&&value.mode!=='configured')||typeof value.timeZone!=='string'||typeof value.stamp!=='string')fail('INVALID_COMMAND_CONTEXT','Некорректный учётный календарь','calendar');
-      result.calendar={version:1,mode:value.mode,timeZone:value.timeZone,stamp:value.stamp};
-    }
-    for(const field of ['readable','writable'] as const)if(checked[field]!==undefined){const values=checked[field];if(!Array.isArray(values)||values.some(value=>typeof value!=='string'||!value.trim()))fail('INVALID_COMMAND_CONTEXT','Некорректные полномочия команды',field);result[field]=values.slice() as string[];}
-    return result;
-  }
-  function noId(db:SectionRows,section:string,id:string):void {
-    if(rows(db,section).some(row=>row.id===id))fail('COMMAND_ID_EXISTS','Запись с идентификатором команды уже существует',section);
-  }
-  function stamp(row:JsonRow,ctx:CommandContext,created:boolean):void {row.updatedAt=ctx.now;if(created)row.createdAt=ctx.now;}
-  function family(row:JsonRow):string {
-    const grade=fuelEngine.parseFuelGrade(row.fuelGrade);
-    if(grade==='ДТ')return 'diesel';if(grade==='Газ')return 'gas';if(/^АИ-/.test(grade)||/^бензин$/i.test(String(row.fuelGrade||'').trim()))return 'gasoline';
-    return typeof row.fuel==='string'&&row.fuel?row.fuel:'diesel';
-  }
-  function effectiveOrg(db:SectionRows,ref:string,date:string,asset:JsonRow):JsonValue {
-    const applicable=rows(db,'assetAssignments').filter(row=>!row.archived&&row.assetRef===ref&&typeof row.from==='string'&&row.from<=date&&(!row.to||typeof row.to==='string'&&row.to>=date))
-      .slice().sort((a,b)=>String(b.from).localeCompare(String(a.from)));
-    return applicable[0]?.org??asset.org??'';
-  }
-  function issueFuel(db:SectionRows,command:Extract<PlatformCommand,{type:'IssueFuel'}>,ctx:CommandContext):CommandPlan {
-    const input=command.input,tank=find(db,'tanks',input.tankId),target=targetFor(db,input.target);
-    if(!live(tank))fail('COMMAND_ARCHIVED','Нельзя выдавать топливо из архивной ёмкости','tankId');
-    if(rows(db,'fuelPeriods').some(row=>row.month===input.date.slice(0,7)&&row.closed))fail('PERIOD_CLOSED','Топливный месяц закрыт','date');
-    const journal=input.target.section==='vehicles'?'records':'genRecords',recordId='fuel-movement:'+ctx.id;
-    noId(db,'fuelMovements',ctx.id);noId(db,journal,recordId);
-    if(rows(db,'records').concat(rows(db,'genRecords')).some(row=>row.fuelMovementId===ctx.id))fail('COMMAND_ID_EXISTS','Связанная выдача уже есть в журнале');
-    const fuelFamily=family(tank),assetOrg=effectiveOrg(db,target.ref,input.date,target.row);
-    const source:JsonRow={tankId:input.tankId,tankName:tank.name??'',tankOrg:tank.org??'',assetOrg,fuel:fuelFamily};
-    const movement:JsonRow={id:ctx.id,date:input.date,kind:'issue',fromTankId:input.tankId,toTankId:'',qty:input.qty,assetRef:target.ref,reason:input.reason,recordId,sourceSnapshot:source};
-    if(input.legacyOverlapConfirmed!==undefined)movement.legacyOverlapConfirmed=input.legacyOverlapConfirmed;
-    const linked:JsonRow={id:recordId,date:input.date,fuelIssued:input.qty,fuelUsed:0,fuelActual:null,fuelMovementId:ctx.id,note:'Выдача из ёмкости: '+String(tank.name||'')+'. '+input.reason,
-      fuelOrg:tank.org??'',fuelProvider:'Ёмкость '+String(tank.name||''),fuelSourceSnapshot:copy(source)};
-    if(journal==='records')Object.assign(linked,{vehicleId:input.target.id,km:0,fuelGrade:fuelEngine.parseFuelGrade(tank.fuelGrade)||(fuelFamily==='gasoline'?'Бензин':fuelFamily==='gas'?'Газ':'ДТ')});
-    else Object.assign(linked,{generatorId:input.target.id,hours:0,tankId:null,fuelActualSource:'movement'});
-    stamp(movement,ctx,true);stamp(linked,ctx,true);
-    const sections:SectionRows={fuelMovements:rows(db,'fuelMovements').concat(movement),[journal]:rows(db,journal).concat(linked)};
-    fuel.validateChanges(db,{...db,...sections});
-    return {sections,readSections:dependencies(command),writeSections:footprint(command),entityIds:{movementId:ctx.id,recordId}};
   }
   function acceptShift(db:SectionRows,command:Extract<PlatformCommand,{type:'AcceptShift'}>,ctx:CommandContext):CommandPlan {
     const before=find(db,'shiftReports',command.input.shiftId);
@@ -224,7 +131,9 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     return {sections,readSections:dependencies(command),writeSections:footprint(command),entityIds};
   }
   function plan(source:unknown,value:unknown,metadata:unknown):CommandPlan {
-    const command=parseCommand(value),ctx=context(metadata),db=database(source,dependencies(command));
+    const command=parseCommand(value);
+    if(command.type==='IssueFuel')return issueFuel.plan(source,command,metadata);
+    const ctx=context(metadata),db=database(source,dependencies(command));
     calendar?.context(db,ctx);
     let result:CommandPlan;
     if(command.type==='ImportAction')result=importModule().plan(db,command.input,ctx);
@@ -243,7 +152,6 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     else if(command.type==='RepairAction')result=repairOperations().plan(db,command.input,ctx);
     else if(command.type==='CalendarAction')result=calendarOperations().plan(db,command.input,ctx);
     else if(command.type==='MergeCatalog')result=mergeModule().plan(db,command.input,ctx);
-    else if(command.type==='IssueFuel')result=issueFuel(db,command,ctx);
     else if(command.type==='AcceptShift')result=acceptShift(db,command,ctx);
     else result=assignPerson(db,command,ctx);
     const timeOptions=command.type==='CalendarAction'&&command.input.action==='confirmInterval'?{confirm:command.input.target,reason:command.input.reason}:{};

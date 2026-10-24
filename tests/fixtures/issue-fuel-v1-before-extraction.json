@@ -1,0 +1,402 @@
+{
+  "description": "Literal synthetic IssueFuel v1 outputs captured before extracting command orchestration; JSON property order and fingerprints are part of the regression.",
+  "source": {
+    "vehicles": [
+      {
+        "id": 0,
+        "plate": "SYNTHETIC ISSUE-FUEL FIXTURE",
+        "org": "Original vehicle organization",
+        "fuel": "diesel",
+        "fuelGrade": "ДТ",
+        "fuelBalance": 923.537
+      }
+    ],
+    "records": [
+      {
+        "id": "original-journal",
+        "vehicleId": 0,
+        "date": "2026-10-01",
+        "km": 125.5,
+        "fuelIssued": 10,
+        "fuelActual": 1.125
+      }
+    ],
+    "generators": [
+      {
+        "id": "g",
+        "name": "Synthetic generator",
+        "tankId": 0,
+        "org": "Generator organization",
+        "fuel": "diesel",
+        "fuelBalance": 20
+      }
+    ],
+    "genRecords": [],
+    "toRecords": [],
+    "tanks": [
+      {
+        "id": 0,
+        "name": "Synthetic source tank",
+        "org": "Source organization",
+        "fuel": "diesel",
+        "balanceInit": 1000
+      }
+    ],
+    "tankIncomes": [],
+    "vehicleTo": [],
+    "repairs": [],
+    "reestrRows": [],
+    "savedReestrs": [],
+    "payments": [],
+    "budget": [],
+    "contragents": [],
+    "fuelPurchases": [],
+    "fuelImports": [],
+    "fuelCards": [],
+    "fuelPeriods": [],
+    "fuelWriteoffs": [],
+    "monthlyFuel": [],
+    "appMeta": [],
+    "dispatchJobs": [],
+    "drivers": [],
+    "assetAssignments": [
+      {
+        "id": "assignment",
+        "assetRef": "v:0",
+        "from": "2026-09-01",
+        "org": "Dated assigned organization",
+        "site": "Synthetic location",
+        "reason": "Synthetic assignment"
+      }
+    ],
+    "workOrders": [],
+    "opsTasks": [],
+    "assetDocuments": [],
+    "fuelMovements": [],
+    "parts": [],
+    "partMovements": [],
+    "shiftReports": [],
+    "connectors": [],
+    "auditLog": [],
+    "savedViews": [],
+    "glonassTrips": [],
+    "glonassImports": [],
+    "costEntries": [],
+    "costProfiles": [],
+    "procurementOrders": [],
+    "procurementRules": [],
+    "documentDrafts": []
+  },
+  "context": {
+    "id": "fixture",
+    "now": "2026-10-22T12:00:00.000Z",
+    "today": "2026-10-22",
+    "actor": {
+      "id": "synthetic-fixture-admin",
+      "name": "Synthetic fixture administrator",
+      "role": "admin"
+    }
+  },
+  "cases": [
+    {
+      "target": {
+        "section": "vehicles",
+        "id": 0
+      },
+      "command": {
+        "type": "IssueFuel",
+        "version": 1,
+        "input": {
+          "tankId": 0,
+          "target": {
+            "section": "vehicles",
+            "id": 0
+          },
+          "date": "2026-10-20",
+          "qty": 23.537,
+          "reason": "Synthetic immutable source fixture"
+        }
+      },
+      "metadata": {
+        "id": "historical-vehicles",
+        "now": "2026-10-22T12:00:00.000Z",
+        "today": "2026-10-22",
+        "actor": {
+          "id": "synthetic-fixture-admin",
+          "name": "Synthetic fixture administrator",
+          "role": "admin"
+        }
+      },
+      "serialized": "{\"sections\":{\"fuelMovements\":[{\"id\":\"historical-vehicles\",\"date\":\"2026-10-20\",\"kind\":\"issue\",\"fromTankId\":0,\"toTankId\":\"\",\"qty\":23.537,\"assetRef\":\"v:0\",\"reason\":\"Synthetic immutable source fixture\",\"recordId\":\"fuel-movement:historical-vehicles\",\"sourceSnapshot\":{\"tankId\":0,\"tankName\":\"Synthetic source tank\",\"tankOrg\":\"Source organization\",\"assetOrg\":\"Dated assigned organization\",\"fuel\":\"diesel\"},\"updatedAt\":\"2026-10-22T12:00:00.000Z\",\"createdAt\":\"2026-10-22T12:00:00.000Z\"}],\"records\":[{\"id\":\"original-journal\",\"vehicleId\":0,\"date\":\"2026-10-01\",\"km\":125.5,\"fuelIssued\":10,\"fuelActual\":1.125},{\"id\":\"fuel-movement:historical-vehicles\",\"date\":\"2026-10-20\",\"fuelIssued\":23.537,\"fuelUsed\":0,\"fuelActual\":null,\"fuelMovementId\":\"historical-vehicles\",\"note\":\"Выдача из ёмкости: Synthetic source tank. Synthetic immutable source fixture\",\"fuelOrg\":\"Source organization\",\"fuelProvider\":\"Ёмкость Synthetic source tank\",\"fuelSourceSnapshot\":{\"tankId\":0,\"tankName\":\"Synthetic source tank\",\"tankOrg\":\"Source organization\",\"assetOrg\":\"Dated assigned organization\",\"fuel\":\"diesel\"},\"vehicleId\":0,\"km\":0,\"fuelGrade\":\"ДТ\",\"updatedAt\":\"2026-10-22T12:00:00.000Z\",\"createdAt\":\"2026-10-22T12:00:00.000Z\"}]},\"readSections\":[\"appMeta\",\"assetAssignments\",\"fuelMovements\",\"fuelPeriods\",\"fuelPurchases\",\"fuelWriteoffs\",\"genRecords\",\"generators\",\"monthlyFuel\",\"records\",\"tankIncomes\",\"tanks\",\"vehicles\"],\"writeSections\":[\"fuelMovements\",\"records\"],\"entityIds\":{\"movementId\":\"historical-vehicles\",\"recordId\":\"fuel-movement:historical-vehicles\"}}",
+      "sha256": "5ac7a1e9a5ae23907db35459fe301aaa5f96cb52f139c4af5709fdf3e1c700bd",
+      "draftDatabase": {
+        "vehicles": [
+          {
+            "id": 0,
+            "plate": "SYNTHETIC ISSUE-FUEL FIXTURE",
+            "org": "Original vehicle organization",
+            "fuel": "diesel",
+            "fuelGrade": "ДТ",
+            "fuelBalance": 923.537
+          }
+        ],
+        "records": [
+          {
+            "id": "original-journal",
+            "vehicleId": 0,
+            "date": "2026-10-01",
+            "km": 125.5,
+            "fuelIssued": 10,
+            "fuelActual": 1.125
+          }
+        ],
+        "generators": [
+          {
+            "id": "g",
+            "name": "Synthetic generator",
+            "tankId": 0,
+            "org": "Generator organization",
+            "fuel": "diesel",
+            "fuelBalance": 20
+          }
+        ],
+        "genRecords": [],
+        "toRecords": [],
+        "tanks": [
+          {
+            "id": 0,
+            "name": "Synthetic source tank",
+            "org": "Source organization",
+            "fuel": "diesel",
+            "balanceInit": 1000
+          }
+        ],
+        "tankIncomes": [],
+        "vehicleTo": [],
+        "repairs": [],
+        "reestrRows": [],
+        "savedReestrs": [],
+        "payments": [],
+        "budget": [],
+        "contragents": [],
+        "fuelPurchases": [],
+        "fuelImports": [],
+        "fuelCards": [],
+        "fuelPeriods": [],
+        "fuelWriteoffs": [],
+        "monthlyFuel": [],
+        "appMeta": [],
+        "dispatchJobs": [],
+        "drivers": [],
+        "assetAssignments": [
+          {
+            "id": "assignment",
+            "assetRef": "v:0",
+            "from": "2026-09-01",
+            "org": "Dated assigned organization",
+            "site": "Synthetic location",
+            "reason": "Synthetic assignment"
+          }
+        ],
+        "workOrders": [],
+        "opsTasks": [],
+        "assetDocuments": [],
+        "fuelMovements": [],
+        "parts": [],
+        "partMovements": [],
+        "shiftReports": [],
+        "connectors": [],
+        "auditLog": [],
+        "savedViews": [],
+        "glonassTrips": [],
+        "glonassImports": [],
+        "costEntries": [],
+        "costProfiles": [],
+        "procurementOrders": [],
+        "procurementRules": [],
+        "documentDrafts": [
+          {
+            "id": "historical-draft-vehicles",
+            "section": "fuelMovements",
+            "payload": {
+              "date": "2026-10-20",
+              "kind": "issue",
+              "fromTankId": 0,
+              "toTankId": "",
+              "qty": 23.537,
+              "assetRef": "v:0",
+              "reason": "Synthetic immutable source fixture"
+            },
+            "status": "draft",
+            "createdAt": "2026-10-22T12:00:00.000Z",
+            "createdBy": {
+              "id": "synthetic-fixture-admin",
+              "name": "Synthetic fixture administrator",
+              "role": "admin"
+            },
+            "updatedAt": "2026-10-22T12:00:00.000Z"
+          }
+        ]
+      },
+      "postInput": {
+        "action": "postDraft",
+        "section": "fuelMovements",
+        "draftId": "historical-draft-vehicles",
+        "reviewFingerprint": "sha256:578c1c609e147e4a100551ad6b69214ca11de4ff98fbbfc3657f047de25948de"
+      },
+      "postSerialized": "{\"sections\":{\"fuelMovements\":[{\"id\":\"historical-vehicles\",\"date\":\"2026-10-20\",\"kind\":\"issue\",\"fromTankId\":0,\"toTankId\":\"\",\"qty\":23.537,\"assetRef\":\"v:0\",\"reason\":\"Synthetic immutable source fixture\",\"recordId\":\"fuel-movement:historical-vehicles\",\"sourceSnapshot\":{\"tankId\":0,\"tankName\":\"Synthetic source tank\",\"tankOrg\":\"Source organization\",\"assetOrg\":\"Dated assigned organization\",\"fuel\":\"diesel\"},\"updatedAt\":\"2026-10-22T12:00:00.000Z\",\"createdAt\":\"2026-10-22T12:00:00.000Z\",\"lifecycle\":{\"version\":1,\"postedAt\":\"2026-10-22T12:00:00.000Z\",\"postedActor\":{\"id\":\"synthetic-fixture-admin\",\"name\":\"Synthetic fixture administrator\",\"role\":\"admin\"},\"operationId\":\"historical-vehicles\"},\"createdBy\":{\"id\":\"synthetic-fixture-admin\",\"name\":\"Synthetic fixture administrator\",\"role\":\"admin\"}}],\"records\":[{\"id\":\"original-journal\",\"vehicleId\":0,\"date\":\"2026-10-01\",\"km\":125.5,\"fuelIssued\":10,\"fuelActual\":1.125},{\"id\":\"fuel-movement:historical-vehicles\",\"date\":\"2026-10-20\",\"fuelIssued\":23.537,\"fuelUsed\":0,\"fuelActual\":null,\"fuelMovementId\":\"historical-vehicles\",\"note\":\"Выдача из ёмкости: Synthetic source tank. Synthetic immutable source fixture\",\"fuelOrg\":\"Source organization\",\"fuelProvider\":\"Ёмкость Synthetic source tank\",\"fuelSourceSnapshot\":{\"tankId\":0,\"tankName\":\"Synthetic source tank\",\"tankOrg\":\"Source organization\",\"assetOrg\":\"Dated assigned organization\",\"fuel\":\"diesel\"},\"vehicleId\":0,\"km\":0,\"fuelGrade\":\"ДТ\",\"updatedAt\":\"2026-10-22T12:00:00.000Z\",\"createdAt\":\"2026-10-22T12:00:00.000Z\"}],\"documentDrafts\":[{\"id\":\"historical-draft-vehicles\",\"section\":\"fuelMovements\",\"payload\":{\"date\":\"2026-10-20\",\"kind\":\"issue\",\"fromTankId\":0,\"toTankId\":\"\",\"qty\":23.537,\"assetRef\":\"v:0\",\"reason\":\"Synthetic immutable source fixture\"},\"status\":\"posted\",\"createdAt\":\"2026-10-22T12:00:00.000Z\",\"createdBy\":{\"id\":\"synthetic-fixture-admin\",\"name\":\"Synthetic fixture administrator\",\"role\":\"admin\"},\"updatedAt\":\"2026-10-22T12:00:00.000Z\",\"postedAt\":\"2026-10-22T12:00:00.000Z\",\"postedBy\":{\"id\":\"synthetic-fixture-admin\",\"name\":\"Synthetic fixture administrator\",\"role\":\"admin\"},\"operationId\":\"historical-vehicles\",\"result\":{\"section\":\"fuelMovements\",\"id\":\"historical-vehicles\"}}]},\"readSections\":[\"appMeta\",\"assetAssignments\",\"documentDrafts\",\"fuelMovements\",\"fuelPeriods\",\"fuelPurchases\",\"fuelWriteoffs\",\"genRecords\",\"generators\",\"monthlyFuel\",\"procurementOrders\",\"records\",\"tankIncomes\",\"tanks\",\"vehicles\"],\"writeSections\":[\"documentDrafts\",\"fuelMovements\",\"records\"],\"entityIds\":{\"documentId\":\"historical-vehicles\"}}",
+      "postSha256": "57a94e68254a33603e86676037b72383e6f02ca85555e3d614df5146eeedf302",
+      "reviewFingerprint": "sha256:578c1c609e147e4a100551ad6b69214ca11de4ff98fbbfc3657f047de25948de"
+    },
+    {
+      "target": {
+        "section": "generators",
+        "id": "g"
+      },
+      "command": {
+        "type": "IssueFuel",
+        "version": 1,
+        "input": {
+          "tankId": 0,
+          "target": {
+            "section": "generators",
+            "id": "g"
+          },
+          "date": "2026-10-20",
+          "qty": 23.537,
+          "reason": "Synthetic immutable source fixture"
+        }
+      },
+      "metadata": {
+        "id": "historical-generators",
+        "now": "2026-10-22T12:00:00.000Z",
+        "today": "2026-10-22",
+        "actor": {
+          "id": "synthetic-fixture-admin",
+          "name": "Synthetic fixture administrator",
+          "role": "admin"
+        }
+      },
+      "serialized": "{\"sections\":{\"fuelMovements\":[{\"id\":\"historical-generators\",\"date\":\"2026-10-20\",\"kind\":\"issue\",\"fromTankId\":0,\"toTankId\":\"\",\"qty\":23.537,\"assetRef\":\"g:g\",\"reason\":\"Synthetic immutable source fixture\",\"recordId\":\"fuel-movement:historical-generators\",\"sourceSnapshot\":{\"tankId\":0,\"tankName\":\"Synthetic source tank\",\"tankOrg\":\"Source organization\",\"assetOrg\":\"Generator organization\",\"fuel\":\"diesel\"},\"updatedAt\":\"2026-10-22T12:00:00.000Z\",\"createdAt\":\"2026-10-22T12:00:00.000Z\"}],\"genRecords\":[{\"id\":\"fuel-movement:historical-generators\",\"date\":\"2026-10-20\",\"fuelIssued\":23.537,\"fuelUsed\":0,\"fuelActual\":null,\"fuelMovementId\":\"historical-generators\",\"note\":\"Выдача из ёмкости: Synthetic source tank. Synthetic immutable source fixture\",\"fuelOrg\":\"Source organization\",\"fuelProvider\":\"Ёмкость Synthetic source tank\",\"fuelSourceSnapshot\":{\"tankId\":0,\"tankName\":\"Synthetic source tank\",\"tankOrg\":\"Source organization\",\"assetOrg\":\"Generator organization\",\"fuel\":\"diesel\"},\"generatorId\":\"g\",\"hours\":0,\"tankId\":null,\"fuelActualSource\":\"movement\",\"updatedAt\":\"2026-10-22T12:00:00.000Z\",\"createdAt\":\"2026-10-22T12:00:00.000Z\"}]},\"readSections\":[\"appMeta\",\"assetAssignments\",\"fuelMovements\",\"fuelPeriods\",\"fuelPurchases\",\"fuelWriteoffs\",\"genRecords\",\"generators\",\"monthlyFuel\",\"records\",\"tankIncomes\",\"tanks\",\"vehicles\"],\"writeSections\":[\"fuelMovements\",\"genRecords\"],\"entityIds\":{\"movementId\":\"historical-generators\",\"recordId\":\"fuel-movement:historical-generators\"}}",
+      "sha256": "4cbfdf687836fff54706c66a05dc7cfeedcd7b362fa0b4e753e03dab81c45fca",
+      "draftDatabase": {
+        "vehicles": [
+          {
+            "id": 0,
+            "plate": "SYNTHETIC ISSUE-FUEL FIXTURE",
+            "org": "Original vehicle organization",
+            "fuel": "diesel",
+            "fuelGrade": "ДТ",
+            "fuelBalance": 923.537
+          }
+        ],
+        "records": [
+          {
+            "id": "original-journal",
+            "vehicleId": 0,
+            "date": "2026-10-01",
+            "km": 125.5,
+            "fuelIssued": 10,
+            "fuelActual": 1.125
+          }
+        ],
+        "generators": [
+          {
+            "id": "g",
+            "name": "Synthetic generator",
+            "tankId": 0,
+            "org": "Generator organization",
+            "fuel": "diesel",
+            "fuelBalance": 20
+          }
+        ],
+        "genRecords": [],
+        "toRecords": [],
+        "tanks": [
+          {
+            "id": 0,
+            "name": "Synthetic source tank",
+            "org": "Source organization",
+            "fuel": "diesel",
+            "balanceInit": 1000
+          }
+        ],
+        "tankIncomes": [],
+        "vehicleTo": [],
+        "repairs": [],
+        "reestrRows": [],
+        "savedReestrs": [],
+        "payments": [],
+        "budget": [],
+        "contragents": [],
+        "fuelPurchases": [],
+        "fuelImports": [],
+        "fuelCards": [],
+        "fuelPeriods": [],
+        "fuelWriteoffs": [],
+        "monthlyFuel": [],
+        "appMeta": [],
+        "dispatchJobs": [],
+        "drivers": [],
+        "assetAssignments": [
+          {
+            "id": "assignment",
+            "assetRef": "v:0",
+            "from": "2026-09-01",
+            "org": "Dated assigned organization",
+            "site": "Synthetic location",
+            "reason": "Synthetic assignment"
+          }
+        ],
+        "workOrders": [],
+        "opsTasks": [],
+        "assetDocuments": [],
+        "fuelMovements": [],
+        "parts": [],
+        "partMovements": [],
+        "shiftReports": [],
+        "connectors": [],
+        "auditLog": [],
+        "savedViews": [],
+        "glonassTrips": [],
+        "glonassImports": [],
+        "costEntries": [],
+        "costProfiles": [],
+        "procurementOrders": [],
+        "procurementRules": [],
+        "documentDrafts": [
+          {
+            "id": "historical-draft-generators",
+            "section": "fuelMovements",
+            "payload": {
+              "date": "2026-10-20",
+              "kind": "issue",
+              "fromTankId": 0,
+              "toTankId": "",
+              "qty": 23.537,
+              "assetRef": "g:g",
+              "reason": "Synthetic immutable source fixture"
+            },
+            "status": "draft",
+            "createdAt": "2026-10-22T12:00:00.000Z",
+            "createdBy": {
+              "id": "synthetic-fixture-admin",
+              "name": "Synthetic fixture administrator",
+              "role": "admin"
+            },
+            "updatedAt": "2026-10-22T12:00:00.000Z"
+          }
+        ]
+      },
+      "postInput": {
+        "action": "postDraft",
+        "section": "fuelMovements",
+        "draftId": "historical-draft-generators",
+        "reviewFingerprint": "sha256:1943d91256a3224f6672a013b331faac15a325db2c24fd39e5579b296c702200"
+      },
+      "postSerialized": "{\"sections\":{\"fuelMovements\":[{\"id\":\"historical-generators\",\"date\":\"2026-10-20\",\"kind\":\"issue\",\"fromTankId\":0,\"toTankId\":\"\",\"qty\":23.537,\"assetRef\":\"g:g\",\"reason\":\"Synthetic immutable source fixture\",\"recordId\":\"fuel-movement:historical-generators\",\"sourceSnapshot\":{\"tankId\":0,\"tankName\":\"Synthetic source tank\",\"tankOrg\":\"Source organization\",\"assetOrg\":\"Generator organization\",\"fuel\":\"diesel\"},\"updatedAt\":\"2026-10-22T12:00:00.000Z\",\"createdAt\":\"2026-10-22T12:00:00.000Z\",\"lifecycle\":{\"version\":1,\"postedAt\":\"2026-10-22T12:00:00.000Z\",\"postedActor\":{\"id\":\"synthetic-fixture-admin\",\"name\":\"Synthetic fixture administrator\",\"role\":\"admin\"},\"operationId\":\"historical-generators\"},\"createdBy\":{\"id\":\"synthetic-fixture-admin\",\"name\":\"Synthetic fixture administrator\",\"role\":\"admin\"}}],\"genRecords\":[{\"id\":\"fuel-movement:historical-generators\",\"date\":\"2026-10-20\",\"fuelIssued\":23.537,\"fuelUsed\":0,\"fuelActual\":null,\"fuelMovementId\":\"historical-generators\",\"note\":\"Выдача из ёмкости: Synthetic source tank. Synthetic immutable source fixture\",\"fuelOrg\":\"Source organization\",\"fuelProvider\":\"Ёмкость Synthetic source tank\",\"fuelSourceSnapshot\":{\"tankId\":0,\"tankName\":\"Synthetic source tank\",\"tankOrg\":\"Source organization\",\"assetOrg\":\"Generator organization\",\"fuel\":\"diesel\"},\"generatorId\":\"g\",\"hours\":0,\"tankId\":null,\"fuelActualSource\":\"movement\",\"updatedAt\":\"2026-10-22T12:00:00.000Z\",\"createdAt\":\"2026-10-22T12:00:00.000Z\"}],\"documentDrafts\":[{\"id\":\"historical-draft-generators\",\"section\":\"fuelMovements\",\"payload\":{\"date\":\"2026-10-20\",\"kind\":\"issue\",\"fromTankId\":0,\"toTankId\":\"\",\"qty\":23.537,\"assetRef\":\"g:g\",\"reason\":\"Synthetic immutable source fixture\"},\"status\":\"posted\",\"createdAt\":\"2026-10-22T12:00:00.000Z\",\"createdBy\":{\"id\":\"synthetic-fixture-admin\",\"name\":\"Synthetic fixture administrator\",\"role\":\"admin\"},\"updatedAt\":\"2026-10-22T12:00:00.000Z\",\"postedAt\":\"2026-10-22T12:00:00.000Z\",\"postedBy\":{\"id\":\"synthetic-fixture-admin\",\"name\":\"Synthetic fixture administrator\",\"role\":\"admin\"},\"operationId\":\"historical-generators\",\"result\":{\"section\":\"fuelMovements\",\"id\":\"historical-generators\"}}]},\"readSections\":[\"appMeta\",\"assetAssignments\",\"documentDrafts\",\"fuelMovements\",\"fuelPeriods\",\"fuelPurchases\",\"fuelWriteoffs\",\"genRecords\",\"generators\",\"monthlyFuel\",\"procurementOrders\",\"records\",\"tankIncomes\",\"tanks\",\"vehicles\"],\"writeSections\":[\"documentDrafts\",\"fuelMovements\",\"genRecords\"],\"entityIds\":{\"documentId\":\"historical-generators\"}}",
+      "postSha256": "0dc8711e64018d73678c2744951300c1960105092046ac6d1dd5274fc7ecdcd6",
+      "reviewFingerprint": "sha256:1943d91256a3224f6672a013b331faac15a325db2c24fd39e5579b296c702200"
+    }
+  ]
+}

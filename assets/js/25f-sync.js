@@ -377,21 +377,12 @@ function syncRefreshView(names) {
     (document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName) &&
      document.getElementById('mainContent')?.contains(document.activeElement));
   if (busy) return;
-  _sync.needRefresh = [];
+  const pending = _sync.needRefresh;
   try {
-    if (activeSection === 'vehicles') {
-      const v = selectedVehicleId!==null&&selectedVehicleId!==undefined&&selectedVehicleId!==''&&data.vehicles.find(x => x.id === selectedVehicleId);
-      if (v) renderDetail(v); else if (typeof renderVehicleCards === 'function') renderVehicleCards();
-    } else if (activeSection === 'fuelPurchases') renderFuelPurchases();
-    else if (activeSection === 'home') renderMainMenu();
-    else if (activeSection === 'workflows' || activeSection === 'dispatch') renderWorkflows();
-    else if (activeSection === 'reports') renderReportsSection();
-    else if (activeSection === 'fuelReport') renderFuelReport();
-    else if (activeSection === 'costs') renderCostsSection();
-    else if (activeSection === 'procurement') renderProcurementSection();
-    else if (activeSection === 'system') renderPlatformSystem();
-    else if (activeSection === 'drivers' || activeSection === 'operators') renderPersonnelSection();
-    else if (activeSection === 'generators') {const generator=selectedGeneratorId!==null&&selectedGeneratorId!==undefined&&selectedGeneratorId!==''&&data.generators.find(row=>row.id===selectedGeneratorId);if(generator&&typeof renderGenDetail==='function')renderGenDetail(generator);else if(typeof renderGeneratorCards==='function')renderGeneratorCards();}
+    if (renderWorkspaceSection(activeSection)) {
+      _sync.needRefresh = _sync.needRefresh.filter(name => !pending.includes(name));
+      if (typeof unifiedRefreshNav === 'function') unifiedRefreshNav();
+    }
   } catch (e) { console.warn('[sync] перерисовка: ' + e.message); }
 }
 

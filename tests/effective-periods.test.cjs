@@ -110,7 +110,7 @@ test('semantic linked issues with explicit zero activity do not need a dated nor
 });
 
 test('new acts use current effective projections; future periods and scalar presentation changes do not alter past dated source fingerprints',()=>{
-  const data=db(),preview=writeoff.prepare(data,request),document=post(writeoff,data),saved={...data,fuelWriteoffs:[document]};assert.equal(document.calculationVersion,4);assert.equal(preview.totals.spent,10);
+  const data=db(),preview=writeoff.prepare(data,request),document=post(writeoff,data),saved={...data,fuelWriteoffs:[document]};assert.equal(document.calculationVersion,6);assert.equal(preview.totals.spent,10);
   const future=copy(saved);future.vehicles[0].fuelNorms.periods.push({id:'oct',from:'2026-10-01',basis:'Future',parameters:vehicle(20)});
   assert.equal(writeoff.fingerprint(future,request),document.sourceFingerprint);assert.equal(writeoff.validateDocuments(saved,future),true);
   future.vehicles[0].norm=123;assert.equal(writeoff.fingerprint(future,request),document.sourceFingerprint);
@@ -152,5 +152,7 @@ test('actual browser modules match Node, and missing dependency only fails when 
   assert.equal(hash(browser.TvsWriteoffEngine.prepare(db(),request)),hash(writeoff.prepare(db(),request)));assert.equal(browser.FuelMovementPolicy.generatorSpent({fuelNorms:container(generator(1.126))},{date:'2026-09-01',hours:1,load:75}),.845);
   const noPeriods=vm.createContext({});for(const name of ['decimal-core','fuel-engine'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name+'.js'),'utf8'),noPeriods);
   assert.equal(noPeriods.TvsFuelEngine.fqRecord({km:100},{norm:10}).norm,10);assert.throws(()=>noPeriods.TvsFuelEngine.fqRecord({date:'2026-09-01',km:100},{fuelNorms:container(vehicle(10))}),{code:'MODULE_UNAVAILABLE'});
-  assert.equal(noPeriods.TvsFuelEngine.recordBalances({vehicles:[{id:'v',norm:10,orgHistory:[]}],records:[{id:'r',vehicleId:'v',date:'2026-09-01',km:100}]},'v').r,-10);
+  const unanchored={vehicles:[{id:'v',norm:10,orgHistory:[]}],records:[{id:'r',vehicleId:'v',date:'2026-09-01',km:100}]};
+  assert.equal(noPeriods.TvsFuelEngine.recordBalanceAt(noPeriods.TvsFuelEngine.recordBalances(unanchored,'v'),'r'),null);
+  assert.equal(noPeriods.TvsFuelEngine.forVersion(5).recordBalances(unanchored,'v').r,-10);
 });

@@ -241,7 +241,7 @@ function wfReversalCheck(id) {
     const last=all[all.length-1];
     const balances=vehicle?computeFuelBalances(id,null,wfToday()):computeGenFuelBalances(id);
     const onSource=all.filter(r=>r.date<=original.date).pop();
-    const current=last?balances[last.id]:Number(asset.row.fuelBalance)||0,atSource=onSource?balances[onSource.id]:Number(asset.row.fuelBalance)||0;
+    const current=last?TvsFuelEngine.recordBalanceAt(balances,last.id):Number(asset.row.fuelBalance)||0,atSource=onSource?TvsFuelEngine.recordBalanceAt(balances,onSource.id):Number(asset.row.fuelBalance)||0;
     if(!Number.isFinite(current)||!Number.isFinite(atSource)||Math.min(current,atSource)+0.005<original.qty)throw Error('В расчётном остатке техники недостаточно топлива для отмены этой выдачи. Проверьте последующий расход и замеры.');
   }
   return {original,linked};

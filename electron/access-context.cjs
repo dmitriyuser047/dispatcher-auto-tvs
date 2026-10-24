@@ -48,7 +48,8 @@ function create(previous,next,value,options={}){
   mergeVisibleChanges:(name,rows)=>api.mergeVisibleChanges(selected,name,previous[name]||[],rows,context),
   validateChanges:(name,rows)=>api.validateChanges(selected,name,previous[name]||[],rows,context),
   resolveArchive:(snapshot,phase='before')=>(phase==='after'?after:before).resolveArchive(snapshot),
-  resolveSource:(source,phase='before')=>(phase==='after'?after:before).resolveSource(source)
+  resolveSource:(source,phase='before')=>(phase==='after'?after:before).resolveSource(source),
+  readDependencies:(phase='before')=>(phase==='after'?after:before).readDependencies()
  });
 }
 module.exports=Object.freeze({apiVersion:1,normalizePrincipal,principal:normalizePrincipal,create,hasPolicy,hasNarrowing,policyStamp,sectionAllowed,actionAvailable:sectionAllowed});

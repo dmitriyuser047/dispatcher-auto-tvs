@@ -6,7 +6,7 @@
 })(typeof globalThis === 'object' ? globalThis : this, function (fuelRoot,getAccounting,getDecimal,getPeriods,getTemporal) {
   'use strict';
   function makeEngine(calculationVersion){
-  const fuel=fuelRoot.forVersion(calculationVersion),modern=calculationVersion>=2,temporal=calculationVersion>=3,corrected=calculationVersion>=4;
+  const fuel=fuelRoot.forVersion(calculationVersion),modern=calculationVersion>=2,temporal=calculationVersion>=3,corrected=calculationVersion>=4,verified=calculationVersion>=6;
   if (!fuel || fuel.apiVersion !== 1) throw Error('Не загружено ядро расчёта ГСМ');
   const sumValues=values=>modern?getDecimal().toNumberExact(getDecimal().sum(values)):values.reduce((sum,value)=>sum+value,0);
   const sourceSections = Object.freeze(['vehicles', 'records', 'fuelPurchases', 'fuelCards', 'monthlyFuel']);
@@ -250,6 +250,10 @@
       if (issueVisible(item, scope, selected.ids)) add(item);
     }
     const vehicles = new Map(db.vehicles.map(row => [row.id,row]));
+    if(verified)for(const row of selected.rows){
+      const evidence=fuel.openingEvidence(db,row.vehicleId,{before:scope.from,family:fuel.gsmFamily(row.grade)});
+      if(evidence.status==='missing')add({code:'opening-missing',vehicleId:row.vehicleId,org:row.org,grade:row.grade,date:scope.from,section:'vehicles',sourceId:row.vehicleId,field:'fuelBalance',message:'Входящий остаток не подтверждён. Укажите начальный остаток, включая явный ноль, начало учёта или подтвердите остаток замером до начала периода'});
+    }
     const measurementPlans = new Map();
     function appliedMeasurement(record) {
       if (!measurementPlans.has(record.vehicleId)) measurementPlans.set(record.vehicleId,fuel.fqMeasurementPlan(db.records.filter(item=>item.vehicleId===record.vehicleId&&fuel.gsmValidDate(item.date)&&currentSource(vehicles.get(item.vehicleId),item.date)).slice().sort((a,b)=>a.date.localeCompare(b.date)),vehicles.get(record.vehicleId)));
@@ -280,7 +284,7 @@
       for (const field of fields) {
         const value = row[field];
         if (!present(value)) continue;
-        if (!['number','string'].includes(typeof value) || !Number.isFinite(Number(value)) || Number(value) < 0) {
+        if (!['number','string'].includes(typeof value) || (verified?fuel.fqValue(value)===null||fuel.fqValue(value)<0:!Number.isFinite(Number(value))||Number(value)<0)) {
           add({ code:'invalid-number', severity:historical?'warning':'error', field, message:(historical?'Исторический источник переноса: ':'')+'Укажите корректное неотрицательное число — ' + (fieldLabels[field] || field),
             vehicleId:idOr(row.vehicleId,(section === 'vehicles' ? row.id : '')), recordId:section === 'records' ? row.id : '', purchaseId:section === 'fuelPurchases' ? row.id : '', date:row.date || '', section, sourceId:idOr(row.id) });
           if (section === 'records' && ['km','fuelIssued','fuelActual','fuelUsed','fuelIdle','tankMeasured'].includes(field) || section === 'fuelPurchases' && field === 'qty') historicalOpeningUncertain(row,section,field,fieldLabels[field] || field);
@@ -298,7 +302,7 @@
     }
     for (const row of projection.vehicles) {
       const boundary=accounting(row);
-      checkNumeric(row,'vehicles',[...(boundary.mode==='legacy'?['fuelBalance']:[]),'norm','normCity','normHighway','normIdle','tankVolume']);
+      checkNumeric(verified?vehicles.get(row.id)||row:row,'vehicles',[...(boundary.mode==='legacy'?['fuelBalance']:[]),'norm','normCity','normHighway','normIdle','tankVolume']);
       if (boundary.mode==='legacy'&&row.fuelBalanceSources != null && !Array.isArray(row.fuelBalanceSources)) fail('INVALID_OPENING','Распределение начального остатка должно быть массивом');
       for (const source of boundary.mode==='explicit'?boundary.sources||[]:row.fuelBalanceSources || []) {
         if (!plain(source)) fail('INVALID_OPENING','Повреждён источник начального остатка');
@@ -380,7 +384,7 @@
         const difference=d.mul(d.sub(target,d.sum(parts.map(part=>part.item[field]))),1000),units=d.toNumberExact(difference);
         if(!Number.isSafeInteger(units)||Math.abs(units)>parts.length)fail('ROUNDING_RANGE','Не удалось согласовать точность строк акта');
         if(!units)return;
-        const sign=units<0?-1:1,ordered=parts.map(part=>({...part,error:d.sub(part.raw[field],part.item[field]),stable:stableSerialize([part.item.recordId,part.index])}));
+        const sign=units<0?-1:1,ordered=parts.map(part=>({...part,error:d.sub(calculationVersion>=5?part.raw.allocation?.[field]??part.raw[field]:part.raw[field],part.item[field]),stable:stableSerialize([part.item.recordId,part.index])}));
         ordered.sort((a,b)=>sign*d.compare(b.error,a.error)||a.stable.localeCompare(b.stable));
         for(const part of ordered.slice(0,Math.abs(units))){const delta=sign*.001;part.item[field]=d.toNumberExact(d.add(part.item[field],delta));(part.item.roundingAdjustment||(part.item.roundingAdjustment={}))[field]=delta;}
         add({code:'rounding-allocation',severity:'warning',vehicleId:row.vehicleId,org:row.org,grade:row.grade,field,qty:d.toNumberExact(d.div(units,1000,{scale:3,rounding:'half-away-from-zero'})),message:'Округление подробных строк согласовано с итогом до 0,001; исходные значения сохранены в снимке'});
@@ -461,6 +465,7 @@
       const ids = new Set();
       for (const document of rows) {
         if (!plain(document) || typeof document.id !== 'string' || !document.id || ids.has(document.id) || !['posted','void'].includes(document.status)) fail('INVALID_DOCUMENTS','Повреждён журнал актов или повторяется ID');
+        if(calculationVersion>=5)documentVersion(document,calculationVersion);
         ids.add(document.id);
       }
     }
@@ -476,7 +481,7 @@
         if (stableSerialize(expected) !== stableSerialize(changed)) fail('DOCUMENT_IMMUTABLE','При аннулировании нельзя изменять снимок акта');
       } else if (stableSerialize(document) !== stableSerialize(changed)) fail('DOCUMENT_IMMUTABLE','Сохранённый акт неизменяем; сначала аннулируйте его');
       if(changed.status==='posted'){
-        const version=documentVersion(document);let source=next;
+        const version=documentVersion(document,calculationVersion>=5?calculationVersion:4);let source=next;
         if(organizationChanged&&version<3){
           if(!compatibility){const api=getTemporal();if(api?.apiVersion!==1||typeof api.compatibilitySnapshot!=='function')fail('MODULE_UNAVAILABLE','Не загружена проверка совместимости истории организации');compatibility=api.compatibilitySnapshot(previous,next);}
           source=compatibility;
@@ -487,7 +492,7 @@
     for (const document of after) if (!old.has(document.id)) {
       if (document.status !== 'posted') fail('INVALID_TRANSITION','Нельзя создать сразу аннулированный акт');
       const withoutOwn = {...next,fuelWriteoffs:after.filter(row=>row.id!==document.id)};
-      const expected = forVersion(corrected?4:temporal?3:2).post(withoutOwn,{...document.scope,date:document.date,basisNote:document.basisNote},
+      const expected = forVersion(calculationVersion>=5?calculationVersion:corrected?4:temporal?3:2).post(withoutOwn,{...document.scope,date:document.date,basisNote:document.basisNote},
         {id:document.id,number:document.number,postedAt:document.postedAt,postedBy:document.postedBy,expectedFingerprint:document.sourceFingerprint});
       if (stableSerialize(expected) !== stableSerialize(document)) fail('DOCUMENT_RECALCULATION_FAILED','Снимок акта не совпадает с серверным пересчётом');
     }
@@ -496,8 +501,8 @@
   return Object.freeze({apiVersion:1,schemaVersion:1,calculationVersion,sourceSections,requiredSections,prepare,preview:prepare,fingerprint,post,voidDocument,
     validateWriteoffChanges,validateDocuments:validateWriteoffChanges,stableSerialize,sha256});
   }
-  function documentVersion(document){const version=Object.prototype.hasOwnProperty.call(document,'calculationVersion')?document.calculationVersion:Object.prototype.hasOwnProperty.call(document,'algorithmVersion')?document.algorithmVersion:1;if(version!==1&&version!==2&&version!==3&&version!==4)throw Object.assign(Error('Неизвестная версия расчёта проведённого акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version;}
-  const legacy=makeEngine(1),decimalVersion=makeEngine(2),temporalVersion=makeEngine(3),current=makeEngine(4);
-  function forVersion(version){if(version!==1&&version!==2&&version!==3&&version!==4)throw Object.assign(Error('Неизвестная версия расчёта акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version===1?legacy:version===2?decimalVersion:version===3?temporalVersion:current;}
+  function documentVersion(document,maxVersion=6){const version=Object.prototype.hasOwnProperty.call(document,'calculationVersion')?document.calculationVersion:Object.prototype.hasOwnProperty.call(document,'algorithmVersion')?document.algorithmVersion:1;if(version!==1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6||version>maxVersion)throw Object.assign(Error('Неизвестная версия расчёта проведённого акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version;}
+  const legacy=makeEngine(1),decimalVersion=makeEngine(2),temporalVersion=makeEngine(3),correctedVersion=makeEngine(4),allocatedVersion=makeEngine(5),current=makeEngine(6);
+  function forVersion(version){if(version!==1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6)throw Object.assign(Error('Неизвестная версия расчёта акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version===1?legacy:version===2?decimalVersion:version===3?temporalVersion:version===4?correctedVersion:version===5?allocatedVersion:current;}
   return Object.freeze({...current,forVersion});
 });

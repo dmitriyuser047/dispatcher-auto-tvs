@@ -43,7 +43,7 @@ function createOperationRecovery({outbox,send,lookup,onWarning=()=>{},onEvent}){
     observed(context,payload.operation.id,'transport-sent','pending');
     try{return settle(context,payload,await send(context,json),requestDigest);}
     catch(error){
-      const definitive=error.definitive===true||error.status>=400&&error.status<500&&error.status!==408||Array.isArray(error.issues)||Array.isArray(error.details?.issues);
+      const definitive=error.unknown!==true&&error.definitive!==false&&(error.definitive===true||error.status>=400&&error.status<500&&error.status!==408||Array.isArray(error.issues)||Array.isArray(error.details?.issues));
       outcome(context,payload.operation.id,{status:definitive?'rejected':'unknown',code:error.code||'TRANSPORT_FAILED'});
       observed(context,payload.operation.id,'ack-received',definitive?'denied':'unknown');
       return errorResult(error,!definitive);

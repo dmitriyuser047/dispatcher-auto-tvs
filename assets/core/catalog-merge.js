@@ -1,5 +1,5 @@
 /* Reviewable catalog aliasing. Physical facts and historical identities are never merged. */
-(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(require('./platform-schema.js'),require('./entity-identity.js'),require('./reference-graph.js'),()=>require('./platform-kernel.js'),()=>require('./writeoff-engine.js'),()=>require('./fuel-engine.js'),()=>require('./business-calendar.js'));else root.MergeCatalog=factory(root.PlatformSchema,root.EntityIdentity,root.ReferenceGraph,()=>root.PlatformKernel,()=>root.TvsWriteoffEngine,()=>root.TvsFuelEngine,()=>root.BusinessCalendar);})(typeof globalThis==='object'?globalThis:this,function(schema,identity,graph,getKernel,getWriteoff,getFuel,getCalendar){
+(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(require('./platform-schema.js'),require('./entity-identity.js'),require('./reference-graph.js'),()=>require('./request-fingerprint.js'),()=>require('./writeoff-engine.js'),()=>require('./fuel-engine.js'),()=>require('./business-calendar.js'));else root.MergeCatalog=factory(root.PlatformSchema,root.EntityIdentity,root.ReferenceGraph,()=>root.RequestFingerprint,()=>root.TvsWriteoffEngine,()=>root.TvsFuelEngine,()=>root.BusinessCalendar);})(typeof globalThis==='object'?globalThis:this,function(schema,identity,graph,getFingerprint,getWriteoff,getFuel,getCalendar){
  'use strict';
  const catalogSections=Object.freeze(['vehicles','generators','tanks','drivers','parts','contragents','fuelCards']),own=(value,key)=>Object.prototype.hasOwnProperty.call(value,key),clone=value=>JSON.parse(JSON.stringify(value));
  function fail(code,message,issues){throw Object.assign(Error(message),{name:'CatalogMergeError',code,status:400,...(issues?{issues,details:{issues}}:{})});}
@@ -98,9 +98,9 @@
    const writeoff=getWriteoff();if(writeoff?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружена защита проведённых актов');
    try{const sections=changes(db,request,source,references,{id:'merge-preview',now:ctx.today+'T12:00:00.000Z',actor:{id:'preview',name:'Preview',role:'preview'}});writeoff.validateDocuments(db,{...db,...sections});}catch(error){blockers.push({code:error.code||'POSTED_SOURCE_LOCKED',message:'Объединение затрагивает источник проведённого акта. Сначала проверьте защищённый документ; его данные и отпечаток не обходятся.'});}
   }
-  const kernel=getKernel();if(kernel?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружен расчёт отпечатка плана');
+  const hashing=getFingerprint();if(hashing?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружен расчёт отпечатка плана');
   const intent={section:request.section,sourceId:request.sourceId,targetId:request.targetId,reason:request.reason,mutableRefs:request.mutableRefs};
-  const fingerprint=kernel.requestDigest({protocolVersion:1,base:{},command:{type:'MergeCatalogReview',version:1,input:intent,today:ctx.today,database:db,references:report.references}});
+  const fingerprint=hashing.requestDigest({protocolVersion:1,base:{},command:{type:'MergeCatalogReview',version:1,input:intent,today:ctx.today,database:db,references:report.references}});
   return {apiVersion:1,source:{section:request.section,id:source.id,label:title(source)},target:{section:request.section,id:target.id,label:title(target)},references,blockers,warnings,fingerprint,canMerge:blockers.length===0,readSections:[...schema.sections],writeSections:footprint(request)};
  }
  function plan(database,value,options){

@@ -37,28 +37,28 @@
       maxCacheCharacters: options.maxCacheCharacters,
       fingerprint:writeoff.sha256,
       modules: {
-        fuel: { version:'4', sections:sections.fuel,
+        fuel: { version:'6', sections:sections.fuel,
           calculate:(db, query) => fuel.buildLedger(db, query) },
-        fuelRecords: { version:'4', sections:sections.fuelRecords,
+        fuelRecords: { version:'6', sections:sections.fuelRecords,
           calculate:(db, query) => fuel.recordBalances(db, query.vehicleId, { from:query.from, to:query.to }) },
-        fuelAudit: { version:'4', sections:sections.fuelAudit,
+        fuelAudit: { version:'6', sections:sections.fuelAudit,
           calculate:(db, query) => audit.buildModel(db, query) },
-        writeoff: { version:'4', sections:sections.writeoff,
+        writeoff: { version:'6', sections:sections.writeoff,
           calculate:(db, query) => writeoff.prepare(db, query) },
-        writeoffPost: { version:'4', sections:sections.writeoffPost,
+        writeoffPost: { version:'6', sections:sections.writeoffPost,
           calculate:(db, query) => writeoff.post(db, query.request, query.metadata) },
         costs: { version:'5', sections:sections.costs,
           calculate:(db, query) => costs.buildReport(db, query) },
-        costValuation: { version:'2', sections:sections.costValuation,
+        costValuation: { version:'3', sections:sections.costValuation,
           calculate:(db,query) => {
             if(typeof costs.buildFullReport!=='function')throw Object.assign(Error('Не загружен расчёт полной себестоимости'),{code:'MODULE_UNAVAILABLE'});
             return costs.buildFullReport(db,query);
           } },
-        repairProcess: {version:'1',sections:sections.repairProcess,calculate:(db,query)=>{
+        repairProcess: {version:'2',sections:sections.repairProcess,calculate:(db,query)=>{
           if(repairs?.apiVersion!==1||typeof repairs.packet!=='function')throw Object.assign(Error('Не загружен ремонтный процесс'),{code:'MODULE_UNAVAILABLE'});
           return repairs.packet(db,{section:'workOrders',id:query.id},query);
         }},
-        procurement: { version:'4', sections:sections.procurement,
+        procurement: { version:'5', sections:sections.procurement,
           calculate:(db, query) => {
             if (!query.date) throw Error('Укажите дату расчёта закупок');
             return procurement.plan(db, query);

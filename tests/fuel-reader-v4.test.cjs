@@ -1,6 +1,6 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
-const fuel=require('../assets/core/fuel-engine'),writeoff=require('../assets/core/writeoff-engine'),audit=require('../assets/core/fuel-audit'),sources=require('../assets/core/financial-recognition');
+const fuelRoot=require('../assets/core/fuel-engine'),fuel={...fuelRoot.forVersion(4),forVersion:fuelRoot.forVersion},writeoff=require('../assets/core/writeoff-engine').forVersion(4),audit=require('../assets/core/fuel-audit'),sources=require('../assets/core/financial-recognition');
 const period={from:'2026-09-01',to:'2026-09-30'},request={month:'2026-09',date:'2026-09-30',org:'A',grade:'ДТ'},metadata={id:'v4-posted',number:'Synthetic',postedAt:'2026-10-22T12:00:00.000Z',postedBy:{id:'synthetic',name:'Synthetic'}};
 function fixture(){return {vehicles:[{id:0,org:'A',fuel:'diesel',fuelGrade:'ДТ',fuelBalance:923.537,norm:0},{id:'0',org:'B',fuel:'diesel',fuelGrade:'ДТ',fuelBalance:0,norm:0}],records:[{id:0,vehicleId:0,date:'2026-09-10',km:0,fuelIssued:10,fuelActual:1}],fuelPurchases:[{id:0,vehicleId:0,recordId:0,date:'2026-09-10',qty:10,grade:'ДТ',sourceOrg:'A'}],fuelCards:[],monthlyFuel:[],fuelWriteoffs:[]};}
 
@@ -37,5 +37,5 @@ test('accounting TankFlows reuses stock projection, cancels internal legs exactl
 });
 
 test('v4 browser UMD ledger, diagnostics and act output match CommonJS',()=>{
- const context=vm.createContext({});for(const file of ['decimal-core.js','accounting-boundary.js','effective-periods.js','fuel-engine.js','writeoff-engine.js','fuel-audit.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',file),'utf8'),context,{filename:file});const db=fixture();assert.equal(JSON.stringify(context.TvsFuelEngine.buildLedger(db,period)),JSON.stringify(fuel.buildLedger(db,period)));assert.equal(JSON.stringify(context.TvsWriteoffEngine.prepare(db,request)),JSON.stringify(writeoff.prepare(db,request)));
+ const context=vm.createContext({});for(const file of ['decimal-core.js','accounting-boundary.js','effective-periods.js','fuel-engine.js','writeoff-engine.js','fuel-audit.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',file),'utf8'),context,{filename:file});const db=fixture();assert.equal(JSON.stringify(context.TvsFuelEngine.forVersion(4).buildLedger(db,period)),JSON.stringify(fuel.buildLedger(db,period)));assert.equal(JSON.stringify(context.TvsWriteoffEngine.forVersion(4).prepare(db,request)),JSON.stringify(writeoff.prepare(db,request)));
 });

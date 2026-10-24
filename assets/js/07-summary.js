@@ -15,16 +15,19 @@ function fuelReportField(section,asset,row,key){
 function fuelReportBalanceLabel(section,asset,to=''){
   const boundary=fuelAccountingFor(section,asset),until=to||dispatcherLocalDate();
   if(boundary.mode==='explicit'&&until<boundary.from)return 'Учёт не начат';
-  return asset?.fuelNorms!=null?'Неизвестно: нет нормы':'Учёт не начат';
+  return asset?.fuelNorms!=null?'Неизвестно: нет нормы':'Неизвестно: нет расхода';
 }
 function fuelReportGroupBalanceLabel(section,assets,to=''){
-  const missingNorm=assets.some(asset=>{
-    if(asset.fuelNorms==null||fuelReportBalanceLabel(section,asset,to)==='Учёт не начат')return false;
+  let missingLabel='Учёт не начат';
+  assets.some(asset=>{
+    const label=fuelReportBalanceLabel(section,asset,to);
+    if(label==='Учёт не начат')return false;
     const records=section==='vehicles'?recsFor(asset.id):genRecsFor(asset.id);
     const balances=section==='vehicles'?computeFuelBalances(asset.id):computeGenFuelBalances(asset.id);
-    return fuelAccountingCurrentBalance(section,asset,records,balances,to)===null;
+    if(fuelAccountingCurrentBalance(section,asset,records,balances,to)!==null)return false;
+    missingLabel=label;return true;
   });
-  return missingNorm?'Неизвестно: нет нормы':'Учёт не начат';
+  return missingLabel;
 }
 function renderSidebarSummary() {
   const el = document.getElementById('sidebarSummary');
@@ -79,7 +82,7 @@ function renderSidebarSummary() {
         </div>
         <div class="ss-row">
           <span class="ss-label">Остаток</span>
-          <span class="ss-value" style="color:${balColor}">${missingNorm[ft]?'Неизвестно: нет нормы':tracked[ft]?bal.toLocaleString('ru',{maximumFractionDigits:3})+' л':'Учёт ещё не начат'}</span>
+          <span class="ss-value" style="color:${balColor}">${missingNorm[ft]?fuelReportGroupBalanceLabel('vehicles',data.vehicles.filter(v=>fuelTypeFromGrade(vehicleFuelGrade(v))===ft)):tracked[ft]?bal.toLocaleString('ru',{maximumFractionDigits:3})+' л':'Учёт ещё не начат'}</span>
         </div>
         ${unstarted[ft]?'<small>Учёт ещё не начат: '+unstarted[ft]+'</small>':''}
       </div>`;

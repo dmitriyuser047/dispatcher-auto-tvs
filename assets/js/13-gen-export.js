@@ -153,7 +153,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     const bm=computeGenFuelBalances(g.id);
     const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
     if(genExportFuelExplicit(g)){gExplicit[ft]=true;const value=fuelAccountingCurrentBalance('generators',g,genRecsFor(g.id),bm,dateTo||'');if(value==null)gMissing[ft]=true;else gBal[ft]+=value;}
-    else gBal[ft]+=sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
+    else{const value=sorted.length?TvsFuelEngine.recordBalanceAt(bm,sorted[sorted.length-1].id):(g.fuelBalance||0);if(value==null)gMissing[ft]=true;else gBal[ft]+=value;}
   });
   const usedFuels=new Set(gens.map(g=>g.fuel||'diesel'));
   ['diesel','gasoline','gas'].filter(ft=>usedFuels.has(ft)).forEach((ft,i)=>{
@@ -275,7 +275,7 @@ function exportAllGensToXlsx(dateFrom, dateTo) {
     const overrun=norm==null||actual==null?null:Math.max(0,actual-norm);
     const bm=computeGenFuelBalances(g.id);
     const sorted=genRecsFor(g.id).slice().sort((a,b)=>cmpDateAsc(a.date, b.date));
-    const bal=explicit?fuelAccountingCurrentBalance('generators',g,genRecsFor(g.id),bm,dateTo||''):sorted.length?(bm[sorted[sorted.length-1].id]||0):(g.fuelBalance||0);
+    const bal=explicit?fuelAccountingCurrentBalance('generators',g,genRecsFor(g.id),bm,dateTo||''):sorted.length?TvsFuelEngine.recordBalanceAt(bm,sorted[sorted.length-1].id):(g.fuelBalance||0);
     if(bal==null)missingBalance=true;
     totH+=hours;totIss+=issued;totNorm=fuelReportAdd(totNorm,norm);totAct=fuelReportAdd(totAct,actual);totEcon=fuelReportAdd(totEcon,economy);totOver=fuelReportAdd(totOver,overrun);totBal=fuelReportAdd(totBal,bal);
     if(g.cost!=null) totCost+=g.cost;
@@ -437,7 +437,7 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
   const avgCons=fuelHours>0&&totActual!=null&&(g.fuelNorms!=null||totActual>0)?totActual/fuelHours:null;
   const balMap=computeGenFuelBalances(gid);
   const lastRec=allRecs[allRecs.length-1];
-  const curBal=explicit?fuelAccountingCurrentBalance('generators',g,allRecs,balMap,dateTo||''):lastRec?((balMap[lastRec.id]!=null?balMap[lastRec.id]:g.fuelBalance)||0):(g.fuelBalance||0);
+  const curBal=explicit?fuelAccountingCurrentBalance('generators',g,allRecs,balMap,dateTo||''):lastRec?TvsFuelEngine.recordBalanceAt(balMap,lastRec.id):(g.fuelBalance||0);
   [
     ['Наработка за период, мтч', +totHours.toFixed(1)],
     ['Количество записей', filtRecs.length],
@@ -471,7 +471,7 @@ function exportOneGenToXlsx(gid, dateFrom, dateTo) {
     filtRecs.forEach((r,i)=>{
       const bg=i%2===0?P.white:P.gray1;
       const day=DAYS[new Date(r.date).getDay()];
-      const bal=balMap[r.id];
+      const bal=TvsFuelEngine.recordBalanceAt(balMap,r.id);
       const bBg=bal!=null?(bal<0?P.redPale:bal===0?P.gray2:P.greenPale):P.gray2;
       const sB=cs({bold:true,sz:10,color:{rgb:bal!=null?(bal<0?P.red:bal===0?P.gray4:P.green):P.gray4}},bBg,{horizontal:'right',vertical:'center',indent:1},bAll('thin',P.gray3));
       const rowNorm=g.fuelNorms!=null?fuelReportField('generators',g,r,'fuelUsed'):fqValue(r.fuelUsed);

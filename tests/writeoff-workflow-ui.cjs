@@ -67,9 +67,15 @@ beforeEach(async () => {
     XLSX.writeFile = (workbook, filename) => { window.__exports.push({ workbook:JSON.parse(JSON.stringify(workbook)), filename }); };
     window.__sourceBytes = JSON.stringify({ vehicles:data.vehicles, records:data.records, fuelPurchases:data.fuelPurchases, fuelCards:data.fuelCards, monthlyFuel:data.monthlyFuel, fuelPeriods:data.fuelPeriods });
   });
+  await openFinalStage();
 });
 afterEach(async () => { await page?.close(); assert.deepEqual(errors, []); });
 
+async function openFinalStage() {
+  await page.locator('.gsm-act-steps').waitFor();
+  await page.locator('[data-gsm-act-step="4"]').click();
+  await page.locator('.gsm-writeoff').waitFor();
+}
 async function sourceBytes() {
   return page.evaluate(() => JSON.stringify({ vehicles:data.vehicles, records:data.records, fuelPurchases:data.fuelPurchases, fuelCards:data.fuelCards, monthlyFuel:data.monthlyFuel, fuelPeriods:data.fuelPeriods }));
 }
@@ -254,6 +260,7 @@ test('annulment requires a reason, preserves the registered source snapshot and 
 test('read-only role cannot post or annul through hidden routes or direct function invocation', async () => {
   const doc = await post();
   await page.evaluate(() => { _sync.access = { user:{ id:'synthetic-reader', role:'viewer' }, readable:Object.keys(data), writable:[] }; renderFuelPurchases(); });
+  await openFinalStage();
   assert.equal(await page.locator('[data-writeoff-action="post"]:not(:disabled),[data-writeoff-action="void"]').count(), 0);
   await page.evaluate(async id => {
     gsmPostWriteoffDialog(); gsmVoidWriteoffDialog(id);

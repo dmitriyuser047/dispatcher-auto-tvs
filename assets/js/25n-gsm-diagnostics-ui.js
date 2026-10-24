@@ -215,7 +215,7 @@ async function gsmOrphanCommit() {
     gsmOrphanCurrent(plan);
     if (!fuelEditAllowed(record.date)) return;
     if (JSON.stringify(gsmVehicle(plan.targetId)) !== plan.targetJson || JSON.stringify(gsmOrphanRelatedPurchases(record.id)) !== plan.purchasesJson) throw Error('Данные изменены во время проверки. Откройте проверку заново.');
-    const before = data, next = JSON.parse(JSON.stringify(data)), at = new Date().toISOString();
+    const next = JSON.parse(JSON.stringify(data)), rollback = captureSaveRollback(data,next), at = new Date().toISOString();
     next.records.find(row => row.id === plan.recordId).vehicleId = plan.targetId;
     (next.appMeta || (next.appMeta = [])).push({ id: 'gsm-record-link:' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36)), rowType: 'gsm-record-vehicle-correction', recordId: plan.recordId,
       fromVehicleId: record.vehicleId || '', toVehicleId: plan.targetId, reason: plan.reason, at });
@@ -223,11 +223,11 @@ async function gsmOrphanCommit() {
     let saved;
     try { saved = await saveData(data, { noMerge: true, history: { action: 'Ручная привязка записи журнала', reason: plan.reason } }); }
     catch (failure) {
-      if (data === next) { data = before; rebuildIndex(); throw Error('Привязка не записана. Данные восстановлены: ' + failure.message); }
+      if (restoreSaveRollback(rollback)) throw Error('Привязка не записана. Данные восстановлены: ' + failure.message);
       throw Error('Привязка не записана. База обновилась; откройте проверку заново. ' + failure.message);
     }
     if (!saved) {
-      if (data === next) { data = before; rebuildIndex(); throw Error('Привязка не записана. Данные восстановлены. Проверьте соединение и повторите.'); }
+      if (restoreSaveRollback(rollback)) throw Error('Привязка не записана. Данные восстановлены. Проверьте соединение и повторите.');
       throw Error('Привязка не записана. База обновилась; откройте проверку заново.');
     }
     gsmOrphanPending = null; gsmOrphanState = null; closeModal('genericModal'); renderFuelPurchases();

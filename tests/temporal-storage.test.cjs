@@ -48,8 +48,8 @@ for(const format of ['json','sqlite']){
   }
  });
 
- test(format+' new acts are canonical calculation version 4 and freeze the selected dated norm without changing journal facts',t=>{
-  const {dir}=fixture(t,format,data=>{data.vehicles[0].fuelNorms=history(period('2026-09-01',10),period('2026-10-01',20));}),before=snapshot(dir),request={month:'2026-09',org:'A',grade:'ДТ',date:'2026-10-01',basisNote:'Synthetic dated norm act'},preview=writeoff.prepare(before.data,request);assert.equal(preview.calculationVersion,4);assert.equal(preview.canPost,true,JSON.stringify(preview.issues));const doc=writeoff.post(before.data,request,{id:'dated-v4',number:'Synthetic-4',postedAt:now,postedBy:principal,expectedFingerprint:preview.sourceFingerprint});assert.equal(save(dir,{fuelWriteoffs:[doc]}).ok,true);const after=snapshot(dir);assert.equal(after.data.fuelWriteoffs[0].calculationVersion,4);assert.deepEqual(after.data.records,before.data.records);assert.deepEqual(after.data.vehicles,before.data.vehicles);
+ test(format+' new acts are canonical calculation version 6 and freeze the selected dated norm without changing journal facts',t=>{
+  const {dir}=fixture(t,format,data=>{data.vehicles[0].fuelNorms=history(period('2026-09-01',10),period('2026-10-01',20));}),before=snapshot(dir),request={month:'2026-09',org:'A',grade:'ДТ',date:'2026-10-01',basisNote:'Synthetic dated norm act'},preview=writeoff.prepare(before.data,request);assert.equal(preview.calculationVersion,6);assert.equal(preview.canPost,true,JSON.stringify(preview.issues));const doc=writeoff.post(before.data,request,{id:'dated-v6',number:'Synthetic-6',postedAt:now,postedBy:principal,expectedFingerprint:preview.sourceFingerprint});assert.equal(save(dir,{fuelWriteoffs:[doc]}).ok,true);const after=snapshot(dir);assert.equal(after.data.fuelWriteoffs[0].calculationVersion,6);assert.deepEqual(after.data.records,before.data.records);assert.deepEqual(after.data.vehicles,before.data.vehicles);
  });
 
  test('HTTP '+format+' temporal metadata shares ACL, malformed/full/raw/command guards and canonical acknowledgement',async t=>{

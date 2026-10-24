@@ -40,13 +40,19 @@ async function protocol(t, { hook = () => {} } = {}) {
     { ...admin, enabled:true, tokenHash:access.hashToken(credentials.admin) },
     { id:'other', name:'Other admin', role:'admin', enabled:true, tokenHash:access.hashToken(credentials.other) },
   ]) };
-  let handler, locked = false, backups = 0, requestPhase='idle';
-  const authLockStates = [];
+  let handler, locked = false, backups = 0, requestPhase='idle', committed=false;
+  const authLockStates = [], authEvents=[];
   const fakeHttp = { createServer(fn) {
     handler = fn;
-    return { once() {}, listen(_port, _host, ready) { ready(); }, address() { return { port:1 }; }, close() {} };
+    return Object.assign(new EventEmitter(), {
+      listen(_port, _host, ready) { ready(); return this; }, address() { return { port:1 }; },
+      close(done) { queueMicrotask(() => { this.emit('close'); done?.(); }); return this; },
+    });
   } };
-  const storageProxy = { ...storage, withDatabaseLock(dataDir, action) {
+  const storageProxy = { ...storage,
+    writeAll(...args) { const result=storage.writeAll(...args);if(result.ok===true&&!result.replayed)committed=true;return result; },
+    writeSections(...args) { const result=storage.writeSections(...args);if(result.ok===true&&!result.replayed)committed=true;return result; },
+    withDatabaseLock(dataDir, action) {
     return storage.withDatabaseLock(dataDir, () => {
       locked = true;
       try { if(requestPhase==='write')hook(); return action(); }
@@ -55,6 +61,7 @@ async function protocol(t, { hook = () => {} } = {}) {
   } };
   const accessProxy = { ...access, authenticate(token, current) {
     authLockStates.push(locked);
+    authEvents.push({locked,committed});
     return access.authenticate(token, current);
   } };
   const exported = { exports:{} };
@@ -76,7 +83,7 @@ async function protocol(t, { hook = () => {} } = {}) {
     try{return await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Synthetic HTTP handler did not answer')),3000),res={destroyed:false,headersSent:false,writeHead(code){status=code;},end(text){clearTimeout(timer);resolve({status,body:JSON.parse(text)});}};handler(req,res);beforeEnd();req.emit('data',Buffer.from(raw));req.complete=true;req.emit('end');});}
     finally{requestPhase='idle';}
   }
-  const harness = { dir, credentials, authLockStates, get backups() { return backups; },
+  const harness = { dir, credentials, authLockStates, authEvents, get backups() { return backups; },
     changeUser(change) {
       settings = { ...settings, serverUsers:access.normalizeServerUsers(settings.serverUsers.map(user =>
         user.id === 'admin' ? { ...user, ...change } : user)) };
@@ -87,7 +94,7 @@ async function protocol(t, { hook = () => {} } = {}) {
       // is virtual; no test secret, minted ticket or bypass enters production.
       const negotiated=await dispatch('/api/negotiate',JSON.stringify(require('../assets/core/platform-compatibility.js').describe().hello),authentication,()=>{},'negotiate');
       const headers={...schemaWriterHeaders(),...authentication,...(negotiated.body.writeTicket?{'x-tvs-write-ticket':negotiated.body.writeTicket}:{})};
-      authLockStates.length=0;
+      authLockStates.length=0;authEvents.length=0;committed=false;
       return dispatch(route,raw,headers,beforeEnd);
     },
     payload(name, operationId) {
@@ -198,7 +205,16 @@ for (const route of ['/api/data', '/api/sections']) {
     const result = await h.request(route, body, () => h.changeUser({ enabled:false }));
     assert.equal(result.status, 401); assert.equal(h.backups, 0);
     assert.deepEqual(storage.readSnapshot(h.dir), before);
-    assert.deepEqual(h.authLockStates, [false, true]);
+    assert.deepEqual(h.authLockStates, [false, false]);
+  });
+  test('revoking an authenticated user under the lock for ' + route + ' prevents backup and write', async t => {
+    let h;h=await protocol(t,{hook:()=>h.changeUser({enabled:false})});
+    const before=storage.readSnapshot(h.dir),body=h.payload('Revoked under lock');
+    if(route.endsWith('sections')){body.sections={vehicles:body.data.vehicles};delete body.data;}
+    const result=await h.request(route,body);
+    assert.equal(result.status,401);assert.equal(result.body.code,'ACCESS_REVOKED');assert.equal(h.backups,0);
+    assert.deepEqual(storage.readSnapshot(h.dir),before);assert.deepEqual(h.authLockStates,[false,false,true]);
+    assert.equal(h.authEvents.some(event=>event.committed),false);
   });
 }
 
@@ -229,14 +245,17 @@ test('the current permitted role and name own canonical audit and ACK filtering'
   const full = h.payload('Permitted', 'current-principal'), body = {
     databaseToken:full.databaseToken, base:full.base, operation:full.operation, sections:{ vehicles:full.data.vehicles },
   };
-  const stale = await h.request('/api/sections', body);
-  assert.equal(stale.status,428);assert.equal(stale.body.code,'PROTOCOL_RENEGOTIATE');assert.equal(h.backups,0);
+  const before=storage.readSnapshot(h.dir),stale = await h.request('/api/sections', body);
+  assert.equal(stale.status,403);assert.equal(stale.body.code,'ACCESS_CHANGED');assert.equal(h.backups,0);
+  assert.deepEqual(storage.readSnapshot(h.dir),before);assert.equal(h.authEvents.at(-1).locked,true);assert.equal(h.authEvents.some(event=>event.committed),false);
   const result = await h.request('/api/sections', body);
   assert.equal(result.status, 200); assert.equal(result.body.revisions.payments, 0);
   const event = storage.readAll(h.dir).auditLog.find(row => row.operationId === 'current-principal' && row.section === 'vehicles');
   assert.equal(event.actorRole, 'dispatcher'); assert.equal(event.actor, 'Current dispatcher');
   assert.ok(result.body.canonicalSections.auditLog.every(row => row.section !== 'payments'));
-  assert.deepEqual(h.authLockStates, [false, true]);
+  assert.equal(h.authEvents[0].locked,false);
+  assert.ok(h.authEvents.some(event=>event.locked&&!event.committed));
+  assert.deepEqual(h.authEvents.at(-1),{locked:false,committed:true});
 });
 
 test('a revoked user cannot receive even a replay acknowledgement for a prior operation', async t => {

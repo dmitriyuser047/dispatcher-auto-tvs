@@ -1,5 +1,5 @@
 /* Procurement forecasts are estimates. Orders never mutate inventory or fuel journals. */
-(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('../core/accounting-boundary.js'),require('../core/decimal-core.js'),()=>require('../core/fuel-stock.js'),()=>require('../core/inventory-stock.js'),()=>require('../core/procurement-operations.js'),require('../core/entity-identity.js'));else root.ProcurementEngine=factory(root.AccountingBoundary,root.DecimalCore,()=>root.FuelStock,()=>root.InventoryStock,()=>root.ProcurementOperations,root.EntityIdentity);})(typeof globalThis!=='undefined'?globalThis:this,function(accounting,decimal,getFuelStock,getInventoryStock,getProcurement,identity){
+(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('../core/accounting-boundary.js'),require('../core/decimal-core.js'),()=>require('../core/fuel-stock.js'),()=>require('../core/inventory-stock.js'),()=>require('../core/procurement-operations.js'),require('../core/entity-identity.js'),()=>require('../core/effective-periods.js'));else root.ProcurementEngine=factory(root.AccountingBoundary,root.DecimalCore,()=>root.FuelStock,()=>root.InventoryStock,()=>root.ProcurementOperations,root.EntityIdentity,()=>root.EffectivePeriods);})(typeof globalThis!=='undefined'?globalThis:this,function(accounting,decimal,getFuelStock,getInventoryStock,getProcurement,identity,getPeriods){
  'use strict';
  const DAY=86400000,STATUSES=['draft','ordered','partial','received','cancelled'];
  const rows=(db,name)=>Array.isArray(db?.[name])?db[name]:[];
@@ -78,15 +78,31 @@
    if(!live(job)||!['assigned','started'].includes(job.status))continue;
    const start=String(job.start||'').slice(0,10),end=String(job.end||'').slice(0,10);
    if(!validDate(start)||!validDate(end)||end<start||end<date||start>shift(date,horizon))continue;
+   // Hours describe the whole assignment. Do not concentrate already elapsed
+   // hours into its remaining days, or use today's norm for a later work date.
+   const span=Math.max(1,Math.round((new Date(end+'T12:00Z')-new Date(start+'T12:00Z'))/DAY)+1);
+   const first=start<date?date:start,last=end>shift(date,horizon)?shift(date,horizon):end;
    let qty=null;
    if(kind==='tank'){
     const generator=String(job.assetRef||'').startsWith('g:')?rows(db,'generators').find(g=>'g:'+g.id===job.assetRef&&!g.archived):null;
     // A vehicle assignment has no reliable source tank in the current data model.
     // Only generators with an explicit tank and a flat l/h norm can be quantified.
     if(!generator||generator.tankId!==id)continue;
-    const hours=number(job.plannedHours),rate=number(generator.norm);
-    if(hours!==null&&hours>=0&&rate!==null&&rate>0)qty=multiply(hours,rate);
-    else unknownJobs++;
+    const hours=number(job.plannedHours);
+    if(Object.hasOwn(generator,'fuelNorms')){
+     const periods=getPeriods?.();if(periods?.apiVersion!==1)throw Error('Не загружены датированные нормы ДЭС');
+     let missing=false;
+     for(let day=first;day<=last;day=shift(day,1)){
+      let rate=null;
+      try{const selected=periods.resolve('generators',generator,day,'fuelNorms');if(selected.status==='known')rate=number(selected.parameters.norm);}catch{missing=true;}
+      if(hours===null||hours<0||rate===null||rate<0){missing=true;continue;}
+      demand.set(day,add(demand.get(day)||0,divide(multiply(hours,rate),span)));
+     }
+     if(missing)unknownJobs++;else knownJobs++;
+     continue;
+    }
+    const rate=number(generator.norm);
+    if(hours!==null&&hours>=0&&rate!==null&&rate>0)qty=multiply(hours,rate);else unknownJobs++;
    }else{
     const requirements=Array.isArray(job.partRequirements)?job.partRequirements.filter(r=>r.partId===id):[];
     if(!requirements.length)continue;
@@ -94,8 +110,7 @@
    }
    if(qty===null||!Number.isFinite(qty))continue;knownJobs++;
    // Spread a multi-day assignment over its whole interval, not only its remaining days.
-   const span=Math.max(1,Math.round((new Date(end+'T12:00Z')-new Date(start+'T12:00Z'))/DAY)+1),perDay=divide(qty,span);
-   const first=start<date?date:start,last=end>shift(date,horizon)?shift(date,horizon):end;
+   const perDay=divide(qty,span);
    for(let d=first;d<=last;d=shift(d,1))demand.set(d,add(demand.get(d)||0,perDay));
   }
   return {demand,knownJobs,unknownJobs};

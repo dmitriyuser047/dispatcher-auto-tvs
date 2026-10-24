@@ -48,7 +48,7 @@ jobs:
       - name: Verify production identity and exact main commit
         id: pkg
         run: |
-          node -e "require('./scripts/write-release-manifest.cjs').validateMetadata(require('./package.json'))"
+          node -e "const guard=require('./scripts/write-release-manifest.cjs');guard.validateMetadata(require('./package.json'));guard.assertCleanSource(process.cwd())"
           if ($LASTEXITCODE -ne 0) { throw 'Invalid production package' }
           $pkg = Get-Content package.json -Raw | ConvertFrom-Json
           if ($env:RELEASE_TAG -cne "v$($pkg.version)") { throw 'Tag and package version differ' }
@@ -106,7 +106,8 @@ jobs:
           if ($manifest.sourceDirty -or $manifest.sourceCommit -cne '${{ steps.pkg.outputs.source }}' -or $manifest.version -cne '${{ steps.pkg.outputs.version }}') { throw 'Installer source differs from the release commit' }
           if ($manifest.published -or $manifest.packageIntegrity.mismatches -ne 0) { throw 'Invalid package verification manifest' }
           if ((Get-FileHash "dist/$($manifest.installer)" -Algorithm SHA256).Hash.ToLowerInvariant() -cne $manifest.sha256) { throw 'Installer checksum differs from manifest' }
-          if (git status --porcelain --untracked-files=no) { throw 'Build changed tracked source files' }
+          node -e "require('./scripts/write-release-manifest.cjs').assertCleanSource(process.cwd())"
+          if ($LASTEXITCODE -ne 0) { throw 'Build changed source files or introduced new non-ignored files' }
           $md = Get-Content assets/CHANGELOG.md -Raw -Encoding UTF8
           $match = [regex]::Match($md, '(?ms)^## ' + [regex]::Escape($manifest.version) + '\b[^\n]*\n(.*?)(?=^## |\z)')
           $notes = $match.Groups[1].Value.Trim()

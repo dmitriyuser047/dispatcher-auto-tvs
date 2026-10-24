@@ -308,11 +308,11 @@ async function fcSave(id) {
 
 async function fcDelete(id) {
   if (!confirm('Удалить карту из справочника? Покупки по ней останутся.')) return;
-  const before = JSON.stringify(data);
+  const rollback = captureSaveRollback();
   const card = fcList().find(c => c.id === id);
   if (card) gsmPreserveCardHistory(data, card.number);
   data.fuelCards = fcList().filter(c => c.id !== id);
-  if (await saveData(data) === false) { data = JSON.parse(before); rebuildIndex(); return; }
+  if (await saveData(data) === false) { restoreSaveRollback(rollback); return; }
   closeModal('genericModal');
   renderFuelPurchases();
 }
@@ -324,7 +324,7 @@ let fcCloseMonth = '';
 function fcMonthEndBalance(vid, month) {
   const bal = computeFuelBalances(vid);
   const recs = recsFor(vid).filter(r => r.date <= month + '-31').sort((a, b) => cmpDateAsc(a.date, b.date));
-  return recs.length ? bal[recs[recs.length - 1].id] : null;
+  return recs.length ? TvsFuelEngine.recordBalanceAt(bal,recs[recs.length - 1].id) : null;
 }
 
 function fcChecklist(month) {

@@ -245,6 +245,21 @@ function scheduleLocalBackup(json) {
 }
 
 const _pendingSaveOperations=new Set();
+// A form owns only its submitted tree in its original session. The shared
+// failure path may already have replaced that tree with its persisted baseline;
+// retain that ownership without accepting a newly loaded database as a rollback.
+const _saveBaselineOrigins=new WeakMap();
+function captureSaveRollback(snapshot=data,submitted=data) {
+  return Object.freeze({database:submitted,session:typeof syncSessionStamp==='function'?syncSessionStamp():null,
+    snapshot:typeof snapshot==='string'?snapshot:JSON.stringify(snapshot)});
+}
+function restoreSaveRollback(owner) {
+  if(!owner||owner.session!==(typeof syncSessionStamp==='function'?syncSessionStamp():null)||
+      data!==owner.database&&_saveBaselineOrigins.get(data)!==owner.database)return false;
+  data=JSON.parse(owner.snapshot);
+  if(typeof reestrRows!=='undefined')reestrRows=data.reestrRows||[];
+  rebuildIndex();return true;
+}
 async function saveData(d = data, options) {
   const operation=typeof platformExecuteSave === 'function' ? platformExecuteSave(d,options,nextOptions=>persistData(d,nextOptions)) : persistData(d,options);
   _pendingSaveOperations.add(operation);
@@ -253,6 +268,7 @@ async function saveData(d = data, options) {
 function restoreSaveBaseline(d) {
   if (d !== data || !_lastPersisted) return;
   data = JSON.parse(_lastPersisted);
+  _saveBaselineOrigins.set(data,d);
   if (typeof _sync !== 'undefined' && _sync.enabled) Object.entries(_sync.synced).forEach(([name,json]) => { data[name]=JSON.parse(json); });
   if (typeof reestrRows !== 'undefined') reestrRows=data.reestrRows || [];
   rebuildIndex();

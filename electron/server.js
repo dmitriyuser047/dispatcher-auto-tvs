@@ -7,17 +7,18 @@ const dns = require('dns').promises;
 const storage = require('./storage');
 const access = require('./access-control');
 
-let _server = null, _dataDir = null, _backupFn = null, _writeLock = false, _writeProof=null, _localWriteProof=null;
+let _server = null, _session = null, _writeProof=null, _localWriteProof=null;
+const _pendingStops=new Set();
 let _clientKey = '', _transport = { protocol:'http:', ca:null }, _accessSettings = {};
 const MAX_BODY = 32 * 1024 * 1024, MAX_IMPORT_BODY = 40 * 1024 * 1024, MAX_RESPONSE = 64 * 1024 * 1024;
 const compatibility=()=>require('../assets/core/platform-compatibility.js');
 function proofProvider(){return require('./write-proof.cjs').createWriteProof({compatibility:compatibility()});}
 function localWriteOptions({hello,databaseToken,principal}){_localWriteProof??=proofProvider();const format=require('./storage-format.cjs'),credential='trusted-local-main',issued=_localWriteProof.negotiate(hello,{databaseToken,principal,descriptor:format.describe(format.SCHEMA_VERSION),credential});return {requireWriterSchema:true,writerSchemaVersion:format.SCHEMA_VERSION,..._localWriteProof.writeOptions(issued.writeTicket,{credential})};}
-function writerContext(req) {
+function writerContext(req,proof=_writeProof) {
   const raw=req.headers['x-tvs-writer-schema'];
   const version=typeof raw==='string'&&/^[1-9][0-9]{0,8}$/.test(raw)?Number(raw):raw===undefined?undefined:null;
   const credential=/^Bearer (.+)$/.exec(String(req.headers.authorization||''))?.[1];
-  return {requireWriterSchema:true,writerSchemaVersion:version,...(_writeProof?_writeProof.writeOptions(require('./write-proof.cjs').readTicket(req),{credential}):{requireNegotiatedWriter:true})};
+  return {requireWriterSchema:true,writerSchemaVersion:version,...(proof?proof.writeOptions(require('./write-proof.cjs').readTicket(req),{credential}):{requireNegotiatedWriter:true})};
 }
 function storageProfile(dataDir) {
   const format=require('./storage-format.cjs'),descriptor=storage.descriptor(dataDir);
@@ -71,67 +72,77 @@ function readBody(req,limit=MAX_BODY) {
   });
 }
 
-async function writeRequest(req,res,full,authenticateRequest) {
-  const dataDir = _dataDir, backup = _backupFn;
+function currentWritePrincipal(session,authenticateRequest,captured) {
+  if(!session.active||_session!==session||_server!==session.server)throw Object.assign(Error('Сервер остановлен или рабочая база изменилась. Повторите запрос после подключения.'),{code:'SERVER_STOPPED',status:503});
+  const principal=authenticateRequest();
+  if(!principal)throw Object.assign(Error('Неверный или отозванный ключ доступа'),{code:'ACCESS_REVOKED',status:401});
+  const normalized=require('./access-context.cjs').normalizePrincipal(principal);
+  if(captured&&[normalized.id,normalized.name,normalized.role,normalized.policyStamp,!!normalized.legacy].some((value,index)=>value!==[captured.id,captured.name,captured.role,captured.policyStamp,!!captured.legacy][index]))
+    throw Object.assign(Error('Учётная запись или права изменились во время сохранения. Загрузите данные и повторите проверку.'),{code:'ACCESS_CHANGED',status:403});
+  return normalized;
+}
+async function executeWrite(session,kind,input,options,assertCurrent) {
+  if(typeof session.backupFn==='function'){
+    // Custom synchronous hooks are a retained embedding API. Production uses
+    // a data-only backup descriptor and performs all storage work in a worker.
+    let commitMayHaveStarted=false;
+    try{return storage.withDatabaseLock(session.dataDir,()=>{
+      assertCurrent({phase:'locked'});
+      const beforeCommit=()=>{assertCurrent({phase:'beforeCommit'});const value=session.backupFn();if(value&&typeof value.then==='function')throw Error('Подготовка записи должна быть синхронной');assertCurrent({phase:'afterBackup'});commitMayHaveStarted=true;};
+      return storage[kind](session.dataDir,input,{...options,beforeCommit});
+    });}catch(error){if(commitMayHaveStarted){error.unknown=true;error.definitive=false;}throw error;}
+  }
+  session.executor??=require('./storage-executor.cjs').createStorageExecutor({onEvent:require('./diagnostic-boundary.cjs').record});
+  return session.executor.run(kind,session.dataDir,input,options,{assertCurrent,...(session.backup?{backup:session.backup}:{})});
+}
+function acknowledgeWrite(assertCurrent) {
+  try{assertCurrent({phase:'ack'});}catch(error){throw Object.assign(Error('Сеанс изменился после выполнения записи. Проверьте исходную операцию перед повтором.'),{code:'STORAGE_ACK_STALE',status:503,unknown:true,definitive:false,...(typeof error.code==='string'?{causeCode:error.code}:{})});}
+}
+function writeFailure(res,error) {
+  const unknown=error.unknown===true||error.definitive===false;
+  respond(res,unknown?503:error.status||400,{ok:false,error:error.message,...(error.code?{code:error.code}:{}),...(unknown?{unknown:true,definitive:false}:{}),...(!unknown&&error.databaseChanged===true&&typeof error.databaseToken==='string'?{databaseChanged:true,databaseToken:error.databaseToken}:{}),...(unknown&&typeof error.causeCode==='string'?{causeCode:error.causeCode}:{})});
+}
+async function writeRequest(req,res,full,authenticateRequest,session) {
+  const dataDir = session.dataDir;
   try {
     const payload = await readBody(req);
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Некорректные данные');
-    if (_writeLock) { respond(res,423,{ok:false,error:'Повторите сохранение'}); return; }
-    _writeLock = true;
-    try {
-      return storage.withDatabaseLock(dataDir, () => {
-      // The request body may take seconds to arrive. Roles, token rotation and
-      // expiry must be checked again under the write lock, before any backup or
-      // data mutation, and this current principal also owns the audit and ACK.
-      const principal = authenticateRequest();
-      if (!principal) { respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'}); return; }
-      const token = storage.databaseToken(dataDir);
-      observedWriteRequest(payload,dataDir,token);
-      if (full && !access.authorize(principal,'replace')) { respond(res,403,{ok:false,error:'Полная замена базы разрешена только администратору'}); return; }
-      const supplied = full ? (payload.data || payload) : payload.sections;
-      if (!supplied || typeof supplied !== 'object' || Array.isArray(supplied)) throw new Error('Не указаны разделы');
-      if (full && (!Array.isArray(supplied.vehicles) || !Array.isArray(supplied.records))) throw new Error('Неполная база: нужны vehicles и records');
-      const sections = full ? Object.fromEntries(storage.SECTIONS.filter(name => name in supplied).map(name => [name,supplied[name]])) : { ...supplied };
-      const names = Object.keys(sections);
-      if (names.some(name => !storage.SECTIONS.includes(name) || !Array.isArray(sections[name]))) throw new Error('Некорректные разделы');
-      if (typeof payload.databaseToken !== 'string' || !payload.databaseToken) { respond(res,428,{ok:false,databaseToken:token,error:'Обновите клиент и заново загрузите базу: для сохранения нужен идентификатор прочитанной базы.'}); return; }
-      if (payload.databaseToken !== token) { respond(res,409,{ok:false,databaseChanged:true,databaseToken:token,error:'База данных на сервере изменилась. Заново откройте её перед сохранением.'}); return; }
-      const writeContext = { principal, ...writerContext(req), now:new Date().toISOString(),beforeCommit:backup||undefined };
-      const result = full
-        ? storage.writeAll(dataDir,sections,{databaseToken:payload.databaseToken,operation:payload.operation,scopeViews:payload.scopeViews,base:payload.base,requireBase:true,...writeContext})
-        : storage.writeSections(dataDir,{base:payload.base || {},sections,databaseToken:payload.databaseToken,operation:payload.operation,scopeViews:payload.scopeViews},writeContext);
-      result.databaseToken = token;
-      if (result.revisions) result.revisions = filteredRevisions(result.revisions,principal);
-      respond(res,result.ok ? 200 : 409,result);
-      });
-    } finally { _writeLock = false; }
-  } catch (e) { respond(res,e.status || 400,{ok:false,error:e.message,...(e.code ? {code:e.code} : {})}); }
+    const principal=currentWritePrincipal(session,authenticateRequest),assertCurrent=()=>currentWritePrincipal(session,authenticateRequest,principal);
+    observedWriteRequest(payload,dataDir);
+    if (full && !access.authorize(principal,'replace')) { respond(res,403,{ok:false,error:'Полная замена базы разрешена только администратору'}); return; }
+    const supplied = full ? (payload.data || payload) : payload.sections;
+    if (!supplied || typeof supplied !== 'object' || Array.isArray(supplied)) throw new Error('Не указаны разделы');
+    if (full && (!Array.isArray(supplied.vehicles) || !Array.isArray(supplied.records))) throw new Error('Неполная база: нужны vehicles и records');
+    const sections = full ? Object.fromEntries(storage.SECTIONS.filter(name => name in supplied).map(name => [name,supplied[name]])) : { ...supplied };
+    const names = Object.keys(sections);
+    if (names.some(name => !storage.SECTIONS.includes(name) || !Array.isArray(sections[name]))) throw new Error('Некорректные разделы');
+    if (typeof payload.databaseToken !== 'string' || !payload.databaseToken) { respond(res,428,{ok:false,databaseToken:storage.databaseToken(dataDir),error:'Обновите клиент и заново загрузите базу: для сохранения нужен идентификатор прочитанной базы.'}); return; }
+    const writeContext = { principal, ...writerContext(req,session.proof), now:new Date().toISOString() };
+    const result = full
+      ? await executeWrite(session,'writeAll',sections,{databaseToken:payload.databaseToken,operation:payload.operation,scopeViews:payload.scopeViews,base:payload.base,requireBase:true,...writeContext},assertCurrent)
+      : await executeWrite(session,'writeSections',{base:payload.base || {},sections,databaseToken:payload.databaseToken,operation:payload.operation,scopeViews:payload.scopeViews},writeContext,assertCurrent);
+    acknowledgeWrite(assertCurrent);
+    if (result.revisions) result.revisions = filteredRevisions(result.revisions,principal);
+    respond(res,result.ok ? 200 : 409,result);
+  } catch (e) { writeFailure(res,e); }
 }
-async function commandRequest(req,res,authenticateRequest) {
-  const dataDir=_dataDir,backup=_backupFn;
+async function commandRequest(req,res,authenticateRequest,session) {
+  const dataDir=session.dataDir;
   try {
     const envelope=await readBody(req);
-    if(_writeLock){respond(res,423,{ok:false,error:'Повторите сохранение'});return;}
-    _writeLock=true;
-    try {
-      return storage.withDatabaseLock(dataDir,()=>{
-        // A token accepted before a slow upload may have been revoked or had
-        // its role changed. Only this current principal owns the command.
-        const principal=authenticateRequest();
-        if(!principal){respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'});return;}
-        observedWriteRequest(envelope,dataDir);
-        const result=storage.executeCommand(dataDir,envelope,{principal,...writerContext(req),now:new Date().toISOString(),beforeCommit:backup || undefined});
-        respond(res,result.ok?200:409,result);
-      });
-    } finally {_writeLock=false;}
-  } catch(error){respond(res,error.status||400,{ok:false,error:error.message,...(error.code?{code:error.code}:{})});}
+    const principal=currentWritePrincipal(session,authenticateRequest),assertCurrent=()=>currentWritePrincipal(session,authenticateRequest,principal);
+    observedWriteRequest(envelope,dataDir);
+    const result=await executeWrite(session,'executeCommand',envelope,{principal,...writerContext(req,session.proof),now:new Date().toISOString()},assertCurrent);
+    acknowledgeWrite(assertCurrent);
+    respond(res,result.ok?200:409,result);
+  } catch(error){writeFailure(res,error);}
 }
 
 function getLocalIPs() {
   return Object.values(os.networkInterfaces()).flat().filter(net => net && net.family === 'IPv4' && !net.internal).map(net => net.address);
 }
 
-function start({port,dataDir,backupFn,serverName,key,settings,users,tls,renderPdf}) {
+function start({port,dataDir,backupFn,backup,serverName,key,settings,users,tls,renderPdf}) {
   if (_server) return {ok:false,error:'Сервер уже запущен'};
   if (typeof settings !== 'function') configureAccess(settings || {networkKey:key,serverUsers:users || []});
   const settingsProvider = typeof settings === 'function' ? settings : () => _accessSettings;
@@ -141,31 +152,33 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls,renderPd
     if (!configuredUsers.some(user => user.enabled !== false && user.role === 'admin' && (!user.expiresAt || Date.parse(user.expiresAt) > Date.now()))) return {ok:false,error:'Нужна действующая учётная запись администратора'};
   } else if (!current.networkKey || String(current.networkKey).length < 16) return {ok:false,error:'Нужен ключ сети длиной от 16 знаков'};
   if (tls && (!tls.cert || !tls.key)) return {ok:false,error:'Для HTTPS нужны сертификат и закрытый ключ сервера'};
-  _dataDir = dataDir; _backupFn = backupFn;_writeProof=proofProvider();
+  const session={dataDir,backupFn,backup:backup?structuredClone(backup):null,proof:proofProvider(),active:true,server:null,executor:null,sockets:new Set()};
+  _session=session;_writeProof=session.proof;
   const handler = (req,res) => {
+    if(!session.active||_session!==session){respond(res,503,{ok:false,code:'SERVER_STOPPED',error:'Сервер остановлен'});return;}
     const header = String(req.headers.authorization || ''), match = /^Bearer (.+)$/.exec(header);
     const authenticateRequest = () => !req.headers.origin && match ? access.authenticate(match[1],settingsProvider()) : null;
-    const currentPrincipal=()=>{const value=authenticateRequest();if(!value)throw Object.assign(Error('Неверный или отозванный ключ доступа'),{code:'ACCESS_REVOKED',status:401});return value;};
+    const currentPrincipal=()=>currentWritePrincipal(session,authenticateRequest);
     const principal = authenticateRequest();
     if (!principal) { respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'}); return; }
     if(req.method==='POST'&&req.url==='/api/negotiate'){
-      void(async()=>{try{const hello=await readBody(req,32*1024);storage.withDatabaseLock(dataDir,()=>{const current=authenticateRequest();if(!current){respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'});return;}const databaseToken=storage.databaseToken(dataDir),platform=storageProfile(dataDir),credential=/^Bearer (.+)$/.exec(String(req.headers.authorization||''))?.[1],issued=_writeProof.negotiate(hello,{databaseToken,principal:current,descriptor:platform.descriptor,credential});respond(res,200,{ok:true,databaseToken,access:publicAccess(current),platform,...issued});});}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'NEGOTIATION_INVALID',error:error.message});}})();return;
+      void(async()=>{try{const hello=await readBody(req,32*1024);storage.withDatabaseLock(dataDir,()=>{const current=currentPrincipal(),databaseToken=storage.databaseToken(dataDir),platform=storageProfile(dataDir),credential=/^Bearer (.+)$/.exec(String(req.headers.authorization||''))?.[1],issued=session.proof.negotiate(hello,{databaseToken,principal:current,descriptor:platform.descriptor,credential});respond(res,200,{ok:true,databaseToken,access:publicAccess(current),platform,...issued});});}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'NEGOTIATION_INVALID',error:error.message});}})();return;
     }
     if (req.method === 'GET' && req.url === '/api/ping') {
-      try { respond(res,200,{ok:true,name:serverName || os.hostname(),version:require('../package.json').version,sections:true,databaseToken:storage.databaseToken(_dataDir),protocol:tls ? 'https:' : 'http:',platform:storageProfile(_dataDir),access:publicAccess(principal)}); }
+      try { respond(res,200,{ok:true,name:serverName || os.hostname(),version:require('../package.json').version,sections:true,databaseToken:storage.databaseToken(dataDir),protocol:tls ? 'https:' : 'http:',platform:storageProfile(dataDir),access:publicAccess(principal)}); }
       catch (e) { respond(res,500,{ok:false,error:e.message}); } return;
     }
     if (req.method === 'POST' && ['/api/sections','/api/data'].includes(req.url)) {
-      void writeRequest(req,res,req.url === '/api/data',authenticateRequest); return;
+      void writeRequest(req,res,req.url === '/api/data',authenticateRequest,session); return;
     }
     if(req.method==='POST'&&req.url==='/api/commands'){
-      void commandRequest(req,res,authenticateRequest);return;
+      void commandRequest(req,res,authenticateRequest,session);return;
     }
     if(req.method==='POST'&&req.url==='/api/import-source'){
-      void (async()=>{try{const payload=await readBody(req,MAX_IMPORT_BODY),principal=currentPrincipal();const result=await require('./import-source.cjs').handle(dataDir,payload,{principal,...writerContext(req),getPrincipal:currentPrincipal});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'IMPORT_SOURCE_FAILED',error:error.message});}})();return;
+      void (async()=>{try{const payload=await readBody(req,MAX_IMPORT_BODY),principal=currentPrincipal();const result=await require('./import-source.cjs').handle(dataDir,payload,{principal,...writerContext(req,session.proof),getPrincipal:currentPrincipal});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'IMPORT_SOURCE_FAILED',error:error.message});}})();return;
     }
     if(req.method==='POST'&&req.url==='/api/document-print'){
-      void (async()=>{try{const payload=await readBody(req),principal=currentPrincipal();const result=await require('./document-archive.cjs').handle(dataDir,payload,{principal,...writerContext(req),renderPdf,getPrincipal:currentPrincipal});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'DOCUMENT_PRINT_FAILED',error:error.message});}})();return;
+      void (async()=>{try{const payload=await readBody(req),principal=currentPrincipal();const result=await require('./document-archive.cjs').handle(dataDir,payload,{principal,...writerContext(req,session.proof),renderPdf,getPrincipal:currentPrincipal});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'DOCUMENT_PRINT_FAILED',error:error.message});}})();return;
     }
     if (req.method !== 'GET') { respond(res,404,{ok:false,error:'Неизвестный запрос'}); return; }
     try {
@@ -174,7 +187,7 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls,renderPd
         const parameters=new URL(req.url,'http://localhost').searchParams;
         if([...parameters.keys()].length!==1||!parameters.has('query')){respond(res,400,{ok:false,code:'HISTORY_QUERY',error:'Неверные параметры истории'});return;}
         let input;try{input=JSON.parse(parameters.get('query'));}catch{respond(res,400,{ok:false,code:'HISTORY_QUERY',error:'Неверные параметры истории'});return;}
-        try{respond(res,200,require('./platform-service.cjs').queryHistory(_dataDir,input,currentPrincipal()));}
+        try{respond(res,200,require('./platform-service.cjs').queryHistory(dataDir,input,currentPrincipal()));}
         catch(error){respond(res,error.status||400,{ok:false,code:error.code||'HISTORY_FAILED',error:error.message});}return;
       }
       if(req.url.startsWith('/api/query?')) {
@@ -182,44 +195,59 @@ function start({port,dataDir,backupFn,serverName,key,settings,users,tls,renderPd
         const parameters=new URL(req.url,'http://localhost').searchParams;
         if([...parameters.keys()].length!==1||!parameters.has('query')){respond(res,400,{ok:false,code:'QUERY_INVALID',error:'Неверные параметры выборки'});return;}
         let query;try{query=JSON.parse(parameters.get('query'));}catch{respond(res,400,{ok:false,code:'QUERY_INVALID',error:'Неверные параметры выборки'});return;}
-        try{respond(res,200,require('./data-query.cjs').queryRows(_dataDir,query,principal));}
+        try{respond(res,200,require('./data-query.cjs').queryRows(dataDir,query,principal));}
         catch(error){respond(res,error.status||500,{ok:false,code:error.code||'QUERY_FAILED',error:error.message});}
         return;
       }
       if(req.url.startsWith('/api/operation?')){
         const query=new URL(req.url,'http://localhost').searchParams;
-        respond(res,200,storage.readOperation(_dataDir,{id:query.get('id'),digest:query.get('digest')},principal));return;
+        respond(res,200,storage.readOperation(dataDir,{id:query.get('id'),digest:query.get('digest')},principal));return;
       }
-      if (req.url === '/api/revisions') { respond(res,200,{...filteredRevisions(storage.readRevisions(_dataDir),principal),databaseToken:storage.databaseToken(_dataDir)}); return; }
+      if (req.url === '/api/revisions') { respond(res,200,{...filteredRevisions(storage.readRevisions(dataDir),principal),databaseToken:storage.databaseToken(dataDir)}); return; }
       const sectionMatch = /^\/api\/section\/([A-Za-z]+)$/.exec(req.url);
       if (sectionMatch) {
         const name = sectionMatch[1];
         if (!storage.SECTIONS.includes(name)) { respond(res,404,{ok:false,error:'Неизвестный раздел'}); return; }
-        if (!readable(principal,name)) { respond(res,200,{name,rev:0,rows:[],databaseToken:storage.databaseToken(_dataDir)}); return; }
-        const section = storage.readSection(_dataDir,name,{principal});
+        if (!readable(principal,name)) { respond(res,200,{name,rev:0,rows:[],databaseToken:storage.databaseToken(dataDir)}); return; }
+        const section = storage.readSection(dataDir,name,{principal});
         respond(res,200,section); return;
       }
       if (req.url === '/api/data' || req.url === '/api/snapshot') {
-        const snapshot = storage.readSnapshot(_dataDir,{principal});
+        const snapshot = storage.readSnapshot(dataDir,{principal});
         respond(res,200,req.url === '/api/data' ? snapshot.data : {...snapshot,access:publicAccess(principal)}); return;
       }
       respond(res,404,{ok:false,error:'Неизвестный запрос'});
     } catch (e) { respond(res,500,{ok:false,error:e.message}); }
   };
   try { _server = tls ? https.createServer({cert:tls.cert,key:tls.key,minVersion:'TLSv1.2'},handler) : http.createServer(handler); }
-  catch (e) { _server = null; return {ok:false,error:'Не удалось настроить сервер: ' + e.message}; }
+  catch (e) { _server = null;session.active=false;if(_session===session)_session=null;return {ok:false,error:'Не удалось настроить сервер: ' + e.message}; }
   const instance = _server;
+  session.server=instance;
+  instance.on('connection',socket=>{session.sockets.add(socket);socket.once('close',()=>session.sockets.delete(socket));});
   instance.requestTimeout = 30000; instance.headersTimeout = 15000;
   return new Promise(resolve => {
-    instance.once('error',e => { if (_server === instance) _server = null; resolve({ok:false,error:e.message}); });
+    instance.once('error',e => { session.active=false;if (_server === instance) _server = null;if(_session===session)_session=null;resolve({ok:false,error:e.message}); });
     instance.listen(port,'0.0.0.0',() => resolve({ok:true,port:instance.address().port,ips:getLocalIPs(),protocol:tls ? 'https:' : 'http:'}));
   });
 }
 
 function stop() {
-  const instance = _server; _server = null;_writeProof=null;
-  if (!instance) return;
-  instance.close(); if (instance.closeIdleConnections) instance.closeIdleConnections();
+  const instance = _server,session=_session; _server = null;_session=null;_writeProof=null;
+  if(session)session.active=false;
+  const drained=session?.executor?session.executor.close():Promise.resolve();
+  if (!instance) return Promise.all([..._pendingStops,drained]).then(()=>undefined);
+  const closed=new Promise(resolve=>{
+    let deadline;
+    instance.close(()=>{clearTimeout(deadline);resolve();});
+    if(instance.closeIdleConnections)instance.closeIdleConnections();
+    // A half-uploaded body must not hold the settings/shutdown queue for its
+    // 30-second request timeout. Socket closure never interrupts the executor.
+    deadline=setTimeout(()=>{for(const socket of session?.sockets||[])socket.destroy();},250);
+    deadline.unref?.();
+  });
+  const pending=Promise.all([drained,closed]).then(()=>undefined);
+  _pendingStops.add(pending);void pending.finally(()=>_pendingStops.delete(pending)).catch(()=>{});
+  return Promise.all([..._pendingStops]).then(()=>undefined);
 }
 function isRunning() { return !!_server; }
 
@@ -282,6 +310,7 @@ function parseResponse(response,allowConflict) {
   if (response.status >= 200 && response.status < 300 || allowConflict && response.status === 409) return value;
   const error=new Error('HTTP ' + response.status + (value?.error ? ': ' + value.error : ''));
   error.status=response.status;error.code=value?.code||'HTTP_RESPONSE';error.definitive=response.status>=400&&response.status<500&&response.status!==408;
+  if(value?.unknown===true||value?.definitive===false){error.unknown=true;error.definitive=false;}
   throw error;
 }
 async function fetchData(host,port) { const response = await request(host,port,'/api/data',null,10000); parseResponse(response); return response.text; }

@@ -77,7 +77,7 @@ async function saveRecord() {
     obj.fuelOrg = owner.org || (!obj.fuelCardNum ? ((data.vehicles || []).find(v => v.id === obj.vehicleId) || {}).org : '') || '';
     obj.fuelProvider = owner.provider || '';
   }
-  const before = JSON.stringify(data);
+  const rollback = captureSaveRollback();
   if (editingRecordId!=null&&editingRecordId!=='') {
     const r = data.records.find(x => x.id === editingRecordId);
     if (!r) { showToast('Запись уже удалена. Откройте журнал заново.'); return; }
@@ -90,7 +90,7 @@ async function saveRecord() {
   const d = new Date(date);
   selectedYear = d.getFullYear();
   selectedMonth = d.getMonth() + 1;
-  if (!await saveData(data)) { data = JSON.parse(before); rebuildIndex(); return; }
+  if (!await saveData(data)) { restoreSaveRollback(rollback); return; }
   closeModal('recordModal');
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   if (typeof activeSection !== 'undefined' && activeSection === 'fuelPurchases') renderFuelPurchases();
@@ -102,9 +102,9 @@ async function deleteRecord(id) {
   const _r = data.records.find(x => x.id === id);
   if (_r && typeof fuelEditAllowed === 'function' && !fuelEditAllowed(_r.date)) return;
   if (!await confirmAction('Удалить эту запись?')) return;
-  const before = JSON.stringify(data);
+  const rollback = captureSaveRollback();
   data.records = data.records.filter(r => r.id !== id);
-  if (!await saveData(data)) { data = JSON.parse(before); rebuildIndex(); return; }
+  if (!await saveData(data)) { restoreSaveRollback(rollback); return; }
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   if (v) renderDetail(v);
 }
@@ -127,9 +127,9 @@ async function recDeleteSelected() {
   if (!ids.length) return;
   if (!fuelEditAllowed(...data.records.filter(r => ids.includes(r.id)).map(r => r.date))) return;
   if (!await confirmAction('Удалить выбранные записи (' + ids.length + ')?')) return;
-  const before = JSON.stringify(data);
+  const rollback = captureSaveRollback();
   data.records = data.records.filter(r => !ids.includes(r.id));
-  if (!await saveData(data)) { data = JSON.parse(before); rebuildIndex(); return; }
+  if (!await saveData(data)) { restoreSaveRollback(rollback); return; }
   const v = data.vehicles.find(x => x.id === selectedVehicleId);
   if (v) renderDetail(v);
 }

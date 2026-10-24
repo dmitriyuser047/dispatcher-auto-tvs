@@ -31,20 +31,20 @@ beforeEach(async()=>{
  });
 });
 afterEach(async()=>{await page?.close();assert.deepEqual(errors,[]);});
-async function openReady(){await page.evaluate(()=>switchSection('fuelPurchases'));await page.locator('.gsm-writeoff').waitFor({timeout:30000});}
+async function openReady(){await page.evaluate(()=>switchSection('fuelPurchases'));await page.locator('.gsm-act-steps').waitFor({timeout:30000});await page.locator('[data-gsm-act-step="4"]').click();await page.locator('.gsm-writeoff').waitFor({timeout:30000});}
 async function holdPreparation(){await page.evaluate(()=>{window.__holdAfter=['fuel','writeoff'];switchSection('fuelPurchases');});await page.waitForFunction(()=>window.__heldReplies.length===2);}
 async function release(){await page.evaluate(()=>{window.__holdAfter=[];window.__heldReplies.splice(0).forEach(reply=>reply.resolve());});}
 async function beginPost(){await page.evaluate(()=>{gsmPostWriteoffDialog();window.__holdAfter=['writeoffPost'];});await page.locator('#gsmWriteoffPostForm').waitFor();await page.locator('[name="basisNote"]').fill('Synthetic reviewed sources');await page.locator('#gsmWriteoffPostForm [type="submit"]').click();await page.waitForFunction(()=>window.__heldReplies.some(reply=>reply.name==='writeoffPost'));}
 
 test('a 999-row synthetic database retains the immediate synchronous workflow',async()=>{
  const size=await page.evaluate(()=>{while(Object.values(data).reduce((sum,rows)=>sum+(Array.isArray(rows)?rows.length:0),0)>999)data.records.pop();switchSection('fuelPurchases');return Object.values(data).reduce((sum,rows)=>sum+(Array.isArray(rows)?rows.length:0),0);});
- assert.equal(size,999);await page.locator('.gsm-writeoff').waitFor();assert.equal(await page.locator('#gsmBackgroundPreparation').count(),0);assert.equal(await page.evaluate(()=>window.__workers),0);assert.deepEqual(await page.evaluate(()=>window.__queries),[]);
+ assert.equal(size,999);await page.locator('.gsm-act-steps').waitFor();assert.equal(await page.locator('#gsmBackgroundPreparation').count(),0);assert.equal(await page.evaluate(()=>window.__workers),0);assert.deepEqual(await page.evaluate(()=>window.__queries),[]);
 });
 
 test('large fuel and writeoff preparation uses real Worker while the page stays responsive and facts stay unchanged',async()=>{
  await page.evaluate(()=>{window.__holdWorkerLoad=true;window.__heartbeats=0;window.__heartbeat=setInterval(()=>window.__heartbeats++,5);switchSection('fuelPurchases');});
- await page.waitForFunction(()=>window.__workerDeliveries.length===1&&window.__heartbeats>2);assert.match(await page.locator('#gsmBackgroundPreparation').innerText(),/Подготавливаю расчёт/);assert.equal(await page.locator('[data-writeoff-action="post"]').count(),0);
- await page.evaluate(()=>{window.__holdWorkerLoad=false;window.__workerDeliveries.splice(0).forEach(send=>send());});await page.locator('.gsm-writeoff').waitFor({timeout:30000});
+ await page.waitForFunction(()=>window.__workerDeliveries.length===1&&window.__heartbeats>2);assert.match(await page.locator('#gsmBackgroundPreparation').innerText(),/Подготавливаю расчёт/);assert.equal(await page.locator('.gsm-act-steps').count(),0);assert.equal(await page.locator('[data-writeoff-action="post"]').count(),0);
+ await page.evaluate(()=>{window.__holdWorkerLoad=false;window.__workerDeliveries.splice(0).forEach(send=>send());});await page.locator('.gsm-act-steps').waitFor({timeout:30000});
  const state=await page.evaluate(()=>{clearInterval(window.__heartbeat);return{workers:window.__workers,messages:window.__workerMessages,sync:window.__syncFuel,writes:window.__writes,exports:window.__exports,facts:JSON.stringify(Object.fromEntries(['vehicles','records','fuelPurchases','fuelCards','monthlyFuel','fuelPeriods'].map(section=>[section,data[section]]))),before:window.__factsBefore,model:gsmWriteoffModel().totals};});
  assert.ok(state.workers>=1);assert.ok(state.messages.includes('query:fuel'));assert.ok(state.messages.includes('query:writeoff'));assert.deepEqual(state.sync,[]);assert.equal(state.writes,0);assert.deepEqual(state.exports,[]);assert.equal(state.facts,state.before);assert.equal(state.model.spent,20);assert.equal(state.model.end,70);
 });
@@ -52,7 +52,7 @@ test('large fuel and writeoff preparation uses real Worker while the page stays 
 test('changed facts block cached draft export, reconciliation export and posting until a new background calculation',async()=>{
  await openReady();await page.evaluate(()=>{data.records[0].fuelActual=21;gsmExportWriteoffDraft();gsmExportReconciliation();gsmPostWriteoffDialog();});
  assert.equal(await page.locator('#gsmWriteoffPostForm').count(),0);assert.deepEqual(await page.evaluate(()=>window.__exports),[]);assert.equal(await page.evaluate(()=>window.__writes),0);assert.match(await page.locator('#globalToast').innerText(),/источники изменились/);
- await page.evaluate(()=>renderFuelPurchases());await page.locator('.gsm-writeoff').waitFor({timeout:30000});assert.equal(await page.evaluate(()=>gsmWriteoffModel().totals.spent),21);assert.deepEqual(await page.evaluate(()=>window.__syncFuel),[]);
+ await page.evaluate(()=>renderFuelPurchases());await page.locator('.gsm-act-steps').waitFor({timeout:30000});assert.equal(await page.evaluate(()=>gsmWriteoffModel().totals.spent),21);assert.deepEqual(await page.evaluate(()=>window.__syncFuel),[]);
 });
 
 for(const [label,mutation]of [['source',()=>{data.records[0].fuelActual=21;}],['filter',()=>{gsmOrg='Another organization';}],['actor',()=>{_sync.access={user:{id:'changed',role:'viewer'},readable:PlatformSchema.sections,writable:[]};}],['date',()=>{gsmActDate='2026-10-01';}],['local day',()=>{dispatcherLocalDate=()=> '2099-01-01';}]])test('late '+label+' preparation response never paints old totals and offers an explicit retry',async()=>{
@@ -65,7 +65,41 @@ test('late replies cannot overwrite another section after navigation',async()=>{
 
 test('cancel terminates the real worker and a deliberate retry can prepare a fresh result',async()=>{
  await page.evaluate(()=>{window.__holdWorkerLoad=true;switchSection('fuelPurchases');});await page.waitForFunction(()=>window.__workerDeliveries.length===1);await page.locator('[data-gsm-background-cancel]').click();await page.locator('[data-gsm-background-retry]').waitFor();
- assert.equal(await page.locator('.gsm-writeoff').count(),0);await page.evaluate(()=>{window.__holdWorkerLoad=false;window.__workerDeliveries=[];});await page.locator('[data-gsm-background-retry]').click();await page.locator('.gsm-writeoff').waitFor({timeout:30000});assert.ok(await page.evaluate(()=>window.__workers)>=2);assert.equal(await page.evaluate(()=>window.__writes),0);
+ assert.equal(await page.locator('.gsm-writeoff').count(),0);await page.evaluate(()=>{window.__holdWorkerLoad=false;window.__workerDeliveries=[];});await page.locator('[data-gsm-background-retry]').click();await page.locator('.gsm-act-steps').waitFor({timeout:30000});assert.ok(await page.evaluate(()=>window.__workers)>=2);assert.equal(await page.evaluate(()=>window.__writes),0);
+});
+
+for(const phase of ['before','after'])test('a '+phase+'-paint failure after background preparation is visible and retryable',async()=>{
+ await page.evaluate(phase=>{
+  fpView='barrels';const render=gsmRenderWorkspace;window.__originalGsmRender=render;
+  gsmRenderWorkspace=function(...args){
+   const prepared=!!gsmPreparedWorkspace();
+   if(prepared&&phase==='before')throw Error('Synthetic rendering failure');
+   const result=render.apply(this,args);
+   if(prepared&&phase==='after')throw Error('Synthetic rendering failure');
+   return result;
+  };
+  switchSection('fuelPurchases');
+ },phase);
+ await page.locator('[data-gsm-background-retry]').waitFor();
+ assert.match(await page.locator('#gsmBackgroundPreparation [role="status"]').innerText(),/Synthetic rendering failure/);
+ assert.deepEqual(await page.evaluate(()=>({ready:!!gsmBackgroundReady,pending:!!gsmBackgroundRequest,body:!!document.querySelector('#fpBody'),writes:__writes})),{ready:false,pending:false,body:false,writes:0});
+ await page.evaluate(()=>{gsmRenderWorkspace=window.__originalGsmRender;});
+ await page.locator('[data-gsm-background-retry]').click();await page.locator('#gsmBarrelCards').waitFor();
+ assert.deepEqual(await page.evaluate(()=>({ready:!!gsmBackgroundReady,pending:!!gsmBackgroundRequest,writes:__writes})),{ready:true,pending:false,writes:0});
+});
+
+test('barrel overview and diagnostics open with fractional historical allocation and negative stock',async()=>{
+ await page.evaluate(()=>{
+  const vehicle=data.vehicles[0];Object.assign(vehicle,{org:'A',norm:10,fuelBalance:3,fuelBalanceSources:[{org:'A',grade:'ДТ',qty:1},{org:'B',grade:'ДТ',qty:2}]});
+  data.records=[{id:'split-history',vehicleId:vehicle.id,date:'2026-08-01',km:1,fuelActual:3},{id:'negative-month',vehicleId:vehicle.id,date:'2026-09-01',km:10000,fuelActual:20},
+   ...Array.from({length:1000},(_,index)=>({id:'zero-history-'+index,vehicleId:vehicle.id,date:'2026-09-02',km:0,fuelIssued:0,fuelActual:0,fuelGrade:'ДТ'}))];
+  data.fuelPurchases=[];rebuildIndex();dispatcherInvalidate();fpMonth='2026-09';fpView='barrels';window.__historySourceBefore=JSON.stringify(data);
+ });
+ await page.locator('#unifiedNav [data-section="fuelPurchases"]').click();await page.locator('#gsmBarrelCards').waitFor();
+ assert.equal(await page.locator('[data-gsm-background-retry]').count(),0);
+ await page.locator('.gsm-nav button').filter({hasText:'Проверка данных'}).click();await page.locator('#gsmDiagnostics').waitFor();
+ assert.equal(await page.evaluate(()=>gsmDiagnosticsModel.items.some(item=>item.code==='negative-ending')),true);
+ assert.deepEqual(await page.evaluate(()=>({unchanged:JSON.stringify(data)===window.__historySourceBefore,writes:__writes,pending:!!gsmBackgroundRequest})),{unchanged:true,writes:0,pending:false});
 });
 
 test('large fuel diagnostics, including negative-stock chronology, are prepared in the real Worker',async()=>{

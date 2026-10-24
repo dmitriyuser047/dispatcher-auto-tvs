@@ -243,6 +243,7 @@ test('native full and section writes enforce assignment and archive guards atomi
 
 test('the browser and CommonJS entry points expose the same pure API', () => {
   const context=vm.createContext({});
+  vm.runInContext(fs.readFileSync(require.resolve('../assets/core/personnel-kinds.js'),'utf8'),context);
   vm.runInContext(fs.readFileSync(require.resolve('../assets/core/personnel-engine.js'),'utf8'),context);
   assert.equal(context.TvsPersonnelEngine.apiVersion,1);
   assert.equal(context.TvsPersonnelEngine.kindForAsset('g:one'),'operator');

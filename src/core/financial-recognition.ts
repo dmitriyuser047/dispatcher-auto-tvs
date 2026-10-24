@@ -1,6 +1,6 @@
 /** Pure projections of untrusted source snapshots; no storage, DOM or IO. */
 import type { AccountingBoundaryAPI } from './accounting-boundary';
-import type { DocumentEngineAPI } from './document-engine';
+import type { DocumentStateAPI } from './document-state';
 import type { FuelStockAPI } from './fuel-stock';
 import type { DecimalCoreAPI } from './decimal-core';
 import type { EntityIdentityAPI } from './entity-identity';
@@ -85,7 +85,7 @@ type UnknownRow = Record<string, unknown>;
 type IdentifiedRow = UnknownRow & { id: EntityId };
 
 /** The build adapter exposes this frozen API identically in Node and browsers. */
-export function createDomainSources(_accounting?: Readonly<AccountingBoundaryAPI>,getDocuments?:()=>Readonly<DocumentEngineAPI>|undefined,getStock?:()=>Readonly<FuelStockAPI>|undefined,decimal?:Readonly<DecimalCoreAPI>,identity?:Readonly<EntityIdentityAPI>,getWriteoff?:()=>{sha256(text:string):string}): Readonly<DomainSourcesAPI> {
+export function createDomainSources(_accounting?: Readonly<AccountingBoundaryAPI>,getDocuments?:()=>Readonly<DocumentStateAPI>|undefined,getStock?:()=>Readonly<FuelStockAPI>|undefined,decimal?:Readonly<DecimalCoreAPI>,identity?:Readonly<EntityIdentityAPI>,getWriteoff?:()=>{sha256(text:string):string}): Readonly<DomainSourcesAPI> {
   function workOrderDate(value:unknown):string {if(value===null||typeof value!=='object'||Array.isArray(value))return '';const ownValue=(name:string):unknown=>{const descriptor=Object.getOwnPropertyDescriptor(value,name);return descriptor&&!descriptor.get&&!descriptor.set?descriptor.value:undefined;},textValue=(name:string):string=>typeof ownValue(name)==='string'?ownValue(name) as string:'';return (Object.prototype.hasOwnProperty.call(value,'downtime')?textValue('completedAt'):textValue('downtimeTo')||textValue('completedAt')).slice(0,10);}
   const isRecord = (value: unknown): value is UnknownRow => {
     if(value===null||typeof value!=='object'||Array.isArray(value))return false;

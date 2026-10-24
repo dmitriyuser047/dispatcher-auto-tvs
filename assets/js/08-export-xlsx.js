@@ -277,7 +277,7 @@ function exportToXlsx() {
   monthRecs.forEach((rec, i) => {
     const d    = new Date(rec.date);
     const bg   = i % 2 === 0 ? P.white : P.gray1;
-    const bal      = xlsBalMap[rec.id] != null ? xlsBalMap[rec.id] : '';
+    const bal      = TvsFuelEngine.recordBalanceAt(xlsBalMap,rec.id) ?? '';
     const normL100 = v.norm ? v.norm : '';
     const factL100 = rec.fuelActual && rec.km > 0 ? +(rec.fuelActual / rec.km * 100).toFixed(2) : '';
 
@@ -302,7 +302,7 @@ function exportToXlsx() {
 
   // end-of-month balance = balance of last record in month
   const lastRec = monthRecs[monthRecs.length - 1];
-  const endBal  = lastRec ? (xlsBalMap[lastRec.id] ?? '') : '';
+  const endBal  = lastRec ? (TvsFuelEngine.recordBalanceAt(xlsBalMap,lastRec.id) ?? '') : '';
 
   // Totals row
   put(row, 0,  '',                                            STYLES.totals);

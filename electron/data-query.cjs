@@ -49,7 +49,7 @@ function scopeOf(principal,section){
 }
 function filterHash(query){const {cursor,...selection}=query;return sha(kernel.stableSerialize(selection));}
 function cursorFor(binding,position){
-  const payload={version:1,...binding,position},text=kernel.stableSerialize(payload);
+  const payload={version:2,...binding,position},text=kernel.stableSerialize(payload);
   return Buffer.from(JSON.stringify({payload,checksum:sha('tvs-data-page\0'+text)})).toString('base64url');
 }
 function cursorPosition(cursor,binding){
@@ -60,7 +60,7 @@ function cursorPosition(cursor,binding){
     const bytes=Buffer.from(cursor,'base64url');if(bytes.toString('base64url')!==cursor)throw Error();
     decoded=JSON.parse(bytes.toString('utf8'));
     const p=decoded?.payload;
-    if(!plain(decoded)||Object.keys(decoded).sort().join(',')!=='checksum,payload'||!plain(p)||Object.keys(p).sort().join(',')!=='databaseToken,filter,position,revision,scope,section,version'||p.version!==1||!Number.isSafeInteger(p.position)||p.position<0||!Number.isSafeInteger(p.revision)||p.revision<0||typeof decoded.checksum!=='string'||decoded.checksum!==sha('tvs-data-page\0'+kernel.stableSerialize(p)))throw Error();
+    if(!plain(decoded)||Object.keys(decoded).sort().join(',')!=='checksum,payload'||!plain(p)||Object.keys(p).sort().join(',')!=='databaseToken,filter,position,revision,scope,section,sources,version'||p.version!==2||!Number.isSafeInteger(p.position)||p.position<0||!Number.isSafeInteger(p.revision)||p.revision<0||p.sources!==null&&(typeof p.sources!=='string'||!/^[a-f0-9]{64}$/.test(p.sources))||typeof decoded.checksum!=='string'||decoded.checksum!==sha('tvs-data-page\0'+kernel.stableSerialize(p)))throw Error();
   }catch{fail('CURSOR_INVALID','Повреждён указатель страницы. Начните выборку заново.');}
   if(Object.entries(binding).some(([key,value])=>decoded.payload[key]!==value))fail('CURSOR_STALE','Данные, фильтр или права изменились. Начните выборку заново.',409);
   return decoded.payload.position;
@@ -76,13 +76,14 @@ function queryRows(dataDir,input,principal){
   return storage.withDatabaseLock(dataDir,()=>{
     const sql=sqlite.exists(dataDir);
     const action=()=>{
-      let revision,databaseToken,jsonRows,database;
+      let revision,revisions,databaseToken,jsonRows,database;
       const scoped=require('./access-context.cjs').hasNarrowing(principal);
-      if(sql){revision=sqlite.readRevisions(dataDir)[query.section];databaseToken=storage.databaseToken(dataDir);}
+      if(sql){revisions=sqlite.readRevisions(dataDir);revision=revisions[query.section];databaseToken=storage.databaseToken(dataDir);}
       else{const section=storage.readSection(dataDir,query.section);revision=section.rev;databaseToken=section.databaseToken;jsonRows=section.rows;}
       if(scoped){database=storage.readAll(dataDir);jsonRows=database[query.section]||[];}
       const scopedContext=scoped?require('./access-context.cjs').create(database,database,principal):null;
-      const binding={databaseToken,section:query.section,revision,filter:filterHash(query),scope},afterPosition=cursorPosition(query.cursor,binding);
+      const binding={databaseToken,section:query.section,revision,filter:filterHash(query),scope,sources:null};
+      let afterPosition=scoped?null:cursorPosition(query.cursor,binding);
       if(query.assetRef){
         const section={v:'vehicles',g:'generators',t:'tanks'}[query.assetRef[0]],ambiguous=sql?sqlite.countLegacyAssetReferences(dataDir,section,query.assetRef.slice(2))>1:identity.resolveAsset({[section]:storage.readSection(dataDir,section).rows},query.assetRef).status==='ambiguous';
         if(scoped){const target=identity.resolveAsset(database,query.assetRef);if(target.status!=='known'||!scopedContext.permits(target.section,'read',target.row))fail('ACCESS_DENIED','Недостаточно прав для выбранной ссылки.',403);}
@@ -98,6 +99,15 @@ function queryRows(dataDir,input,principal){
           if(!row)return;
           if(matchesRow(row,query))matching.push({row,position});
         });total=matching.length;
+        if(scoped){
+          // Visibility is a projection over related tables, including rows that
+          // are currently hidden. Read every candidate before binding the cursor
+          // so expansion, revocation and new assignments use the same sources.
+          revisions??=storage.readRevisions(dataDir);
+          const dependencies=[...new Set([query.section,...scopedContext.readDependencies()])].sort();
+          binding.sources=sha(kernel.stableSerialize(dependencies.map(name=>[name,revisions[name]||0])));
+        }
+        if(scoped)afterPosition=cursorPosition(query.cursor,binding);
         const candidates=matching.filter(entry=>entry.position>afterPosition),page=candidates.slice(0,query.limit);
         rows=page.map(entry=>entry.row);positions=page.map(entry=>entry.position);hasMore=candidates.length>query.limit;
       }

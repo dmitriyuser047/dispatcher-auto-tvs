@@ -118,6 +118,54 @@ test('unrelated section changes do not invalidate a stable keyset cursor',t=>{
  }
 });
 
+function scopedCursorFixture(t,backend,firstOrg='B',assignments=[]){
+ const root=temp(t),dir=path.join(root,backend),vehicles=[0,1,2].map(id=>({id:'v'+id,plate:'SYNTHETIC-'+id,orgHistory:[{from:'2026-09-01',to:'2026-09-30',org:id===0?firstOrg:'A',basis:'Synthetic ownership fixture'}]})),records=vehicles.map((vehicle,id)=>({id:'r'+id,vehicleId:vehicle.id,date:'2026-09-02',km:1}));
+ const data=Object.fromEntries(schema.sections.map(name=>[name,({vehicles,records,assetAssignments:assignments})[name]||[]]));
+ if(backend==='json')storage.createJson(dir,{data});else sqlite.create(dir,{data});
+ const principal={id:'synthetic-scoped-reader',role:'admin',accessPolicy:{version:1,grants:[{org:'A',site:{any:true}}]}};
+ return {dir,principal};
+}
+function changeSection(dir,name,update){
+ const snapshot=storage.readSnapshot(dir),next=update(structuredClone(snapshot.data[name]));
+ const result=storage.writeSections(dir,{databaseToken:snapshot.databaseToken,base:snapshot.revisions,sections:{[name]:next}},{principal:admin});assert.equal(result.ok,true);
+}
+
+for(const backend of ['json','sqlite']){
+ test(backend+' scoped cursor rejects organisation-history expansion before the previous position',t=>{
+  const {dir,principal}=scopedCursorFixture(t,backend),first=rows(dir,{section:'records',limit:1},principal);
+  assert.deepEqual(first.rows.map(row=>row.id),['r1']);assert.equal(first.total,2);
+  changeSection(dir,'vehicles',vehicles=>{vehicles[0].orgHistory[0].org='A';return vehicles;});
+  assert.throws(()=>rows(dir,{section:'records',limit:1,cursor:first.nextCursor},principal),{code:'CURSOR_STALE',status:409});
+  assert.deepEqual(readAllPages(dir,{section:'records',limit:1},principal).rows.map(row=>row.id),['r0','r1','r2']);
+ });
+ test(backend+' scoped cursor rejects organisation-history revocation on a later page',t=>{
+  const {dir,principal}=scopedCursorFixture(t,backend,'A'),first=rows(dir,{section:'records',limit:1},principal);
+  changeSection(dir,'vehicles',vehicles=>{vehicles[1].orgHistory[0].org='B';return vehicles;});
+  assert.throws(()=>rows(dir,{section:'records',limit:1,cursor:first.nextCursor},principal),{code:'CURSOR_STALE',status:409});
+  assert.deepEqual(readAllPages(dir,{section:'records',limit:1},principal).rows.map(row=>row.id),['r0','r2']);
+ });
+ test(backend+' scoped cursor binds an empty assignment source before its first ownership grant',t=>{
+  const {dir,principal}=scopedCursorFixture(t,backend),first=rows(dir,{section:'records',limit:1},principal);
+  changeSection(dir,'assetAssignments',()=>[{id:'assignment',assetRef:'v:v0',from:'2026-09-01',to:'2026-09-30',org:'A'}]);
+  assert.throws(()=>rows(dir,{section:'records',limit:1,cursor:first.nextCursor},principal),{code:'CURSOR_STALE',status:409});
+  assert.deepEqual(readAllPages(dir,{section:'records',limit:1},principal).rows.map(row=>row.id),['r0','r1','r2']);
+ });
+ test(backend+' scoped cursor rejects assignment revocation and removal',t=>{
+  for(const remove of [false,true]){
+   const assignment={id:'assignment',assetRef:'v:v0',from:'2026-09-01',to:'2026-09-30',org:'A'}, {dir,principal}=scopedCursorFixture(t,backend,'B',[assignment]),first=rows(dir,{section:'records',limit:1},principal);
+   assert.deepEqual(first.rows.map(row=>row.id),['r0']);
+   changeSection(dir,'assetAssignments',assignments=>remove?[]:assignments.map(row=>({...row,org:'B'})));
+   assert.throws(()=>rows(dir,{section:'records',limit:1,cursor:first.nextCursor},principal),{code:'CURSOR_STALE',status:409});
+   assert.deepEqual(readAllPages(dir,{section:'records',limit:1},principal).rows.map(row=>row.id),['r1','r2']);
+  }
+ });
+ test(backend+' scoped cursor stays stable across unrelated catalogue changes',t=>{
+  const {dir,principal}=scopedCursorFixture(t,backend),first=rows(dir,{section:'records',limit:1},principal);
+  changeSection(dir,'parts',()=>[{id:'unrelated-part',name:'Synthetic unrelated catalogue item'}]);
+  const next=rows(dir,{section:'records',limit:1,cursor:first.nextCursor},principal);assert.deepEqual(next.rows.map(row=>row.id),['r2']);assert.equal(next.total,2);
+ });
+}
+
 test('cursor is bound to database generation, filters, page size, section and current principal/access',t=>{
  const f=fixture(t);
  for(const dir of [f.json,f.sql]){

@@ -2,7 +2,7 @@ import type {BusinessCalendarAPI} from './business-calendar';
 import type {Identifier,JsonRow,JsonValue,SectionRows} from './platform-contracts';
 import type {EntityIdentityAPI} from './entity-identity';
 import type {DecimalCoreAPI} from './decimal-core';
-import type {DocumentEngineAPI} from './document-engine';
+import type {DocumentStateAPI} from './document-state';
 import type {DomainSourcesAPI} from './financial-recognition';
 import type {InventoryStockAPI} from './inventory-stock';
 import type {CostValuationAPI} from './cost-valuation';
@@ -21,7 +21,7 @@ const operationalNames=Object.freeze(['workOrders','shiftReports','vehicles','ge
 const financialNames=Object.freeze(['workOrders','repairs','vehicleTo','toRecords','payments','costEntries','vehicles','generators','tankIncomes','partMovements']);
 
 /** A joined repair packet and domain guards. No writes, clocks, reservations or invented facts. */
-export function createRepairProcess(contracts:Contracts,identity:EntityIdentityAPI,decimal:DecimalCoreAPI,getDocuments?:()=>DocumentEngineAPI,getSources?:()=>DomainSourcesAPI,getInventory?:()=>InventoryStockAPI,getValuation?:()=>CostValuationAPI,getCalendar?:()=>BusinessCalendarAPI) {
+export function createRepairProcess(contracts:Contracts,identity:EntityIdentityAPI,decimal:DecimalCoreAPI,getDocuments?:()=>DocumentStateAPI,getSources?:()=>DomainSourcesAPI,getInventory?:()=>InventoryStockAPI,getValuation?:()=>CostValuationAPI,getCalendar?:()=>BusinessCalendarAPI) {
  const own=(value:object,key:string):boolean=>Object.prototype.hasOwnProperty.call(value,key),object=(value:unknown):value is JsonRow=>value!==null&&typeof value==='object'&&!Array.isArray(value);
  function fail(code:string,message:string,issues:RepairIssue[]=[]):never {const error=new Error(message) as RepairError;error.name='RepairProcessError';error.code=code;error.issues=issues;error.status=400;throw error;}
  if(contracts?.apiVersion!==1||identity?.apiVersion!==1||decimal?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружено общее ядро ремонта');

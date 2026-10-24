@@ -100,7 +100,7 @@ try{
   check(!/prototype|прототип/i.test([packaged.name,metadata.build.appId,metadata.build.productName].join(' ')),'Prototype application identity cannot be released');
   const paths=['index.html','reestr-window.html','pdf-editor.html','ReestrBuilder/lib.mjs'];
   function walk(directory){for(const name of fs.readdirSync(path.join(root,directory))){const file=path.join(directory,name);if(fs.statSync(path.join(root,file)).isDirectory())walk(file);else if(/\.(?:js|mjs|cjs|css)$/.test(file))paths.push(file.replaceAll('\\','/'));}}
-  for(const directory of ['electron','assets/js','assets/css'])walk(directory);
+  for(const directory of ['electron','assets/core','assets/js','assets/css'])walk(directory);
   for(const file of paths){const source=fs.readFileSync(path.join(root,file)),built=archiveFile(file);check(digest(source)===digest(built),'Package differs from current source: '+file);report.files.push({file,sha256:digest(built)});}
   check(!entries.some(({file})=>file==='bundled-data'||file.startsWith('bundled-data/')),'Working database must not be packaged');
   verifyStagingDependencies(entries);

@@ -111,9 +111,9 @@ test('unreadable sections fail before reading hidden rows, and getters, malforme
 });
 
 test('actual browser UMDs produce the same complete graph, preview fingerprint and pure plan without DOM, network or storage',()=>{
- const sandbox=vm.createContext({});for(const name of ['platform-schema','entity-identity','platform-contracts','business-calendar','decimal-core','effective-periods','temporal-policy','accounting-boundary','fuel-engine','writeoff-engine','reference-graph','platform-kernel','catalog-merge']){
-  // Kernel is used only for its pure digest API here; its planning dependencies
-  // are deliberately absent and must never be called by a catalog planner.
+ const sandbox=vm.createContext({});for(const name of ['platform-schema','entity-identity','platform-contracts','business-calendar','decimal-core','effective-periods','temporal-policy','accounting-boundary','fuel-engine','writeoff-engine','reference-graph','request-fingerprint','catalog-merge']){
+  // The catalog planner uses the lower digest primitive. The full transaction
+  // kernel and its validation/queue dependencies are deliberately absent.
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/core',name+'.js'),'utf8'),sandbox,{filename:name});
  }
  const db=fixture(),input=request(),preview=merge.preview(db,input,context);assert.equal(JSON.stringify(sandbox.ReferenceGraph.inspect(db,context)),JSON.stringify(graph.inspect(db,context)));assert.equal(sandbox.MergeCatalog.preview(db,input,context).fingerprint,preview.fingerprint);assert.equal(JSON.stringify(sandbox.MergeCatalog.plan(db,{...input,reviewFingerprint:preview.fingerprint},context)),JSON.stringify(plan(db)));assert.equal(typeof sandbox.document,'undefined');assert.equal(typeof sandbox.fetch,'undefined');

@@ -1,7 +1,7 @@
 /* Catalog aliases preserve original identities and never authorize raw rewrites. */
-(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(require('./platform-schema.js'),()=>require('./catalog-merge.js'),()=>require('./reference-graph.js'),()=>require('./platform-integrity.js'));else root.CatalogPolicy=factory(root.PlatformSchema,()=>root.MergeCatalog,()=>root.ReferenceGraph,()=>root.PlatformIntegrity);})(typeof globalThis==='object'?globalThis:this,function(schema,getMerge,getGraph,getIntegrity){
+(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(require('./platform-schema.js'),()=>require('./catalog-merge.js'),()=>require('./reference-graph.js'),require('./record-identity.js'),require('./catalog-facts.js'));else root.CatalogPolicy=factory(root.PlatformSchema,()=>root.MergeCatalog,()=>root.ReferenceGraph,root.RecordIdentity,root.CatalogFacts);})(typeof globalThis==='object'?globalThis:this,function(schema,getMerge,getGraph,recordIdentity,catalogFacts){
   'use strict';
-  const catalogs=Object.freeze(['vehicles','generators','tanks','drivers','parts','contragents','fuelCards']);
+  const catalogs=catalogFacts.catalogs;
   const own=(row,key)=>!!row&&Object.prototype.hasOwnProperty.call(row,key);
   const plain=value=>value!==null&&Object.prototype.toString.call(value)==='[object Object]';
   const identifier=value=>typeof value==='string'&&!!value.trim()||typeof value==='number'&&Number.isFinite(value);
@@ -22,31 +22,7 @@
       else walk(value[field],index+1,next);
     }walk(row,0,'');return result;
   }
-  function metadataValid(value,section){
-    return plain(value)&&Object.keys(value).sort().join('|')==='actor|at|id|operationId|reason|section|version'&&value.version===1&&value.section===section&&identifier(value.id)&&
-      typeof value.reason==='string'&&!!value.reason.trim()&&value.reason.length<=4000&&typeof value.operationId==='string'&&/^[a-zA-Z0-9._:-]{1,200}$/.test(value.operationId)&&
-      typeof value.at==='string'&&/^\d{4}-\d{2}-\d{2}T/.test(value.at)&&Number.isFinite(Date.parse(value.at))&&plain(value.actor)&&Object.keys(value.actor).sort().join('|')==='id|name|role'&&
-      typeof value.actor.id==='string'&&!!value.actor.id&&typeof value.actor.name==='string'&&!!value.actor.name&&value.actor.role==='admin';
-  }
-  function inspect(db,context={}){
-    const issues=[],add=(section,row,code,field,message,proof,severity='error')=>issues.push({severity,section,recordId:identifier(row?.id)?row.id:'',code,field,message,proof});
-    for(const section of catalogs){if(!readable(context,section))continue;const list=rows(db,section);
-      for(const row of list){if(!own(row,'mergedInto'))continue;const metadata=row.mergedInto;
-        if(!metadataValid(metadata,section)){add(section,row,'CATALOG_ALIAS_INVALID','mergedInto','Повреждены реквизиты объединения карточки',stable(metadata));continue;}
-        if(row.archived!==true||row.archivedAt!==metadata.at)add(section,row,'CATALOG_ALIAS_NOT_ARCHIVED','archived','Объединённая карточка должна сохраняться в архиве',[row.archived,row.archivedAt,metadata.at]);
-        const targets=list.filter(target=>target.id===metadata.id);
-        if(targets.length!==1){add(section,row,'CATALOG_ALIAS_TARGET','mergedInto.id','Не удалось однозначно найти основную карточку',[metadata.id,targets.length]);continue;}
-        const target=targets[0];
-        if(target===row||target.deleted||own(target,'mergedInto'))add(section,row,'CATALOG_ALIAS_TARGET','mergedInto.id','Основная карточка должна сохраняться как самостоятельная запись; цепочки объединений недопустимы',[metadata.id,target.deleted,stable(target.mergedInto)]);
-        const seen=new Set([key(row.id)]);let current=row;
-        while(metadataValid(current.mergedInto,section)){
-          const targetKey=key(current.mergedInto.id);if(seen.has(targetKey)){add(section,row,'CATALOG_ALIAS_CYCLE','mergedInto.id','Объединение содержит циклическую ссылку',targetKey);break;}
-          seen.add(targetKey);const matches=list.filter(item=>item.id===current.mergedInto.id);if(matches.length!==1)break;current=matches[0];
-        }
-      }
-    }
-    return {issues,counts:{error:issues.filter(issue=>issue.severity==='error').length,warning:0,total:issues.length}};
-  }
+  const inspect=catalogFacts.inspect;
   function aliasIndexes(db){const result={};for(const section of catalogs){const typed=new Set(),text=new Set(),numbers=new Set();for(const row of rows(db,section))if(own(row,'mergedInto')){typed.add(key(row.id));text.add(String(row.id));if(section==='fuelCards')numbers.add(card(row.number));}result[section]={typed,text,numbers};}return result;}
   function aliasTargets(indexes,relation,row,value,path){
     let section=relation.target,expected=value,byString=false;
@@ -96,9 +72,9 @@
     }
     // Existing historical references remain attached to their original card.
     // A new fact, or a changed factual field, cannot reuse the archived alias.
-    const indexes=aliasIndexes(next),priorAliases=aliasIndexes(previous),oldRows={},nextRows={},integrity=getIntegrity();
-    if(integrity?.apiVersion!==1||typeof integrity.rowIdentity!=='function'){const error=new Error('Не загружены устойчивые идентификаторы записей');error.code='MODULE_UNAVAILABLE';throw error;}
-    const rowKey=(section,row,index)=>integrity.rowIdentity(section,row,index);
+    const indexes=aliasIndexes(next),priorAliases=aliasIndexes(previous),oldRows={},nextRows={};
+    if(recordIdentity?.apiVersion!==1||typeof recordIdentity.rowIdentity!=='function'){const error=new Error('Не загружены устойчивые идентификаторы записей');error.code='MODULE_UNAVAILABLE';throw error;}
+    const rowKey=(section,row,index)=>recordIdentity.rowIdentity(section,row,index);
     for(const section of schema.sections){const before=rows(previous,section),exact=new Set(before.map(row=>stable(row))),byId=new Map();before.forEach((row,index)=>{const value=rowKey(section,row,index);if(!byId.has(value))byId.set(value,[]);byId.get(value).push(row);});oldRows[section]={exact,byId};}
     for(const section of schema.sections){const byId=new Map();rows(next,section).forEach((row,index)=>{const value=rowKey(section,row,index);if(!byId.has(value))byId.set(value,[]);byId.get(value).push(row);});nextRows[section]=byId;}
     const graph=getGraph();if(graph?.apiVersion!==1||typeof graph.classify!=='function'){const error=new Error('Не загружена классификация связей справочников');error.code='MODULE_UNAVAILABLE';throw error;}

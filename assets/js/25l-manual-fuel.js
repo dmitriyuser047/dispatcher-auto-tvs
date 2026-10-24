@@ -198,11 +198,11 @@ async function gsmManualCommit() {
   if (gsmManualSaving || !gsmManualPending) return;
   const error = document.getElementById('gsmManualReviewError');
   try {
-    const next = gsmManualApply(data, gsmManualPending, !!document.getElementById('gsmManualDuplicates')?.checked), before = data;
+    const next = gsmManualApply(data, gsmManualPending, !!document.getElementById('gsmManualDuplicates')?.checked), rollback = captureSaveRollback(data,next);
     gsmManualSaving = true; document.getElementById('gsmManualCommit').disabled = true;
     data = next; rebuildIndex();
     if (!await saveData(data, { noMerge: true })) {
-      data = before; rebuildIndex(); error.textContent = 'Не записано. Строки сохранены в форме; проверьте соединение или обновление базы и повторите.'; return;
+      restoreSaveRollback(rollback); error.textContent = 'Не записано. Строки сохранены в форме; проверьте соединение или обновление базы и повторите.'; return;
     }
     gsmOrg = gsmManual.org; fpMonth = gsmManual.month;
     const date = gsmManual.rows[gsmManual.rows.length - 1]?.date;
@@ -377,18 +377,19 @@ function gsmStatementReview(id) {
 async function gsmStatementCommit() {
   if (gsmStatementSaving || !gsmStatementPending) return;
   const error = document.getElementById('gsmStatementError');
-  let before;
+  let rollback, committed = false;
   try {
     const original=fpById(gsmStatementPending.id);if(original&&!original.manual&&!original.manualStatement)throw Error('Привязка импортированной покупки выполняется только по проверенному исходнику. Откройте её план заново.');
-    const next = gsmStatementApply(data, gsmStatementPending); before = data;
+    const next = gsmStatementApply(data, gsmStatementPending); rollback = captureSaveRollback(data,next);
     gsmStatementSaving = true; document.getElementById('gsmStatementCommit').disabled = true;
     data = next; rebuildIndex();
     if (!await saveData(data, { noMerge: true })) {
-      data = before; rebuildIndex(); error.textContent = 'Не записано. Изменения в строке сохранены; проверьте соединение и повторите.'; return;
+      restoreSaveRollback(rollback); error.textContent = 'Не записано. Изменения в строке сохранены; проверьте соединение и повторите.'; return;
     }
+    committed = true;
     gsmStatementDrafts.delete(gsmStatementPending.id); gsmStatementPending = null;
     closeModal('genericModal'); showToast('Заправка записана в журнал и учтена в акте');
-  } catch (e) { if (before) { data = before; rebuildIndex(); } error.textContent = e.message; }
+  } catch (e) { if (!committed) restoreSaveRollback(rollback); error.textContent = e.message; }
   finally {
     gsmStatementSaving = false;
     const button = document.getElementById('gsmStatementCommit'); if (button) button.disabled = false;

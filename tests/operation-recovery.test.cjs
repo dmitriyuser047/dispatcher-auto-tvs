@@ -38,6 +38,13 @@ function timeout(){return Object.assign(Error('Synthetic transport timeout'),{co
 function transactions(dir,id){return storage.readAll(dir).auditLog.filter(row=>row.source==='platform'&&row.type==='transaction'&&row.operationId===id);}
 function receipt(box,ctx,id,patch={}){return {id,status:'committed',digest:box.getForRetry(ctx.scope,id).requestDigest,...patch};}
 function failingOutcome(box){return {...box,updateOutcome(){throw Object.assign(Error('Synthetic durable outcome failure'),{code:'ENOSPC'});}};}
+for(const uncertainty of [{unknown:true},{definitive:false}])test('explicit uncertainty overrides a retained 400 status and validation-shaped details '+Object.keys(uncertainty)[0],async t=>{
+ const f=fixture(t),body=f.payload('explicit-uncertain-'+Object.keys(uncertainty)[0]);let sends=0;
+ const recovery=createOperationRecovery({outbox:f.box,lookup:f.lookup,send:async(ctx,json)=>{sends++;await f.send(ctx,json);throw Object.assign(Error('Synthetic error after commit'),{code:'EIO',status:400,issues:[],details:{issues:[]},...uncertainty});}});
+ const result=await recovery.execute(f.ctx,body);assert.equal(result.queued,true);assert.equal(recovery.list(f.ctx)[0].status,'unknown');
+ const before=storage.readSnapshot(f.dir),blocked=await recovery.execute(f.ctx,f.payload('do-not-duplicate-uncertain'));assert.equal(blocked.code,'PENDING_OPERATION');assert.equal(sends,1);
+ assert.equal((await recovery.reconcile(f.ctx,body.operation.id)).committed,true);assert.deepEqual(storage.readSnapshot(f.dir),before);assert.equal(transactions(f.dir,body.operation.id).length,1);
+});
 async function request(port,route,token,body){
  const currentBody=JSON.stringify(body);
  const proofHeaders=await writerHeaders({host:'127.0.0.1',port:port,headers:{Authorization:'Bearer '+token},method:body===undefined?'GET':'POST'});

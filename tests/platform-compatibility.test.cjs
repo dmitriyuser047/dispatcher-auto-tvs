@@ -33,6 +33,22 @@ test('missing writer schema, write protocol or server write capability permits o
 test('all current descriptor features and scoped reads are explicit mandatory read capabilities',()=>{
  const initial=fixture();for(const capability of ['scopedAccess',...initial.descriptor.features]){const {module,hello,server,descriptor}=fixture();remove(hello,capability);const result=module.negotiate(hello,server,descriptor);assert.equal(result.mode,'unsupported',capability);assert.equal(result.selectedProfile,null);assert.ok(result.reasons.some(item=>item.code==='REQUIRED_READ_CAPABILITY_UNAVAILABLE'&&item.capability===capability));}
 });
+
+for(const calculationVersion of [5,6])test('fuel calculation v'+calculationVersion+' requires both peers before writes while older peers retain proven reads',()=>{
+ const capability='fuelCalculationsV'+calculationVersion;
+ for(const older of ['client','server']){
+  const {module,hello,server,descriptor}=fixture();
+  const peer=older==='client'?hello:server;remove(peer,capability);
+  if(older==='server')server.requiredWriteCapabilities=server.requiredWriteCapabilities.filter(item=>item.name!==capability);
+  const result=module.negotiate(hello,server,descriptor);
+  assert.equal(result.mode,'read-only',older);assert.equal(result.readCompatible,true);assert.equal(result.writeCompatible,false);assert.equal(result.selectedProfile.writerSchemaVersion,null);
+  assert.ok(result.reasons.some(item=>item.code==='REQUIRED_WRITE_CAPABILITY_UNAVAILABLE'&&item.capability===capability));
+ }
+ const {module,hello,server,descriptor}=fixture();
+ const result=module.negotiate(hello,server,descriptor);
+ assert.equal(result.mode,'read-write');assert.ok(result.selectedProfile.capabilities.some(item=>item.name===capability&&item.version===1));
+ assert.ok(server.requiredWriteCapabilities.some(item=>item.name===capability&&item.version===1));
+});
 test('capability versions are exact implemented intersections; advertising version2 never implies version1',()=>{
  const {module,hello,server,descriptor}=fixture();for(const profile of [hello,server]){profile.protocolVersions=[2,1];for(const item of profile.capabilities)item.versions=[2,1];}const result=module.negotiate(hello,server,descriptor);assert.equal(result.mode,'read-write');assert.equal(result.selectedProfile.protocolVersion,1);assert.ok(result.selectedProfile.capabilities.every(item=>item.version===1));hello.capabilities.find(item=>item.name==='commands').versions=[2];const noCommand=module.negotiate(hello,server,descriptor);assert.equal(noCommand.mode,'read-only');assert.ok(reason(noCommand,'REQUIRED_WRITE_CAPABILITY_UNAVAILABLE'));hello.capabilities.find(item=>item.name==='scopedAccess').versions=[2];assert.equal(module.negotiate(hello,server,descriptor).mode,'unsupported');
 });

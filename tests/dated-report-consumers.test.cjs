@@ -86,3 +86,27 @@ test('dated reports label scalar power/norm as original rather than claiming the
  const db=fixture();db.generators[0].power=77;db.generators[0].norm=99;const h=harness(db);assert.match(h.cards(),/77 кВт \(исходная\)/);assert.equal(row(h.xlsx('exportAllGensToXlsx'),1,'SYNTHETIC-DATED-DES')[5],'77 (исходная)');assert.equal(pdfRow(h.pdf('exportAllGensToPdf'),'SYNTHETIC-DATED-DES')[5],'77 (исходная)');
  const one=h.xlsx('exportOneGenToXlsx','g');assert.equal(row(one,0,'Исходная мощность (параметры по датам)')[4],'77 кВт');assert.equal(row(one,0,'Исходная норма расхода (параметры по датам)')[4],'99 л/мтч');
 });
+
+for(const explicit of [false,true])test('missing scalar consumption stays unknown in actual vehicle sidebar, XLSX and PDF without becoming zero; explicit='+explicit,()=>{
+ const db=fixture();delete db.vehicles[0].fuelNorms;delete db.vehicles[0].norm;db.vehicles[0].fuelBalance=100;
+ if(!explicit)delete db.vehicles[0].fuelAccounting;
+ db.records.push({id:'known-after-gap',vehicleId:'v',date:'2026-09-11',km:10,fuelActual:2});
+ const h=harness(db),sheet=h.xlsx('exportAllToXlsx');assert.equal(row(sheet,1,'SYNTHETIC-DATED-VEHICLE')[12],'Неизвестно: нет расхода');assert.equal(row(sheet,0,'Дизельное')[9],'Неизвестно: нет расхода');
+ assert.equal(pdfRow(h.pdf('exportAllToPdf'),'SYNTHETIC-DATED-VEHICLE')[12],'Неизвестно: нет расхода');assert.equal(pdfRow(h.pdf('exportAllToPdf'),'Дизельное').at(-1),'Неизвестно: нет расхода');assert.match(h.sidebar(),/Остаток[\s\S]*Неизвестно: нет расхода/);
+});
+
+test('actual vehicle journal and its Excel export distinguish numeric/string and reserved record IDs',()=>{
+ const db=fixture();delete db.vehicles[0].fuelNorms;db.records=[7,'7','__proto__'].map((id,index)=>({id,vehicleId:'v',date:'2026-09-'+String(index+1).padStart(2,'0'),km:0,fuelActual:10}));
+ const h=harness(db);Object.assign(h.api,{selectedVehicleId:'v',selectedMonth:9,selectedYear:2026,vehicleDetailView:'journal',historyFullscreen:false,recordFuelGrade:fuel.recordFuelGrade});
+ for(const file of ['02-vehicles-list.js','08-export-xlsx.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/js',file),'utf8'),h.api,{filename:file});
+ const sheet=h.xlsx('exportToXlsx');assert.equal(row(sheet,1,'2026-09-01')[10],90);assert.equal(row(sheet,1,'2026-09-02')[10],80);assert.equal(row(sheet,1,'2026-09-03')[10],70);
+ h.api.renderDetail(h.api.data.vehicles[0]);const html=h.elements.get('mainContent').innerHTML;
+ const journalRows=[...html.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].filter(match=>match[1].includes('class="rec-check"')).map(match=>match[1]);assert.equal(journalRows.length,3);
+ for(const [index,value]of [90,80,70].entries())assert.match(journalRows[index],new RegExp('>'+value+',00<'));
+});
+
+test('actual DES journal adapter preserves typed and reserved row IDs for shared report consumers',()=>{
+ const db=fixture();delete db.generators[0].fuelNorms;db.genRecords=[7,'7','__proto__'].map((id,index)=>({id,generatorId:'g',date:'2026-09-'+String(index+1).padStart(2,'0'),hours:0,fuelActual:10,fuelUsed:10,tankId:null}));
+ const h=harness(db),balances=h.api.computeGenFuelBalances('g');assert.equal(fuel.recordBalanceAt(balances,7),90);assert.equal(fuel.recordBalanceAt(balances,'7'),80);assert.equal(fuel.recordBalanceAt(balances,'__proto__'),70);
+ const sheet=h.xlsx('exportOneGenToXlsx','g');for(const [index,value]of [90,80,70].entries()){const date='2026-09-'+String(index+1).padStart(2,'0'),entry=rows(sheet).find(r=>typeof r?.[0]==='string'&&r[0].startsWith(date));assert.equal(entry[7],value);}
+});

@@ -46,7 +46,7 @@ function gsmWriteoffWorkspaceHtml() {
   const basis = gsmWriteoffBasis(model), docs = gsmWriteoffDocs(), canPost = model.canPost && gsmWriteoffCanWrite();
   const total = key => fpNum(model.totals[key] || 0, 3);
   const issues = model.issues.slice(0, 20).map(issue => '<li><strong>' + fpEsc(issue.severity === 'error' ? 'Ошибка' : 'Проверить') + '</strong> · ' +
-    fpEsc([issue.date && fmtDate(issue.date), issue.vehicleId && fpVehicleTitle(gsmVehicle(issue.vehicleId)), issue.org, issue.grade].filter(Boolean).join(' · ')) +
+    fpEsc([issue.date && fmtDate(issue.date), issue.vehicleId != null ? fpVehicleTitle(gsmVehicle(issue.vehicleId)) : '', issue.org, issue.grade].filter(Boolean).join(' · ')) +
     '<p>' + fpEsc(issue.message || issue.title || issue.code) + '</p>' + gsmWriteoffIssueLinks(issue) + '</li>').join('');
   const rows = model.rows.map(row => {
     const movements = (model.consumption || []).filter(item => item.vehicleId === row.vehicleId && gsmOrgKey(item.org) === gsmOrgKey(row.org) && item.grade === row.grade);
@@ -75,8 +75,8 @@ function gsmWriteoffWorkspaceHtml() {
 }
 function gsmWriteoffIssueLinks(issue) {
   const buttons = [];
-  if (issue.purchaseId && fpById(issue.purchaseId)) buttons.push('<button type="button" class="btn btn-ghost btn-sm" onclick="fpEdit(' + gsmArg(issue.purchaseId) + ')">Открыть покупку</button>');
-  if (issue.recordId && (data.records || []).some(row => row.id === issue.recordId)) buttons.push('<button type="button" class="btn btn-ghost btn-sm" onclick="gsmEditRecord(' + gsmArg(issue.recordId) + ')">Открыть журнал</button>');
+  if (issue.purchaseId != null && fpById(issue.purchaseId)) buttons.push('<button type="button" class="btn btn-ghost btn-sm" onclick="fpEdit(' + gsmArg(issue.purchaseId) + ')">Открыть покупку</button>');
+  if (issue.recordId != null && (data.records || []).some(row => row.id === issue.recordId)) buttons.push('<button type="button" class="btn btn-ghost btn-sm" onclick="gsmEditRecord(' + gsmArg(issue.recordId) + ')">Открыть журнал</button>');
   return buttons.join('');
 }
 function gsmWriteoffDetails(vehicleId, org, grade) {
@@ -164,6 +164,7 @@ async function gsmPostWriteoff(event) {
       throw Error('Источники, сеанс или параметры акта изменились во время расчёта. Откройте проверку заново.');
     await gsmWriteoffStore(doc, null, pending);
     gsmActNo = number; gsmActDate = date; gsmWriteoffPending = null;
+    if (form.isConnected && activeSection === 'fuelPurchases' && fpView === 'writeoff' && typeof gsmActStepsDocumentSaved === 'function') gsmActStepsDocumentSaved();
     if (form.isConnected) { closeModal('genericModal'); renderFuelPurchases(); }
     showToast('Акт проведён. Состав и основания сохранены.');
   } catch (error) { if (errorBox.isConnected) errorBox.textContent = error.message; }
@@ -186,6 +187,7 @@ async function gsmVoidWriteoff(event) {
   try {
     const doc = TvsWriteoffEngine.voidDocument(pending.original, { reason:form.elements.reason.value.trim(), voidedAt:new Date().toISOString(), voidedBy:gsmWriteoffActor() });
     await gsmWriteoffStore(doc, pending.original, pending); gsmWriteoffVoidPending = null;
+    if (form.isConnected && activeSection === 'fuelPurchases' && fpView === 'writeoff' && typeof gsmActStepsDocumentSaved === 'function') gsmActStepsDocumentSaved();
     if (form.isConnected) { closeModal('genericModal'); renderFuelPurchases(); }
     showToast('Акт аннулирован. История сохранена.');
   } catch (error) { if (errorBox.isConnected) errorBox.textContent = error.message; }

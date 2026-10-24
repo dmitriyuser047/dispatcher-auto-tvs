@@ -1,0 +1,224 @@
+{
+  "inspections": [
+    {
+      "db": {
+        "vehicles": [
+          {
+            "id": 7
+          },
+          {
+            "id": "7"
+          }
+        ],
+        "records": [
+          {
+            "id": 0,
+            "vehicleId": 7,
+            "date": "2026-09-01",
+            "km": 1.001,
+            "fuelActual": 0
+          }
+        ]
+      },
+      "all": "0fc568a2ea6d8024570bb4ea7329ce7f051807e4151674d2b8adeef6dcae03eb",
+      "restricted": "87804b624170ab72a76c3502244e7d1c88261a8d31202986a266cdaf175c8535"
+    },
+    {
+      "db": {
+        "vehicles": [
+          {
+            "id": "v"
+          },
+          {
+            "id": "v"
+          }
+        ],
+        "records": [
+          {
+            "id": "r",
+            "vehicleId": "missing",
+            "date": "2026-02-30",
+            "fuelActual": -1
+          }
+        ]
+      },
+      "all": "5cedc2ed0c3713b5b8927213932112ecb3171890e94a00388b36daf16bbcce01",
+      "restricted": "b1c56f037b8781c84b6662fbd0941e5e325bac1cbb3aa2decc249583b71e78a7"
+    },
+    {
+      "db": {
+        "vehicles": [
+          {
+            "id": "v",
+            "archived": true
+          }
+        ],
+        "records": [
+          {
+            "id": "r",
+            "vehicleId": "v"
+          }
+        ],
+        "fuelPurchases": [
+          {
+            "id": "p",
+            "vehicleId": "v",
+            "date": "2026-09-01",
+            "recordId": "stale",
+            "grade": "ДТ"
+          }
+        ]
+      },
+      "all": "a6da6243e874c755579bef33f41871ad96215c8b7f94930c8d0a285ad41a2ac1",
+      "restricted": "025d24bbacb202d222c715b18b7338b6db8967be9e7154874fdf424d4255c26a"
+    },
+    {
+      "db": {
+        "vehicles": [
+          {
+            "id": "v"
+          }
+        ],
+        "records": [
+          {
+            "id": "r",
+            "vehicleId": "v",
+            "date": "2026-09-01"
+          }
+        ],
+        "dispatchJobs": [
+          {
+            "id": "j",
+            "assetRef": "v:v",
+            "status": "new",
+            "start": "2026-09-01T10:00:00Z",
+            "end": "2026-09-01T09:00:00Z"
+          }
+        ]
+      },
+      "all": "5f03716ba8f4f0d13c76670becb3f5b5d60d365dda9b8bbb935e16e4eaecb715",
+      "restricted": "025d24bbacb202d222c715b18b7338b6db8967be9e7154874fdf424d4255c26a"
+    }
+  ],
+  "deltas": [
+    {
+      "before": {},
+      "after": {
+        "vehicles": [
+          {
+            "id": 7
+          },
+          {
+            "id": "7"
+          }
+        ],
+        "records": [
+          {
+            "id": 0,
+            "vehicleId": 7,
+            "date": "2026-09-01",
+            "km": 1.001,
+            "fuelActual": 0
+          }
+        ]
+      },
+      "hash": "4062edaf750fb8074e7e83e0c9028c94e32468a8b6f1614774328ef045150f93"
+    },
+    {
+      "before": {
+        "vehicles": [
+          {
+            "id": "v"
+          },
+          {
+            "id": "v"
+          }
+        ],
+        "records": [
+          {
+            "id": "r",
+            "vehicleId": "missing",
+            "date": "2026-02-30",
+            "fuelActual": -1
+          }
+        ]
+      },
+      "after": {
+        "vehicles": [
+          {
+            "id": "v"
+          },
+          {
+            "id": "v"
+          }
+        ],
+        "records": [
+          {
+            "id": "r",
+            "vehicleId": "missing",
+            "date": "2026-02-30",
+            "fuelActual": -1,
+            "note": "Preserved legacy corruption"
+          }
+        ]
+      },
+      "hash": "4062edaf750fb8074e7e83e0c9028c94e32468a8b6f1614774328ef045150f93"
+    },
+    {
+      "before": {
+        "vehicles": [
+          {
+            "id": "v"
+          }
+        ],
+        "records": [
+          {
+            "id": "r",
+            "vehicleId": "v"
+          }
+        ]
+      },
+      "after": {
+        "vehicles": [],
+        "records": [
+          {
+            "id": "r",
+            "vehicleId": "v"
+          }
+        ]
+      },
+      "hash": "2f6217215dccf254d0d9ee08809b45c8eef3b80d432232f76cdd09ecd1c34a4e"
+    },
+    {
+      "before": {
+        "vehicles": [
+          {
+            "id": "v"
+          }
+        ]
+      },
+      "after": {
+        "vehicles": [
+          {
+            "id": "v"
+          }
+        ],
+        "records": [
+          {
+            "id": "new",
+            "vehicleId": "v"
+          }
+        ]
+      },
+      "context": {
+        "readable": [
+          "records"
+        ],
+        "writable": [
+          "records"
+        ]
+      },
+      "hash": "8e32f3b8523a785792ba83399c8e4e1d580cf66e7944b18b21a07362d8467e73"
+    }
+  ]
+}
