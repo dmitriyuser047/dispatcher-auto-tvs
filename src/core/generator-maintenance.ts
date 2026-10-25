@@ -13,6 +13,10 @@ export interface GeneratorMaintenanceMonthlyInput {year:number;months:number[];d
 export type GeneratorMaintenanceUtilization={mode:'monthly';hours:number|number[]}|{mode:'daily';hours:number};
 export interface GeneratorMaintenanceForecastInput {startDate:string;endDate:string;currentHours:number;intervalHours:number;firstDueHours:number;utilization:GeneratorMaintenanceUtilization}
 export interface GeneratorMaintenanceForecastOccurrence {plannedDate:string;plannedHours:number}
+export interface GeneratorMaintenanceJournalCounterInput {generatorId:Identifier;throughDate:string}
+export interface GeneratorMaintenanceJournalCounterSource {section:'genRecords';recordId:Identifier;date:string;field:'meterEnd'}
+export interface GeneratorMaintenanceJournalCounterIssue {code:string;message:string;recordId?:Identifier;date?:string}
+export interface GeneratorMaintenanceJournalCounterResult {status:'known'|'unknown';throughDate:string;currentHours:number|null;source:GeneratorMaintenanceJournalCounterSource|null;startDate:string|null;reason:string;issues:GeneratorMaintenanceJournalCounterIssue[]}
 export interface GeneratorMaintenancePayload {org:string;year:number|null;title:string;rows:GeneratorMaintenanceRow[];commission:{chairman:GeneratorMaintenancePerson;members:GeneratorMaintenancePerson[]}}
 export type GeneratorMaintenanceActionInput=
  |{action:'saveDraft';planId?:Identifier;payload:GeneratorMaintenancePayload;reason:string;reviewFingerprint:string}
@@ -115,6 +119,41 @@ export function createGeneratorMaintenance(contracts:Contracts,identity:EntityId
    if(!day(plannedDate))fail('MAINTENANCE_DATE','Дата '+plannedDate+' не существует. Выберите другое число месяца; дата не переносится автоматически.');
    return {id:ids[index]!,plannedDate,plannedHours:quantity(Array.isArray(hours)?hours[index]:null,'Плановая отметка счётчика')};
   });
+ }
+ /** A saved end-of-day journal reading, never an opening-card or summed-hours
+  * estimate. Forecasting starts on the following calendar day so that the
+  * measured day's actual workload is not counted again. */
+ function journalCounter(databaseValue:unknown,value:unknown):GeneratorMaintenanceJournalCounterResult {
+  const input=row(value);fields(input,['generatorId','throughDate']);const generatorId=id(input.generatorId);
+  if(!day(input.throughDate))fail('MAINTENANCE_COUNTER_DATE','Укажите действительную дату, по которую брать показание журнала ДЭС');
+  const throughDate=input.throughDate,generators=sectionRows(databaseValue,'generators'),journal=sectionRows(databaseValue,'genRecords');
+  const problem=(code:string,message:string,source:GeneratorMaintenanceJournalCounterSource|null=null):GeneratorMaintenanceJournalCounterResult=>freeze({status:'unknown',throughDate,currentHours:null,source,startDate:null,reason:message,issues:[{code,message,...(source?{recordId:source.recordId,date:source.date}:{})}]});
+  const selected=generators.filter(entry=>entry.id===generatorId);
+  if(selected.length!==1||!live(selected[0]!))return problem('MAINTENANCE_COUNTER_GENERATOR','Выберите одну существующую действующую ДЭС, чтобы получить счётчик из журнала');
+  const present=(value:JsonValue|undefined):boolean=>value!==undefined&&value!==null&&!(typeof value==='string'&&!value.trim());
+  const zeroOrUnknown=(value:JsonValue|undefined):boolean=>!present(value)||value===0;
+  const inactive=(entry:JsonRow):boolean=>!!entry.deleted||!!entry.cancelled||!!entry.void||entry.posted===false||['draft','cancelled','void','discarded','unposted'].includes(String(entry.status))||object(entry.lifecycle)&&(own(entry.lifecycle,'void')||entry.lifecycle.posted===false||['draft','cancelled','void','discarded','unposted'].includes(String(entry.lifecycle.state)));
+  const issueOnly=(entry:JsonRow):boolean=>entry.hours===0&&contracts.identifier(entry.fuelMovementId)&&!present(entry.meterStart)&&!present(entry.meterEnd)&&zeroOrUnknown(entry.fuelUsed)&&zeroOrUnknown(entry.fuelActual);
+  const active=journal.filter(entry=>entry.generatorId===generatorId&&!inactive(entry)&&!issueOnly(entry));
+  if(active.some(entry=>!day(entry.date)))return problem('MAINTENANCE_COUNTER_DATE','В действующем журнале этой ДЭС есть запись без действительной даты. Исправьте её перед расчётом графика');
+  const included=active.filter(entry=>String(entry.date)<=throughDate),lastDate=included.reduce<string|null>((latest,entry)=>latest===null||String(entry.date)>latest?String(entry.date):latest,null);
+  if(lastDate===null)return problem('MAINTENANCE_COUNTER_EMPTY','В журнале этой ДЭС нет показания на выбранную дату. Заполните конечный счётчик в журнале; начальный остаток карточки и сумма часов не подставляются');
+  const latest=included.filter(entry=>entry.date===lastDate);
+  if(latest.length!==1)return problem('MAINTENANCE_COUNTER_AMBIGUOUS','На последнюю дату '+lastDate+' есть несколько записей ДЭС. Уточните записи журнала: последнее показание не выбирается по порядку строк');
+  const entry=latest[0]!;
+  if(!contracts.identifier(entry.id)||journal.filter(other=>other.id===entry.id).length!==1)return problem('MAINTENANCE_COUNTER_SOURCE','У последней записи журнала нет однозначного ID. Исправьте источник перед расчётом графика');
+  const source:GeneratorMaintenanceJournalCounterSource={section:'genRecords',recordId:entry.id,date:lastDate,field:'meterEnd'};
+  const number=(value:JsonValue|undefined):value is number=>typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1e12&&/^\d+(?:\.\d{1,3})?$/.test(String(value));
+  if(!number(entry.meterEnd))return problem('MAINTENANCE_COUNTER_READING','В последней записи журнала не задан корректный конечный счётчик. Укажите число с точностью до 0,001 мтч; прежнее показание вместо него не подставляется',source);
+  const units=(value:number):bigint=>{const [whole,fraction='']=String(value).split('.');return BigInt(whole!)*1000n+BigInt(fraction.padEnd(3,'0'));};
+  if(present(entry.meterStart)&&!number(entry.meterStart)||present(entry.hours)&&!number(entry.hours))return problem('MAINTENANCE_COUNTER_READING','В последней записи журнала некорректны начальный счётчик или наработка. Исправьте исходную запись',source);
+  if(number(entry.meterStart)){
+   const difference=units(entry.meterEnd)-units(entry.meterStart),worked=entry.hours,delta=number(worked)?difference-units(worked):0n;
+   if(difference<0n||number(worked)&&(delta<0n?-delta:delta)>110n)return problem('MAINTENANCE_COUNTER_CONTRADICTION','Показания счётчика и наработка в последней записи журнала противоречат друг другу. Исправьте источник; сброс счётчика автоматически не предполагается',source);
+  }
+  const next=new Date(lastDate+'T00:00:00Z');next.setUTCDate(next.getUTCDate()+1);const startDate=next.toISOString().slice(0,10);
+  if(!day(startDate))return problem('MAINTENANCE_COUNTER_RANGE','После даты последнего показания нет поддерживаемой даты начала расчёта',source);
+  return freeze({status:'known',throughDate,currentHours:entry.meterEnd,source,startDate,reason:'Конечный счётчик из журнала ДЭС за '+lastDate+'. Плановый расчёт начинается со следующего дня: '+startDate,issues:[]});
  }
  /** Forecast only: the counter is read at the beginning of startDate and the
   * explicitly supplied workload is distributed over calendar days. No past
@@ -248,6 +287,6 @@ export function createGeneratorMaintenance(contracts:Contracts,identity:EntityId
   for(const value of before)if(!seen.has(value.id as Identifier)&&(value.status==='approved'||own(value,'previousId')))fail('MAINTENANCE_DELETE','Утверждённый график или историю редакций нельзя удалить');return true;
  }
  function describe():JsonRow {return {section:SECTION,readSections:dependencies(),writeSections:footprint(),actions:['saveDraft','approve','revise'],noStockWrites:true};}
- return Object.freeze({apiVersion:1 as const,describe,dependencies,footprint,groupCalendarRows,expandCalendarGroups,monthlyOccurrences,forecastOccurrences,preview,apply,plan:apply,snapshotDigest,validateChanges});
+ return Object.freeze({apiVersion:1 as const,describe,dependencies,footprint,groupCalendarRows,expandCalendarGroups,monthlyOccurrences,journalCounter,forecastOccurrences,preview,apply,plan:apply,snapshotDigest,validateChanges});
 }
 export type GeneratorMaintenanceAPI=ReturnType<typeof createGeneratorMaintenance>;

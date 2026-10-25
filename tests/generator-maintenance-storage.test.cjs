@@ -25,6 +25,18 @@ for(const format of ['json','sqlite']){
   assert.equal(execute(dir,envelope(dir,{action:'approve',planId:'forecast-plan',date:today,document:'Synthetic commission decision',reason:'Reviewed forecast, not actual service'},'forecast-approval')).ok,true);
   const after=snapshot(dir),plan=after.data.generatorMaintenancePlans[0],projection=require('../assets/core/generator-maintenance-spares').project(plan.snapshot);assert.equal(plan.snapshot.rows.length,24);assert.equal(projection.organization[0].qtyDecimal,'2.4');assert.ok(plan.snapshot.rows.every(value=>value.note===note));unchangedFacts(before,after);
  });
+ test(format+' saves a journal-sourced forecast through the actual storage command without changing journal facts',t=>{
+  const {dir}=fixture(t,format,data=>{data.genRecords=[{id:0,generatorId:0,date:'2026-09-30',hours:20,meterStart:980,meterEnd:1000},{id:'fuel-only',generatorId:0,date:'2026-10-01',hours:0,fuelMovementId:0,fuelUsed:0,fuelActual:null},{id:'0',generatorId:'0',date:'2026-09-30',hours:1,meterEnd:9999}];}),before=snapshot(dir),counter=maintenance.journalCounter(before.data,{generatorId:0,throughDate:'2026-10-02'});
+  assert.equal(counter.status,'known');assert.equal(counter.currentHours,1000);assert.equal(counter.source.recordId,0);assert.equal(counter.source.date,'2026-09-30');assert.equal(counter.startDate,'2026-10-01');
+  const forecast=maintenance.forecastOccurrences({startDate:counter.startDate,endDate:'2026-12-31',currentHours:counter.currentHours,intervalHours:300,firstDueHours:1300,utilization:{mode:'monthly',hours:[0,0,0,0,0,0,0,0,0,100,200,400]}});
+  assert.deepEqual(forecast,[{plannedDate:'2026-11-30',plannedHours:1300},{plannedDate:'2026-12-24',plannedHours:1600}]);
+  const note='Journal genRecords number '+counter.source.recordId+' on '+counter.source.date+'; end counter '+counter.currentHours+'; forecast starts '+counter.startDate;
+  const rows=forecast.map((occurrence,index)=>({id:'journal-forecast-'+index,generatorId:0,site:'North',type:'ТО-1',work:'Synthetic journal-based planning',note,components:[{partId:0,qty:1}],...occurrence}));
+  const request=envelope(dir,{action:'saveDraft',payload:{...payload(),rows},reason:'Explicit saved journal basis and planned monthly workload'},'journal-plan');
+  assert.equal(execute(dir,request).ok,true);const after=snapshot(dir);unchangedFacts(before,after);assert.deepEqual(after.data.generatorMaintenancePlans[0].rows,rows);
+  const model=require('../assets/core/generator-maintenance-print').prepare(after.data,'journal-plan'),projection=require('../assets/core/generator-maintenance-spares').project(model.snapshot);assert.equal(projection.organization[0].qtyDecimal,'2');
+  assert.equal(execute(dir,request).replayed,true);assert.deepEqual(snapshot(dir),after);
+ });
  test(format+' saves 150 monthly services from 30 shared DES templates once and freezes exact annual ZIP demand',t=>{
   const ids=[0,'0',...Array.from({length:28},(_,index)=>'monthly-des-'+index)],{dir}=fixture(t,format,data=>{
    data.generators=ids.map((id,index)=>({id,name:'Synthetic monthly DES '+index,org:'Synthetic organization',site:'Site '+index,hoursInit:0,power:100,norm:1}));
