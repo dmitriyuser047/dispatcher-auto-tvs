@@ -20,7 +20,26 @@ function exclusivePublish(stage,target,bytes){try{fs.linkSync(stage,target);}cat
 function checkedCapsule(bytes,expected){if(sha(bytes)!==expected)fail('DOCUMENT_ARCHIVE_HASH','Контрольная сумма печатного снимка не совпала',409);const value=parse(bytes);if(value.version!==1||!['document-print-seal','document-print-artifact'].includes(value.type)||value.previous!==null&&typeof value.previous!=='string'||typeof value.sourceDatabase?.uuid!=='string')fail('DOCUMENT_ARCHIVE_HASH','Некорректная структура печатного снимка',409);if(value.previous!==null)id(value.previous);if(value.type==='document-print-seal')printing().verify(value.snapshot);else {const item=value.artifact;if(!item||!['pdf','xlsx'].includes(item.format)||!Number.isSafeInteger(item.size)||item.size<=0)fail('DOCUMENT_ARCHIVE_HASH','Повреждено подтверждение печатного файла',409);id(item.archiveId);id(item.sha256);}return value;}
 function capsule(dataDir,archiveId){id(archiveId);const final=safeFile(dataDir,archiveId+'.json'),staged=safeFile(dataDir,archiveId+'.stage'),file=final&&stat(final)?final:staged;const bytes=readBytes(file,file===final?staged:final);return {value:checkedCapsule(bytes,archiveId),bytes,file,final,staged};}
 function chain(dataDir,data){const output=[],seen=new Set();for(let current=head(data);current!==null;){if(seen.has(current)||seen.size>=MAX_CHAIN)fail('DOCUMENT_ARCHIVE_CHAIN','Повреждена цепочка печатного архива',409);seen.add(current);const item=capsule(dataDir,current);output.push({id:current,...item});current=item.value.previous;}return output;}
-function recover(dataDir,data,options={}){storage().assertWritable(dataDir,options);storage().assertWriteCompatibility(dataDir,options);data??=storage().readAll(dataDir);const entries=chain(dataDir,data);for(const item of entries.slice().reverse())if(item.file===item.staged||stat(item.staged))exclusivePublish(item.staged,item.final,item.bytes);for(const item of entries)if(item.value.type==='document-print-artifact')artifact(dataDir,item.value.artifact.archiveId,item.value.artifact.format,true,entries);return {ok:true};}
+function recover(dataDir,data,options={}){
+ data??=storage().readAll(dataDir);
+ const entries=chain(dataDir,data);
+ let pending=entries.some(item=>item.file===item.staged||stat(item.staged));
+ for(const item of entries)if(item.value.type==='document-print-artifact'){
+  const proof=item.value.artifact;
+  // Validate existing seals and files even when there is no publication work.
+  // A completed archive is a read, so a transport ticket expiring after the
+  // business commit must not turn that successful commit into an unknown ACK.
+  artifact(dataDir,proof.archiveId,proof.format,false,entries);
+  const file=safeFile(dataDir,proof.archiveId+'.'+proof.format+'.json'),metadata=file&&stat(file)?metadataBytes(dataDir,file):null,staged=safeFile(dataDir,proof.sha256+'.stage');
+  if(!metadata||staged&&stat(staged)||metadata.pair&&stat(metadata.pair))pending=true;
+ }
+ if(!pending)return {ok:true};
+ // Actual stage publication and cleanup retain the original writer checks.
+ storage().assertWritable(dataDir,options);storage().assertWriteCompatibility(dataDir,options);
+ for(const item of entries.slice().reverse())if(item.file===item.staged||stat(item.staged))exclusivePublish(item.staged,item.final,item.bytes);
+ for(const item of entries)if(item.value.type==='document-print-artifact')artifact(dataDir,item.value.artifact.archiveId,item.value.artifact.format,true,entries);
+ return {ok:true};
+}
 function permitted(principal,name){return require('./document-access.cjs').permitted(principal||{id:'local-profile',name:'Локальный пользователь',role:'admin'},'read',name);}
 function archiveScope(database,snapshot){
  const rows=[],seen=new Set(),add=(section,row)=>{if(!row)return;const key=section+'|'+stable(row);if(!seen.has(key)){seen.add(key);rows.push({section,row:clone(row)});}};
