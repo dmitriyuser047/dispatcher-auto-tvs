@@ -17,6 +17,25 @@ beforeEach(async()=>{
 });
 afterEach(async()=>{await page?.close();assert.deepEqual(errors,[]);});
 
+test('local runtime version labels follow the installed application instead of the update channel',async()=>{
+ const version=require('../package.json').version;
+ await page.evaluate(async version=>{window._updateInfo={version:'99.9.9'};electronAPI.getAppVersion=async()=>version;await unifiedRefreshVersion();},version);
+ assert.equal(await page.locator('.workspace-breadcrumb .unified-build-label').innerText(),'Версия '+version);
+ assert.equal(await page.locator('#unifiedNav .unified-build-note').innerText(),'Диспетчер ТВС · '+version);
+ await page.evaluate(async()=>{electronAPI.getAppVersion=async()=> '4.0.1';await unifiedRefreshVersion();});
+ assert.equal(await page.locator('.workspace-breadcrumb .unified-build-label').innerText(),'Версия 4.0.1');
+ assert.equal(await page.locator('#unifiedNav .unified-build-note').innerText(),'Диспетчер ТВС · 4.0.1');
+});
+
+test('local runtime version labels omit unavailable or malformed native metadata',async()=>{
+ assert.equal(await page.locator('.workspace-breadcrumb .unified-build-label').isHidden(),true);
+ assert.equal(await page.locator('#unifiedNav .unified-build-note').innerText(),'Диспетчер ТВС');
+ await page.evaluate(async()=>{electronAPI.getAppVersion=async()=> '<img src=x onerror=window.__versionInjected=true>';await unifiedRefreshVersion();electronAPI.getAppVersion=async()=>{throw Error('Synthetic unavailable native metadata');};await unifiedRefreshVersion();delete electronAPI.getAppVersion;await unifiedRefreshVersion();});
+ assert.equal(await page.locator('.workspace-breadcrumb .unified-build-label').isHidden(),true);
+ assert.equal(await page.locator('#unifiedNav .unified-build-note').innerText(),'Диспетчер ТВС');
+ assert.equal(await page.evaluate(()=>window.__versionInjected===true),false);
+});
+
 test('all 3.5 sections work in the shared navigation and both restored 3.5.1 themes at supported sizes',async()=>{
  for(const width of [1280,960]){
   await page.setViewportSize({width,height:width===960?700:900});

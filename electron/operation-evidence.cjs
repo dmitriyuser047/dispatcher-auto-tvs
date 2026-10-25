@@ -49,6 +49,17 @@ function makeSubject(sectionName,before,after,beforeFacts,afterFacts,fields=chan
  const id=identifier(after?.id)?after.id:identifier(before?.id)?before.id:undefined;
  return {section:sectionName,...(id===undefined?{}:{id}),before:fragment(before,fields,sectionName),after:fragment(after,fields,sectionName),beforeFacts,afterFacts,beforeHash:before===null?null:digest(before),afterHash:after===null?null:digest(after),changedFields:fields,action:before===null?'create':after===null?'delete':'update'};
 }
+function compactSelectedFacts(facts,row){
+ if(facts===null)return null;
+ // Check the complete original facts first: an unused malformed guard must
+ // never become acceptable merely because its field is outside the fragment.
+ validateFacts(facts);
+ if(!Array.isArray(facts.fieldGuards))return facts;
+ const guards=facts.fieldGuards.filter(guard=>{
+  let value=row;for(const token of guard.path){if(value===null||typeof value!=='object'||!own(value,token))return false;value=value[token];}return true;
+ });
+ return guards.length===facts.fieldGuards.length?facts:{...facts,fieldGuards:guards};
+}
 function grouped(sectionName,rows){const groups=new Map();for(const [index,row]of rows.entries()){const key=load('assets/core/platform-integrity.js').rowIdentity(sectionName,row,index),list=groups.get(key)||[];list.push(row);groups.set(key,list);}return {groups};}
 function ownedDatabase(value){if(!object(value))fail();const result={};for(const name of schema.sections){const rows=value[name]??[];if(!Array.isArray(rows)||rows.some(row=>!object(row)))fail();result[name]=rows;}return result;}
 function archiveCapture(selected,bound){
@@ -101,7 +112,12 @@ function createProof(input){
   // A row dependency already retains its exact typed identity in both phase
   // fragments. Avoid repeating that identity and the default discriminator in
   // every selected row of a large reviewed source closure.
-  if(kind==='row')delete item.id;else item.kind=kind;
+  if(kind==='row'){
+   delete item.id;
+   // These guards are used only to project this exact read fragment. Changed
+   // subjects and full archive/source captures keep their complete facts.
+   if(item.fullReadRequired!==true){item.beforeFacts=compactSelectedFacts(item.beforeFacts,item.before);item.afterFacts=compactSelectedFacts(item.afterFacts,item.after);}
+  }else item.kind=kind;
   selectedTargets.push(item);
  }
  const actual=[...new Set(subjects.map(row=>row.section))].sort(),declared=list(receipt.changedSections||[]).filter(name=>name!=='auditLog');if(!same(actual,declared)){verified=false;issues.push('changed-section-coverage-mismatch');}
