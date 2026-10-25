@@ -102,6 +102,15 @@ export function createAccessScope(contracts:Contracts,schema:Registry,identity:E
     }
     resolved=items.length?combine(items):result([{org:fact(row.org),site:unknown()}],true);
    }
+   else if(section==='assetDocuments'&&(row.kind==='personnel-timesheet'||own(row,'personnelTimesheet'))){
+    const model=row.personnelTimesheet;
+    if(row.kind!=='personnel-timesheet'||!object(model)||model.version!==1||!['operator','driver'].includes(model.kind as string)||model.org!==row.org||!Array.isArray(model.rows))resolved=result(undefined,false,{issues:['unproven-personnel-timesheet']});
+    else {
+     const entries=model.rows;
+     const items:Resolved[]=entries.map(entry=>object(entry)?result([{org:fact(model.org),site:fact(entry.site)}],true,{evidence:[evidence('personnel-timesheet-site',true)]}):result());
+     resolved=items.length?combine(items):result([{org:fact(model.org),site:unknown()}],true,{evidence:[evidence('personnel-timesheet-organization',true)]});
+    }
+   }
    else if(frozen)resolved=frozen;
    else if(section==='auditLog'){
     const changes:Resolved[]=[];if(typeof row.section==='string'&&names.has(row.section)&&row.section!=='auditLog'){for(const field of ['before','after'])if(object(row[field]))changes.push(resolveOwned(row.section,row[field],next));}
