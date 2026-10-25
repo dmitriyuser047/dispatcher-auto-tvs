@@ -39,6 +39,21 @@ beforeEach(async()=>{
 });
 afterEach(async()=>{await page?.close();assert.deepEqual(errors,[]);});
 
+test('pending recovery check is visible on the first screen without starting a recovery action',async()=>{
+ for(const viewport of [{width:1280,height:900},{width:960,height:700}]){
+  await page.setViewportSize(viewport);await page.evaluate(()=>renderPlatformSystem());await page.locator('#platformRecovery [data-operation-check]').waitFor();
+  const button=await page.locator('#platformRecovery [data-operation-check]').boundingBox();assert.ok(button&&button.y>=0&&button.y+button.height<=viewport.height,JSON.stringify({viewport,button}));
+ }
+ assert.deepEqual(await page.evaluate(()=>({calls:window.__calls,writes:window.__writes})),{calls:[],writes:0});
+});
+
+test('recovery remains available while the general health calculation is pending or fails',async()=>{
+ await page.evaluate(()=>{dispatcherBackgroundNeeded=()=>true;dispatcherHealthAsync=()=>new Promise((resolve,reject)=>{window.__rejectHealth=reject;});renderPlatformSystem();});
+ await page.locator('#platformRecovery [data-operation-check]').waitFor();assert.match(await page.locator('.platform-workspace > p').innerText(),/Выполняется расчёт/);
+ await page.evaluate(()=>window.__rejectHealth(Error('Synthetic health calculation failed')));await page.waitForFunction(()=>document.querySelector('.platform-workspace > p')?.textContent==='Synthetic health calculation failed');
+ assert.equal(await page.locator('#platformRecovery [data-operation-check]').isVisible(),true);assert.deepEqual(await page.evaluate(()=>({calls:window.__calls,writes:window.__writes})),{calls:[],writes:0});
+});
+
 test('startup warns about unresolved metadata without automatically checking, retrying or writing',async()=>{
  await page.waitForFunction(()=>document.getElementById('globalToast')?.textContent.includes('Есть неподтверждённые операции: 1'));
  assert.deepEqual(await page.evaluate(()=>({calls:window.__calls,writes:window.__writes})),{calls:[],writes:0});
