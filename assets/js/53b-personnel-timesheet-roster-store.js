@@ -2,7 +2,7 @@
 'use strict';
 async function personnelTimesheetRosterStore(request) {
   if(personnelSaving || typeof unifiedPendingSaves!=='undefined' && unifiedPendingSaves) throw Error('Дождитесь завершения сохранения');
-  const target=data,clone=value=>JSON.parse(JSON.stringify(value)),text=value=>JSON.stringify(value||[]);
+  const target=data,clone=value=>JSON.parse(JSON.stringify(value)),text=value=>JSON.stringify(value||[]),same=(left,right)=>RequestFingerprint.stableSerialize(left)===RequestFingerprint.stableSerialize(right);
   const assertSession=()=>{
     personnelAssertIdentity(request.identity);
     if(data!==target||platformPrepareAccessStamp(platformSessionContext())!==request.accessStamp) throw Error('База, пользователь или права изменились. Откройте проверку заново.');
@@ -30,8 +30,8 @@ async function personnelTimesheetRosterStore(request) {
   const plan=PersonnelTimesheetRoster.preview(baseline,request.model,request.options);
   if(!plan.canApply||plan.fingerprint!==request.reviewFingerprint) throw Error('Результат проверки изменился. Проверьте совпадения сотрудников заново.');
   const original=request.original??null,id=original?original.id:request.operationId,current=(baseline.assetDocuments||[]).filter(row=>row.id===id);
-  if(original?current.length!==1||JSON.stringify(current[0])!==JSON.stringify(original):current.length!==0) throw Error('Сохранённый табель изменился. Откройте актуальный документ и повторите проверку.');
-  if(original&&plan.createdIds.length===0&&JSON.stringify(original.personnelTimesheet)===JSON.stringify(plan.model)) return {record:clone(original),createdIds:[],plan};
+  if(original?current.length!==1||!same(current[0],original):current.length!==0) throw Error('Сохранённый табель изменился. Откройте актуальный документ и повторите проверку.');
+  if(original&&plan.createdIds.length===0&&same(original.personnelTimesheet,plan.model)) return {record:clone(original),createdIds:[],plan};
   const record=PersonnelTimesheetDocument.makeRecord(plan.model,{id,previous:original,now:request.now}),next=clone(baseline);
   next.drivers=clone(plan.drivers);
   next.assetDocuments=original?(next.assetDocuments||[]).map(row=>row.id===id?record:row):(next.assetDocuments||[]).concat(record);
@@ -43,7 +43,7 @@ async function personnelTimesheetRosterStore(request) {
     if(saved!==true) throw Error('Сохранение не подтверждено. Введённые данные остаются в форме; повторите попытку.');
     assertSources();
     const records=(next.assetDocuments||[]).filter(row=>row.id===id);
-    if(records.length!==1||JSON.stringify(records[0].personnelTimesheet)!==JSON.stringify(plan.model)) throw Error('База не вернула сохранённый табель со связями сотрудников.');
+    if(records.length!==1||!same(records[0].personnelTimesheet,plan.model)) throw Error('База не вернула сохранённый табель со связями сотрудников.');
     PersonnelTimesheetDocument.validateRecord(records[0]);
     for(const item of plan.items) if(item.status==='create'||item.status==='matched') {
       const people=(next.drivers||[]).filter(row=>row.id===item.employeeId);

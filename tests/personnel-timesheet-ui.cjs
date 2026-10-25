@@ -46,8 +46,9 @@ beforeEach(async()=>{
    if(window.__concurrentDriverArchive){window.__concurrentDriverArchive=false;db.drivers.find(row=>row.id==='ts-driver').archived=true;window.__revisions.drivers++;window.__disk=JSON.stringify(db);sessionStorage.setItem('syntheticTimesheetDisk',window.__disk);}
    const conflicts=Object.keys(request.base||{}).filter(name=>request.base[name]!==window.__revisions[name]);
    if(conflicts.length){window.__lastConflicts=conflicts;return{ok:false,conflicts,revisions:{...window.__revisions},databaseToken:request.databaseToken};}
-   for(const[name,rows]of Object.entries(request.sections)){db[name]=rows;window.__revisions[name]++;}
-   window.__disk=JSON.stringify(db);sessionStorage.setItem('syntheticTimesheetDisk',window.__disk);return{ok:true,revisions:{...window.__revisions},databaseToken:request.databaseToken,canonicalSections:request.sections,operationReceipt:{id:request.operation?.id,status:'committed'}};
+   const canonical=window.__canonicalSorted?JSON.parse(RequestFingerprint.stableSerialize(request.sections)):request.sections;
+   for(const[name,rows]of Object.entries(canonical)){db[name]=rows;window.__revisions[name]++;}
+   window.__disk=JSON.stringify(db);sessionStorage.setItem('syntheticTimesheetDisk',window.__disk);return{ok:true,revisions:{...window.__revisions},databaseToken:request.databaseToken,canonicalSections:canonical,operationReceipt:{id:request.operation?.id,status:'committed'}};
   }};
  });
  await page.goto(baseURL);
@@ -143,6 +144,13 @@ test('all-matched roster refuses a concurrently archived employee and leaves the
  await importSynthetic('driver',[{name:'Тестовый водитель',personnelNumber:'SYNTHETIC-D01'}]);await openRoster();const before=await page.evaluate(()=>({drivers:JSON.stringify(data.drivers),documents:JSON.stringify(data.assetDocuments),model:JSON.stringify(ptView('driver').model)}));await page.evaluate(()=>{window.__concurrentDriverArchive=true;});await page.locator('[data-pt-roster-confirm]').click();await page.waitForFunction(()=>!!document.querySelector('#personnelTimesheetRoster [role=alert]')?.textContent.trim());
  assert.deepEqual(await page.evaluate(()=>window.__lastConflicts),['drivers']);assert.equal(await page.evaluate(()=>JSON.stringify(data.drivers)),before.drivers);assert.equal(await page.evaluate(()=>JSON.stringify(data.assetDocuments)),before.documents);assert.equal(await page.evaluate(()=>JSON.stringify(ptView('driver').model)),before.model);assert.equal(await page.locator('[data-pt-roster-open]').count(),0);assert.equal(await page.locator('[data-pt-roster-confirm]').isEnabled(),true);
  const disk=await page.evaluate(()=>JSON.parse(window.__disk));assert.equal(disk.drivers.find(row=>row.id==='ts-driver').archived,true);assert.equal(JSON.stringify(disk.assetDocuments),before.documents);assert.equal(disk.assetDocuments.some(row=>row.kind==='personnel-timesheet'),false);
+});
+
+test('roster accepts canonically reordered acknowledgement keys and repeating the saved transfer is a no-op',async()=>{
+ await importSynthetic('driver',[{name:'Сидоров Сергей Сергеевич',personnelNumber:'SYNTHETIC-CANONICAL'}]);await openRoster();await page.evaluate(()=>{window.__canonicalSorted=true;});await commitRoster();
+ const before=await page.evaluate(()=>({drivers:JSON.stringify(data.drivers),documents:JSON.stringify(data.assetDocuments),audit:JSON.stringify(data.auditLog),disk:window.__disk,writes:window.__writes,record:JSON.stringify(ptView('driver').original)}));assert.equal(before.writes,1);assert.equal(await page.evaluate(()=>data.drivers.filter(row=>row.name==='Сидоров Сергей Сергеевич').length),1);
+ const keys=await page.evaluate(()=>Object.keys(ptView('driver').original.personnelTimesheet));assert.deepEqual(keys,keys.slice().sort());await page.locator('[data-pt-roster-open]').click();await openSection('driverTimesheets');await openRoster();assert.equal(await page.locator('[data-pt-roster-status=create]').count(),0);await commitRoster();await page.waitForFunction(()=>!document.querySelector('#personnelTimesheetRoster')?.closest('.modal-overlay')?.classList.contains('open'));
+ const after=await page.evaluate(()=>({drivers:JSON.stringify(data.drivers),documents:JSON.stringify(data.assetDocuments),audit:JSON.stringify(data.auditLog),disk:window.__disk,writes:window.__writes,record:JSON.stringify(ptView('driver').original)}));assert.deepEqual(after,before);
 });
 
 test('new operator sheet edits typed hours and codes, preserves zero versus blank, saves and reopens only a document',async()=>{
