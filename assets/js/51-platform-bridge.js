@@ -327,6 +327,9 @@ function platformExecuteCommand(value,options={}){
   }catch(error){return Promise.resolve(platformCommandFailure(error.code||'INVALID_COMMAND',error.message));}
 }
 async function platformFlushForClose(){
+  // A save can settle and leave the shared set while another editor flushes.
+  // Retain operations already in flight so a rejected ACK still blocks close.
+  const closingOperations=new Set(typeof _pendingSaveOperations!=='undefined'?[..._pendingSaveOperations]:[]);
   let ready=typeof frcFlush==='function'?await frcFlush():true;
   if(typeof personnelPlanningFlush==='function'&&!await personnelPlanningFlush())ready=false;
   if(typeof documentPrintFlush==='function'&&!await documentPrintFlush())ready=false;
@@ -337,8 +340,9 @@ async function platformFlushForClose(){
   if(typeof reviewedImportFlush==='function'&&!await reviewedImportFlush())ready=false;
   if(typeof reestrImportFlush==='function'&&!await reestrImportFlush())ready=false;
   if(ready)document.activeElement?.blur();
-  while(typeof _pendingSaveOperations!=='undefined'&&_pendingSaveOperations.size){
-    const results=await Promise.allSettled([..._pendingSaveOperations]);
+  while(closingOperations.size||typeof _pendingSaveOperations!=='undefined'&&_pendingSaveOperations.size){
+    if(typeof _pendingSaveOperations!=='undefined')for(const operation of _pendingSaveOperations)closingOperations.add(operation);
+    const results=await Promise.allSettled([...closingOperations]);closingOperations.clear();
     if(results.some(result=>result.status!=='fulfilled'||result.value!==true))ready=false;
   }
   if(typeof frcHasPendingEdits==='function'&&frcHasPendingEdits())ready=false;
