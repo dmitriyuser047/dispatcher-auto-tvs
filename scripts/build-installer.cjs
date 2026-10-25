@@ -8,6 +8,7 @@ require('./write-release-manifest.cjs').assertCleanSource(root);
 const version=pkg.version;
 const env={...process.env,ELECTRON_BUILDER_CACHE:path.join(root,'.builder-cache')};
 function run(args){const result=spawnSync(process.execPath,args,{cwd:root,env,stdio:'inherit',windowsHide:true});if(result.error)throw result.error;if(result.status!==0)process.exit(result.status||1);}
+for(const script of ['build-typed-core.cjs','build-inventory-ui.cjs','build-inventory-server.cjs','build-gsm-ui.cjs'])run([path.join(__dirname,script),'--check']);
 run([path.join(__dirname,'vendor-tesseract-worker.cjs')]);
 run([path.join(__dirname,'verify-native-ocr-core.cjs')]);
 run([path.join(__dirname,'ocr-model-tools.cjs'),'analyze','--output','audit/ocr-model-analysis.json']);

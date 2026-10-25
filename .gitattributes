@@ -17,3 +17,4 @@
 /tests/fixtures/document-print-v1-before-v5.cjs -text
 /tests/fixtures/schema-v4/** -text
 /tests/fixtures/schema-v5/** -text
+/tests/fixtures/request-fingerprint-v3.5.8/** -text
