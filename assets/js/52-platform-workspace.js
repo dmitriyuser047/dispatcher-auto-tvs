@@ -55,7 +55,7 @@ function renderPlatformIssues(report) {
 }
 function renderPlatformSystem(calculatedIntegrity) {
   const supplied=calculatedIntegrity&&Array.isArray(calculatedIntegrity.issues)&&calculatedIntegrity.counts?calculatedIntegrity:null;
-  if(!supplied&&dispatcherBackgroundNeeded()){dispatcherRenderBackground('system','health',{},renderPlatformSystem);return;}
+  if(!supplied&&dispatcherBackgroundNeeded()){dispatcherRenderBackground('system','health',{},renderPlatformSystem);platformRenderRecoveryPanel();return;}
   const report = platformHealthSnapshot(supplied), counts = report.integrity.counts || {}, allowed = new Set(report.storage.readable);
   const modules = Array.isArray(PlatformSchema.modules) ? PlatformSchema.modules : Object.values(PlatformSchema.modules);
   const history = report.runtime.recent || report.runtime.operations || [];
@@ -179,7 +179,8 @@ async function platformRenderRecoveryPanel(){
   const workspace=document.querySelector('.platform-workspace');if(!workspace)return;
   document.getElementById('platformRecovery')?.remove();
   const panel=document.createElement('section');panel.id='platformRecovery';
-  panel.innerHTML='<h3>Восстановление операций</h3><p role="status">Проверяю локальную очередь…</p>';workspace.append(panel);
+  panel.innerHTML='<h3>Восстановление операций</h3><p role="status">Проверяю локальную очередь…</p>';
+  const heading=workspace.querySelector('.platform-heading');if(heading)heading.after(panel);else workspace.append(panel);
   const stamp=syncSessionStamp();
   let result;try{result=await window.electronAPI.getPendingOperations();}catch{result={ok:false,error:'Не удалось прочитать очередь'};}
   if(stamp!==syncSessionStamp()||!panel.isConnected)return;

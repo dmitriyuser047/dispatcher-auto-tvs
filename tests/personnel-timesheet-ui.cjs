@@ -105,6 +105,24 @@ test('a previously saved imported driver sheet explicitly adds new drivers, link
  await openSection('driverTimesheets');await openRoster();assert.equal(await page.locator('[data-pt-roster-status=create]').count(),0);await commitRoster();assert.equal(await page.evaluate(()=>data.drivers.length),4);assert.equal(await page.evaluate(()=>data.assetDocuments.filter(row=>row.kind==='personnel-timesheet').length),1);
 });
 
+test('pending operation shows the original cause and opens recovery without sending again or discarding the draft',async()=>{
+ await importSynthetic('driver',[{name:'Петров Пётр Петрович',personnelNumber:'SYNTHETIC-PENDING'}]);await openRoster();
+ const before=await page.evaluate(()=>({data:JSON.stringify(data),disk:window.__disk,model:JSON.stringify(ptView('driver').model)}));
+ const message='В этом разделе есть операция с неподтверждённым результатом. Откройте «Состояние программы» и проверьте её перед новым сохранением.';
+ await page.evaluate(message=>{
+  window.__recoveryChecks=0;window.__recoveryRetries=0;window.__recoveryDiscards=0;
+  electronAPI.writeSections=async raw=>{window.__writes++;window.__requests.push(JSON.parse(raw));return {ok:false,queued:false,needsReload:true,code:'PENDING_OPERATION',error:message};};
+  electronAPI.getPendingOperations=async()=>({ok:true,supported:true,operations:[{id:'synthetic-earlier-operation',status:'unknown',sections:['drivers','assetDocuments'],createdAt:'2026-10-25T18:30:00.000Z'}]});
+  electronAPI.reconcileOperation=async()=>{window.__recoveryChecks++;return {ok:true,committed:false};};
+  electronAPI.retryOperation=async()=>{window.__recoveryRetries++;return {ok:false};};electronAPI.discardOperation=async()=>{window.__recoveryDiscards++;return {ok:false};};
+ },message);
+ await page.locator('[data-pt-roster-confirm]').click();await page.waitForFunction(()=>document.querySelector('#personnelTimesheetRoster [role=alert]')?.textContent.includes('неподтверждённым'));
+ assert.equal(await page.locator('#personnelTimesheetRoster [role=alert]').innerText(),message);assert.equal(await page.evaluate(()=>_platformLastError.code),'PENDING_OPERATION');assert.equal(await page.locator('[data-pt-roster-recovery]').isVisible(),true);
+ await page.locator('[data-pt-roster-recovery]').click();await page.waitForFunction(()=>activeSection==='system');await page.locator('#platformRecovery [data-operation-check]').waitFor();
+ assert.deepEqual(await page.evaluate(()=>({data:JSON.stringify(data),disk:window.__disk,model:JSON.stringify(ptView('driver').model)})),before);
+ assert.deepEqual(await page.evaluate(()=>({writes:window.__writes,checks:window.__recoveryChecks,retries:window.__recoveryRetries,discards:window.__recoveryDiscards})),{writes:1,checks:0,retries:0,discards:0});
+});
+
 test('operator roster review can skip ambiguous rows without deleting them from the timesheet',async()=>{
  await page.evaluate(async()=>{data.drivers.push({id:'ambiguous-one',name:'Неоднозначный машинист',personnelRoles:['operator'],org:'Тестовая организация'},{id:'ambiguous-two',name:'Неоднозначный машинист',personnelRoles:['operator'],org:'Тестовая организация'});if(!await saveData(data))throw Error('Synthetic fixture was not saved');});
  await importSynthetic('operator',[{name:'Новый машинист из таблицы',personnelNumber:'SYNTHETIC-O02'},{name:'Неоднозначный машинист'}]);await openRoster();

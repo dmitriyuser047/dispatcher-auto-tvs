@@ -118,6 +118,8 @@ function ptRoster(s) {
     const assertReview=()=>{ptAssert(s,true);if(!ptRosterWrite())throw Error('Нет доступа к изменению справочника сотрудников.');if(generation!==s.generation||source!==JSON.stringify(s.model))throw Error('Табель изменился после проверки. Откройте добавление в справочник заново.');};
     wfShowDialog('Сотрудники из табеля · '+ptLabel(s.kind),'<form id="personnelTimesheetRoster" class="wf-form personnel-form"><div class="wf-wide" data-pt-roster-review></div><label class="wf-wide"><span>Основание добавления в справочник</span><input name="reason" required minlength="5" maxlength="500" value="'+ptEsc(review.reason)+'"></label><p class="wf-error wf-wide" role="alert"></p><div class="wf-wide pt-actions"><button type="button" class="btn btn-ghost" data-pt-roster-cancel>Вернуться к табелю</button><button type="submit" class="btn btn-primary" data-pt-roster-confirm>Подтвердить и сохранить</button></div></form>');
     const form=document.getElementById('personnelTimesheetRoster'),host=form.querySelector('[data-pt-roster-review]'),confirm=form.querySelector('[data-pt-roster-confirm]'),errorHost=form.querySelector('[role=alert]');
+    const recovery=document.createElement('button');recovery.type='button';recovery.className='btn btn-ghost';recovery.dataset.ptRosterRecovery='';recovery.textContent='Открыть восстановление операций';recovery.hidden=true;confirm.before(recovery);
+    recovery.onclick=()=>{try{assertReview();closeModal('wfModal');switchSection('system');}catch(error){errorHost.textContent=error.message;}};
     const renderReview=()=>{
       assertReview();review.plan=PersonnelTimesheetRoster.preview(database,model,{createIds:review.createIds,skipRowIds:review.skipRowIds});
       const plan=review.plan,counts={create:plan.createdIds.length,matched:plan.items.filter(item=>item.status==='matched').length,blocked:plan.items.filter(item=>item.status==='blocked').length,skipped:plan.items.filter(item=>item.status==='skip').length};
@@ -152,7 +154,7 @@ function ptRoster(s) {
         showToast(message);
       } catch(error) {
         s.pending=false;review.pending=false;
-        if(s.stamp===ptStamp()&&personnelTimesheetViews.get(s.kind)===s){controls.forEach(({input,disabled})=>input.disabled=disabled);errorHost.textContent=error.message||String(error);}else ptFail(error);
+        if(s.stamp===ptStamp()&&personnelTimesheetViews.get(s.kind)===s){controls.forEach(({input,disabled})=>input.disabled=disabled);errorHost.textContent=error.message||String(error);recovery.hidden=error.code!=='PENDING_OPERATION';}else ptFail(error);
       }
     };
     renderReview();

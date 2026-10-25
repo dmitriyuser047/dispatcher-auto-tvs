@@ -40,7 +40,11 @@ async function personnelTimesheetRosterStore(request) {
   let saved=false;
   try {
     saved=await saveData(next,{noMerge:true,atomicSections:['drivers','assetDocuments'],requiredCanonicalSections:changed,operation:{id:request.operationId},history:{action:'Сотрудники из табеля',reason:request.reason.trim()}});
-    if(saved!==true) throw Error('Сохранение не подтверждено. Введённые данные остаются в форме; повторите попытку.');
+    if(saved!==true) {
+      assertSession();
+      const failure=typeof platformRuntimeStatus==='function'?platformRuntimeStatus().lastError:null;
+      throw Object.assign(Error(failure?.message||'Сохранение не подтверждено. Введённые данные остаются в форме; повторите попытку.'),{code:failure?.code||'SAVE_FAILED'});
+    }
     assertSources();
     const records=(next.assetDocuments||[]).filter(row=>row.id===id);
     if(records.length!==1||!same(records[0].personnelTimesheet,plan.model)) throw Error('База не вернула сохранённый табель со связями сотрудников.');
