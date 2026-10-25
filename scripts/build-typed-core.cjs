@@ -27,6 +27,9 @@ const ENTRIES=Object.freeze([
   Object.freeze({source:'src/core/generator-spares.ts',output:'assets/core/generator-spares.js',global:'GeneratorSpares',factory:'createGeneratorSpares',dependencies:[{path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./entity-identity.js',global:'EntityIdentity'}]}),
   Object.freeze({source:'src/core/generator-maintenance-spares.ts',output:'assets/core/generator-maintenance-spares.js',global:'GeneratorMaintenanceSpares',factory:'createGeneratorMaintenanceSpares',dependencies:[{path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./decimal-core.js',global:'DecimalCore'}]}),
   Object.freeze({source:'src/core/generator-maintenance.ts',output:'assets/core/generator-maintenance.js',global:'GeneratorMaintenance',factory:'createGeneratorMaintenance',dependencies:[{path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./entity-identity.js',global:'EntityIdentity'},{path:'./request-fingerprint.js',global:'RequestFingerprint'},{path:'./inventory-stock.js',global:'InventoryStock',lazy:true},{path:'./business-calendar.js',global:'BusinessCalendar',lazy:true}]}),
+  Object.freeze({source:'src/core/asset-inventory.ts',output:'assets/core/asset-inventory.js',global:'AssetInventory',factory:'createAssetInventory',dependencies:[{path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./decimal-core.js',global:'DecimalCore'},{path:'./request-fingerprint.js',global:'RequestFingerprint'}]}),
+  Object.freeze({source:'src/core/asset-inventory-import.ts',output:'assets/core/asset-inventory-import.js',global:'AssetInventoryImport',factory:'createAssetInventoryImport',dependencies:[{path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./decimal-core.js',global:'DecimalCore'},{path:'./request-fingerprint.js',global:'RequestFingerprint'}]}),
+  Object.freeze({source:'src/core/asset-inventory-excel.ts',output:'assets/core/asset-inventory-excel.js',global:'AssetInventoryExcel',factory:'createAssetInventoryExcel',dependencies:[{path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./decimal-core.js',global:'DecimalCore'}]}),
   Object.freeze({source:'src/core/seasonal-fuel.ts',output:'assets/core/seasonal-fuel.js',global:'SeasonalFuel',factory:'createSeasonalFuel',dependencies:[{path:'./decimal-core.js',global:'DecimalCore'},{path:'./effective-periods.js',global:'EffectivePeriods'},{path:'./generator-fuel.js',global:'GeneratorFuel',lazy:true}]}),
   Object.freeze({source:'src/core/financial-recognition.ts',output:'assets/core/financial-recognition.js',global:'DomainSources',factory:'createDomainSources',dependencies:[{path:'./accounting-boundary.js',global:'AccountingBoundary'},{path:'./document-state.js',global:'DocumentState',lazy:true},{path:'./fuel-stock.js',global:'FuelStock',lazy:true},{path:'./decimal-core.js',global:'DecimalCore'},{path:'./entity-identity.js',global:'EntityIdentity'},{path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true}]}),
   Object.freeze({source:'src/core/accounting-boundary.ts',output:'assets/core/accounting-boundary.js',global:'AccountingBoundary',factory:'createAccountingBoundary'}),
@@ -58,6 +61,7 @@ const ENTRIES=Object.freeze([
     {path:'./entity-identity.js',global:'EntityIdentity'}, {path:'./decimal-core.js',global:'DecimalCore'},
     {path:'./business-calendar.js',global:'BusinessCalendar',lazy:true},
     {path:'./document-state.js',global:'DocumentState',lazy:true}, {path:'./writeoff-engine.js',global:'TvsWriteoffEngine',lazy:true},
+    {path:'./asset-inventory.js',global:'AssetInventory',lazy:true},
   ]}),
   Object.freeze({source:'src/core/import-engine.ts',output:'assets/core/import-engine.js',global:'ImportEngine',factory:'createImportEngine',dependencies:[
     {path:'./import-planner.js',global:'ImportPlanner'}, {path:'./platform-policies.js',global:'PlatformPolicies',lazy:true},
@@ -162,6 +166,7 @@ const ENTRIES=Object.freeze([
     {path:'./document-print.js',global:'DocumentPrint',lazy:true},
     {path:'./import-engine.js',global:'ImportEngine',lazy:true},
     {path:'./generator-maintenance.js',global:'GeneratorMaintenance',lazy:true},
+    {path:'./asset-inventory.js',global:'AssetInventory',lazy:true},
   ]}),
 ]);
 const normalize=text=>text.replace(/\r\n?/g,'\n');

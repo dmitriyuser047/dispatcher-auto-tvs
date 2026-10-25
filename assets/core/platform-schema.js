@@ -1,7 +1,7 @@
 /* Shared business-section catalog. No application state, storage or DOM access. */
 (function(root,factory){'use strict';const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.PlatformSchema=api;})(typeof globalThis==='object'?globalThis:this,function(){
   'use strict';
-  const sections=['vehicles','records','generators','genRecords','toRecords','tanks','tankIncomes','vehicleTo','repairs','reestrRows','savedReestrs','payments','budget','contragents','fuelPurchases','fuelImports','fuelCards','fuelPeriods','fuelWriteoffs','monthlyFuel','appMeta','dispatchJobs','drivers','assetAssignments','workOrders','opsTasks','assetDocuments','fuelMovements','parts','partMovements','shiftReports','connectors','auditLog','savedViews','glonassTrips','glonassImports','costEntries','costProfiles','procurementOrders','procurementRules','documentDrafts','generatorMaintenancePlans'];
+  const sections=['vehicles','records','generators','genRecords','toRecords','tanks','tankIncomes','vehicleTo','repairs','reestrRows','savedReestrs','payments','budget','contragents','fuelPurchases','fuelImports','fuelCards','fuelPeriods','fuelWriteoffs','monthlyFuel','appMeta','dispatchJobs','drivers','assetAssignments','workOrders','opsTasks','assetDocuments','fuelMovements','parts','partMovements','shiftReports','connectors','auditLog','savedViews','glonassTrips','glonassImports','costEntries','costProfiles','procurementOrders','procurementRules','documentDrafts','generatorMaintenancePlans','inventoryOrgs','inventoryObjects','inventoryMols','inventoryItems','inventorySessions'];
   const moduleDefinitions=[
     ['fleet','Транспорт',['vehicles','records']],
     ['power','ДЭС и ёмкости',['generators','genRecords','tanks','tankIncomes']],
@@ -11,6 +11,7 @@
     ['dispatch','Диспетчерская',['dispatchJobs','drivers','assetAssignments','shiftReports']],
     ['operations','Задачи и документы',['opsTasks','assetDocuments','documentDrafts']],
     ['inventory','Склад и закупки',['parts','partMovements','fuelMovements','procurementOrders','procurementRules']],
+    ['assetInventory','Инвентаризация',['inventoryOrgs','inventoryObjects','inventoryMols','inventoryItems','inventorySessions']],
     ['integration','Обмен и ГЛОНАСС',['connectors','glonassTrips','glonassImports']],
     ['system','История и настройки',['appMeta','auditLog','savedViews']]
   ];
@@ -25,6 +26,7 @@
   const number=(section,fields,options={})=>fields.split(' ').filter(Boolean).forEach(field=>descriptors[section].numbers.push({field,...options}));
   labels.generatorMaintenancePlans='Графики ТО ДЭС';
   descriptors.generatorMaintenancePlans.label=labels.generatorMaintenancePlans;
+  for(const [section,label]of Object.entries({inventoryOrgs:'Организации инвентаризации',inventoryObjects:'Объекты инвентаризации',inventoryMols:'МОЛ инвентаризации',inventoryItems:'Основные средства инвентаризации',inventorySessions:'Инвентаризационные описи'})){labels[section]=label;descriptors[section].label=label;}
   sections.forEach(section=>date(section,'createdAt updatedAt archivedAt','datetime'));
   date('generatorMaintenancePlans','rows[].plannedDate approval.date');
   date('generatorMaintenancePlans','approval.at','datetime');
@@ -32,6 +34,12 @@
   number('generatorMaintenancePlans','revision',{integer:true,min:1});
   number('generatorMaintenancePlans','rows[].plannedHours rows[].components[].qty',{min:0});
   descriptors.generatorMaintenancePlans.enums.push({field:'status',values:['draft','approved']});
+  date('inventorySessions','date approval.date snapshot.date snapshot.approval.date');
+  date('inventorySessions','approval.at snapshot.approval.at','datetime');
+  number('inventorySessions','revision snapshot.revision',{integer:true,min:1});
+  number('inventoryItems','qty cost',{min:0});
+  number('inventorySessions','rows[].qtyAcct rows[].costAcct rows[].qtyFact rows[].costFact snapshot.rows[].qtyAcct snapshot.rows[].costAcct snapshot.rows[].qtyFact snapshot.rows[].costFact',{min:0});
+  descriptors.inventorySessions.enums.push({field:'status',values:['draft','approved']});
   date('records','date');date('vehicles','orgHistory[].from orgHistory[].to');date('genRecords','date');date('vehicleTo','date nextDate');date('toRecords','date nextDate');date('vehicleTo','completedAt','dateOrDatetime');date('toRecords','completedAt','dateOrDatetime');date('repairs','invoiceDate');date('tankIncomes','date');
   date('payments','date dueDate paidDate');date('fuelPurchases','date');date('fuelImports','at','datetime');date('fuelCards','assignments[].from assignments[].to orgHistory[].from orgHistory[].to');date('fuelPeriods','month','month');date('fuelPeriods','closedAt reopenedAt','datetime');date('fuelWriteoffs','date');date('fuelWriteoffs','postedAt voidedAt','datetime');date('monthlyFuel','month','month');date('appMeta','at','datetime');
   date('dispatchJobs','start end actualStart actualEnd','datetime');date('assetAssignments','from to');date('workOrders','downtimeFrom downtimeTo completedAt repairProcess.events[].at','datetime');date('workOrders','warrantyUntil');date('opsTasks','due','date');date('assetDocuments','date expires');date('fuelMovements','date');date('partMovements','date');date('shiftReports','date');date('auditLog','at','datetime');date('glonassTrips','date');date('glonassImports','at','datetime');date('costEntries','date');date('procurementOrders','deliveryDate');
@@ -67,6 +75,11 @@
   direct('generatorMaintenancePlans','rows[].components[].partId','parts');
   direct('generatorMaintenancePlans','rootId','generatorMaintenancePlans');
   direct('generatorMaintenancePlans','previousId','generatorMaintenancePlans');
+  direct('inventoryMols','orgId','inventoryOrgs');direct('inventoryMols','objectId','inventoryObjects');direct('inventoryItems','molId','inventoryMols');
+  for(const field of ['rootId','previousId'])direct('inventorySessions',field,'inventorySessions');
+  // The document owns these values. Its approved snapshots remain readable
+  // after a source catalogue row has been archived or otherwise removed.
+  for(const [field,target]of [['objectId','inventoryObjects'],['orgId','inventoryOrgs'],['rows[].itemId','inventoryItems'],['rows[].molId','inventoryMols'],['rows[].orgId','inventoryOrgs'],['rows[].objectId','inventoryObjects'],['snapshot.sessionId','inventorySessions'],['snapshot.rootId','inventorySessions'],['snapshot.previousId','inventorySessions'],['snapshot.objectId','inventoryObjects'],['snapshot.orgId','inventoryOrgs'],['snapshot.rows[].itemId','inventoryItems'],['snapshot.rows[].molId','inventoryMols'],['snapshot.rows[].orgId','inventoryOrgs'],['snapshot.rows[].objectId','inventoryObjects']])relations.push({id:'inventorySessions.'+field,from:'inventorySessions',field,kind:'historical',target,optional:true,strength:'historical'});
   direct('partMovements','partId','parts');direct('partMovements','workOrderId','workOrders');direct('workOrders','repeatOf','workOrders');direct('workOrders','repairId','repairs');direct('workOrders','vehicleToId','vehicleTo');direct('workOrders','toRecordId','toRecords');direct('shiftReports','jobId','dispatchJobs');direct('dispatchJobs','partRequirements[].partId','parts');
   direct('workOrders','defectSource.id','shiftReports');direct('partMovements','repairReturn.issueId','partMovements');
   direct('drivers','personnelPlanning.qualifications[].documentId','assetDocuments');

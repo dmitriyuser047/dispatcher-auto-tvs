@@ -11,6 +11,7 @@ function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvs-lock-test-'));
   t.after(() => { assert.equal(path.dirname(path.resolve(dir)), path.resolve(os.tmpdir())); assert.ok(path.basename(dir).startsWith('tvs-lock-test-')); fs.rmSync(dir, { recursive:true, force:true }); });
   const data = { vehicles:[{id:'v', fuelBalance:0}], records:[{id:'r', date:'2026-09-01', vehicleId:'v', km:1}] };
+  storage.createJson(dir, { data:{} });
   storage.writeAll(dir,data);
   return { dir, data:storage.readAll(dir), revisions:storage.readRevisions(dir) };
 }
@@ -77,6 +78,7 @@ test('unknown and foreign host locks are never automatically removed', t => {
 test('database tokens bind physical directories including directory aliases', t => {
   const {dir}=fixture(t),other=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-lock-test-'));
   t.after(()=>{assert.equal(path.dirname(path.resolve(other)),path.resolve(os.tmpdir()));assert.ok(path.basename(other).startsWith('tvs-lock-test-'));fs.rmSync(other,{recursive:true,force:true});});
+  storage.createJson(other,{data:{}});
   const alias=path.join(other,'alias');fs.symlinkSync(dir,alias,process.platform==='win32'?'junction':'dir');
   assert.equal(storage.databaseToken(dir),storage.databaseToken(alias));
   assert.notEqual(storage.databaseToken(dir),storage.databaseToken(other));

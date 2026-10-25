@@ -16,7 +16,7 @@ async function fixture(t,format){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-data-query-http-'));
  t.after(()=>{server.stop();assert.equal(path.dirname(path.resolve(dir)),path.resolve(os.tmpdir()));assert.ok(path.basename(dir).startsWith('tvs-data-query-http-'));fs.rmSync(dir,{recursive:true,force:true});});
  const data={vehicles:[{id:7,plate:'СИНТЕТИКА',fuelBalance:923.537},{id:'7',plate:'STRING'}],records:[{id:7,vehicleId:7,date:'2026-09-01',km:1.125,note:'КамАЗ'},{id:'7',vehicleId:'7',date:'2026-09-02',km:2.125,note:'Second'},{id:'last',vehicleId:7,date:'2026-09-30',km:3}],payments:[{id:'private',sum:9988776655,date:'2026-09-01',description:'FINANCIAL-SECRET'}],auditLog:[{id:'legacy-private',section:'payments',after:{sum:9988776655,note:'FINANCIAL-SECRET'}}]};
- if(format==='sqlite')sqlite.create(dir,{data});else storage.writeAll(dir,data);
+ if(format==='sqlite')sqlite.create(dir,{data});else{storage.createJson(dir,{data:{}});storage.writeAll(dir,data);}
  const tokens={admin:'synthetic-query-admin-token-123456',dispatcher:'synthetic-query-dispatcher-token-123456',mechanic:'synthetic-query-mechanic-token-123456'},users=Object.keys(tokens).map(role=>({id:'query-'+role,name:'Synthetic '+role,role,enabled:true,tokenHash:access.hashToken(tokens[role])}));
  let settings={serverAccessConfigured:true,serverUsers:access.normalizeServerUsers(users)};
  const start=await server.start({port:0,dataDir:dir,settings:()=>settings});assert.equal(start.ok,true);

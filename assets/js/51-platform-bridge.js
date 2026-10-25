@@ -255,6 +255,8 @@ function platformExecuteCommand(value,options={}){
           throw platformPrepareError('UNSUPPORTED_COMMANDS','Подключение не поддерживает атомарные команды. Загрузите данные из совместимой версии программы.');
         if(command.type==='GeneratorMaintenanceAction'&&!_sync.platform?.negotiation?.selectedProfile?.capabilities?.some(item=>item.name==='generatorMaintenanceV1'&&item.version===1))
           throw platformPrepareError('UNSUPPORTED_GENERATOR_MAINTENANCE','Подключение не поддерживает график ТО ДЭС. Обновите основную программу.');
+        if(command.type==='AssetInventoryAction'&&(!_sync.platform?.negotiation?.selectedProfile?.capabilities?.some(item=>item.name==='inventoryV1'&&item.version===1)||_sync.platform?.storageKind!=='sqlite'))
+          throw platformPrepareError('UNSUPPORTED_ASSET_INVENTORY','Для инвентаризации нужна SQLite-база и совместимая версия сервера. Создайте отдельную обновлённую копию.');
         if(command.type==='PeriodAction'&&_sync.platform?.periods!==1)
           throw platformPrepareError('UNSUPPORTED_PERIODS','Подключение не поддерживает проверенное закрытие периодов. Загрузите данные из совместимой версии программы.');
         if((command.type==='FuelAction'||command.type==='DocumentAction'&&command.input.section==='tankIncomes')&&_sync.platform?.fuelOperations!==1)
@@ -330,6 +332,7 @@ async function platformFlushForClose(){
   if(typeof documentPrintFlush==='function'&&!await documentPrintFlush())ready=false;
   if(typeof generatorMaintenanceFlush==='function'&&!await generatorMaintenanceFlush())ready=false;
   if(typeof generatorMaintenancePrintFlush==='function'&&!await generatorMaintenancePrintFlush())ready=false;
+  if(typeof assetInventoryWorkspaceFlush==='function'&&!await assetInventoryWorkspaceFlush())ready=false;
   if(typeof accessPolicyFlush==='function'&&!await accessPolicyFlush())ready=false;
   if(typeof reviewedImportFlush==='function'&&!await reviewedImportFlush())ready=false;
   if(typeof reestrImportFlush==='function'&&!await reestrImportFlush())ready=false;
@@ -343,6 +346,7 @@ async function platformFlushForClose(){
   if(typeof documentPrintHasPendingEdits==='function'&&documentPrintHasPendingEdits())ready=false;
   if(typeof generatorMaintenanceHasPendingEdits==='function'&&generatorMaintenanceHasPendingEdits())ready=false;
   if(typeof generatorMaintenancePrintHasPendingEdits==='function'&&generatorMaintenancePrintHasPendingEdits())ready=false;
+  if(typeof assetInventoryWorkspaceHasPendingEdits==='function'&&assetInventoryWorkspaceHasPendingEdits())ready=false;
   if(typeof reviewedImportHasPendingEdits==='function'&&reviewedImportHasPendingEdits())ready=false;
   if(typeof reestrImportHasPendingEdits==='function'&&reestrImportHasPendingEdits())ready=false;
   return ready;

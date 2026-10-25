@@ -20,6 +20,7 @@ function fixture(t) {
     assert.ok(path.basename(resolved).startsWith('tvs-protocol-hardening-'));
     fs.rmSync(resolved, { recursive:true, force:true });
   });
+  storage.createJson(dir, { data:{} });
   storage.writeAll(dir, { vehicles:[{ id:'vehicle', name:'Original' }], records:[],
     payments:[{ id:'payment', date:'2026-10-01', amount:100 }] });
   return dir;

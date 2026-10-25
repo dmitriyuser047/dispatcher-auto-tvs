@@ -4,13 +4,12 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const facts=require('../assets/core/integrity-facts.js'),fingerprint=require('../assets/core/request-fingerprint.js'),kernel=require('../assets/core/platform-kernel.js');
 const baseline=require('./fixtures/integrity-facts-baseline.json'),hash=value=>crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
-// The literal extraction oracle predates the new registry section. Check that
-// one declaration explicitly, then retain every original issue and hash byte.
+// The literal extraction oracle predates these registry sections. Check every
+// new declaration explicitly, then retain every original issue and hash byte.
 function originalRegistryProjection(report,restricted){
- const section='generatorMaintenancePlans',added=report.sections.filter(value=>value.section===section),warnings=report.issues.filter(value=>value.section===section);
- assert.deepEqual(added,[{section,label:'Графики ТО ДЭС',module:'maintenance',readable:!restricted,rows:restricted?null:0}]);
- assert.deepEqual(warnings,restricted?[{code:'section-unavailable',severity:'warning',section,recordId:'',rowIndex:-1,field:'',message:'Раздел недоступен для проверки: Графики ТО ДЭС'}]:[]);
- return {...report,issues:report.issues.filter(value=>value.section!==section),sections:report.sections.filter(value=>value.section!==section),counts:{...report.counts,warning:report.counts.warning-warnings.length,total:report.counts.total-warnings.length}};
+ const additions=[['generatorMaintenancePlans','Графики ТО ДЭС','maintenance'],['inventoryOrgs','Организации инвентаризации','assetInventory'],['inventoryObjects','Объекты инвентаризации','assetInventory'],['inventoryMols','МОЛ инвентаризации','assetInventory'],['inventoryItems','Основные средства инвентаризации','assetInventory'],['inventorySessions','Инвентаризационные описи','assetInventory']],names=new Set(additions.map(([name])=>name));let warningCount=0;
+ for(const [section,label,module]of additions){const added=report.sections.filter(value=>value.section===section),warnings=report.issues.filter(value=>value.section===section);assert.deepEqual(added,[{section,label,module,readable:!restricted,rows:restricted?null:0}]);assert.deepEqual(warnings,restricted?[{code:'section-unavailable',severity:'warning',section,recordId:'',rowIndex:-1,field:'',message:'Раздел недоступен для проверки: '+label}]:[]);warningCount+=warnings.length;}
+ return {...report,issues:report.issues.filter(value=>!names.has(value.section)),sections:report.sections.filter(value=>!names.has(value.section)),counts:{...report.counts,warning:report.counts.warning-warningCount,total:report.counts.total-warningCount}};
 }
 
 test('structural facts and delta failures match golden results captured before extraction, including restricted views',()=>{

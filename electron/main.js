@@ -703,6 +703,34 @@ app.whenReady().then(() => {
       return { ok: false, error: e.message };
     }
   });
+  ipcMain.handle('asset-inventory-export',async(event,payload)=>{
+    let written=false;
+    try{
+      const fileContext=await captureFileContext(event),context=fileContext.operation;
+      if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(key=>!['format','sessionId','databaseToken'].includes(key))||!['xlsx','pdf'].includes(payload.format))throw Object.assign(Error('Неверные параметры выгрузки описи'),{code:'INVENTORY_EXPORT_REQUEST'});
+      if(payload.databaseToken!==context.databaseToken)throw Object.assign(Error('База изменилась. Откройте опись заново.'),{code:'DATABASE_CHANGED'});
+      const exporter=require('./asset-inventory-export.js');
+      const read=async fingerprint=>{
+        await assertFileContext(fileContext);const request={...payload,...(fingerprint?{sourceFingerprint:fingerprint}:{})};
+        const result=context.client?await server.postInventoryReport(context.host,context.port,JSON.stringify(request)):exporter.prepare(context.directory,request,context.principal);
+        await assertFileContext(fileContext);
+        if(result?.ok!==true)throw Object.assign(Error(result?.error||'Опись недоступна для выгрузки'),{code:result?.code||'INVENTORY_EXPORT_SOURCE'});
+        if(result.databaseToken!==context.databaseToken||result.sessionId!==payload.sessionId||result.format!==payload.format||result.templateVersion!==1||!/^sha256:[a-f0-9]{64}$/.test(result.sourceFingerprint||''))throw Object.assign(Error('Источник выгрузки не подтверждён'),{code:'INVENTORY_EXPORT_SOURCE'});
+        require('../assets/core/platform-contracts.js').validateSections({appMeta:[{model:result.model}]},storage.SECTIONS);return result;
+      };
+      const prepared=await read(),defaultFileName=selectedFileName(prepared.defaultFileName,payload.format,'Инвентаризация.'+payload.format);
+      const pick=await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender),{title:'Сохранить инвентаризационную опись',defaultPath:path.join(app.getPath('documents'),defaultFileName),filters:[{name:payload.format==='pdf'?'PDF':'Excel',extensions:[payload.format]}]});
+      await assertFileContext(fileContext);if(pick.canceled||!pick.filePath)return {ok:false,cancelled:true};
+      const destination=path.join(fs.realpathSync(path.dirname(pick.filePath)),path.basename(pick.filePath));
+      for(const base of [context.directory,app.getPath('userData')].filter(Boolean)){const relative=path.relative(path.resolve(base),destination);if(relative===''||!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep))throw Object.assign(Error('Выберите каталог выгрузки вне файлов рабочей базы и профиля программы'),{code:'INVENTORY_EXPORT_TARGET'});}
+      await read(prepared.sourceFingerprint);
+      const bytes=payload.format==='xlsx'?await exporter.xlsx(prepared):await require('./safe-html-pdf.cjs').createSafeHtmlPdfRenderer({BrowserWindow,session})(exporter.html(prepared),{landscape:true,pageSize:'A4',preferCSSPageSize:false},()=>assertFileContextSync(fileContext));
+      await read(prepared.sourceFingerprint);
+      await require('./safe-file.cjs').writeRegularFileAtomic(destination,bytes,{maxBytes:128*1024*1024,assertCurrent:()=>assertFileContextSync(fileContext)});written=true;
+      await assertFileContext(fileContext);await shell.openPath(destination);await assertFileContext(fileContext);
+      return {ok:true,path:destination,format:payload.format,sourceFingerprint:prepared.sourceFingerprint,sha256:exporter.digestBytes(bytes)};
+    }catch(error){return {ok:false,code:error.code||'INVENTORY_EXPORT_FAILED',error:(written?'Файл сохранён, но подтверждение изменилось. Проверьте выбранную опись. ':'')+error.message,fileWritten:written};}
+  });
   ipcMain.handle('document-print',async(event,payload)=>{
     let archiveAck={};
     try{

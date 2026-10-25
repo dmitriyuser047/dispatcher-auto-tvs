@@ -180,6 +180,9 @@ function start({port,dataDir,backupFn,backup,serverName,key,settings,users,tls,r
     if(req.method==='POST'&&req.url==='/api/document-print'){
       void (async()=>{try{const payload=await readBody(req),principal=currentPrincipal();const result=await require('./document-archive.cjs').handle(dataDir,payload,{principal,...writerContext(req,session.proof),renderPdf,getPrincipal:currentPrincipal});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'DOCUMENT_PRINT_FAILED',error:error.message});}})();return;
     }
+    if(req.method==='POST'&&req.url==='/api/inventory-report'){
+      void(async()=>{try{const payload=await readBody(req,32*1024),activePrincipal=currentPrincipal();const result=require('./asset-inventory-export.js').prepare(dataDir,payload,activePrincipal);respond(res,200,result);}catch(error){const safe=access.publicError(error,principal);respond(res,safe.status||400,{ok:false,code:safe.code||'INVENTORY_EXPORT_FAILED',error:safe.message});}})();return;
+    }
     if (req.method !== 'GET') { respond(res,404,{ok:false,error:'Неизвестный запрос'}); return; }
     try {
       if(req.url.startsWith('/api/history?')){
@@ -328,7 +331,8 @@ async function postCommands(host,port,jsonStr,options) {
 }
 async function postImportSource(host,port,jsonStr,options){const response=await request(host,port,'/api/import-source',jsonStr,45000,options);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_IMPORT_SOURCE'};return parseResponse(response,true);}
 async function postDocumentPrint(host,port,jsonStr,options){const response=await request(host,port,'/api/document-print',jsonStr,45000,options);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_DOCUMENT_PRINT'};return parseResponse(response,true);}
+async function postInventoryReport(host,port,jsonStr){const response=await request(host,port,'/api/inventory-report',jsonStr,45000);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_INVENTORY_REPORT'};return parseResponse(response,true);}
 async function negotiate(host,port,hello){const json=JSON.stringify(hello);if(typeof json!=='string'||Buffer.byteLength(json)>32*1024)throw Object.assign(Error('Некорректный профиль совместимости'),{code:'NEGOTIATION_INVALID',status:400});return parseResponse(await request(host,port,'/api/negotiate',json));}
 async function ping(host,port) { try { return parseResponse(await request(host,port,'/api/ping',null,5000)); } catch { return null; } }
 
-module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,postCommands,postDocumentPrint,postImportSource,negotiate,localWriteOptions,configureKey,configureTransport,configureAccess};
+module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,postCommands,postDocumentPrint,postInventoryReport,postImportSource,negotiate,localWriteOptions,configureKey,configureTransport,configureAccess};

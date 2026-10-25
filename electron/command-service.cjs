@@ -23,7 +23,7 @@ function requireAccess(principal,action,names){if(names.some(name=>!permitted(pr
 const stable=value=>require('../assets/core/platform-kernel.js').stableSerialize(value);
 function filteredResult(result,principal,database){return platform.filteredResult(result,principal,database);}
 function semanticAction(command){
-  const names={DocumentAction:'document',FuelAction:'fuel',ProcurementAction:'procurement',CostAction:'cost',RepairAction:'repair',CalendarAction:'calendar',PeriodAction:'period',GeneratorMaintenanceAction:'maintenance'};
+  const names={DocumentAction:'document',FuelAction:'fuel',ProcurementAction:'procurement',CostAction:'cost',RepairAction:'repair',CalendarAction:'calendar',PeriodAction:'period',GeneratorMaintenanceAction:'maintenance',AssetInventoryAction:'inventory'};
   if(names[command.type])return names[command.type]+':'+command.input.action;
   return command.type==='ImportAction'?'import:'+command.input.profile:command.type==='PrintAction'?'print:capture':command.type==='MergeCatalog'?'catalog:merge':command.type==='IssueFuel'?'fuel:issue':command.type==='AcceptShift'?'shift:accept':'assignment:save';
 }
@@ -66,6 +66,7 @@ function assertSemanticChanges(database,sections,command,principal){
 function executeInternal(dataDir,input,options={}){
   const commands=require('../assets/core/platform-commands.js');
   const envelope=contracts.parseCommandEnvelope(input,schema.sections),command=commands.parseCommand(envelope.command),principal=checkedPrincipal(options.principal);
+  if(command.type==='AssetInventoryAction'&&!require('./sqlite-storage.cjs').exists(dataDir))fail('INVENTORY_SQLITE_REQUIRED','Инвентаризация работает на SQLite. Создайте проверенную копию базы в SQLite.',428);
   const catalogMerge=command.type==='MergeCatalog';
   const periodAction=command.type==='PeriodAction',costPolicy=command.type==='CostAction'&&command.input.action==='savePolicy';
   const dependencies=commands.dependencies(command),footprint=commands.footprint(command);
@@ -78,6 +79,7 @@ function executeInternal(dataDir,input,options={}){
   if(command.type==='ProcurementAction'&&!access.procurementActions(principal)[command.input.action==='saveOrder'?command.input.payload.kind:command.input.kind]?.includes(command.input.action))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия с закупкой.',403);
   if(command.type==='CostAction'&&!access.costActions(principal).includes(command.input.action))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия со стоимостью.',403);
   if(command.type==='GeneratorMaintenanceAction'&&!['admin','mechanic'].includes(principal.role))fail('ACCESS_DENIED','Управление графиком ТО доступно механику и администратору.',403);
+  if(command.type==='AssetInventoryAction'&&!['admin','accountant'].includes(principal.role))fail('ACCESS_DENIED','Изменение инвентаризации доступно администратору и бухгалтеру.',403);
   if(command.type==='RepairAction'&&!access.repairActions(principal).includes(command.input.action))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия с ремонтом.',403);
   if(command.type==='CalendarAction'&&!access.canCalendarAction(principal,command.input))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия рабочего календаря.',403);
   if(!primary.some(name=>access.actionAvailable(principal,semanticAction(command),name)))fail('ACCESS_DENIED','Нет права на выбранное действие.',403);
@@ -104,7 +106,8 @@ function executeInternal(dataDir,input,options={}){
       authorizeNewIntent();
       storage.assertWriteCompatibility(dataDir,options,command.type==='ImportAction'?'controlledImports':command.type==='PrintAction'?'documentPrint':undefined);
       storage.assertWritable(dataDir,options);
-      const importSource=command.type==='ImportAction'?require('./import-source.cjs').load(dataDir,command.input.sourceId,principal):null;
+      const inventoryImport=command.type==='AssetInventoryAction'&&['importLegacy','importRows'].includes(command.input.action);
+      const importSource=command.type==='ImportAction'||inventoryImport?require('./import-source.cjs').load(dataDir,command.input.sourceId,principal):null;
       const missing=dependencies.filter(name=>!own(envelope.base,name));
       if(missing.length)fail('COMMAND_BASE_REQUIRED','Для команды нужны версии всех её зависимостей: '+missing.join(', '),428);
       const conflicts=dependencies.filter(name=>envelope.base[name]!==snapshot.revisions[name]);

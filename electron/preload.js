@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   queryHistory:   query     => ipcRenderer.invoke('query-history',query),
   documentPrint:  payload   => ipcRenderer.invoke('document-print', payload),
   importSource:   payload   => ipcRenderer.invoke('import-source', payload),
+  assetInventoryExport:payload=>ipcRenderer.invoke('asset-inventory-export',payload),
   writeSections:  (json)    => invokeOperation('write-sections', json),
   executeCommand:(json)    => invokeOperation('execute-command', json),
   getOperationDiagnostics:query=>ipcRenderer.invoke('get-operation-diagnostics',query),

@@ -14,7 +14,7 @@ function fixture(t,format='json'){
   const database={...Object.fromEntries(schema.sections.map(name=>[name,[]])),vehicles:[{id:7,plate:'Synthetic review',fuelGrade:'ДТ',fuel:'diesel',fuelBalance:923.537}],
     tanks:[{id:5,name:'Synthetic review tank',fuel:'diesel',balanceInit:923.537}],drivers:[{id:3,name:'Synthetic driver',personnelRoles:['driver']}],
     shiftReports:[{id:'shift',title:'Synthetic sent shift',date:'2026-10-21',assetRef:'v:7',driverId:3,status:'sent',hours:4}]};
-  if(format==='sqlite')sqlite.create(dir,{data:database});else storage.writeAll(dir,database);
+  if(format==='sqlite')sqlite.create(dir,{data:database});else{storage.createJson(dir,{data:{}});storage.writeAll(dir,database);}
   const snapshot=storage.readSnapshot(dir),scope='c'.repeat(64),principal={id:'review-user',name:'Synthetic review account',role:'admin'},config={rootDir:path.join(directory,'outbox')};
   const box=createCommandOutbox(config),context={scope,databaseToken:snapshot.databaseToken,supportsOperations:true,supportsCommands:true};
   const calls=[];let sendHook=null,readHook=null,service;

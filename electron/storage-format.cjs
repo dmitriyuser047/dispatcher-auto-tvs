@@ -1,14 +1,16 @@
 'use strict';
 // Business schema versions are independent of the JSON/SQLite container format.
 const schema = require('../assets/core/platform-schema.js');
-const FORMAT = 'tvs-platform-json', FORMAT_VERSION = 1, SCHEMA_VERSION = 5;
-const SUPPORTED_READ_SCHEMAS = Object.freeze([1, 2, 3, 4, 5]);
+const FORMAT = 'tvs-platform-json', FORMAT_VERSION = 1, SCHEMA_VERSION = 6;
+const SUPPORTED_READ_SCHEMAS = Object.freeze([1, 2, 3, 4, 5, 6]);
 const FEATURES_V3 = Object.freeze(['controlled-import-v1', 'document-lifecycle-v1', 'row-scope-v1', 'sealed-print-v1']);
 const FEATURES_V4 = Object.freeze(['controlled-import-v1', 'document-lifecycle-v1', 'operation-receipts-v1', 'row-scope-v1', 'sealed-print-v1']);
-const FEATURES = Object.freeze([...FEATURES_V4, 'generator-spares-v1', 'generator-maintenance-v1'].sort());
+const FEATURES_V5 = Object.freeze([...FEATURES_V4, 'generator-spares-v1', 'generator-maintenance-v1'].sort());
+const FEATURES = Object.freeze([...FEATURES_V5, 'inventory-v1'].sort());
+const INVENTORY_SECTIONS = Object.freeze(['inventoryOrgs','inventoryObjects','inventoryMols','inventoryItems','inventorySessions']);
 function sectionsFor(version) {
   if (!SUPPORTED_READ_SCHEMAS.includes(version)) fail('STORAGE_FORMAT', 'Неподдерживаемая версия схемы базы');
-  return Object.freeze(schema.sections.filter(name => (version >= 5 || name !== 'generatorMaintenancePlans') && (version >= 2 || name !== 'documentDrafts')));
+  return Object.freeze(schema.sections.filter(name => (version >= 6 || !INVENTORY_SECTIONS.includes(name)) && (version >= 5 || name !== 'generatorMaintenancePlans') && (version >= 2 || name !== 'documentDrafts')));
 }
 const legacySections = () => sectionsFor(1);
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -16,7 +18,7 @@ function fail(code, message) { throw Object.assign(new Error(message), { code, s
 function isCurrent(version) { return version === SCHEMA_VERSION; }
 function describe(version, features) {
   if (!SUPPORTED_READ_SCHEMAS.includes(version)) fail('STORAGE_FORMAT', 'Неподдерживаемая версия схемы базы');
-  const expected = version === 5 ? FEATURES : version === 4 ? FEATURES_V4 : version === 3 ? FEATURES_V3 : [];
+  const expected = version === 6 ? FEATURES : version === 5 ? FEATURES_V5 : version === 4 ? FEATURES_V4 : version === 3 ? FEATURES_V3 : [];
   const wanted = features === undefined ? expected : features;
   if (!Array.isArray(wanted) || wanted.some(value => typeof value !== 'string') || new Set(wanted).size !== wanted.length || wanted.length !== expected.length || wanted.some(value => !expected.includes(value))) fail('STORAGE_CAPABILITY', 'Не поддерживаются обязательные возможности базы');
   return Object.freeze({ schemaVersion: version, minReader: version, minWriter: version >= 4 ? version : 3, features: Object.freeze(wanted.slice().sort()) });
@@ -31,7 +33,7 @@ function decodeRevisions(raw) {
   if (!plain(raw)) fail('STORAGE_FORMAT', 'Повреждены версии разделов базы');
   if (Object.hasOwn(raw, 'format')) {
     const version = raw.schemaVersion;
-    if (raw.format !== FORMAT || raw.formatVersion !== FORMAT_VERSION || ![2, 3, 4, 5].includes(version) || raw.vehicles !== null || raw.records !== null || !plain(raw.revisions) || Object.keys(raw).some(name => !['format', 'formatVersion', 'schemaVersion', 'vehicles', 'records', 'revisions', ...(version >= 3 ? ['compatibility'] : []), ...(version >= 4 ? ['operationState'] : [])].includes(name))) fail('STORAGE_FORMAT', 'Неподдерживаемая версия JSON базы');
+    if (raw.format !== FORMAT || raw.formatVersion !== FORMAT_VERSION || ![2, 3, 4, 5, 6].includes(version) || raw.vehicles !== null || raw.records !== null || !plain(raw.revisions) || Object.keys(raw).some(name => !['format', 'formatVersion', 'schemaVersion', 'vehicles', 'records', 'revisions', ...(version >= 3 ? ['compatibility'] : []), ...(version >= 4 ? ['operationState'] : [])].includes(name))) fail('STORAGE_FORMAT', 'Неподдерживаемая версия JSON базы');
     const descriptor = version >= 3 ? validateDescriptor(raw.compatibility, version) : describe(version);
     const revisions = raw.revisions;
     const names = sectionsFor(version);
@@ -55,6 +57,14 @@ function encodeRevisions(revisions, descriptor = describe(SCHEMA_VERSION), opera
 }
 function upgradeRequired() { fail('SCHEMA_UPGRADE_REQUIRED', 'База открыта только для чтения. Создайте отдельную обновлённую копию. Исходная база останется без изменений.'); }
 function assertWriter(options = {}) {
-  if (options.requireWriterSchema === true && options.writerSchemaVersion !== SCHEMA_VERSION) fail('WRITER_SCHEMA_REQUIRED', 'Для записи требуется клиент с поддержкой схемы 5. Обновите программу.');
+  if (options.requireWriterSchema === true && options.writerSchemaVersion !== SCHEMA_VERSION) fail('WRITER_SCHEMA_REQUIRED', 'Для записи требуется клиент с поддержкой схемы 6. Обновите программу.');
 }
-module.exports = Object.freeze({ FORMAT, FORMAT_VERSION, SCHEMA_VERSION, SUPPORTED_READ_SCHEMAS, FEATURES, FEATURES_V4, FEATURES_V3, sectionsFor, legacySections, isCurrent, describe, validateDescriptor, decodeRevisions, encodeRevisions, validateOperationState, createOperationState, upgradeRequired, assertWriter });
+function assertInventoryBackend(data, backend) {
+  if (backend === 'sqlite') return;
+  if (!plain(data)) fail('INVENTORY_SQLITE_REQUIRED', 'Инвентаризация хранится только в SQLite. Создайте отдельную обновлённую копию базы SQLite.');
+  for (const section of INVENTORY_SECTIONS) {
+    const entry = Object.getOwnPropertyDescriptor(data, section);
+    if (entry && (!entry.enumerable || entry.get || entry.set || !Array.isArray(entry.value) || entry.value.length)) fail('INVENTORY_SQLITE_REQUIRED', 'Инвентаризация хранится только в SQLite. Создайте отдельную обновлённую копию базы SQLite.');
+  }
+}
+module.exports = Object.freeze({ FORMAT, FORMAT_VERSION, SCHEMA_VERSION, SUPPORTED_READ_SCHEMAS, FEATURES, FEATURES_V5, FEATURES_V4, FEATURES_V3, INVENTORY_SECTIONS, assertInventoryBackend, sectionsFor, legacySections, isCurrent, describe, validateDescriptor, decodeRevisions, encodeRevisions, validateOperationState, createOperationState, upgradeRequired, assertWriter });

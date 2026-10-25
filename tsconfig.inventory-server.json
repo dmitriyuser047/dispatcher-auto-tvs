@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmitOnError": true,
+    "newLine": "lf",
+    "rootDir": "src/server",
+    "outDir": "electron"
+  },
+  "files": ["src/server/asset-inventory-source.ts", "src/server/asset-inventory-decode-worker.ts", "src/server/asset-inventory-export.ts"]
+}

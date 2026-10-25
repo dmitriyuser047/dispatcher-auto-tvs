@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "none",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "types": [],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmitOnError": true,
+    "newLine": "lf",
+    "outFile": ".typed-inventory-ui/asset-inventory.js"
+  },
+  "files": ["src/ui/asset-inventory.ts", "src/ui/asset-inventory-host.ts", "src/ui/asset-inventory-files.ts"]
+}

@@ -1,4 +1,6 @@
 import type {GeneratorMaintenanceActionInput,GeneratorMaintenancePayload,GeneratorMaintenanceRow} from './generator-maintenance';
+import type {AssetInventoryActionInput} from './asset-inventory';
+export type {AssetInventoryActionInput} from './asset-inventory';
 export type {GeneratorMaintenanceActionInput} from './generator-maintenance';
 /** Runtime contracts shared by browser commands and the trusted storage boundary. */
 export type Identifier = string | number;
@@ -94,6 +96,7 @@ export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelI
   | { type: 'CostAction'; version: 1; input: CostActionInput }
   | { type: 'RepairAction'; version: 1; input: RepairActionInput }
   | { type: 'GeneratorMaintenanceAction'; version: 1; input: GeneratorMaintenanceActionInput }
+  | { type: 'AssetInventoryAction'; version: 1; input: AssetInventoryActionInput }
   | { type: 'CalendarAction'; version: 1; input: CalendarActionInput }
   | { type: 'PrintAction'; version: 1; input: PrintActionInput }
   | { type: 'ImportAction'; version: 1; input: ImportActionInput };
@@ -278,6 +281,26 @@ export function createPlatformContracts() {
     const row = commandObject(commandJson(value,'command'),'command'); keys(row,['type','version','input'],'command');
     if (row.version !== 1) fail('COMMAND_VERSION', 'command.version', 'Версия команды не поддерживается');
     const input = commandObject(row.input,'command.input'), path = 'command.input.';
+    if(row.type==='AssetInventoryAction'){
+      // JSON shape is checked at the transport boundary. The standalone domain
+      // parser checks catalog fields and all counting/approval invariants before
+      // dependencies, planning, review or persistence can use this command.
+      const fields:Record<string,readonly string[]>={
+        saveCatalog:['action','section','id','payload','reason','reviewFingerprint'],
+        archiveCatalog:['action','section','id','reason','reviewFingerprint'],
+        createSession:['action','objectId','orgId','date','title','reason','reviewFingerprint'],
+        saveDraft:['action','sessionId','payload','reason','reviewFingerprint'],
+        approve:['action','sessionId','date','document','reason','reviewFingerprint'],
+        revise:['action','sessionId','reason','reviewFingerprint'],
+        amendDraft:['action','sessionId','corrections','reason','reviewFingerprint'],
+        importLegacy:['action','sourceId','reason','reviewFingerprint'],
+        importRows:['action','sourceId','objectId','orgId','reason','reviewFingerprint'],
+      };
+      if(typeof input.action!=='string'||!Object.prototype.hasOwnProperty.call(fields,input.action))fail('INVALID_COMMAND',path+'action','Неизвестное действие инвентаризации');
+      keys(input,fields[input.action]!,'command.input');commandText(input.reason,path+'reason',true);reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint');
+      for(const name of ['id','sessionId','objectId','orgId'])if(input[name]!==undefined)commandId(input[name],path+name);
+      return {type:'AssetInventoryAction',version:1,input:input as unknown as AssetInventoryActionInput};
+    }
     if(row.type==='GeneratorMaintenanceAction'){
       const reason=commandText(input.reason,path+'reason',true),fingerprint=reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint');
       let result:GeneratorMaintenanceActionInput;

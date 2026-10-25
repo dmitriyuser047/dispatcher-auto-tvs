@@ -4,7 +4,7 @@
  const own=(value,key)=>Object.prototype.hasOwnProperty.call(value,key),catalogSections=Object.freeze(['vehicles','generators','tanks','drivers','parts','contragents','fuelCards']);
  // Stock ownership and maintenance revisions are changed by their own reviewed
  // operations, never by moving references during a catalogue merge.
- const pinned=new Set(['records','genRecords','toRecords','tankIncomes','vehicleTo','repairs','reestrRows','payments','budget','fuelPurchases','fuelImports','fuelPeriods','monthlyFuel','fuelMovements','parts','partMovements','glonassTrips','glonassImports','costEntries','documentDrafts','generatorMaintenancePlans']);
+ const pinned=new Set(['records','genRecords','toRecords','tankIncomes','vehicleTo','repairs','reestrRows','payments','budget','fuelPurchases','fuelImports','fuelPeriods','monthlyFuel','fuelMovements','parts','partMovements','glonassTrips','glonassImports','costEntries','documentDrafts','generatorMaintenancePlans','inventoryOrgs','inventoryObjects','inventoryMols','inventoryItems','inventorySessions']);
  const historical=new Set(['auditLog','fuelWriteoffs','savedReestrs']);
  const operational=new Set(['dispatchJobs','assetAssignments','workOrders','opsTasks','assetDocuments','shiftReports','procurementOrders','procurementRules','generators','fuelCards','costProfiles','vehicles']);
  const aliases={vehicleId:'vehicles',cardVehicleId:'vehicles',generatorId:'generators',tankId:'tanks',fromTankId:'tanks',toTankId:'tanks',counterTankId:'tanks',driverId:'drivers',personId:'drivers',partId:'parts',contragentId:'contragents'};
@@ -110,6 +110,9 @@
    if(Array.isArray(value)){value.forEach((child,index)=>supplemental(section,row,rowIndex,child,path+'['+index+']',containerSection,proof,depth+1));return;}
    for(const [key,child]of Object.entries(value)){
     const current=path?path+'.'+key:key,knownPath=registered.has(JSON.stringify([section,rowIndex,current]));let targetSection=aliases[key],targetId=child,legacyString=false;
+    // These identifiers belong exclusively to the standalone inventory. Never
+    // guess fleet, generator or spare-stock ownership from their values/names.
+    if(section.startsWith('inventory'))targetSection=({orgId:'inventoryOrgs',objectId:'inventoryObjects',molId:'inventoryMols',itemId:'inventoryItems',sessionId:'inventorySessions',rootId:'inventorySessions',previousId:'inventorySessions'})[key]||targetSection;
     if(key==='id'&&catalogSections.includes(containerSection)&&path)targetSection=containerSection;
     if(key==='id'&&path.split('.').at(-1)==='mergedInto'&&catalogSections.includes(value.section))targetSection=value.section;
     if((key==='recordId'||key==='id'&&['before','after'].includes(path.split('.').at(-1)))&&schema.sections.includes(value.section||row.section))targetSection=value.section||row.section;

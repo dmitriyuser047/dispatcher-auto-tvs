@@ -13,6 +13,7 @@ function fixture(t) {
     assert.ok(path.basename(dir).startsWith('tvs-platform-storage-'));
     fs.rmSync(dir, { recursive:true, force:true });
   });
+  storage.createJson(dir, { data:{} });
   storage.writeAll(dir, { vehicles:[{ id:'v', plate:'SYNTHETIC', fuelBalance:50, fuelGrade:'ДТ', org:'Synthetic organization', norm:10 }],
     records:[{ id:'r', vehicleId:'v', date:'2026-09-10', km:100, fuelActual:10 }] }, { principal, now:at });
   return dir;
@@ -43,7 +44,7 @@ test('storage uses the same authoritative section registry as the platform kerne
 test('native snapshots explicitly advertise transactional operation acknowledgement support', t => {
   const dir = fixture(t);
   const current=require('../electron/storage-format.cjs').SCHEMA_VERSION;
-  assert.deepEqual(storage.readSnapshot(dir).platform, { apiVersion:1, operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:current,currentSchemaVersion:current,descriptor:require('../electron/storage-format.cjs').describe(current),readOnly:false,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false });
+  assert.deepEqual(storage.readSnapshot(dir).platform, { apiVersion:1, storageKind:'json', operations:1,outbox:1,receiptQuery:1,commands:1,schemaVersion:current,currentSchemaVersion:current,descriptor:require('../electron/storage-format.cjs').describe(current),readOnly:false,documentDrafts:1,periods:1,fuelOperations:1,procurement:1,costAccounting:1,repairs:1,calendar:1,personnelPlanning:1,documentPrint:1,controlledImports:1,needsSchemaUpgrade:false });
 });
 
 test('operational roles do not receive financial row history or mixed transaction metadata', () => {

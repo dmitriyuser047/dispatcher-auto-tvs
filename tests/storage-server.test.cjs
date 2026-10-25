@@ -13,13 +13,14 @@ const server = require('../electron/server');
 function database() {
   return { ...Object.fromEntries(storage.SECTIONS.map(n => [n, []])), vehicles: [{ id: 'v', driver: 'Уренгой' }], records: [{ id: 'r', vehicleId: 'v', date: '2026-09-01', km: 100 }] };
 }
-function temp(t) {
+function temp(t, empty = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvs-storage-test-'));
   t.after(() => {
     assert.equal(path.dirname(path.resolve(dir)), path.resolve(os.tmpdir()));
     assert.ok(path.basename(dir).startsWith('tvs-storage-test-'));
     fs.rmSync(dir, { recursive: true, force: true });
   });
+  if (!empty) storage.createJson(dir, {data:{vehicles:[],records:[]}});
   return dir;
 }
 test('corrupt or missing working section never becomes empty or writable', t => {
@@ -42,13 +43,13 @@ test('loss of current-schema revisions stops reads and preserves newer split dat
   assert.deepEqual(fs.readFileSync(storage.sectionFile(dir,'records')),bytes);assert.equal(JSON.parse(bytes)[0].id,'r');assert.equal(fs.existsSync(storage.revisionsFile(dir)),false);
 });
 test('incomplete split database cannot be replaced by legacy or empty data', t => {
-  const dir = temp(t); fs.mkdirSync(storage.sectionsDir(dir));
+  const dir = temp(t, true); fs.mkdirSync(storage.sectionsDir(dir));
   fs.writeFileSync(storage.sectionFile(dir, 'vehicles'), '[{"id":"keep"}]');
   assert.throws(() => storage.readAll(dir), /Неполный/);
   assert.equal(fs.readFileSync(storage.sectionFile(dir, 'vehicles'), 'utf8'), '[{"id":"keep"}]');
 });
 test('older split schema gains only new optional sections without losing existing data', t => {
-  const dir = temp(t); fs.mkdirSync(storage.sectionsDir(dir));
+  const dir = temp(t, true); fs.mkdirSync(storage.sectionsDir(dir));
   fs.writeFileSync(storage.sectionFile(dir, 'vehicles'), '[{"id":"v"}]');
   fs.writeFileSync(storage.sectionFile(dir, 'records'), '[{"id":"r"}]');
   fs.writeFileSync(storage.revisionsFile(dir), '{"vehicles":4,"records":7}');
@@ -89,7 +90,7 @@ test('restart finishes a transaction only after its revision commit point', t =>
   const committed=operationStore.readState(dir);assert.notEqual(committed.transactionId,state.transactionId);assert.equal(operationStore.engine(dir).inspectReceipt(committed.head,'restart-after').kind,'receipt');assert.equal(storage.readAll(dir).auditLog.filter(row=>row.type==='transaction'&&row.operationId==='restart-after').length,1);
 });
 test('closed periods are guarded in storage, including bulk and legacy writes', t => {
-  const dir = temp(t), db = database(); db.fuelPeriods = [{ month: '2026-09', closed: true }]; require('./period-test-support.cjs').seedDatabase(dir,db);
+  const dir = temp(t, true), db = database(); db.fuelPeriods = [{ month: '2026-09', closed: true }]; require('./period-test-support.cjs').seedDatabase(dir,db);
   const before=storage.readSnapshot(dir);
   assert.throws(() => storage.writeAll(dir, { ...storage.readAll(dir), records: [] }), /закрыт/);
   assert.throws(() => storage.writeSections(dir, { base: storage.readRevisions(dir), sections: { records: [] } }), /закрыт/);

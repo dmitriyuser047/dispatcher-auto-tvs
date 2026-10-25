@@ -1,0 +1,32 @@
+[
+  {
+    "name": "storage-format-v5.cjs",
+    "source": "electron/storage-format.cjs",
+    "commit": "88c1fdc73975a485780977910e97447105d4c341",
+    "sha256": "aee642aece8d4bc7f0a390671167350430cee52ea48000ffadbc38e8c4096946"
+  },
+  {
+    "name": "sqlite-storage-v5.cjs",
+    "source": "electron/sqlite-storage.cjs",
+    "commit": "88c1fdc73975a485780977910e97447105d4c341",
+    "sha256": "cd2b491097ead7feeb849fc9b72292be70434ed7e7d605680e7cb62488a7069f"
+  },
+  {
+    "name": "storage-v5.cjs",
+    "source": "electron/storage.js",
+    "commit": "88c1fdc73975a485780977910e97447105d4c341",
+    "sha256": "e8f26125d457c193446ef83c245708b1a171fc92a7c201bdcb125f665c97c08b"
+  },
+  {
+    "name": "platform-schema-v5.js",
+    "source": "assets/core/platform-schema.js",
+    "commit": "88c1fdc73975a485780977910e97447105d4c341",
+    "sha256": "44a15f84c71e1c27c69cdfed859b1afba26710090979e8e65b45e2065b21dd3f"
+  },
+  {
+    "name": "platform-compatibility-v5.js",
+    "source": "assets/core/platform-compatibility.js",
+    "commit": "88c1fdc73975a485780977910e97447105d4c341",
+    "sha256": "bc5434ef078ce0127c1215632f8e2c05c0ef8057c5b63e9b383a77cd46b8c72b"
+  }
+]

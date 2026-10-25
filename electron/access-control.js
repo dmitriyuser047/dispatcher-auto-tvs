@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 
 const FINANCIAL_SECTIONS = Object.freeze(['payments', 'budget', 'contragents', 'costEntries', 'costProfiles']);
+const INVENTORY_SECTIONS = Object.freeze(['inventoryOrgs','inventoryObjects','inventoryMols','inventoryItems','inventorySessions']);
 const DISPATCHER_WRITES = Object.freeze([
   'vehicles', 'records', 'generators', 'genRecords', 'tanks', 'tankIncomes',
   'fuelPurchases', 'fuelImports', 'fuelCards', 'fuelPeriods', 'fuelWriteoffs', 'monthlyFuel',
@@ -99,6 +100,7 @@ function authorizeRole(principal, action, section) {
   if (action === 'ping') return true;
   if (action === 'admin' || action === 'replace') return role === 'admin';
   if (typeof section !== 'string' || !/^[a-zA-Z]+$/.test(section)) return false;
+  if(INVENTORY_SECTIONS.includes(section))return action==='read'?['admin','accountant','viewer'].includes(role):action==='write'&&['admin','accountant'].includes(role);
   if(section==='documentDrafts'&&['read','write'].includes(action))return ['shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords','tankIncomes'].some(name=>authorizeRole(principal,action,name));
   if (action === 'read') return !FINANCIAL_SECTIONS.includes(section) || ['admin','accountant','viewer'].includes(role);
   // The HTTP handler MUST enforce append-only history, ignoring client authors.
@@ -203,5 +205,5 @@ function publicError(error,principal){
   const safe=['SCOPE_VIEW_REQUIRED','CURSOR_INVALID','CURSOR_STALE','QUERY_FIELD_ACCESS','ACCESS_DENIED'].includes(error?.code)?error.message:'Операция не выполнена: проверьте доступные данные и текущие права.';
   return Object.assign(new Error(safe),{code:error?.code||'OPERATION_FAILED',status:error?.status||400});
 }
-const POLICY_ACTIONS=Object.freeze(['read','create','update','delete','document:saveDraft','document:postDraft','document:discardDraft','document:post','document:void','document:reverse','document:settle','fuel:issue','fuel:measure','fuel:applyDifference','fuel:voidMeasurement','fuel:reverseLegacyTransfer','procurement:saveOrder','procurement:activateLegacy','procurement:cancelRemaining','procurement:supplierReturn','cost:savePolicy','cost:saveAllocation','repair:saveOrder','repair:approve','repair:start','repair:cancel','maintenance:saveDraft','maintenance:approve','maintenance:revise','calendar:configure','calendar:confirmInterval','period:close','period:reopen','shift:accept','assignment:save','catalog:merge','print:capture','print:export',...['glonass','fuel-statement','section-data','vehicles','catalog','personnel','registry','provider-totals'].map(profile=>'import:'+profile)]);
+const POLICY_ACTIONS=Object.freeze(['read','create','update','delete','document:saveDraft','document:postDraft','document:discardDraft','document:post','document:void','document:reverse','document:settle','fuel:issue','fuel:measure','fuel:applyDifference','fuel:voidMeasurement','fuel:reverseLegacyTransfer','procurement:saveOrder','procurement:activateLegacy','procurement:cancelRemaining','procurement:supplierReturn','cost:savePolicy','cost:saveAllocation','repair:saveOrder','repair:approve','repair:start','repair:cancel','maintenance:saveDraft','maintenance:approve','maintenance:revise',...['saveCatalog','archiveCatalog','createSession','saveDraft','amendDraft','approve','revise','importLegacy','importRows'].map(action=>'inventory:'+action),'calendar:configure','calendar:confirmInterval','period:close','period:reopen','shift:accept','assignment:save','catalog:merge','print:capture','print:export',...['glonass','fuel-statement','section-data','vehicles','catalog','personnel','registry','provider-totals','asset-inventory'].map(profile=>'import:'+profile)]);
 module.exports = { POLICY_ACTIONS,actionAvailable,publicError, ROLES, FINANCIAL_SECTIONS, hashToken, issueToken, normalizeServerUsers, authenticate, authorize, authorizeRole, publicUser, validateAssetChanges, fieldPermissions,fuelActions,procurementActions,costActions,repairActions,calendarActions,canCalendarAction,printActions,importActions:principal=>require('./import-source.cjs').actions(principal) };

@@ -30,7 +30,7 @@ async function fixture(t,format){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-command-http-')),dir=path.join(root,'db');
  t.after(async()=>{await server.stop();server.configureKey('');server.configureTransport();assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));assert.ok(path.basename(root).startsWith('tvs-command-http-'));fs.rmSync(root,{recursive:true,force:true});});
  const data={vehicles:[{id:'v',plate:'SYNTHETIC HTTP',org:'A',fuel:'diesel',fuelGrade:'ДТ',norm:10,fuelBalance:0}],records:[],generators:[],genRecords:[],tanks:[{id:'t',name:'Synthetic HTTP tank',org:'A',fuel:'diesel',balanceInit:923.537}],tankIncomes:[],fuelMovements:[],drivers:[{id:'d',name:'Synthetic HTTP driver',personnelRoles:['driver'],employmentStatus:'active'}],assetAssignments:[],shiftReports:[{id:'s',title:'Synthetic HTTP sent shift',date:'2026-09-10',assetRef:'v:v',driverId:'d',status:'sent',hours:2}],dispatchJobs:[],payments:[{id:'private-http-payment',sum:9988776655,description:'FINANCIAL-HTTP-SECRET'}]};
- if(format==='sqlite')sqlite.create(dir,{data});else storage.writeAll(dir,data);
+ if(format==='sqlite')sqlite.create(dir,{data});else{storage.createJson(dir,{data:{}});storage.writeAll(dir,data);}
  const tokens=Object.fromEntries(['root','admin','dispatcher','mechanic','accountant','viewer'].map(role=>[role,'synthetic-command-http-'+role+'-1234567890']));
  let settings={serverAccessConfigured:true,serverUsers:access.normalizeServerUsers(Object.keys(tokens).map(key=>({id:'http-'+key,name:'Synthetic '+key,role:key==='root'?'admin':key,enabled:true,tokenHash:access.hashToken(tokens[key])})))};
  let onSettingsRead,backups=0;

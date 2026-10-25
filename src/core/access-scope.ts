@@ -12,6 +12,7 @@ const operationalAssets=['vehicles','generators','tanks'];
 const documents=['shiftReports','workOrders','dispatchJobs','fuelMovements','partMovements','fuelWriteoffs','payments','repairs','vehicleTo','toRecords','tankIncomes'];
 const sourceKinds:Record<string,string>={repair:'repairs',to:'vehicleTo',vehicleTo:'vehicleTo',toRecord:'toRecords',workOrder:'workOrders',fuelPurchase:'fuelPurchases',tankIncome:'tankIncomes',partReceipt:'partMovements'};
 const sharedCatalogs=['parts','contragents'];
+const inventorySections=['inventoryOrgs','inventoryObjects','inventoryMols','inventoryItems','inventorySessions'];
 const directTargets:Record<string,string>={vehicleId:'vehicles',generatorId:'generators',tankId:'tanks',driverId:'drivers',workOrderId:'workOrders',jobId:'dispatchJobs',partId:'parts'};
 
 /** Factual ownership only. Unknown history never becomes the current card's owner. */
@@ -56,13 +57,35 @@ export function createAccessScope(contracts:Contracts,schema:Registry,identity:E
   function assetReference(ref:unknown,on:string|null,stack:Set<string>):Resolved {const target=asset(ref);return target?inherited(target.section,target.row,on,stack):result(undefined,false,{issues:['missing-or-ambiguous-asset']});}
   function related(row:JsonRow,stack:Set<string>,on:string|null):Resolved[] {const found:Resolved[]=[];if(own(row,'assetRef')&&row.assetRef!==''&&row.assetRef!==null)found.push(assetReference(row.assetRef,on,stack));for(const [field,section]of Object.entries(directTargets))if(contracts.identifier(row[field]))found.push(reference(section,row[field],stack,on));return found;}
   function ledger(row:JsonRow):Resolved|null {const root=object(row.snapshot)?row.snapshot:row,projection=object(root.ledger)?root.ledger:object(row.ledger)?row.ledger:null,list=projection&&Array.isArray(projection.rows)?projection.rows:Array.isArray(row.rows)?row.rows:null;if(!list)return null;const owners=list.filter(object).map(value=>pair(value).owner);return owners.length?result(owners,true,{evidence:[evidence('frozen-ledger',true)]}):result(undefined,false,{issues:['empty-frozen-ledger']});}
+  // Separate typed namespaces intentionally do not reuse the main program's
+  // organisation/site labels. Fleet grants cannot expose inventory by name.
+  const inventoryKey=(kind:'org'|'object',id:unknown):AccessFact=>contracts.identifier(id)?known('inventory:'+kind+':'+JSON.stringify([typeof id,id])):unknown();
+  function inventoryScope(section:string,row:JsonRow,stack:Set<string>):Resolved {
+   const proof=(owners:AccessOwnerFacts[],sections:string[]):Resolved=>result(owners,true,{sections,evidence:[evidence('standalone-inventory',true,{section})]});
+   if(section==='inventoryOrgs')return contracts.identifier(row.id)?proof([{org:inventoryKey('org',row.id),site:unknown()}],[]):result();
+   if(section==='inventoryObjects')return contracts.identifier(row.id)?proof([{org:known('inventory:objects'),site:inventoryKey('object',row.id)}],[]):result();
+   if(section==='inventoryMols'){
+    const owner=find('inventoryOrgs',row.orgId),place=find('inventoryObjects',row.objectId);
+    return owner&&place?proof([{org:inventoryKey('org',owner.id),site:inventoryKey('object',place.id)}],['inventoryOrgs','inventoryObjects']):result(undefined,false,{sections:['inventoryOrgs','inventoryObjects'],issues:['missing-or-ambiguous-inventory-owner']});
+   }
+   if(section==='inventoryItems')return reference('inventoryMols',row.molId,stack,null,false);
+   const source=row.status==='approved'&&object(row.snapshot)?row.snapshot:row,rows=Array.isArray(source.rows)?source.rows:[];
+   if(!contracts.identifier(source.objectId)||source.objectId!==row.objectId||!rows.length||own(source,'orgId')&&!contracts.identifier(source.orgId)||source.orgId!==row.orgId)return result(undefined,false,{issues:['unproven-inventory-document']});
+   const owners:AccessOwnerFacts[]=[];
+   for(const entry of rows){
+    if(!object(entry)||!contracts.identifier(entry.orgId)||!contracts.identifier(entry.objectId)||!contracts.identifier(entry.molId)||!contracts.identifier(entry.itemId)||entry.objectId!==source.objectId||own(source,'orgId')&&entry.orgId!==source.orgId)return result(undefined,false,{issues:['unproven-inventory-document-row']});
+    owners.push({org:inventoryKey('org',entry.orgId),site:inventoryKey('object',entry.objectId)});
+   }
+   return combine(owners.map(owner=>proof([owner],[])));
+  }
   function resolveOwned(section:string,value:JsonRow,stack:Set<string>):Resolved {
    const row=copy(value),marker=section+':'+(contracts.identifier(row.id)?identity.typedKey(section,row.id):stable(row));if(stack.has(marker)||stack.size>40)return result(undefined,false,{issues:['scope-reference-cycle']});const remembered=cache.get(row)?.get(section);if(remembered)return remembered;const next=new Set(stack);next.add(marker);let resolved:Resolved;
    const frozen=snapshot(row),accepted=personnelSnapshot(row),saved=ownSaved(row),on=date(row);
    // A spare stock card belongs to its typed generator. A row's free-text
    // organisation or a supplied snapshot cannot turn private stock into a
    // shared catalogue item. Movements and purchases retain that requirement.
-   if(section==='parts'&&own(row,'generatorId'))resolved=reference('generators',row.generatorId,next,null,false);
+   if(inventorySections.includes(section)){resolved=inventoryScope(section,row,next);resolved.sections=[...new Set([section,...resolved.sections])];}
+   else if(section==='parts'&&own(row,'generatorId'))resolved=reference('generators',row.generatorId,next,null,false);
    else if(section==='partMovements'&&privatePart(row.partId)){
     const items=[reference('parts',row.partId,next,null,false)];
     if(frozen)items.push(frozen);if(saved)items.push(saved);

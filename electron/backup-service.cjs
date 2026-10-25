@@ -154,6 +154,7 @@ function sourceSnapshot(source, files) {
                 data[name] = [];
             }
         }
+        require('./storage-format.cjs').assertInventoryBackend(data,'json');
         return { data: database(data), revisions: revisions(versions), sourceFormat: 'json', sourceDescriptor: decoded.descriptor, sourceIdentity: require('./database-identity.cjs').readOrCreate(source,{create:false}),...(decoded.schemaVersion>=4?{operationSeed:operations().fromClosure(operations().exportClosure(source),{operationState:decoded.operationState})}:{}) };
     }
     return { data: database(read('data.json')), revisions: revisions(), sourceFormat: 'json', sourceDescriptor: require('./storage-format.cjs').describe(1), sourceIdentity: require('./database-identity.cjs').readOrCreate(source,{create:false}) };
@@ -264,9 +265,14 @@ function readPackage(archivePath) {
         fail('BACKUP_DATABASE', 'В пакете нет базы');
     const rawDatabase=json(primary.bytes,'database.json');
     if((sourceDescriptor?.schemaVersion??1)<5&&plain(rawDatabase)&&Object.hasOwn(rawDatabase,'generatorMaintenancePlans'))fail('BACKUP_DATABASE','Исходная схема не поддерживает планы обслуживания ДЭС');
+    if((sourceDescriptor?.schemaVersion??1)<6&&plain(rawDatabase)&&require('./storage-format.cjs').INVENTORY_SECTIONS.some(name=>Object.hasOwn(rawDatabase,name)))fail('BACKUP_DATABASE','Исходная схема не поддерживает инвентаризацию');
+    if(sourceDescriptor?.schemaVersion===6&&(!plain(rawDatabase)||SECTIONS.some(name=>!Object.hasOwn(rawDatabase,name))))fail('BACKUP_DATABASE','В резервном пакете отсутствует раздел схемы 6');
+    const sourceSections=require('./storage-format.cjs').sectionsFor(sourceDescriptor?.schemaVersion??1);
+    if((manifest.revisions!==undefined||manifest.version!==1)&&(!plain(manifest.revisions)||Object.keys(manifest.revisions).some(name=>!sourceSections.includes(name))||sourceDescriptor?.schemaVersion===6&&(Object.keys(manifest.revisions).length!==SECTIONS.length||SECTIONS.some(name=>!Object.hasOwn(manifest.revisions,name)))))fail('BACKUP_REVISIONS','Версии разделов не соответствуют исходной схеме резервного пакета');
     const data = database(rawDatabase), settings = files.find(entry => entry.name === 'settings.json');
     if (manifest.sourceFormat !== undefined && !['json', 'sqlite'].includes(manifest.sourceFormat))
         fail('BACKUP_MANIFEST', 'Неизвестный исходный формат базы');
+    require('./storage-format.cjs').assertInventoryBackend(data,manifest.sourceFormat);
     const checked = { version:manifest.version,sourceDescriptor,sourceIdentity,files, data, settings: settings ? jsonObject(json(settings.bytes, 'settings.json'), 'settings.json') : null, revisions: revisions(manifest.revisions), sourceFormat: manifest.sourceFormat === 'sqlite' ? 'sqlite' : 'json', sourceFingerprint: typeof manifest.sourceFingerprint === 'string' && /^[a-f0-9]{64}$/.test(manifest.sourceFingerprint) ? manifest.sourceFingerprint : null, archiveSha256: sha(archive) };
     if(sourceDescriptor?.schemaVersion>=4&&manifest.version!==3||manifest.version===3&&!(sourceDescriptor?.schemaVersion>=4)||manifest.version<3&&entries.some(entry=>entry.entryName==='operation-state.json'||entry.entryName.startsWith('operation-ledger/')))fail('BACKUP_OPERATION_STATE','Версия пакета не сохраняет историю операций исходной базы');
     if(manifest.version===3){checked.operationSeed=readOperations(files);if(JSON.stringify(checked.operationSeed.hotRows)!==JSON.stringify(data.auditLog))fail('BACKUP_OPERATION_STATE','Горячая история не соответствует полному журналу операций');}
@@ -308,7 +314,7 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir,all
         let total = 0;
         const add = (name, bytes) => { total += bytes.length; if (total > MAX_BYTES || files.length >= MAX_FILES - 2)
             fail('BACKUP_LIMIT', 'Резервный пакет превышает допустимый размер'); zip.addFile(name, bytes); files.push({ name, size: bytes.length, sha256: sha(bytes) }); };
-        const packageSections=SECTIONS.filter(name=>snapshot.sourceDescriptor.schemaVersion>=5||name!=='generatorMaintenancePlans'),packageData=Object.fromEntries(packageSections.map(name=>[name,snapshot.data[name]])),packageRevisions=Object.fromEntries(packageSections.map(name=>[name,snapshot.revisions[name]]));
+        const packageSections=require('./storage-format.cjs').sectionsFor(snapshot.sourceDescriptor.schemaVersion),packageData=Object.fromEntries(packageSections.map(name=>[name,snapshot.data[name]])),packageRevisions=Object.fromEntries(packageSections.map(name=>[name,snapshot.revisions[name]]));
         add('database.json', Buffer.from(JSON.stringify(packageData)));
         add('settings.json', Buffer.from(JSON.stringify(settings)));
         if(snapshot.operationSeed)for(const entry of operationFiles(snapshot.operationSeed))add(entry.name,entry.bytes);
@@ -371,9 +377,10 @@ function restoreLegacyPackage({ archivePath, targetDir, format, protectedDir } =
     }
     if (within(target, archive))
         fail('BACKUP_PATH', 'Целевая папка не может содержать исходный пакет');
-    const chosen = format ?? checked.sourceFormat;
+    const chosen = format ?? 'sqlite';
     if (!['json', 'sqlite'].includes(chosen))
         fail('BACKUP_FORMAT', 'Неизвестный формат восстановления');
+    require('./storage-format.cjs').assertInventoryBackend(restoredData,chosen);
     let stage, identity;
     try {
         stage = fs.mkdtempSync(path.join(parent, '.tvs-backup-stage-'));
@@ -443,6 +450,7 @@ function restoreReviewedPackage({ archivePath, targetDir, format, protectedDir }
         if(!checked){
             const value=readPackage(archive);
             if('sha256:'+value.archiveSha256!==plan.source.fingerprint||JSON.stringify(value.sourceIdentity)!==JSON.stringify(plan.source.identity)||JSON.stringify(value.sourceDescriptor)!==JSON.stringify(plan.source.descriptor))fail('BACKUP_SOURCE_CHANGED','Резервный пакет не совпадает с проверенным планом');
+            require('./storage-format.cjs').assertInventoryBackend(value.data,chosen);
             checked=value;
         }
         return checked;

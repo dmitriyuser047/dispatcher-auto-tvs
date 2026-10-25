@@ -28,8 +28,8 @@ const SECTIONS = require('../assets/core/platform-schema.js').sections.slice();
 const storageFormat=require('./storage-format.cjs');
 
 const REVISIONS_FILE = 'revisions.json';
-// SQLite is opt-in: only an explicitly created database file selects it. A
-// damaged or unsupported SQLite file never falls back to an empty JSON base.
+// A SQLite file selects that backend. Fresh empty profiles initialize SQLite;
+// existing JSON is never converted, and damaged SQLite never falls back.
 function sqliteBackend(dataDir) {
   try { fs.lstatSync(path.join(dataDir,'platform.sqlite')); }
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
@@ -66,6 +66,7 @@ function canonicalDirectory(dataDir) {
 function databaseToken(dataDir) {
   return withDatabaseLock(dataDir,physical=>{
     dataDir=physical;
+    if(!sqliteBackend(dataDir)&&!isSplit(dataDir)&&schemaVersion(dataDir)>=storageFormat.SCHEMA_VERSION)migrate(dataDir);
     const sqlite=sqliteBackend(dataDir);
     const identity=sqlite ? sqlite.readIdentity(dataDir) : require('./database-identity.cjs').readOrCreate(dataDir,{create:schemaVersion(dataDir)>=storageFormat.SCHEMA_VERSION});
     return crypto.createHash('sha256').update(JSON.stringify(['tvs-database',canonicalDirectory(dataDir),identity?.uuid??'legacy-readonly',identity?.generation??0])).digest('hex');
@@ -161,7 +162,7 @@ function readRevisions(dataDir) {
   const sqlite = sqliteBackend(dataDir);
   if (sqlite) return sqlite.readRevisions(dataDir);
   recoverTransaction(dataDir);
-  if(!fs.existsSync(revisionsFile(dataDir))){if(schemaVersion(dataDir)===1)return Object.fromEntries(SECTIONS.map(name=>[name,0]));migrate(dataDir);}
+  if(!fs.existsSync(revisionsFile(dataDir))){if(schemaVersion(dataDir)===1)return Object.fromEntries(SECTIONS.map(name=>[name,0]));migrate(dataDir);const initialized=sqliteBackend(dataDir);if(initialized)return initialized.readRevisions(dataDir);}
   return storageFormat.decodeRevisions(readJson(revisionsFile(dataDir))).revisions;
 }
 
@@ -324,6 +325,7 @@ function createJson(dataDir,input){
   if(!input||typeof input!=='object'||Array.isArray(input)||!input.data||typeof input.data!=='object'||Array.isArray(input.data)||Object.keys(input.data).some(name=>!SECTIONS.includes(name)))throw Object.assign(Error('Для создания нужны исходные разделы базы'),{code:'JSON_CREATE'});
   const safe=require('./safe-file.cjs'),store=require('./operation-store.cjs'),location=path.resolve(dataDir),parent=safe.verifiedDirectory(path.dirname(location)),descriptor=storageFormat.validateDescriptor(input.descriptor??storageFormat.describe(storageFormat.SCHEMA_VERSION),storageFormat.SCHEMA_VERSION),identity=require('./database-identity.cjs').validate(input.identity??{format:'tvs-database-identity',version:1,uuid:crypto.randomUUID(),generation:1});
   const data=require('../assets/core/platform-contracts.js').validateSections(Object.fromEntries(SECTIONS.map(name=>[name,Object.hasOwn(input.data,name)?input.data[name]:[]])),SECTIONS),raw=input.revisions??{};
+  storageFormat.assertInventoryBackend(data,'json');
   if(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.keys(raw).some(name=>!SECTIONS.includes(name))||Object.values(raw).some(value=>!Number.isSafeInteger(value)||value<0))throw Object.assign(Error('Некорректные исходные версии разделов'),{code:'JSON_CREATE'});
   const revisions=Object.fromEntries(SECTIONS.map(name=>[name,raw[name]??0])),provided=Object.hasOwn(input,'operationState')||Object.hasOwn(input,'operationObjects'),seed=provided?store.validateSeed({operationState:input.operationState,operationObjects:input.operationObjects,hotRows:data.auditLog}):store.bootstrap({auditRows:data.auditLog});data.auditLog=seed.hotRows;
   safe.assertDirectory(parent);if(fs.existsSync(location)){safe.verifiedDirectory(location);if(fs.readdirSync(location).length)throw Object.assign(Error('База создаётся только в новом или пустом отдельном каталоге'),{code:'JSON_TARGET_NOT_EMPTY'});}else fs.mkdirSync(location,{mode:0o700});
@@ -340,42 +342,31 @@ function isSplit(dataDir) {
   return fs.existsSync(revisionsFile(dataDir));
 }
 
-/**
- * Разложить старый data.json по разделам. Вызывается один раз: как только
- * появился revisions.json, миграция считается выполненной. Исходный файл не
- * удаляем и не трогаем — он остаётся резервной копией на случай отката.
- */
+// Create only a demonstrably fresh profile. A source, partial database or an
+// unknown physical file must never be mistaken for an empty new database.
 function migrate(dataDir) {
   if (sqliteBackend(dataDir)) return { migrated:false, reason:'SQLite: явный перенос уже выполнен' };
   recoverTransaction(dataDir);
   if (isSplit(dataDir)) return { migrated: false, reason: 'уже разделено' };
   if(schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION)return {migrated:false,reason:'Старая база доступна только для чтения; обновление выполняется отдельной копией'};
-  const legacy = legacyFile(dataDir);
-  fs.mkdirSync(sectionsDir(dataDir), { recursive: true });
-
-  const existing = SECTIONS.filter(n => fs.existsSync(sectionFile(dataDir, n)));
-  if (existing.length && (!existing.includes('vehicles') || !existing.includes('records'))) throw new Error('Неполный набор разделов. Восстановите базу из резервной копии.');
-  const data = !existing.length && fs.existsSync(legacy) ? readJson(legacy) : null;
-  if (data && (!Array.isArray(data.vehicles) || !Array.isArray(data.records))) throw new Error('Некорректная старая база');
-  const revisions = {};
-  let records = 0;
-  const sections = {};
-  SECTIONS.forEach(name => {
-    const arr = existing.includes(name) ? readRows(dataDir, name) : data && Array.isArray(data[name]) ? data[name] : [];
-    validateRows(name, arr);
-    sections[name] = arr;
-    revisions[name] = existing.length ? Date.now() : 1;
-    records += arr.length;
-  });
-  const seed=require('./operation-store.cjs').bootstrap({auditRows:sections.auditLog});sections.auditLog=seed.hotRows;
-  commitSections(dataDir, sections, revisions,{initialSeed:seed});
-
-  if (data) {
-    // Помечаем исходник, чтобы было видно: он больше не рабочий
-    const marker = path.join(dataDir, 'data.json.before-split');
-    try { if (!fs.existsSync(marker)) fs.copyFileSync(legacy, marker); } catch {}
-  }
-  return { migrated: true, sections: SECTIONS.length, records, hadLegacy: !!data };
+  const directory=fs.realpathSync(path.resolve(dataDir)),key=canonicalDirectory(directory),owner=heldLocks.get(key),lock=path.join(directory,'.tvs-database.lock');
+  if(!owner?.nonce||lockOwner(lock)?.nonce!==owner.nonce||fs.readdirSync(directory).some(name=>name!=='.tvs-database.lock'))throw Object.assign(Error('Папка содержит неизвестные или неполные данные. Новая база не создана; восстановите или перенесите согласованный источник.'),{code:'STORAGE_INITIALIZE',status:428});
+  const stage=fs.mkdtempSync(path.join(directory,'.tvs-new-sqlite-')),pin=fs.lstatSync(stage),target=path.join(directory,'platform.sqlite');let guardPin=null,guardBytes=null,preserveStage=false;
+  const assertOwned=()=>{const current=fs.lstatSync(stage);if(path.dirname(path.resolve(stage))!==directory||!path.basename(stage).startsWith('.tvs-new-sqlite-')||!current.isDirectory()||current.isSymbolicLink()||current.dev!==pin.dev||current.ino!==pin.ino)throw Object.assign(Error('Не подтверждён временный каталог новой SQLite'),{code:'STORAGE_INITIALIZE'});};
+  try{
+    const sql=require('./sqlite-storage.cjs'),checked=sql.create(stage,{data:{}});if(!checked.ok||checked.schemaVersion!==storageFormat.SCHEMA_VERSION||checked.foreignKeyErrors.length)throw Object.assign(Error('Новая SQLite не прошла проверку целостности'),{code:'STORAGE_INITIALIZE'});
+    for(const suffix of ['-wal','-shm']){const file=path.join(stage,'platform.sqlite'+suffix);if(fs.existsSync(file)){const info=fs.lstatSync(file);if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1||suffix==='-wal'&&info.size)throw Object.assign(Error('Не завершён журнал новой SQLite'),{code:'STORAGE_INITIALIZE'});fs.unlinkSync(file);}}
+    assertOwned();if(JSON.stringify(fs.readdirSync(stage).sort())!==JSON.stringify(['platform.sqlite','sections'])||fs.readdirSync(directory).some(name=>!['.tvs-database.lock',path.basename(stage)].includes(name)))throw Object.assign(Error('Состав папки изменился при создании SQLite'),{code:'STORAGE_INITIALIZE'});
+    // Publish the fail-closed guard first, then the complete SQLite commit point.
+    // A crash in between cannot expose a writable empty JSON fallback.
+    guardPin=fs.lstatSync(path.join(stage,'sections'));guardBytes=fs.readFileSync(path.join(stage,'sections',REVISIONS_FILE));
+    fs.renameSync(path.join(stage,'sections'),sectionsDir(directory));
+    fs.renameSync(path.join(stage,'platform.sqlite'),target);
+    return {migrated:true,initialized:true,format:'sqlite',sections:SECTIONS.length,records:0,hadLegacy:false};
+  }catch(error){
+    if(guardPin&&!fs.existsSync(target)&&fs.existsSync(sectionsDir(directory))){try{const current=fs.lstatSync(sectionsDir(directory)),guard=path.join(sectionsDir(directory),REVISIONS_FILE),info=fs.lstatSync(guard);if(!current.isDirectory()||current.isSymbolicLink()||current.dev!==guardPin.dev||current.ino!==guardPin.ino||!info.isFile()||info.isSymbolicLink()||info.nlink!==1||!fs.readFileSync(guard).equals(guardBytes)||fs.readdirSync(sectionsDir(directory)).length!==1)throw Error('Новая защита была изменена');fs.renameSync(sectionsDir(directory),path.join(stage,'sections'));}catch{preserveStage=true;}}
+    throw error;
+  }finally{if(!preserveStage){assertOwned();fs.rmSync(stage,{recursive:true,force:true});}}
 }
 
 /** Собрать все разделы в один объект — в том же виде, что раньше отдавал data.json */
@@ -384,12 +375,14 @@ function readAll(dataDir) {
   if (sqlite) return sqlite.readAll(dataDir);
   recoverTransaction(dataDir);
   if (!isSplit(dataDir)) migrate(dataDir);
+  const initialized=sqliteBackend(dataDir);if(initialized)return initialized.readAll(dataDir);
   readRevisions(dataDir);
   const version=schemaVersion(dataDir);
   const out = {};
   SECTIONS.forEach(name => { out[name] = readRows(dataDir, name, version); });
   require('../assets/core/platform-contracts.js').validateSections(out,SECTIONS);
   if(version>=4){require('./operation-store.cjs').validateHot(dataDir,out.auditLog);require('./platform-service.cjs').bindHistory(out,dataDir);}
+  storageFormat.assertInventoryBackend(out,'json');
   return out;
 }
 
@@ -398,6 +391,7 @@ function readAll(dataDir) {
  * Возвращает список записанных разделов и новые номера версий.
  */
 function writeAll(dataDir, data, options = {}) {
+  storageFormat.assertInventoryBackend(data,sqliteBackend(dataDir)?'sqlite':'json');
   if (options.databaseToken != null) {
     const actualToken = databaseToken(dataDir);
     if (options.databaseToken !== actualToken) throw Object.assign(new Error('База данных изменилась. Заново откройте её перед сохранением.'),
@@ -498,7 +492,7 @@ function readSnapshot(dataDir,options={}) {
   require('./document-archive.cjs').validateState(dataDir,database);
   const data=options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?platform.visibleRows(name,database[name],options.principal,database):[]])):database;
   const version=schemaVersion(dataDir);
-  return {data,revisions:options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?revisions[name]:0])):revisions,databaseToken:databaseToken(dataDir),...(options.principal?{scopeViews:platform.scopeViews(database,revisions,options.principal)}:{}),platform:{apiVersion:1,operations:1,outbox:1,receiptQuery:1,commands:1,...(require('./access-context.cjs').hasNarrowing(options.principal)?{scopedAccess:1}:{}),schemaVersion:version,currentSchemaVersion:storageFormat.SCHEMA_VERSION,descriptor:descriptor(dataDir),readOnly:version<storageFormat.SCHEMA_VERSION,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,calendar:version>=2?1:0,personnelPlanning:version>=2?1:0,documentPrint:version>=2?1:0,controlledImports:version>=2?1:0,needsSchemaUpgrade:version<storageFormat.SCHEMA_VERSION}};
+  return {data,revisions:options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?revisions[name]:0])):revisions,databaseToken:databaseToken(dataDir),...(options.principal?{scopeViews:platform.scopeViews(database,revisions,options.principal)}:{}),platform:{apiVersion:1,storageKind:sqliteBackend(dataDir)?'sqlite':'json',operations:1,outbox:1,receiptQuery:1,commands:1,...(require('./access-context.cjs').hasNarrowing(options.principal)?{scopedAccess:1}:{}),schemaVersion:version,currentSchemaVersion:storageFormat.SCHEMA_VERSION,descriptor:descriptor(dataDir),readOnly:version<storageFormat.SCHEMA_VERSION,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,calendar:version>=2?1:0,personnelPlanning:version>=2?1:0,documentPrint:version>=2?1:0,controlledImports:version>=2?1:0,needsSchemaUpgrade:version<storageFormat.SCHEMA_VERSION}};
 }
 function readOperation(dataDir,query,principal){
   if(schemaVersion(dataDir)>=4)return require('./platform-service.cjs').readReceipt(dataDir,query,principal);
@@ -514,6 +508,7 @@ function readOperation(dataDir,query,principal){
  * Так правки двух людей не затирают друг друга молча.
  */
 function writeSections(dataDir, payload, options = {}) {
+  storageFormat.assertInventoryBackend(payload?.sections,sqliteBackend(dataDir)?'sqlite':'json');
   const token = databaseToken(dataDir);
   if (payload && payload.databaseToken != null && payload.databaseToken !== token) return { ok: false, databaseChanged: true, databaseToken: token, error: 'База данных изменилась. Заново откройте её перед сохранением.' };
   const previous = readAll(dataDir);

@@ -43,7 +43,7 @@ for (const format of ['json', 'sqlite'])
         assert.equal(verified.sourceFormat, format);
         assert.equal(JSON.stringify(created).includes('SECRET-NETWORK-TOKEN'), false);
         assert.equal(JSON.stringify(verified).includes('networkKey'), false);
-        const restored = backup.restorePackage(paths), actual = storage.readSnapshot(paths.targetDir);
+        const restored = backup.restorePackage({...paths,format}), actual = storage.readSnapshot(paths.targetDir);
         assert.equal(restored.restoredFormat, format);
         assert.deepEqual(actual.data, expected.input);
         assert.deepEqual(actual.revisions, expected.revisions);
@@ -262,7 +262,7 @@ test('restored JSON gets a new database UUID while an existing source sidecar re
     source(paths);
     const identity = require('../electron/database-identity.cjs').readOrCreate(paths.sourceDir), before = businessTree(paths.sourceDir);
     backup.createPackage(paths);
-    backup.restorePackage(paths);
+    backup.restorePackage({...paths,format:'json'});
     const restored = JSON.parse(fs.readFileSync(path.join(paths.targetDir, 'database-identity.json'), 'utf8'));
     assert.notEqual(restored.uuid, identity.uuid);
     assert.deepEqual(businessTree(paths.sourceDir), before);

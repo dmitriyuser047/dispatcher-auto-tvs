@@ -357,6 +357,7 @@ async function syncPoll() {
 }
 
 function syncClearAccessView(message){
+  if(typeof assetInventoryWorkspaceRevoke==='function')assetInventoryWorkspaceRevoke();
   _loadWriteBlocked=true;_sync.enabled=false;_sync.revs={};_sync.synced={};_sync.scopeViews={};_sync.lastResult=null;_sync.needRefresh=[];
   _sync.access=null;_sync.databaseToken=null;_lastPersisted=null;localCacheKey=null;
   if(typeof _lsTimer!=='undefined'&&_lsTimer){clearTimeout(_lsTimer);_lsTimer=null;_lsPending=null;}

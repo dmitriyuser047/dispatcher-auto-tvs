@@ -59,6 +59,9 @@
     "src/core/issue-fuel.ts",
     "src/core/generator-spares.ts",
     "src/core/generator-maintenance.ts",
-    "src/core/generator-maintenance-spares.ts"
+    "src/core/generator-maintenance-spares.ts",
+    "src/core/asset-inventory.ts",
+    "src/core/asset-inventory-import.ts",
+    "src/core/asset-inventory-excel.ts"
   ]
 }

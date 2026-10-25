@@ -4,6 +4,7 @@ export type {CommandActor,CommandContext,CommandPlan} from './command-source';
 import type {CommandContext,CommandPlan,CommandSourceAPI} from './command-source';
 import type {IssueFuelAPI} from './issue-fuel';
 import type {GeneratorMaintenanceActionInput} from './generator-maintenance';
+import type {AssetInventoryActionInput} from './asset-inventory';
 interface PersonnelRules { apiVersion: number; validateChanges(previous: unknown, next: unknown, context?: unknown): unknown }
 interface CatalogMerge { apiVersion: number; footprint(input: MergeCatalogInput): string[]; plan(database: unknown,input: MergeCatalogInput,context: CommandContext): CommandPlan }
 interface SectionRegistry { sections: readonly string[] }
@@ -19,10 +20,11 @@ interface PersonnelPlanning {apiVersion:number;dependencies():string[];captureSh
 interface DocumentPrint {apiVersion:number;dependencies(request:unknown):string[];prepare(database:unknown,request:unknown,context:unknown):{canCapture:boolean;sourceFingerprint:string;blockers:unknown[]};capture(database:unknown,request:unknown,context:unknown):unknown}
 interface ImportEngine {apiVersion:number;dependencies(input:ImportActionInput):string[];footprint(input:ImportActionInput):string[];plan(database:unknown,input:ImportActionInput,context:CommandContext):CommandPlan}
 interface GeneratorMaintenance {apiVersion:number;dependencies(input?:GeneratorMaintenanceActionInput):string[];footprint(input?:GeneratorMaintenanceActionInput):string[];plan(database:unknown,input:GeneratorMaintenanceActionInput,context:CommandContext):CommandPlan}
+interface AssetInventory {apiVersion:number;dependencies(input?:AssetInventoryActionInput):string[];footprint(input?:AssetInventoryActionInput):string[];plan(database:unknown,input:AssetInventoryActionInput,context:CommandContext):CommandPlan}
 type Contracts = ReturnType<typeof createPlatformContracts>;
 
 /** Pure semantic actions. Storage still owns ACL, CAS, audit and atomic commit. */
-export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, commandSource:CommandSourceAPI, issueFuel:IssueFuelAPI,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions,calendarActions?:CalendarActions,calendar?:BusinessCalendar,planning?:PersonnelPlanning,getPrinting?:()=>DocumentPrint,getImports?:()=>ImportEngine,getGeneratorMaintenance?:()=>GeneratorMaintenance) {
+export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, commandSource:CommandSourceAPI, issueFuel:IssueFuelAPI,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions,calendarActions?:CalendarActions,calendar?:BusinessCalendar,planning?:PersonnelPlanning,getPrinting?:()=>DocumentPrint,getImports?:()=>ImportEngine,getGeneratorMaintenance?:()=>GeneratorMaintenance,getAssetInventory?:()=>AssetInventory) {
   if (!contracts || contracts.apiVersion !== 1 || !personnel || personnel.apiVersion !== 1 || commandSource?.apiVersion!==1 || issueFuel?.apiVersion!==1)
     throw new Error('Не загружены общие правила команд платформы');
   const fail:(code:string,message:string,field?:string)=>never=commandSource.fail;
@@ -42,9 +44,11 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   function printModule():DocumentPrint {const printing=getPrinting?.();if(!printing||printing.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены печатные модели документов');return printing;}
   function importModule():ImportEngine {const imports=getImports?.();if(!imports||imports.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила подтверждённого импорта');return imports;}
   function maintenanceModule():GeneratorMaintenance {const api=getGeneratorMaintenance?.();if(api?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила графиков ТО ДЭС');return api;}
+  function inventoryModule():AssetInventory {const api=getAssetInventory?.();if(api?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружено ядро инвентаризации ОС');return api;}
   function footprint(value: unknown): string[] {
     const command=parseCommand(value);
     if(command.type==='GeneratorMaintenanceAction')return maintenanceModule().footprint(command.input);
+    if(command.type==='AssetInventoryAction')return inventoryModule().footprint(command.input);
     if(command.type==='ImportAction')return importModule().footprint(command.input);
     if(command.type==='PrintAction')return ['appMeta'];
     if(command.type==='DocumentAction')return documentModule().footprint(command.input);
@@ -65,6 +69,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   function commandDependencies(value: unknown): string[] {
     const command=parseCommand(value);
     if(command.type==='GeneratorMaintenanceAction')return maintenanceModule().dependencies(command.input);
+    if(command.type==='AssetInventoryAction')return inventoryModule().dependencies(command.input);
     if(command.type==='ImportAction')return importModule().dependencies(command.input);
     if(command.type==='PrintAction')return printModule().dependencies(command.input.request);
     if(command.type==='DocumentAction')return documentModule().dependencies(command.input);
@@ -142,6 +147,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     calendar?.context(db,ctx);
     let result:CommandPlan;
     if(command.type==='GeneratorMaintenanceAction')result=maintenanceModule().plan(db,command.input,ctx);
+    else if(command.type==='AssetInventoryAction')result=inventoryModule().plan(db,command.input,ctx);
     else if(command.type==='ImportAction')result=importModule().plan(db,command.input,ctx);
     else if(command.type==='PrintAction'){
       const prepared=printModule().prepare(db,command.input.request,{...ctx,timing:command.input.request.mode==='manual'?'manual':'late'});
