@@ -28,6 +28,7 @@ const XP_MODULES={
   tanks:{title:'Топливные ёмкости',note:'Остатки и движения',icon:'tank',count:()=>(data.tanks||[]).filter(v=>!v.archived).length},
   toSchedule:{title:'Обслуживание',note:'Регламенты и график ТО',icon:'calendar'},
   generatorSpares:{title:'ЗИП ДЭС',note:'Перечни запчастей по ДЭС и итог по организации',icon:'tool'},
+  objectQuantity:{title:'Количественный учёт',note:'Имущество, учётное количество и результаты подсчётов по объектам',icon:'grid'},
   repairs:{title:'Журнал ремонта',note:'Неисправности и затраты',icon:'tool',action:'openRepairsJournal()'},
   fuelPurchases:{title:'ГСМ и заправки',note:'Выписки, сверка и топливные карты',icon:'fuel'},
   fuelReport:{title:'Топливная аналитика',note:'Приход, расход и источники',icon:'chart'},
@@ -56,7 +57,7 @@ function renderLaunchpad(){
     ['Техника и эксплуатация',['vehicles','generators','tanks','toSchedule','generatorSpares','repairs']],
     ['Сотрудники',['drivers','operators']],
     ['Топливо и финансы',['fuelPurchases','fuelReport','finances','costs','contragents','reports']],
-    ['Документы и процессы',['reestr','workflows','procurement','printForms','pdf']],
+    ['Документы и процессы',['objectQuantity','reestr','workflows','procurement','printForms','pdf']],
   ];
   const module=id=>{const item=XP_MODULES[id];return `<button type="button" class="xp-module" onclick="${xpModuleAction(id)}"><span class="xp-icon">${xpIcon(item.icon)}</span><span class="xp-module-copy"><b>${item.title}</b><small>${item.note}</small></span>${item.count?`<span class="xp-module-count">${htmlEsc(item.count())}</span>`:''}<span class="xp-module-arrow">›</span></button>`;};
   document.getElementById('mainContent').innerHTML=`<div class="xp-launchpad">

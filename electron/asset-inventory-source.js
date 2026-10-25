@@ -1,5 +1,5 @@
 /* Generated from src/server by scripts/build-inventory-server.cjs.
- * TypeScript 5.9.3; Node types 24.19.2; source/config sha256:809f63c1db8eb780156769a6c61010673a0a978136ad9c755657cc312b6a5ca5. Do not edit directly. */
+ * TypeScript 5.9.3; Node types 24.19.2; source/config sha256:8a7fc6b8092c258ae6cf000c69b509fbff1b4ab0ffc7e2085e20891dc5f18165. Do not edit directly. */
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handle = handle;
@@ -120,7 +120,7 @@ function preview(dir, payload, options, support) {
             fail('IMPORT_PROFILE', 'Источник относится к другому профилю');
         if (typeof payload.reason !== 'string' || payload.reason.trim().length < 3 || payload.reason.length > 20000)
             fail('IMPORT_REASON', 'Укажите основание импорта');
-        const input = { action: source.format === 'inventory-legacy-json' ? 'importLegacy' : 'importRows', sourceId: payload.sourceId, reason: payload.reason }, now = options.now || new Date().toISOString(), calendar = require('../assets/core/business-calendar.js').resolve(snapshot.data, now), readable = SECTIONS.filter(name => allowed(user, 'read', name)), writable = SECTIONS.filter(name => allowed(user, 'write', name)), core = require('../assets/core/asset-inventory.js');
+        const input = { action: source.format === 'inventory-legacy-json' ? 'importLegacy' : 'importRows', sourceId: payload.sourceId, reason: payload.reason, ...(Object.hasOwn(payload, 'sessionIds') ? { sessionIds: payload.sessionIds } : {}) }, now = options.now || new Date().toISOString(), calendar = require('../assets/core/business-calendar.js').resolve(snapshot.data, now), readable = SECTIONS.filter(name => allowed(user, 'read', name)), writable = SECTIONS.filter(name => allowed(user, 'write', name)), core = require('../assets/core/asset-inventory.js');
         const reviewed = core.preview(snapshot.data, input, { today: calendar.today, importSource: source, readable }), context = { id: 'inventory-import-preview', now, today: calendar.today, calendar, actor: { id: user.id, name: user.name || user.id, role: user.role }, readable, writable, importSource: source };
         support.requireRead(user, reviewed.readSections);
         require('./command-service.cjs').assertCommandScope(snapshot.data, { type: 'AssetInventoryAction', input }, reviewed.readSections, user);

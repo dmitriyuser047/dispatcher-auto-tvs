@@ -293,8 +293,8 @@ export function createPlatformContracts() {
         approve:['action','sessionId','date','document','reason','reviewFingerprint'],
         revise:['action','sessionId','reason','reviewFingerprint'],
         amendDraft:['action','sessionId','corrections','reason','reviewFingerprint'],
-        importLegacy:['action','sourceId','reason','reviewFingerprint'],
-        importRows:['action','sourceId','objectId','orgId','reason','reviewFingerprint'],
+        importLegacy:['action','sourceId','sessionIds','reason','reviewFingerprint'],
+        importRows:['action','sourceId','sessionIds','objectId','orgId','reason','reviewFingerprint'],
       };
       if(typeof input.action!=='string'||!Object.prototype.hasOwnProperty.call(fields,input.action))fail('INVALID_COMMAND',path+'action','Неизвестное действие инвентаризации');
       keys(input,fields[input.action]!,'command.input');commandText(input.reason,path+'reason',true);reviewFingerprint(input.reviewFingerprint,path+'reviewFingerprint');

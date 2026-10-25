@@ -3,7 +3,7 @@ const UNIFIED_NAV = [
  ['Рабочий день', [['home','Главная','grid'],['dispatch','Диспетчерская','calendar'],['workflows','Рабочие процессы','tool']]],
  ['Сотрудники', [['drivers','Водители','people','personnelDrivers'],['driverTimesheets','Загрузка водителей','calendar'],['operators','Операторы ДЭС','people','personnelOperators'],['operatorTimesheets','Загрузка машинистов ДЭС','calendar']]],
  ['Техника и топливо', [['vehicles','Транспорт','car','vehicles'],['generators','Генераторы','power','generators'],['tanks','Ёмкости','tank'],['fuelPurchases','ГСМ и заправки','fuel'],['fuelReport','Топливная аналитика','chart'],['procurement','Закупки','tank'],['toSchedule','Обслуживание','calendar'],['generatorSpares','ЗИП ДЭС','tool']]],
- ['Документы и расчёты', [['assetInventory','Инвентаризация ОС','grid'],['reestr','Реестр счетов','document'],['finances','Финансы','wallet'],['costs','Стоимость работы','chart'],['contragents','Контрагенты','people'],['reports','Отчёты','chart'],['printForms','Печатные формы','print']]],
+ ['Документы и расчёты', [['objectQuantity','Количественный учёт','grid'],['assetInventory','Инвентаризация ОС','grid'],['reestr','Реестр счетов','document'],['finances','Финансы','wallet'],['costs','Стоимость работы','chart'],['contragents','Контрагенты','people'],['reports','Отчёты','chart'],['printForms','Печатные формы','print']]],
 ];
 function unifiedMountNav() {
  if(document.getElementById('unifiedNav'))return;

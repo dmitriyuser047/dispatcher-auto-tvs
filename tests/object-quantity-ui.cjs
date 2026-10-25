@@ -1,0 +1,69 @@
+'use strict';
+// Synthetic standalone quantity workspace, real inventory core and canonical ACKs.
+const {test,before,after,beforeEach,afterEach}=require('node:test');
+const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{createRequire}=require('node:module');
+let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
+const root=path.resolve(__dirname,'..'),api=require('../assets/core/asset-inventory.js');
+const ui=require('../scripts/build-inventory-ui.cjs').compileInventoryUI().artifact;
+let browser,page,errors;
+const clone=value=>JSON.parse(JSON.stringify(value));
+function database(){return {inventoryOrgs:[{id:0,name:'Организация А',note:''},{id:'0',name:'Организация Б',note:''}],inventoryObjects:[{id:0,name:'Объект А',note:''},{id:'0',name:'Объект Б',note:''}],inventoryMols:[{id:0,orgId:0,objectId:0,name:'Иванов',accountCode:'01',note:''},{id:'0',orgId:'0',objectId:'0',name:'Петров',accountCode:'10',note:''}],inventoryItems:[{id:0,molId:0,name:'Нулевой остаток',code:'N0',unit:'шт',qty:0,cost:123.45,note:''},{id:'0',molId:'0',name:'Неизвестный остаток',code:'S0',unit:'шт',qty:null,cost:888,note:'<img src=x onerror=window.__injected=true>'},{id:'meters',molId:0,name:'Кабель',code:'M',unit:'м',qty:5,cost:20,note:''}],inventorySessions:[]};}
+function execute(db,input,id){const context={id,now:'2026-10-25T10:00:00.000Z',today:'2026-10-25',actor:{id:'test',name:'Проверяющий',role:'admin'}},preview=api.preview(db,input,{today:context.today});assert.equal(preview.canApply,true,JSON.stringify(preview.issues));return {...db,...clone(api.plan(db,{...input,reviewFingerprint:preview.fingerprint},context).sections)};}
+function counted(db=database(),approve=true){
+ db=execute(db,{action:'createSession',objectId:0,date:'2026-10-24',title:'Подтвержденная опись',reason:'Проверенный подсчет'},'session');
+ const session=db.inventorySessions[0];
+ db=execute(db,{action:'saveDraft',sessionId:session.id,payload:{date:session.date,title:session.title,note:'',commission:{chairman:{name:'Председатель',position:'Инженер'},members:[]},facts:session.rows.map(row=>({rowId:row.id,qtyFact:row.itemId===0?0:4,costFact:17.35,action:'',note:''}))},reason:'Внесение физического факта'},'facts');
+ return approve?execute(db,{action:'approve',sessionId:session.id,date:'2026-10-25',document:'Подписанная опись',reason:'Утверждение комиссии'},'approval'):db;
+}
+before(async()=>{const edge='C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';browser=await pw.chromium.launch({headless:true,executablePath:process.env.TVS_TEST_BROWSER||(!process.env.CI&&fs.existsSync(edge)?edge:undefined)});});
+after(async()=>{await browser?.close();});
+beforeEach(async()=>{
+ page=await browser.newPage({viewport:{width:1365,height:1000}});errors=[];page.on('pageerror',error=>errors.push(error.message));
+ await page.setContent('<!doctype html><html lang="ru"><head><meta charset="utf-8"></head><body><main id="mainContent"></main></body></html>');
+ await page.addStyleTag({path:path.join(root,'assets/css/asset-inventory.css')});
+ await page.addStyleTag({content:':root{--text:#1b2430;--bg:#f4f6f9;--surface:#fff;--border:#cbd5e1;--muted:#526173;--primary:#2563eb;--danger:#b91c1c}body{font-family:Arial,sans-serif;margin:20px;color:var(--text);background:var(--bg)}button,input,select,textarea{font:inherit}button{padding:8px;border:1px solid var(--border);border-radius:6px;background:white;color:var(--text)}small{display:block;color:var(--muted)}'});
+ for(const file of ['platform-contracts','decimal-core','request-fingerprint','asset-inventory'])await page.addScriptTag({path:path.join(root,'assets/core',file+'.js')});
+ await page.addScriptTag({content:ui});
+ await mount(counted());
+});
+afterEach(async()=>{await page?.close();assert.deepEqual(errors,[]);});
+async function mount(db,mode='quantity'){
+ await page.evaluate(({db,mode})=>{
+  window.__db=db;window.__stamp=1;window.__read=true;window.__write=true;window.__commands=[];window.__imports=[];window.__ops=0;window.__injected=false;window.__upgrades=0;
+  window.__host={mode,core:AssetInventory,snapshot:()=>({database:__db,identity:'synthetic',analysisStamp:__stamp,isSQLite:true,schemaVersion:6,capabilities:[{name:'inventoryV1',version:1}],canRead:__read,canWrite:__write,today:'2026-10-25'}),operationId:()=> 'operation-'+(++__ops),openUpgrade:()=>{__upgrades++;},confirmDiscard:()=>true,importFile:async request=>{__imports.push(request);return{ok:true};},execute:async(input,{operationId})=>{__commands.push(structuredClone(input));const result=AssetInventory.plan(__db,input,{id:operationId,now:'2026-10-25T11:00:00.000Z',today:'2026-10-25',actor:{id:'test',name:'Проверяющий',role:'admin'}});for(const [section,entries]of Object.entries(result.sections))__db[section]=structuredClone(entries);__stamp++;return{ok:true,canonicalSections:structuredClone(result.sections),operationReceipt:{id:operationId}};}};
+  window.__workspace=AssetInventoryWorkspace.create(__host);__workspace.render(document.getElementById('mainContent'));
+ },{db,mode});
+}
+async function save(form){await form.locator('[data-ai-action=review]').click();assert.equal(await form.locator('[data-ai-error]').innerText(),'');await form.locator('[name=confirm]').check();await form.locator('[data-ai-save]').click();await page.waitForFunction(()=>!document.querySelector('[data-ai-pending]')?.textContent);const error=page.locator('.ai-overlay [data-ai-error]');if(await error.count())assert.equal(await error.innerText(),'');}
+test('quantities keep known zero, unknown, approved dates and separate units without costs',async()=>{
+ const main=page.locator('#mainContent');assert.equal(await main.locator('h2').innerText(),'Количественный учет');assert.deepEqual(await main.locator('[role=tab]').allTextContents(),['Остатки по объектам','Имущество']);
+ const quantity=main.locator('[data-ai-quantity]');assert.equal(await quantity.locator('tbody tr').count(),3);assert.equal(await quantity.locator('tbody tr').filter({hasText:'Нулевой остаток'}).locator('[data-ai-value=qtyAcct]').innerText(),'0');assert.equal(await quantity.locator('tbody tr').filter({hasText:'Нулевой остаток'}).locator('[data-ai-value=qtyFact]').innerText(),'0');assert.equal(await quantity.locator('tbody tr').filter({hasText:'Неизвестный остаток'}).locator('[data-ai-value=qtyAcct]').innerText(),'Неизвестно');assert.match(await quantity.innerText(),/2026-10-24/);assert.equal(await main.locator('[data-ai-quantity-totals] tbody tr').count(),3);assert.doesNotMatch(await main.innerText(),/Стоимость|123,45|888/);assert.equal(await page.evaluate(()=>__commands.length),0);assert.equal(await page.evaluate(()=>__injected),false);
+ const dir=path.join(root,'audit/object-quantity');fs.mkdirSync(dir,{recursive:true});await page.screenshot({path:path.join(dir,'desktop.png'),fullPage:true});await page.setViewportSize({width:480,height:900});await page.screenshot({path:path.join(dir,'narrow.png'),fullPage:true});
+ assert.equal(await main.locator('[data-ai-quantity]').evaluate(el=>el.closest('.ai-scroll').scrollWidth>el.closest('.ai-scroll').clientWidth),true);
+});
+test('quantity card edits preserve cost and unknown is explicitly blank; creation keeps unknown cost',async()=>{
+ await page.locator('[data-ai-quantity] tbody tr').filter({hasText:'Нулевой остаток'}).getByRole('button',{name:'Карточка'}).click();let form=page.locator('[data-ai-form]');assert.equal(await form.locator('[name=cost]').count(),0);assert.equal(await form.locator('[name=qty]').inputValue(),'0');await form.locator('[name=qty]').fill('2,125');await form.locator('[name=reason]').fill('Проверенное учетное изменение');await save(form);assert.equal(await page.evaluate(()=>__db.inventoryItems[0].cost),123.45);assert.equal(await page.evaluate(()=>__db.inventoryItems[0].qty),2.125);
+ await page.locator('[data-ai-tab=registry]').click();await page.locator('[data-ai-item]').filter({hasText:'Неизвестный остаток'}).getByRole('button',{name:'Открыть'}).click();form=page.locator('[data-ai-form]');assert.equal(await form.locator('[name=qty]').inputValue(),'');await page.locator('.ai-overlay [data-ai-action=close]').click();
+ await page.locator('[data-ai-action=newItem]').click();form=page.locator('[data-ai-form]');await form.locator('[name=name]').fill('Новая позиция');await form.locator('[name=molId]').selectOption({label:'Иванов · Организация А / Объект А · 01'});await form.locator('[name=unit]').fill('шт');await form.locator('[name=qty]').fill('0');await form.locator('[name=reason]').fill('Создание учетной позиции');await save(form);const added=await page.evaluate(()=>__db.inventoryItems.at(-1));assert.equal(added.qty,0);assert.equal(added.cost,null);
+});
+test('draft facts and accounting corrections hide financial fields and retain previous amounts',async()=>{
+ await mount(counted(database(),false));await page.evaluate(()=>__workspace.openSession('session'));let form=page.locator('[data-ai-form]');assert.equal(await form.locator('[name^=cost]').count(),0);assert.doesNotMatch(await form.innerText(),/Стоимость|стоимость/);await form.locator('[name=qtyFact0]').fill('3');await form.locator('[name=reason]').fill('Изменен только подсчет');await save(form);assert.equal(await page.evaluate(()=>__db.inventorySessions[0].rows[0].costFact),17.35);
+ form=page.locator('[data-ai-form]');await form.locator('[data-ai-action=amendDraft]').click();form=page.locator('[data-ai-form]');assert.equal(await form.locator('[name^=cost]').count(),0);await form.locator('[name=correct0]').check();await form.locator('[name=qtyAcct0]').fill('1');await form.locator('[name=reason]').fill('Проверенное учетное исправление');await save(form);assert.equal(await page.evaluate(()=>__db.inventorySessions[0].rows[0].costAcct),123.45);assert.equal(await page.evaluate(()=>__db.inventorySessions[0].rows[0].qtyAcct),1);
+});
+test('typed filters retain zero IDs, import scope and independent workspace state; access loss clears contents',async()=>{
+ await page.locator('[name=filterObject]').selectOption({label:'Объект А'});assert.equal(await page.locator('[data-ai-quantity] tbody tr').count(),2);await page.locator('[data-ai-action=importXlsx]').click();assert.deepEqual(await page.evaluate(()=>__imports[0]),{format:'xlsx',scope:{objectId:0}});
+ await page.evaluate(()=>{window.__inventory=AssetInventoryWorkspace.create({...__host,mode:'inventory'});__inventory.render(document.getElementById('mainContent'));});assert.equal(await page.locator('[data-ai-item]').count(),3);assert.equal(await page.locator('[name=filterObject]').inputValue(),'');await page.evaluate(()=>__workspace.render(document.getElementById('mainContent')));assert.equal(await page.locator('[data-ai-quantity] tbody tr').count(),2);
+ await page.evaluate(()=>{__write=false;__workspace.render(document.getElementById('mainContent'));});assert.equal(await page.locator('[data-ai-action=newItem]').isDisabled(),true);await page.evaluate(()=>{__read=false;__workspace.render(document.getElementById('mainContent'));});assert.match(await page.locator('#mainContent').innerText(),/Нет доступа/);assert.doesNotMatch(await page.locator('#mainContent').innerText(),/Нулевой остаток|123/);assert.equal(await page.evaluate(()=>__commands.length),0);
+});
+test('empty inventory produces no fabricated quantity or fact rows',async()=>{await mount({inventoryOrgs:[],inventoryObjects:[],inventoryMols:[],inventoryItems:[],inventorySessions:[]});assert.equal(await page.locator('[data-ai-quantity] tbody tr').count(),0);assert.match(await page.locator('#mainContent').innerText(),/Загрузите инвентаризацию/);assert.equal(await page.evaluate(()=>__db.inventoryItems.length+__commands.length),0);});
+test('quantity property list omits archived parents and model errors remain visible inside the workspace',async()=>{
+ const db=database();db.inventoryOrgs[0].archived=true;await mount(db);assert.equal(await page.locator('[data-ai-quantity] tbody tr').count(),1);await page.locator('[data-ai-tab=registry]').click();assert.equal(await page.locator('[data-ai-item]').count(),1);assert.match(await page.locator('[data-ai-item]').innerText(),/Неизвестный остаток/);
+ await page.evaluate(()=>{__workspace=AssetInventoryWorkspace.create({...__host,core:{...AssetInventory,quantityModel(){throw Error('Некорректная опись <img src=x onerror=window.__injected=true>');}}});__workspace.render(document.getElementById('mainContent'));});assert.equal(await page.locator('h2').innerText(),'Количественный учет');assert.match(await page.locator('[role=alert]').innerText(),/Некорректная опись/);assert.equal(await page.locator('[role=alert] img').count(),0);assert.equal(await page.evaluate(()=>__injected),false);
+});
+test('quantity import prepares compatible copies for unsupported readers and keeps supported viewers read only',async()=>{
+ for(const mode of ['json','schema5','capability','viewer']){
+  await page.evaluate(mode=>{const base=__host.snapshot();__host.snapshot=()=>({...base,isSQLite:mode!=='json',schemaVersion:mode==='schema5'?5:6,capabilities:mode==='capability'?[]:[{name:'inventoryV1',version:1}],canWrite:false});__workspace=AssetInventoryWorkspace.create(__host);__workspace.render(document.getElementById('mainContent'));},mode);
+  for(const action of ['importLegacy','importXlsx']){const button=page.locator('[data-ai-action='+action+']');assert.equal(await button.isDisabled(),mode==='viewer');if(mode!=='viewer')await button.click();}
+ }
+ assert.equal(await page.evaluate(()=>__upgrades),6);assert.equal(await page.evaluate(()=>__imports.length+__commands.length),0);
+});

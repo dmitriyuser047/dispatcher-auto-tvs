@@ -1,5 +1,5 @@
 /* Generated from src/ui/asset-inventory.ts, src/ui/asset-inventory-host.ts, src/ui/asset-inventory-files.ts by scripts/build-inventory-ui.cjs.
- * TypeScript 5.9.3; source/config sha256:4b0dc768ba99fa333dde6e0b4016a9acf4db2b4f7951ba37fb70fff5823dc361. Do not edit directly. */
+ * TypeScript 5.9.3; source/config sha256:bc562227886eb63077547395da37ab8831ed6058227d31e6b143ad384e90bea7. Do not edit directly. */
 "use strict";
 /** Standalone property inventory UI. This adapter never accesses application globals,
  * paths, localStorage or fleet/stock data. All writes require a canonical host ACK. */
@@ -39,13 +39,15 @@ var AssetInventoryWorkspace;
     function create(host) {
         if (host.core?.apiVersion !== 1)
             throw Error('Не загружено ядро инвентаризации');
-        let container = null, tab = 'registry', form = null;
+        const quantity = host.mode === 'quantity', heading = quantity ? 'Количественный учет' : 'Инвентаризация ОС';
+        let container = null, tab = quantity ? 'quantity' : 'registry', form = null;
         let filters = { account: '', search: '' };
         let renderSnapshot = null, renderSource = '', filePending = null, memberSequence = 0;
         const refs = new Map();
         let sequence = 0;
         function supported(snapshot) { return snapshot.isSQLite && snapshot.schemaVersion === 6 && snapshot.capabilities.some(capability => capability.name === 'inventoryV1' && capability.version === 1); }
         function writable(snapshot = host.snapshot()) { return supported(snapshot) && snapshot.canRead && snapshot.canWrite; }
+        function importOptions(snapshot) { return !supported(snapshot) ? 'title="Для импорта сначала создайте совместимую копию базы"' : writable(snapshot) ? '' : 'disabled'; }
         function unavailable(snapshot) { if (!snapshot.isSQLite)
             return 'Инвентаризация ОС работает только в SQLite. Создайте отдельную обновлённую копию базы; исходная база сохранится.'; if (snapshot.schemaVersion !== 6 || !supported(snapshot))
             return 'Для инвентаризации нужна отдельная обновлённая копия SQLite и сервер с поддержкой инвентаризации.'; return 'У вас доступ только для просмотра инвентаризации.'; }
@@ -73,6 +75,7 @@ var AssetInventoryWorkspace;
         function name(db, section, id) { const found = rows(db, section).find(row => row.id === id); return found ? str(found.name) : 'Неизвестно'; }
         function active(db, section) { return rows(db, section).filter(row => !row.archived); }
         function itemScope(db, item) { const mol = rows(db, 'inventoryMols').find(row => row.id === item.molId) ?? {}; return { mol, orgName: name(db, 'inventoryOrgs', mol.orgId), objectName: name(db, 'inventoryObjects', mol.objectId) }; }
+        function itemParentsActive(db, item) { const mol = rows(db, 'inventoryMols').find(row => row.id === item.molId); return !!mol && !mol.archived && rows(db, 'inventoryOrgs').some(row => row.id === mol.orgId && !row.archived) && rows(db, 'inventoryObjects').some(row => row.id === mol.objectId && !row.archived); }
         function itemMatches(db, item) { const { mol } = itemScope(db, item); return (filters.org === undefined || mol.orgId === filters.org) && (filters.object === undefined || mol.objectId === filters.object) && (filters.mol === undefined || item.molId === filters.mol) && (!filters.account || mol.accountCode === filters.account) && (!filters.search || [item.name, item.code, mol.name].some(value => String(value ?? '').toLocaleLowerCase('ru-RU').includes(filters.search.toLocaleLowerCase('ru-RU')))); }
         function sessionMatches(session) { const entries = list(session.rows), search = filters.search.toLocaleLowerCase('ru-RU'); return (filters.object === undefined || session.objectId === filters.object) && ((filters.org === undefined && filters.mol === undefined && !filters.account) || entries.some(row => (filters.org === undefined || row.orgId === filters.org) && (filters.mol === undefined || row.molId === filters.mol) && (!filters.account || row.accountCode === filters.account))) && (!search || [session.title, session.objectName, ...entries.flatMap(row => [row.name, row.code, row.molName])].some(value => String(value ?? '').toLocaleLowerCase('ru-RU').includes(search))); }
         function status(message, error = false) { if (!container)
@@ -90,12 +93,13 @@ var AssetInventoryWorkspace;
             refs.clear();
             sequence = 0;
             if (!snapshot.canRead) {
-                target.innerHTML = '<section class="asset-inventory"><h2>Инвентаризация ОС</h2><p role="alert">Нет доступа к собственным справочникам инвентаризации.</p></section>';
+                target.innerHTML = '<section class="asset-inventory"><h2>' + heading + '</h2><p role="alert">Нет доступа к собственным справочникам инвентаризации.</p></section>';
                 return;
             }
             const db = snapshot.database, choices = new Map(), mols = active(db, 'inventoryMols').filter(mol => (filters.org === undefined || mol.orgId === filters.org) && (filters.object === undefined || mol.objectId === filters.object));
             const filterHtml = selectField('filterOrg', 'Организация', active(db, 'inventoryOrgs'), filters.org, choices, 'Все организации') + selectField('filterObject', 'Объект', active(db, 'inventoryObjects'), filters.object, choices, 'Все объекты') + selectField('filterMol', 'МОЛ', mols, filters.mol, choices, 'Все МОЛ') + '<label>Счёт<select name="filterAccount"><option value="">Все счета</option>' + [...new Set(mols.map(mol => str(mol.accountCode)).filter(Boolean))].map(account => '<option' + (account === filters.account ? ' selected' : '') + '>' + esc(account) + '</option>').join('') + '</select></label>' + control('filterSearch', 'Название / код', filters.search);
-            target.innerHTML = '<section class="asset-inventory" data-asset-inventory><header class="ai-heading"><div><h2>Инвентаризация ОС</h2><p>Собственный реестр имущества, подсчёт по объектам и зафиксированные описи.</p></div><div class="ai-actions">' + button('importLegacy', 'Импорт прежней базы', writable(snapshot) ? '' : 'disabled') + button('importXlsx', 'Импорт Excel', writable(snapshot) ? '' : 'disabled') + '</div></header>' + (!writable(snapshot) ? '<div class="ai-notice" role="status">' + esc(unavailable(snapshot)) + (!supported(snapshot) ? button('upgrade', 'Создать обновлённую копию') : '') + '</div>' : '') + '<div class="ai-filters">' + filterHtml + '</div><div class="ai-tabs" role="tablist" aria-label="Подразделы инвентаризации">' + ['registry', 'sessions', 'documents'].map(value => '<button type="button" role="tab" aria-selected="' + (value === tab) + '" data-ai-tab="' + value + '">' + ({ registry: 'Реестр имущества', sessions: 'Подсчёты', documents: 'Документы' }[value]) + '</button>').join('') + '</div><p data-ai-status role="status" aria-live="polite"></p><div data-ai-content>' + (tab === 'registry' ? registryHtml(snapshot) : sessionsHtml(snapshot)) + '</div></section>';
+            const tabs = quantity ? ['quantity', 'registry'] : ['registry', 'sessions', 'documents'];
+            target.innerHTML = '<section class="asset-inventory" data-asset-inventory' + (quantity ? ' data-object-quantity' : '') + '><header class="ai-heading"><div><h2>' + heading + '</h2><p>' + (quantity ? 'Учётное имущество объектов и последний подтверждённый факт по утверждённым описям.' : 'Собственный реестр имущества, подсчёт по объектам и зафиксированные описи.') + '</p></div><div class="ai-actions">' + button('importLegacy', 'Импорт прежней базы', importOptions(snapshot)) + button('importXlsx', 'Импорт Excel', importOptions(snapshot)) + '</div></header>' + (!writable(snapshot) ? '<div class="ai-notice" role="status">' + esc(unavailable(snapshot)) + (!supported(snapshot) ? button('upgrade', 'Создать обновлённую копию') : '') + '</div>' : '') + '<div class="ai-filters">' + filterHtml + '</div><div class="ai-tabs" role="tablist" aria-label="Подразделы ' + (quantity ? 'количественного учета' : 'инвентаризации') + '">' + tabs.map(value => '<button type="button" role="tab" aria-selected="' + (value === tab) + '" data-ai-tab="' + value + '">' + ({ quantity: 'Остатки по объектам', registry: quantity ? 'Имущество' : 'Реестр имущества', sessions: 'Подсчёты', documents: 'Документы' }[value]) + '</button>').join('') + '</div><p data-ai-status role="status" aria-live="polite"></p><div data-ai-content>' + (tab === 'quantity' ? quantityHtml(snapshot) : tab === 'registry' ? registryHtml(snapshot) : sessionsHtml(snapshot)) + '</div></section>';
             target.querySelectorAll('.ai-filters input,.ai-filters select').forEach(element => element.addEventListener('change', () => { try {
                 if (!renderSnapshot)
                     throw Error('Откройте раздел заново');
@@ -136,7 +140,27 @@ var AssetInventoryWorkspace;
             target.querySelectorAll('[data-ai-tab]').forEach(element => element.onclick = () => { tab = element.dataset.aiTab; render(target); });
             target.querySelectorAll('[data-ai-action]').forEach(element => element.onclick = () => { void route(element); });
         }
-        function registryHtml(snapshot) { const db = snapshot.database, items = active(db, 'inventoryItems').filter(item => itemMatches(db, item)); return '<div class="ai-actions ai-toolbar">' + catalogs.map(section => button('catalog', labels[section], 'data-ai-section="' + section + '"')).join('') + button('newItem', 'Добавить имущество', writable(snapshot) ? '' : 'disabled') + '</div><p class="ai-muted">Показано позиций: ' + items.length + '. Пустое количество или стоимость означают неизвестное значение.</p><div class="ai-scroll"><table><thead><tr><th>Организация / объект</th><th>МОЛ / счёт</th><th>Наименование / код</th><th>Ед.</th><th>Количество</th><th>Стоимость</th><th>Действие</th></tr></thead><tbody>' + items.map(item => { const scope = itemScope(db, item); return '<tr data-ai-item="' + reference('inventoryItems', item.id) + '"><td>' + esc(scope.orgName) + '<small>' + esc(scope.objectName) + '</small></td><td>' + esc(scope.mol.name) + '<small>' + esc(scope.mol.accountCode) + '</small></td><td>' + esc(item.name) + '<small>' + esc(item.code) + '</small></td><td>' + esc(item.unit || 'Не задано') + '</td><td data-ai-value="qty" data-status="' + (typeof item.qty === 'number' && Number.isFinite(item.qty) ? 'known' : 'unknown') + '">' + esc(numberText(item.qty)) + '</td><td data-ai-value="cost" data-status="' + (typeof item.cost === 'number' && Number.isFinite(item.cost) ? 'known' : 'unknown') + '">' + esc(numberText(item.cost)) + '</td><td>' + button('edit', 'Открыть', 'data-ai-ref="' + reference('inventoryItems', item.id) + '"') + '</td></tr>'; }).join('') + '</tbody></table>' + (items.length ? '' : '<p class="ai-empty">Пока нет имущества по выбранным фильтрам. Создайте организацию, объект и МОЛ, затем добавьте позиции.</p>') + '</div>'; }
+        function catalogToolbar(snapshot) { return '<div class="ai-actions ai-toolbar">' + catalogs.map(section => button('catalog', labels[section], 'data-ai-section="' + section + '"')).join('') + button('newItem', 'Добавить имущество', writable(snapshot) ? '' : 'disabled') + '</div>'; }
+        function registryHtml(snapshot) {
+            const db = snapshot.database, items = active(db, 'inventoryItems').filter(item => itemMatches(db, item) && (!quantity || itemParentsActive(db, item)));
+            return catalogToolbar(snapshot) + '<p class="ai-muted">Показано позиций: ' + items.length + '. ' + (quantity ? 'Пустое количество означает неизвестное значение.' : 'Пустое количество или стоимость означают неизвестное значение.') + '</p><div class="ai-scroll"><table><thead><tr><th>Организация / объект</th><th>МОЛ / счёт</th><th>Наименование / код</th><th>Ед.</th><th>Количество</th>' + (quantity ? '' : '<th>Стоимость</th>') + '<th>Действие</th></tr></thead><tbody>' + items.map(item => { const scope = itemScope(db, item); return '<tr data-ai-item="' + reference('inventoryItems', item.id) + '"><td>' + esc(scope.orgName) + '<small>' + esc(scope.objectName) + '</small></td><td>' + esc(scope.mol.name) + '<small>' + esc(scope.mol.accountCode) + '</small></td><td>' + esc(item.name) + '<small>' + esc(item.code) + '</small></td><td>' + esc(item.unit || 'Не задано') + '</td><td data-ai-value="qty" data-status="' + (typeof item.qty === 'number' && Number.isFinite(item.qty) ? 'known' : 'unknown') + '">' + esc(numberText(item.qty)) + '</td>' + (quantity ? '' : '<td data-ai-value="cost" data-status="' + (typeof item.cost === 'number' && Number.isFinite(item.cost) ? 'known' : 'unknown') + '">' + esc(numberText(item.cost)) + '</td>') + '<td>' + button('edit', 'Открыть', 'data-ai-ref="' + reference('inventoryItems', item.id) + '"') + '</td></tr>'; }).join('') + '</tbody></table>' + (items.length ? '' : '<p class="ai-empty">Пока нет имущества по выбранным фильтрам. Создайте организацию, объект и МОЛ, затем добавьте позиции.</p>') + '</div>';
+        }
+        function quantityHtml(snapshot) {
+            try {
+                return quantityModelHtml(snapshot);
+            }
+            catch (error) {
+                return catalogToolbar(snapshot) + '<p role="alert" class="ai-error">Не удалось рассчитать количественный учет: ' + esc(errorMessage(error)) + '. Проверьте исходную инвентаризацию.</p>';
+            }
+        }
+        function quantityModelHtml(snapshot) {
+            if (!host.core.quantityModel)
+                return '<p role="alert">Для количественного учета обновите программу: модель остатков недоступна.</p>';
+            const model = host.core.quantityModel(snapshot.database, { ...(filters.org === undefined ? {} : { orgId: filters.org }), ...(filters.object === undefined ? {} : { objectId: filters.object }), ...(filters.mol === undefined ? {} : { molId: filters.mol }), account: filters.account, search: filters.search, asOf: snapshot.today }), entries = list(model.rows), totals = list(model.totals), summary = object(model.summary);
+            const stateText = { unrecorded: 'Нет подтверждённого факта', scopeChanged: 'После описи изменены объект, организация или МОЛ', unitChanged: 'После описи изменена единица', ambiguous: 'Противоречивые описи на одну дату' };
+            const cell = (row, key) => '<td data-ai-value="' + key + '" data-status="' + (row[key] !== null && row[key] !== undefined || typeof row[key + 'Decimal'] === 'string' ? 'known' : 'unknown') + '">' + esc(exactText(row, key)) + '</td>';
+            return catalogToolbar(snapshot) + '<p class="ai-muted">Позиций: ' + entries.length + ' · объектов: ' + esc(summary.objects ?? 0) + '. Неизвестный учёт: ' + esc(summary.unknownAcct ?? 0) + ' · нет сопоставимого подтверждённого факта: ' + esc(summary.unknownFact ?? 0) + '. Факт — последняя утверждённая опись каждой позиции; даты могут различаться. Факт не меняет учётное количество. Пустые значения показаны как «Неизвестно»; нулевой остаток сохраняется.</p>' + list(model.issues).map(issue => '<p class="ai-notice">' + esc(issue.message) + '</p>').join('') + '<div class="ai-scroll"><table data-ai-quantity><thead><tr><th>Объект / организация</th><th>МОЛ / счёт</th><th>Имущество / код</th><th>Ед.</th><th>Учётное кол-во</th><th>Последний подтверждённый факт</th><th>Дата описи</th><th>Отклонение от текущего учёта</th><th>Действие</th></tr></thead><tbody>' + entries.map(row => '<tr data-ai-quantity-row><td>' + esc(row.objectName) + '<small>' + esc(row.orgName) + '</small></td><td>' + esc(row.molName) + '<small>' + esc(row.accountCode) + '</small></td><td>' + esc(row.name) + '<small>' + esc(row.code) + '</small></td><td>' + esc(row.unit || 'Не задано') + '</td>' + cell(row, 'qtyAcct') + cell(row, 'qtyFact') + '<td>' + esc(row.inventoryDate || 'Нет описи') + (row.comparisonStatus !== 'known' ? '<small>' + esc(stateText[str(row.comparisonStatus)] || 'Неизвестно') + '</small>' : '') + '</td>' + cell(row, 'difference') + '<td>' + button('edit', 'Карточка', 'data-ai-ref="' + reference('inventoryItems', row.itemId) + '"') + (isId(row.sessionId) ? button('session', 'Опись', 'data-ai-ref="' + reference('inventorySessions', row.sessionId) + '"') : '') + '</td></tr>').join('') + '</tbody></table>' + (entries.length ? '' : '<p class="ai-empty">Нет имущества по выбранным фильтрам. Загрузите инвентаризацию или создайте организацию, объект, МОЛ и позиции имущества.</p>') + '</div>' + (totals.length ? '<h3>Итоги по объектам, организациям и единицам</h3><div class="ai-scroll"><table data-ai-quantity-totals><thead><tr><th>Объект / организация</th><th>Ед.</th><th>Позиций</th><th>Учёт</th><th>Факт</th><th>Даты описи</th><th>Отклонение</th></tr></thead><tbody>' + totals.map(group => '<tr><td>' + esc(group.objectName) + '<small>' + esc(group.orgName) + '</small></td><td>' + esc(group.unit || 'Не задано') + '</td><td>' + esc(group.rows) + '</td>' + cell(group, 'qtyAcct') + cell(group, 'qtyFact') + '<td>' + esc(group.inventoryDate || ([group.inventoryDateFrom, group.inventoryDateTo].filter(Boolean).join(' — ') || 'Нет описи')) + '</td>' + cell(group, 'difference') + '</tr>').join('') + '</tbody></table></div><p class="ai-muted">Разные объекты, организации и единицы не складываются. Неизвестные значения исключают полный итог.</p>' : '') + '<h3>Описи и подсчёты</h3>' + sessionsHtml(snapshot);
+        }
         function sessionsHtml(snapshot) { const sessions = rows(snapshot.database, 'inventorySessions').filter(session => sessionMatches(session) && (tab !== 'documents' || session.status === 'approved')); return '<div class="ai-actions ai-toolbar">' + button('createSession', 'Начать подсчёт по объекту', writable(snapshot) ? '' : 'disabled') + '</div><p class="ai-muted">Опись сохраняет учётные данные на момент создания. Просмотр и ввод факта не меняют реестр имущества.</p><div class="ai-scroll"><table><thead><tr><th>Дата / название</th><th>Объект</th><th>Организация</th><th>Редакция</th><th>Состояние</th><th>Позиций</th><th>Действие</th></tr></thead><tbody>' + sessions.map(session => '<tr><td>' + esc(session.date) + '<small>' + esc(session.title) + '</small></td><td>' + esc(session.objectName) + '</td><td>' + esc(session.orgName || 'Все организации объекта') + '</td><td>' + esc(session.revision) + '</td><td>' + esc(session.status === 'approved' ? 'Утверждена' : 'Черновик') + '</td><td>' + list(session.rows).length + '</td><td>' + button('session', 'Открыть', 'data-ai-ref="' + reference('inventorySessions', session.id) + '"') + '</td></tr>').join('') + '</tbody></table>' + (sessions.length ? '' : '<p class="ai-empty">Здесь появятся ' + (tab === 'documents' ? 'утверждённые описи' : 'подсчёты по объектам') + '.</p>') + '</div>'; }
         async function route(element) { try {
             if (filePending)
@@ -295,7 +319,7 @@ var AssetInventoryWorkspace;
         }
         function catalogList(section) { if (!catalogs.includes(section))
             throw Error('Неизвестный справочник'); const snapshot = host.snapshot(), entries = active(snapshot.database, section), tokens = new Map(); const body = entries.map((entry, index) => { if (!isId(entry.id))
-            return ''; const token = 'e' + index; tokens.set(token, entry.id); return '<tr><td>' + esc(entry.name) + '</td><td>' + esc(section === 'inventoryMols' ? entry.accountCode : entry.note) + '</td><td>' + button('entry', 'Открыть', 'data-ai-entry="' + token + '"') + '</td></tr>'; }).join(''); const s = show(labels[section], '<p>Этот справочник относится только к инвентаризации ОС.</p><div class="ai-actions">' + button('new', 'Добавить', writable(snapshot) ? '' : 'disabled') + '</div><div class="ai-scroll"><table><thead><tr><th>Наименование</th><th>Примечание / счёт</th><th></th></tr></thead><tbody>' + body + '</tbody></table></div><p data-ai-error role="alert" class="ai-error"></p>'); required(s.element, '[data-ai-action=new]').onclick = () => { try {
+            return ''; const token = 'e' + index; tokens.set(token, entry.id); return '<tr><td>' + esc(entry.name) + '</td><td>' + esc(section === 'inventoryMols' ? entry.accountCode : entry.note) + '</td><td>' + button('entry', 'Открыть', 'data-ai-entry="' + token + '"') + '</td></tr>'; }).join(''); const s = show(labels[section], '<p>Справочник имущества для инвентаризации и количественного учета.</p><div class="ai-actions">' + button('new', 'Добавить', writable(snapshot) ? '' : 'disabled') + '</div><div class="ai-scroll"><table><thead><tr><th>Наименование</th><th>Примечание / счёт</th><th></th></tr></thead><tbody>' + body + '</tbody></table></div><p data-ai-error role="alert" class="ai-error"></p>'); required(s.element, '[data-ai-action=new]').onclick = () => { try {
             check(s, true, true);
             openCatalog(section);
         }
@@ -319,12 +343,12 @@ var AssetInventoryWorkspace;
             if (section === 'inventoryMols')
                 html += selectField('orgId', 'Организация', active(db, 'inventoryOrgs'), isId(entry?.orgId) ? entry.orgId : filters.org, choices) + selectField('objectId', 'Объект', active(db, 'inventoryObjects'), isId(entry?.objectId) ? entry.objectId : filters.object, choices) + control('accountCode', 'Счёт', str(entry?.accountCode));
             if (section === 'inventoryItems')
-                html += selectField('molId', 'МОЛ / счёт', active(db, 'inventoryMols').map(mol => ({ ...mol, name: str(mol.name) + ' · ' + name(db, 'inventoryOrgs', mol.orgId) + ' / ' + name(db, 'inventoryObjects', mol.objectId) + ' · ' + str(mol.accountCode) })), isId(entry?.molId) ? entry.molId : filters.mol, choices) + control('code', 'Код / инвентарный номер', str(entry?.code)) + control('unit', 'Единица измерения', str(entry?.unit)) + control('qty', 'Учётное количество', valueText(entry?.qty)) + control('cost', 'Учётная стоимость', valueText(entry?.cost));
+                html += selectField('molId', 'МОЛ / счёт', active(db, 'inventoryMols').map(mol => ({ ...mol, name: str(mol.name) + ' · ' + name(db, 'inventoryOrgs', mol.orgId) + ' / ' + name(db, 'inventoryObjects', mol.objectId) + ' · ' + str(mol.accountCode) })), isId(entry?.molId) ? entry.molId : filters.mol, choices) + control('code', 'Код / инвентарный номер', str(entry?.code)) + control('unit', 'Единица измерения', str(entry?.unit)) + control('qty', 'Учётное количество', valueText(entry?.qty)) + (quantity ? '' : control('cost', 'Учётная стоимость', valueText(entry?.cost)));
             html += textArea('note', 'Примечание', str(entry?.note)) + '</div>' + footer() + (entry && writable(snapshot) ? button('archive', 'В архив') : '');
             const s = show((entry ? 'Карточка: ' : 'Добавить: ') + labels[section], html, choices);
             s.input = () => { const payload = { name: field(s.element, 'name').value, note: field(s.element, 'note').value }; if (section === 'inventoryMols')
                 Object.assign(payload, { orgId: selected(s, 'orgId'), objectId: selected(s, 'objectId'), accountCode: field(s.element, 'accountCode').value }); if (section === 'inventoryItems')
-                Object.assign(payload, { molId: selected(s, 'molId'), code: field(s.element, 'code').value, unit: field(s.element, 'unit').value, qty: inputNumber(field(s.element, 'qty').value, 3), cost: inputNumber(field(s.element, 'cost').value, 2) }); return { action: 'saveCatalog', section, ...(id !== undefined ? { id } : {}), payload, reason: field(s.element, 'reason').value }; };
+                Object.assign(payload, { molId: selected(s, 'molId'), code: field(s.element, 'code').value, unit: field(s.element, 'unit').value, qty: inputNumber(field(s.element, 'qty').value, 3), cost: quantity ? (entry?.cost ?? null) : inputNumber(field(s.element, 'cost').value, 2) }); return { action: 'saveCatalog', section, ...(id !== undefined ? { id } : {}), payload, reason: field(s.element, 'reason').value }; };
             if (entry) {
                 const archive = s.element.querySelector('[data-ai-action=archive]');
                 if (archive)
@@ -350,12 +374,12 @@ var AssetInventoryWorkspace;
             throw Error(unavailable(snapshot)); const choices = new Map(), s = show('Начать подсчёт по объекту', '<p>Учётные данные и названия будут скопированы в новую опись. Позже изменения реестра не перепишут эту опись.</p><div class="ai-grid">' + selectField('objectId', 'Объект', active(snapshot.database, 'inventoryObjects'), filters.object, choices) + selectField('orgId', 'Организация', active(snapshot.database, 'inventoryOrgs'), filters.org, choices, 'Все организации объекта') + control('date', 'Дата описи', snapshot.today, 'date') + control('title', 'Название описи') + '</div>' + footer('Создать черновик'), choices); s.input = () => { const orgId = selected(s, 'orgId', true); return { action: 'createSession', objectId: selected(s, 'objectId'), ...(orgId === undefined ? {} : { orgId }), date: field(s.element, 'date').value, title: field(s.element, 'title').value, reason: field(s.element, 'reason').value }; }; seal(s); }
         function commissionHtml(value) { const commission = object(value.commission), chairman = object(commission.chairman), members = list(commission.members); return '<fieldset><legend>Комиссия</legend><div class="ai-grid">' + control('chairmanName', 'ФИО председателя', str(chairman.name)) + control('chairmanPosition', 'Должность председателя', str(chairman.position)) + '</div><div data-ai-members>' + members.map((person, index) => memberHtml(person, index)).join('') + '</div>' + button('addMember', 'Добавить члена комиссии') + '</fieldset>'; }
         function memberHtml(person, index) { return '<div class="ai-member" data-ai-member="' + index + '">' + control('memberName' + index, 'ФИО', str(person.name)) + control('memberPosition' + index, 'Должность', str(person.position)) + button('removeMember', 'Убрать') + '</div>'; }
-        function factsHtml(model, editable) { return '<div class="ai-scroll ai-facts"><table><thead><tr><th>Организация / МОЛ / счёт</th><th>Имущество / код</th><th>Ед.</th><th>Кол-во учёт</th><th>Кол-во факт</th><th>Стоимость учёт</th><th>Стоимость факт</th><th>Решение</th><th>Примечание</th></tr></thead><tbody>' + list(model.rows).map((row, index) => '<tr data-ai-fact="' + index + '"><td>' + esc(row.orgName) + '<small>' + esc(row.molName) + ' · ' + esc(row.accountCode) + '</small></td><td>' + esc(row.name) + '<small>' + esc(row.code) + '</small></td><td>' + esc(row.unit || 'Не задано') + '</td><td>' + esc(numberText(row.qtyAcct)) + '</td><td>' + (editable ? '<input aria-label="Фактическое количество: ' + esc(row.name) + '" name="qtyFact' + index + '" value="' + esc(valueText(row.qtyFact)) + '" inputmode="decimal">' : esc(numberText(row.qtyFact))) + '</td><td>' + esc(numberText(row.costAcct)) + '</td><td>' + (editable ? '<input aria-label="Фактическая стоимость: ' + esc(row.name) + '" name="costFact' + index + '" value="' + esc(valueText(row.costFact)) + '" inputmode="decimal">' : esc(numberText(row.costFact))) + '</td><td>' + (editable ? '<select aria-label="Решение: ' + esc(row.name) + '" name="action' + index + '">' + [['', 'Не выбрано'], ['writeoff', 'Списать'], ['transfer', 'Передать']].map(([value, label]) => '<option value="' + value + '"' + (row.action === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select>' : esc(row.action === 'writeoff' ? 'Списать' : row.action === 'transfer' ? 'Передать' : 'Не выбрано')) + '</td><td>' + (editable ? '<input aria-label="Примечание: ' + esc(row.name) + '" name="note' + index + '" value="' + esc(row.note) + '">' : esc(row.note)) + '</td></tr>').join('') + '</tbody></table></div>'; }
-        function summaryHtml(model) { const summary = object(model.summary), costs = object(summary.costs); return '<div class="ai-summary"><p>Позиций: ' + esc(summary.rows) + ' · проверено: ' + esc(summary.checked) + ' · недостача: ' + esc(summary.shortage) + ' · излишек: ' + esc(summary.surplus) + '</p>' + list(summary.quantities).map(group => '<p>' + esc(group.unit || 'Единица не задана') + ': учёт ' + esc(exactText(group, 'qtyAcct')) + '; факт ' + esc(exactText(group, 'qtyFact')) + '; разница ' + esc(exactText(group, 'difference')) + '.</p>').join('') + '<p>Стоимость: учёт ' + esc(exactText(costs, 'costAcct')) + '; факт ' + esc(exactText(costs, 'costFact')) + '; разница ' + esc(exactText(costs, 'difference')) + '.</p><p class="ai-muted">Разные единицы не складываются. Неизвестные значения исключают полный итог.</p></div>'; }
+        function factsHtml(model, editable) { return '<div class="ai-scroll ai-facts"><table><thead><tr><th>Организация / МОЛ / счёт</th><th>Имущество / код</th><th>Ед.</th><th>Кол-во учёт</th><th>Кол-во факт</th>' + (quantity ? '' : '<th>Стоимость учёт</th><th>Стоимость факт</th>') + '<th>Решение</th><th>Примечание</th></tr></thead><tbody>' + list(model.rows).map((row, index) => '<tr data-ai-fact="' + index + '"><td>' + esc(row.orgName) + '<small>' + esc(row.molName) + ' · ' + esc(row.accountCode) + '</small></td><td>' + esc(row.name) + '<small>' + esc(row.code) + '</small></td><td>' + esc(row.unit || 'Не задано') + '</td><td>' + esc(numberText(row.qtyAcct)) + '</td><td>' + (editable ? '<input aria-label="Фактическое количество: ' + esc(row.name) + '" name="qtyFact' + index + '" value="' + esc(valueText(row.qtyFact)) + '" inputmode="decimal">' : esc(numberText(row.qtyFact))) + '</td>' + (quantity ? '' : '<td>' + esc(numberText(row.costAcct)) + '</td><td>' + (editable ? '<input aria-label="Фактическая стоимость: ' + esc(row.name) + '" name="costFact' + index + '" value="' + esc(valueText(row.costFact)) + '" inputmode="decimal">' : esc(numberText(row.costFact))) + '</td>') + '<td>' + (editable ? '<select aria-label="Решение: ' + esc(row.name) + '" name="action' + index + '">' + [['', 'Не выбрано'], ['writeoff', 'Списать'], ['transfer', 'Передать']].map(([value, label]) => '<option value="' + value + '"' + (row.action === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select>' : esc(row.action === 'writeoff' ? 'Списать' : row.action === 'transfer' ? 'Передать' : 'Не выбрано')) + '</td><td>' + (editable ? '<input aria-label="Примечание: ' + esc(row.name) + '" name="note' + index + '" value="' + esc(row.note) + '">' : esc(row.note)) + '</td></tr>').join('') + '</tbody></table></div>'; }
+        function summaryHtml(model) { const summary = object(model.summary), costs = object(summary.costs); return '<div class="ai-summary"><p>Позиций: ' + esc(summary.rows) + ' · проверено: ' + esc(summary.checked) + ' · недостача: ' + esc(summary.shortage) + ' · излишек: ' + esc(summary.surplus) + '</p>' + list(summary.quantities).map(group => '<p>' + esc(group.unit || 'Единица не задана') + ': учёт ' + esc(exactText(group, 'qtyAcct')) + '; факт ' + esc(exactText(group, 'qtyFact')) + '; разница ' + esc(exactText(group, 'difference')) + '.</p>').join('') + (quantity ? '' : '<p>Стоимость: учёт ' + esc(exactText(costs, 'costAcct')) + '; факт ' + esc(exactText(costs, 'costFact')) + '; разница ' + esc(exactText(costs, 'difference')) + '.</p>') + '<p class="ai-muted">Разные единицы не складываются. Неизвестные значения исключают полный итог.</p></div>'; }
         function openSession(id) {
             try {
                 const snapshot = host.snapshot(), session = lookup(snapshot.database, 'inventorySessions', id), model = host.core.exportModel(session), readonly = session.status === 'approved' || !writable(snapshot);
-                let html = '<div class="ai-actions">' + button('exportXlsx', 'Сохранить Excel') + button('exportPdf', 'Сохранить PDF') + (session.status === 'draft' && writable(snapshot) ? button('amendDraft', 'Исправить учётные данные') + button('approve', 'Утвердить') : '') + (session.status === 'approved' && writable(snapshot) ? button('revise', 'Новая редакция') : '') + '</div><p class="ai-muted">' + esc(model.objectName) + ' · ' + esc(model.orgName || 'Все организации объекта') + ' · редакция ' + esc(model.revision) + ' · ' + (session.status === 'approved' ? 'Утверждённая опись' : 'Черновик: документ не утверждён') + '</p>';
+                let html = '<div class="ai-actions">' + (quantity ? '' : button('exportXlsx', 'Сохранить Excel') + button('exportPdf', 'Сохранить PDF')) + (session.status === 'draft' && writable(snapshot) ? button('amendDraft', 'Исправить учётные данные') + button('approve', 'Утвердить') : '') + (session.status === 'approved' && writable(snapshot) ? button('revise', 'Новая редакция') : '') + '</div><p class="ai-muted">' + esc(model.objectName) + ' · ' + esc(model.orgName || 'Все организации объекта') + ' · редакция ' + esc(model.revision) + ' · ' + (session.status === 'approved' ? 'Утверждённая опись' : 'Черновик: документ не утверждён') + '</p>';
                 if (readonly) {
                     const approval = object(model.approval), commission = object(model.commission), chairman = object(commission.chairman);
                     html += '<h4>' + esc(model.title) + '</h4><p>' + esc(model.date) + ' · ' + esc(model.note) + '</p>' + (session.status === 'approved' ? '<p>Утверждено ' + esc(approval.date) + ' · ' + esc(approval.document) + ' · ' + esc(approval.actor) + '</p>' : '') + '<p>Председатель: ' + esc(chairman.name) + ' · ' + esc(chairman.position) + '</p>' + list(commission.members).map(person => '<p>' + esc(person.name) + ' · ' + esc(person.position) + '</p>').join('') + factsHtml(model, false) + summaryHtml(model) + amendmentsHtml(model) + '<p data-ai-error class="ai-error" role="alert"></p>';
@@ -365,7 +389,7 @@ var AssetInventoryWorkspace;
                 const s = show('Опись: ' + str(model.objectName), html);
                 s.sessionId = id;
                 s.original = clone(session);
-                s.input = () => { const facts = list(session.rows).map((row, index) => ({ rowId: row.id, qtyFact: inputNumber(field(s.element, 'qtyFact' + index).value, 3), costFact: inputNumber(field(s.element, 'costFact' + index).value, 2), action: field(s.element, 'action' + index).value, note: field(s.element, 'note' + index).value })), members = [...s.element.querySelectorAll('[data-ai-member]')].map(node => { const inputs = node.querySelectorAll('input'); return { name: inputs[0]?.value ?? '', position: inputs[1]?.value ?? '' }; }); return { action: 'saveDraft', sessionId: id, payload: { date: field(s.element, 'date').value, title: field(s.element, 'title').value, note: field(s.element, 'note').value, commission: { chairman: { name: field(s.element, 'chairmanName').value, position: field(s.element, 'chairmanPosition').value }, members }, facts }, reason: field(s.element, 'reason').value }; };
+                s.input = () => { const facts = list(session.rows).map((row, index) => ({ rowId: row.id, qtyFact: inputNumber(field(s.element, 'qtyFact' + index).value, 3), costFact: quantity ? (row.costFact ?? null) : inputNumber(field(s.element, 'costFact' + index).value, 2), action: field(s.element, 'action' + index).value, note: field(s.element, 'note' + index).value })), members = [...s.element.querySelectorAll('[data-ai-member]')].map(node => { const inputs = node.querySelectorAll('input'); return { name: inputs[0]?.value ?? '', position: inputs[1]?.value ?? '' }; }); return { action: 'saveDraft', sessionId: id, payload: { date: field(s.element, 'date').value, title: field(s.element, 'title').value, note: field(s.element, 'note').value, commission: { chairman: { name: field(s.element, 'chairmanName').value, position: field(s.element, 'chairmanPosition').value }, members }, facts }, reason: field(s.element, 'reason').value }; };
                 s.element.querySelectorAll('[data-ai-action]').forEach(element => element.onclick = () => { try {
                     check(s);
                     const action = element.dataset.aiAction;
@@ -410,7 +434,7 @@ var AssetInventoryWorkspace;
                 return '';
             return '<section class="ai-summary" data-ai-amendments><h4>Исправления учётных данных</h4>' + amendments.map(amendment => {
                 const before = object(amendment.before), after = object(amendment.after), row = list(model.rows).find(value => value.id === amendment.rowId);
-                return '<div><p><strong>' + esc(row?.name ?? 'Позиция описи') + '</strong>: единица ' + esc(before.unit || 'Не задано') + ' → ' + esc(after.unit || 'Не задано') + '; количество ' + esc(numberText(before.qtyAcct)) + ' → ' + esc(numberText(after.qtyAcct)) + '; стоимость ' + esc(numberText(before.costAcct)) + ' → ' + esc(numberText(after.costAcct)) + '.</p><p class="ai-muted">' + esc(amendment.reason) + ' · ' + esc(amendment.actor) + ' · ' + esc(amendment.at) + '</p></div>';
+                return '<div><p><strong>' + esc(row?.name ?? 'Позиция описи') + '</strong>: единица ' + esc(before.unit || 'Не задано') + ' → ' + esc(after.unit || 'Не задано') + '; количество ' + esc(numberText(before.qtyAcct)) + ' → ' + esc(numberText(after.qtyAcct)) + (quantity ? '' : '; стоимость ' + esc(numberText(before.costAcct)) + ' → ' + esc(numberText(after.costAcct))) + '.</p><p class="ai-muted">' + esc(amendment.reason) + ' · ' + esc(amendment.actor) + ' · ' + esc(amendment.at) + '</p></div>';
             }).join('') + '</section>';
         }
         function amendDraftForm(prior, id) {
@@ -420,10 +444,10 @@ var AssetInventoryWorkspace;
                 throw Error('Утверждённую опись изменять нельзя. Создайте новую редакцию.');
             const entries = list(original.rows);
             prior.committed = true;
-            const html = '<p>Выберите строки и укажите проверенные учётные данные. Пустое числовое поле означает неизвестное значение. Поправка сохранится с причиной и автором; исходный источник импорта и каталог имущества останутся прежними.</p><div class="ai-scroll"><table><thead><tr><th>Исправить</th><th>Имущество / МОЛ</th><th>Единица измерения</th><th>Учётное количество</th><th>Учётная стоимость</th></tr></thead><tbody>' + entries.map((row, index) => '<tr data-ai-correction="' + index + '"><td><input type="checkbox" name="correct' + index + '" aria-label="Исправить: ' + esc(row.name) + '"></td><td>' + esc(row.name) + '<small>' + esc(row.code) + ' · ' + esc(row.molName) + '</small></td><td><input name="unit' + index + '" aria-label="Единица: ' + esc(row.name) + '" value="' + esc(row.unit) + '" disabled></td><td><input name="qtyAcct' + index + '" aria-label="Учётное количество: ' + esc(row.name) + '" value="' + esc(valueText(row.qtyAcct)) + '" inputmode="decimal" disabled></td><td><input name="costAcct' + index + '" aria-label="Учётная стоимость: ' + esc(row.name) + '" value="' + esc(valueText(row.costAcct)) + '" inputmode="decimal" disabled></td></tr>').join('') + '</tbody></table></div>' + footer('Сохранить исправления');
+            const html = '<p>Выберите строки и укажите проверенные учётные данные. Пустое числовое поле означает неизвестное значение. Поправка сохранится с причиной и автором; исходный источник импорта и каталог имущества останутся прежними.</p><div class="ai-scroll"><table><thead><tr><th>Исправить</th><th>Имущество / МОЛ</th><th>Единица измерения</th><th>Учётное количество</th>' + (quantity ? '' : '<th>Учётная стоимость</th>') + '</tr></thead><tbody>' + entries.map((row, index) => '<tr data-ai-correction="' + index + '"><td><input type="checkbox" name="correct' + index + '" aria-label="Исправить: ' + esc(row.name) + '"></td><td>' + esc(row.name) + '<small>' + esc(row.code) + ' · ' + esc(row.molName) + '</small></td><td><input name="unit' + index + '" aria-label="Единица: ' + esc(row.name) + '" value="' + esc(row.unit) + '" disabled></td><td><input name="qtyAcct' + index + '" aria-label="Учётное количество: ' + esc(row.name) + '" value="' + esc(valueText(row.qtyAcct)) + '" inputmode="decimal" disabled></td>' + (quantity ? '' : '<td><input name="costAcct' + index + '" aria-label="Учётная стоимость: ' + esc(row.name) + '" value="' + esc(valueText(row.costAcct)) + '" inputmode="decimal" disabled></td>') + '</tr>').join('') + '</tbody></table></div>' + footer('Сохранить исправления');
             const s = show('Исправить учётные данные описи', html);
             s.original = original;
-            s.input = () => ({ action: 'amendDraft', sessionId: id, corrections: entries.flatMap((row, index) => field(s.element, 'correct' + index).checked ? [{ rowId: row.id, unit: field(s.element, 'unit' + index).value, qtyAcct: inputNumber(field(s.element, 'qtyAcct' + index).value, 3), costAcct: inputNumber(field(s.element, 'costAcct' + index).value, 2) }] : []), reason: field(s.element, 'reason').value });
+            s.input = () => ({ action: 'amendDraft', sessionId: id, corrections: entries.flatMap((row, index) => field(s.element, 'correct' + index).checked ? [{ rowId: row.id, unit: field(s.element, 'unit' + index).value, qtyAcct: inputNumber(field(s.element, 'qtyAcct' + index).value, 3), costAcct: quantity ? (row.costAcct ?? null) : inputNumber(field(s.element, 'costAcct' + index).value, 2) }] : []), reason: field(s.element, 'reason').value });
             s.element.querySelectorAll('input[type=checkbox][name^=correct]').forEach(element => element.addEventListener('change', () => { if (s.pending || s.uncertain)
                 return; const row = element.closest('[data-ai-correction]'); row?.querySelectorAll('input:not([type=checkbox])').forEach(input => { input.disabled = !element.checked; }); }));
             seal(s);
@@ -464,16 +488,33 @@ var AssetInventoryWorkspace;
         catch (error) {
             formError(s, saved ? Error('Файл уже сохранён, но контекст формы изменился. ' + errorMessage(error)) : error);
         } }
-        async function importFile(format) { if (filePending)
-            return; const snapshot = host.snapshot(); assertSnapshot(snapshot, source(snapshot), true); if (!host.importFile)
-            throw Error('Безопасный предпросмотр импорта недоступен в этом подключении. Никакие данные не записаны.'); const scope = { ...(filters.org === undefined ? {} : { orgId: filters.org }), ...(filters.object === undefined ? {} : { objectId: filters.object }), ...(filters.mol === undefined ? {} : { molId: filters.mol }) }; const capturedSource = source(snapshot), pending = (async () => { const result = await host.importFile({ format, scope }); assertSnapshot(snapshot, null, true); if (!result.ok && !result.cancelled)
-            throw Error(result.error || 'Импорт не подтверждён'); status(result.cancelled ? 'Импорт отменён' : result.message || 'Предпросмотр импорта открыт.'); if (source(host.snapshot()) !== capturedSource && container)
-            render(container); })(); filePending = pending; try {
-            await pending;
+        async function importFile(format) {
+            if (filePending)
+                return;
+            const snapshot = host.snapshot();
+            assertSnapshot(snapshot, source(snapshot));
+            // Legacy bases stay unchanged. The import action leads to the existing,
+            // reviewed copy workflow before attempting any inventory file operation.
+            if (!supported(snapshot)) {
+                status('Для импорта создайте и выберите совместимую копию базы в открывшемся окне.');
+                host.openUpgrade();
+                return;
+            }
+            assertSnapshot(snapshot, source(snapshot), true);
+            if (!host.importFile)
+                throw Error('Безопасный предпросмотр импорта недоступен в этом подключении. Никакие данные не записаны.');
+            const scope = { ...(filters.org === undefined ? {} : { orgId: filters.org }), ...(filters.object === undefined ? {} : { objectId: filters.object }), ...(filters.mol === undefined ? {} : { molId: filters.mol }) };
+            const capturedSource = source(snapshot), pending = (async () => { const result = await host.importFile({ format, scope }); assertSnapshot(snapshot, null, true); if (!result.ok && !result.cancelled)
+                throw Error(result.error || 'Импорт не подтверждён'); status(result.cancelled ? 'Импорт отменён' : result.message || 'Предпросмотр импорта открыт.'); if (source(host.snapshot()) !== capturedSource && container)
+                render(container); })();
+            filePending = pending;
+            try {
+                await pending;
+            }
+            finally {
+                filePending = null;
+            }
         }
-        finally {
-            filePending = null;
-        } }
         function hasPendingEdits() { return !!filePending || !!form && (!!form.pending || dirty(form)); }
         async function flush() { const pending = filePending ?? form?.pending; if (pending) {
             try {
@@ -495,6 +536,7 @@ var AssetInventoryWorkspace;
     AssetInventoryWorkspace.create = create;
 })(AssetInventoryWorkspace || (AssetInventoryWorkspace = {}));
 let assetInventoryMountedWorkspace = null;
+let objectQuantityMountedWorkspace = null;
 let assetInventoryMountedIdentity = null;
 const assetInventoryOwnSections = ['inventoryOrgs', 'inventoryObjects', 'inventoryMols', 'inventoryItems', 'inventorySessions'];
 function assetInventoryHostSnapshot() {
@@ -502,17 +544,25 @@ function assetInventoryHostSnapshot() {
     const identity = JSON.stringify([_sync.databaseToken ?? null, _sync.epoch ?? null]);
     return { database: data, identity, analysisStamp: wfCommandContextStamp(), isSQLite: platform?.storageKind === 'sqlite', schemaVersion: platform?.schemaVersion ?? 0, capabilities: platform?.negotiation?.selectedProfile?.capabilities ?? [], canRead: assetInventoryOwnSections.every(name => has(context.readable, name)), canWrite: context.blocked !== true && platform?.readOnly !== true && assetInventoryOwnSections.every(name => has(context.writable, name)), today: context.today };
 }
-function assetInventoryWorkspaceInstance() {
-    if (assetInventoryMountedWorkspace)
-        return assetInventoryMountedWorkspace;
-    assetInventoryMountedWorkspace = AssetInventoryWorkspace.create({ core: AssetInventory, snapshot: assetInventoryHostSnapshot, operationId: () => wfId('asset-inventory'), execute: (input, options) => platformExecuteCommand({ type: 'AssetInventoryAction', version: 1, input }, options), openUpgrade: () => lifecycleUpgradeOpen(), confirmDiscard: message => window.confirm(message), importFile: request => assetInventoryImportWizard(request), exportFile: request => assetInventoryExportDocument({ format: request.format, sessionId: request.sessionId }) });
-    return assetInventoryMountedWorkspace;
+function assetInventoryWorkspaceInstance(mode = 'inventory') {
+    const existing = mode === 'quantity' ? objectQuantityMountedWorkspace : assetInventoryMountedWorkspace;
+    if (existing)
+        return existing;
+    const workspace = AssetInventoryWorkspace.create({ mode, core: AssetInventory, snapshot: assetInventoryHostSnapshot, operationId: () => wfId('asset-inventory'), execute: (input, options) => platformExecuteCommand({ type: 'AssetInventoryAction', version: 1, input }, options), openUpgrade: () => lifecycleUpgradeOpen(), confirmDiscard: message => window.confirm(message), importFile: request => assetInventoryImportWizard(request), exportFile: request => assetInventoryExportDocument({ format: request.format, sessionId: request.sessionId }) });
+    if (mode === 'quantity')
+        objectQuantityMountedWorkspace = workspace;
+    else
+        assetInventoryMountedWorkspace = workspace;
+    return workspace;
 }
-function renderAssetInventorySection() {
+function objectQuantityWorkspaceInstance() { return assetInventoryWorkspaceInstance('quantity'); }
+function renderAssetInventorySection() { renderAssetInventoryMode('inventory'); }
+function renderObjectQuantitySection() { renderAssetInventoryMode('quantity'); }
+function renderAssetInventoryMode(mode) {
     const container = document.getElementById('mainContent');
     if (!container)
         throw Error('Не найден раздел программы');
-    const snapshot = assetInventoryHostSnapshot(), workspace = assetInventoryWorkspaceInstance();
+    const snapshot = assetInventoryHostSnapshot(), workspace = assetInventoryWorkspaceInstance(mode);
     if (assetInventoryMountedIdentity !== null && assetInventoryMountedIdentity !== snapshot.identity)
         assetInventoryWorkspaceRevoke();
     if (!snapshot.canRead)
@@ -521,20 +571,22 @@ function renderAssetInventorySection() {
     workspace.render(container);
 }
 function assetInventoryWorkspaceLeave() {
-    if (!assetInventoryMountedWorkspace)
-        return true;
-    const left = assetInventoryMountedWorkspace.unmount();
-    if (!left)
-        showToast('Завершите сохранение или закройте форму инвентаризации.');
-    return left;
+    for (const workspace of [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace])
+        if (workspace && !workspace.unmount()) {
+            showToast('Завершите сохранение или закройте форму учёта имущества.');
+            return false;
+        }
+    return true;
 }
-function assetInventoryWorkspaceFlush() { return assetInventoryMountedWorkspace?.flush() ?? Promise.resolve(true); }
-function assetInventoryWorkspaceHasPendingEdits() { return assetInventoryMountedWorkspace?.hasPendingEdits() ?? false; }
+async function assetInventoryWorkspaceFlush() { let ready = true; for (const workspace of [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace])
+    if (workspace && !await workspace.flush())
+        ready = false; return ready; }
+function assetInventoryWorkspaceHasPendingEdits() { return [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace].some(workspace => workspace?.hasPendingEdits()); }
 function assetInventoryWorkspaceRevoke() {
     assetInventoryFilesRevoke();
-    // Forced session changes must not leave old organization costs in the DOM.
-    const workspace = assetInventoryMountedWorkspace;
-    workspace?.invalidate?.();
+    // Forced session changes revoke both views of the shared private register.
+    for (const workspace of [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace])
+        workspace?.invalidate();
     assetInventoryMountedIdentity = null;
 }
 /** Browser-selected bytes only. The host decodes, binds and stores sources;

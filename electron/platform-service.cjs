@@ -18,7 +18,10 @@ function bindHistory(database,dataDir){
   return database;
 }
 function boundReceipt(binding,id){
-  if(!binding.receipts.has(id))binding.receipts.set(id,binding.engine.inspectReceipt(binding.state.head,id));
+  if(!binding.receipts.has(id)){
+    const stored=binding.engine.inspectReceipt(binding.state.head,id);
+    binding.receipts.set(id,stored?.kind==='receipt'&&!stored.legacy?Object.freeze({...stored,proof:require('./operation-evidence.cjs').validateProof(stored.proof)}):stored);
+  }
   return binding.receipts.get(id);
 }
 function projectHistoryEvent(event,principal,binding){
@@ -326,7 +329,15 @@ function queryHistoryInternal(dataDir,input,principal){
   const value=contracts().validateSections({appMeta:[input]},schema().sections).appMeta[0];
   if(Object.keys(value).some(name=>!['query','limit','cursor'].includes(name)))fail('HISTORY_QUERY','Некорректный запрос истории.');
   const token=require('./storage').databaseToken(dataDir),state=store.readState(dataDir),evidence=require('./operation-evidence.cjs'),principalStamp='sha256:'+crypto.createHash('sha256').update(kernel().stableSerialize([normalized.id,normalized.role,normalized.policyStamp])).digest('hex');
-  return {ok:true,databaseToken:token,...store.engine(dataDir).page(state.head,{databaseToken:token,principalStamp,query:value.query||{},limit:value.limit??25,...(value.cursor===undefined?{}:{cursor:value.cursor})},(event,context)=>publicAuditRow(context.proof.status==='legacy-unverified'&&context.proof.request?.status==='unknown'?evidence.projectLegacyEvent(event,normalized):evidence.projectEvent(event,context.proof,normalized)))};
+  // These keys are private ledger-owned segment proofs. Reuse only the fully
+  // validated immutable result within this query; current ACL projection runs
+  // separately for every event and no caller-supplied proof enters this map.
+  const checkedProofs=new WeakMap();
+  return {ok:true,databaseToken:token,...store.engine(dataDir).page(state.head,{databaseToken:token,principalStamp,query:value.query||{},limit:value.limit??25,...(value.cursor===undefined?{}:{cursor:value.cursor})},(event,context)=>{
+    const source=context.proof;if(source.status==='legacy-unverified'&&source.request?.status==='unknown')return publicAuditRow(evidence.projectLegacyEvent(event,normalized));
+    if(!checkedProofs.has(source))checkedProofs.set(source,evidence.validateProof(source));
+    return publicAuditRow(evidence.projectEvent(event,checkedProofs.get(source),normalized));
+  })};
 }
 function queryHistory(dataDir,input,principal){return require('./storage').withDatabaseLock(dataDir,()=>{const sqlite=require('./sqlite-storage.cjs'),action=()=>queryHistoryInternal(dataDir,input,principal);return sqlite.exists(dataDir)?sqlite.transaction(dataDir,action,{readOnly:true}):action();});}
 

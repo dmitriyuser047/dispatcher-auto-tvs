@@ -19,8 +19,8 @@ export type AssetInventoryActionInput=
  |{action:'approve';sessionId:Identifier;date:string;document:string;reason:string;reviewFingerprint:string}
  |{action:'revise';sessionId:Identifier;reason:string;reviewFingerprint:string}
  |{action:'amendDraft';sessionId:Identifier;corrections:AssetInventoryCorrection[];reason:string;reviewFingerprint:string}
- |{action:'importLegacy';sourceId:string;reason:string;reviewFingerprint:string}
- |{action:'importRows';sourceId:string;reason:string;reviewFingerprint:string};
+ |{action:'importLegacy';sourceId:string;sessionIds?:Identifier[];reason:string;reviewFingerprint:string}
+ |{action:'importRows';sourceId:string;sessionIds?:Identifier[];reason:string;reviewFingerprint:string};
 export interface AssetInventoryContext {id:string;now:string;today:string;actor:{id:string;name:string;role:string};readable?:string[];writable?:string[];importSource?:JsonRow}
 export interface AssetInventoryIssue {severity:'error'|'warning';section:string;recordId:Identifier|null;code:string;message:string;field?:string;rowId?:Identifier}
 export interface AssetInventoryResult {canApply:boolean;readSections:string[];writeSections:string[];sections:SectionRows;changed:{section:string;id:Identifier;type:'create'|'update'}[];issues:AssetInventoryIssue[];warnings:AssetInventoryIssue[];fingerprint:string;reviewFingerprint:string;session:JsonRow|null;entityIds:Record<string,Identifier>}
@@ -88,7 +88,7 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
  function draftPayload(value:unknown):AssetInventoryDraftPayload {const source=row(value);fields(source,['date','title','note','commission','facts']);if(!Array.isArray(source.facts)||source.facts.length>100000)fail('INVENTORY_FACTS','Нужны фактические данные всех строк описи');const facts=source.facts.map(fact),seen=new Set<Identifier>();for(const item of facts){if(seen.has(item.rowId))fail('INVENTORY_ROW_ID','Фактические данные строки повторяются');seen.add(item.rowId);}return {date:date(source.date,'Дата описи'),title:text(source.title,'Название',2000),note:text(source.note,'Примечание',20000),commission:commission(source.commission),facts};}
  function parse(value:unknown,preview=false):AssetInventoryActionInput {
   const source=row(value),action=source.action;
-  const allowed=action==='saveCatalog'?['action','section','id','payload','reason','reviewFingerprint']:action==='archiveCatalog'?['action','section','id','reason','reviewFingerprint']:action==='createSession'?['action','objectId','orgId','date','title','reason','reviewFingerprint']:action==='saveDraft'?['action','sessionId','payload','reason','reviewFingerprint']:action==='approve'?['action','sessionId','date','document','reason','reviewFingerprint']:action==='amendDraft'?['action','sessionId','corrections','reason','reviewFingerprint']:action==='importLegacy'||action==='importRows'?['action','sourceId','reason','reviewFingerprint']:['action','sessionId','reason','reviewFingerprint'];fields(source,allowed);
+  const allowed=action==='saveCatalog'?['action','section','id','payload','reason','reviewFingerprint']:action==='archiveCatalog'?['action','section','id','reason','reviewFingerprint']:action==='createSession'?['action','objectId','orgId','date','title','reason','reviewFingerprint']:action==='saveDraft'?['action','sessionId','payload','reason','reviewFingerprint']:action==='approve'?['action','sessionId','date','document','reason','reviewFingerprint']:action==='amendDraft'?['action','sessionId','corrections','reason','reviewFingerprint']:action==='importLegacy'||action==='importRows'?['action','sourceId','sessionIds','reason','reviewFingerprint']:['action','sessionId','reason','reviewFingerprint'];fields(source,allowed);
   const reason=text(source.reason,'Основание',20000);if(reason.trim().length<3)fail('INVENTORY_REASON','Укажите основание действия не короче трёх символов');
   const review=source.reviewFingerprint;if(!(preview&&review===undefined)&&(typeof review!=='string'||!/^sha256:[a-f0-9]{64}$/.test(review)))fail('INVENTORY_REVIEW','Сначала проверьте действие инвентаризации');const common={reason,reviewFingerprint:typeof review==='string'?review:'sha256:'+'0'.repeat(64)};
   if(action==='saveCatalog'){const section=catalogSection(source.section);return {action,section,...(own(source,'id')?{id:id(source.id)}:{}),payload:catalogPayload(section,source.payload) as unknown as AssetInventoryCatalogPayload,...common};}
@@ -101,7 +101,11 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
    if(!Array.isArray(source.corrections)||!source.corrections.length||source.corrections.length>100000)fail('INVENTORY_CORRECTIONS','Укажите исправляемые строки черновика');const seen=new Set<Identifier>();
    const corrections=source.corrections.map(value=>{const entry=row(value);fields(entry,['rowId','unit','qtyAcct','costAcct']);const rowId=id(entry.rowId),unit=text(entry.unit,'Единица измерения',100);if(seen.has(rowId))fail('INVENTORY_ROW_ID','Исправление строки повторяется');seen.add(rowId);if(!unit.trim())fail('INVENTORY_UNIT_REQUIRED','Укажите единицу измерения исправляемой строки');return {rowId,unit,qtyAcct:numeric(entry.qtyAcct,'Учётное количество',3),costAcct:numeric(entry.costAcct,'Учётная стоимость',2)};});return {action,sessionId:id(source.sessionId),corrections,...common};
   }
-  if(action==='importLegacy'||action==='importRows'){if(typeof source.sourceId!=='string'||!/^[a-f0-9]{64}$/.test(source.sourceId))fail('INVENTORY_IMPORT_SOURCE','Нужен отпечаток проверенного источника');return {action,sourceId:source.sourceId,...common};}
+  if(action==='importLegacy'||action==='importRows'){
+   if(typeof source.sourceId!=='string'||!/^[a-f0-9]{64}$/.test(source.sourceId))fail('INVENTORY_IMPORT_SOURCE','Нужен отпечаток проверенного источника');
+   let sessionIds:Identifier[]|undefined;if(own(source,'sessionIds')){if(!Array.isArray(source.sessionIds)||!source.sessionIds.length||source.sessionIds.length>1000)fail('INVENTORY_IMPORT_BATCH','Выберите от одной до 1000 исходных описей');sessionIds=source.sessionIds.map(id);if(new Set(sessionIds).size!==sessionIds.length)fail('INVENTORY_IMPORT_BATCH','Исходная опись повторяется в выбранном пакете');}
+   return {action,sourceId:source.sourceId,...(sessionIds?{sessionIds}:{}),...common};
+  }
   return fail('INVENTORY_ACTION','Неизвестное действие инвентаризации');
  }
  function sectionRows(value:unknown,name:string):JsonRow[] {if(!object(value))fail('INVENTORY_DATABASE','Нужен снимок инвентаризации');const d=Object.getOwnPropertyDescriptor(value,name);if(d&&(!d.enumerable||d.get||d.set))fail('INVENTORY_JSON','Исполняемые и скрытые разделы запрещены');const list=safe(d?.value??[]);if(!Array.isArray(list))fail('INVENTORY_DATABASE','Нужен список строк раздела '+name);return contracts.validateSections({[name]:list},[name])[name]||[];}
@@ -187,7 +191,8 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
   if(input.action==='importLegacy'&&source.format!=='inventory-legacy-json'||input.action==='importRows'&&source.format==='inventory-legacy-json')fail('INVENTORY_IMPORT_SOURCE','Формат источника не соответствует выбранному импорту');
   for(const field of ['sections','sourceScopes'])if(!Array.isArray(source[field])||!equal([...(source[field] as string[])].sort(),[...SECTIONS].sort()))fail('INVENTORY_IMPORT_SOURCE','Источник должен содержать только собственные разделы инвентаризации');
   for(const field of ['sourceArchive','sourceManifest']){const ref=row(source[field]);if(typeof ref.id!=='string'||!/^[a-f0-9]{64}\.[a-z0-9]{1,6}$/.test(ref.id)||!digest(ref.sha256)||ref.sha256!==ref.id.slice(0,64)||typeof ref.size!=='number'||!Number.isSafeInteger(ref.size)||ref.size<=0||typeof ref.name!=='string')fail('INVENTORY_IMPORT_SOURCE','Не подтверждён оригинал или манифест источника');if(field==='sourceArchive'&&ref.sha256!==source.sha256||field==='sourceManifest'&&ref.id!==input.sourceId+'.json')fail('INVENTORY_IMPORT_SOURCE','Отпечаток источника не совпадает с подтверждёнными файлами');}
-  for(const section of SECTIONS)for(const value of db[section]||[])if(object(value.sourceMeta)&&(value.sourceMeta.importSourceId===input.sourceId||value.sourceMeta.originalSha256===source.sha256&&value.sourceMeta.format===source.format))fail('INVENTORY_SOURCE_REPEATED','Этот источник уже импортирован; повторное добавление запрещено');
+  const batching=input.sessionIds!==undefined;
+  for(const section of SECTIONS)for(const value of db[section]||[])if(object(value.sourceMeta)&&(value.sourceMeta.importSourceId===input.sourceId||value.sourceMeta.originalSha256===source.sha256&&value.sourceMeta.format===source.format)&&(!batching||value.sourceMeta.importSourceId!==input.sourceId))fail('INVENTORY_SOURCE_REPEATED','Этот источник уже импортирован; повторное добавление запрещено');
   const sourceData=row(source.data);fields(sourceData,SECTIONS);const incoming=database(sourceData),maps=new Map<string,Map<Identifier,Identifier>>(),targets=new Map<string,JsonRow>(),namespace=(section:string,external:Identifier,scope?:Identifier):Identifier=>'inventory:'+fingerprint.sha256(stable({version:1,sourceId:input.sourceId,section,id:[typeof external,external],...(scope===undefined?{}:{scope:[typeof scope,scope]})}));
   if(own(source,'target')){
    if(input.action!=='importRows')fail('INVENTORY_IMPORT_TARGET','Полный перенос прежней базы не объединяется с существующими справочниками');const target=row(source.target);fields(target,['orgId','objectId','molId']);
@@ -195,11 +200,22 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
    const mol=targets.get('inventoryMols');if(mol){for(const[field,section]of [['orgId','inventoryOrgs'],['objectId','inventoryObjects']] as const){const owner=available(db,section,id(mol[field])),given=targets.get(section);if(given&&given.id!==owner.id)fail('INVENTORY_IMPORT_TARGET','Выбранный МОЛ относится к другой организации или объекту');targets.set(section,owner);}const sourceMol=incoming.inventoryMols?.[0];if(sourceMol&&typeof sourceMol.accountCode==='string'&&sourceMol.accountCode.trim()&&typeof mol.accountCode==='string'&&mol.accountCode.trim()&&sourceMol.accountCode!==mol.accountCode)fail('INVENTORY_IMPORT_TARGET','Счёт выбранного МОЛ отличается от счёта источника');}
    for(const[section]of targets)if((incoming[section]||[]).length>1)fail('INVENTORY_IMPORT_TARGET','Нельзя неявно объединять несколько организаций, объектов или МОЛ в одну запись');
   }
-  for(const section of SECTIONS){unique(incoming[section]||[],section);const map=new Map<Identifier,Identifier>(),target=targets.get(section);for(const value of incoming[section]||[]){const external=id(value.id),mapped=target?id(target.id):namespace(section,external);if(!target&&(db[section]||[]).some(value=>value.id===mapped))fail('INVENTORY_IMPORT_COLLISION','Идентификатор импорта уже занят');map.set(external,mapped);}maps.set(section,map);}
+  for(const section of SECTIONS){unique(incoming[section]||[],section);const map=new Map<Identifier,Identifier>(),target=targets.get(section);for(const value of incoming[section]||[]){const external=id(value.id),mapped=target?id(target.id):namespace(section,external);if(!batching&&!target&&(db[section]||[]).some(value=>value.id===mapped))fail('INVENTORY_IMPORT_COLLISION','Идентификатор импорта уже занят');map.set(external,mapped);}maps.set(section,map);}
   function linked(section:string,external:unknown):Identifier {const selected=id(external),mapped=maps.get(section)?.get(selected);if(mapped===undefined)fail('INVENTORY_IMPORT_REFERENCE','Источник ссылается на отсутствующую запись: '+section);return mapped;}
   function meta(value:JsonRow):JsonRow {return {...sourceLocator(value.sourceMeta),importSourceId:input.sourceId,originalSha256:source.sha256!,format:source.format!,name:source.name!,externalId:copy(value.id!),sourceArchive:fileReference(source.sourceArchive),sourceManifest:fileReference(source.sourceManifest)};}
   const provenance:JsonRow={version:1,sourceId:input.sourceId,sourceManifest:fileReference(source.sourceManifest),sourceArchive:fileReference(source.sourceArchive)};
-  const appended:SectionRows={},changed:AssetInventoryResult['changed']=[];let count=0;
+  // A bounded batch consists of complete, independent source documents. The
+  // same source namespace is retained across batches, including shared owners.
+  const selected=new Map<string,Set<Identifier>>(SECTIONS.map(section=>[section,new Set<Identifier>()]));
+  if(batching){
+   const chosen=selected.get(SESSION)!,itemUses=new Map<Identifier,number>();for(const selectedId of input.sessionIds!)chosen.add(selectedId);
+   for(const selectedId of chosen)if(!(incoming[SESSION]||[]).some(value=>value.id===selectedId))fail('INVENTORY_IMPORT_BATCH','Выбранная опись отсутствует в подтверждённом источнике');
+   for(const session of incoming[SESSION]||[]){if(!Array.isArray(session.rows))fail('INVENTORY_ROWS','Источник не содержит строки описи');for(const raw of session.rows){const entry=sessionRow(raw),itemId=id(entry.itemId);itemUses.set(itemId,(itemUses.get(itemId)||0)+1);if(chosen.has(id(session.id))){selected.get('inventoryItems')!.add(itemId);selected.get('inventoryMols')!.add(id(entry.molId));selected.get('inventoryOrgs')!.add(id(entry.orgId));selected.get('inventoryObjects')!.add(id(entry.objectId));}}if(chosen.has(id(session.id))){selected.get('inventoryObjects')!.add(id(session.objectId));if(own(session,'orgId'))selected.get('inventoryOrgs')!.add(id(session.orgId));}}
+   if(itemUses.size!==(incoming.inventoryItems||[]).length||(incoming.inventoryItems||[]).some(value=>itemUses.get(id(value.id))!==1))fail('INVENTORY_IMPORT_BATCH','Пакетный импорт требует, чтобы каждая карточка источника относилась ровно к одной описи');
+   for(const item of incoming.inventoryItems||[])if(selected.get('inventoryItems')!.has(id(item.id)))selected.get('inventoryMols')!.add(id(item.molId));
+   for(const mol of incoming.inventoryMols||[])if(selected.get('inventoryMols')!.has(id(mol.id))){selected.get('inventoryOrgs')!.add(id(mol.orgId));selected.get('inventoryObjects')!.add(id(mol.objectId));}
+  }
+  const full:SectionRows={};
   for(const section of SECTIONS){const values:JsonRow[]=[];for(const original of targets.has(section)?[]:incoming[section]||[]){const value=copy(original);value.id=linked(section,original.id);value.sourceMeta=meta(original);value.importProvenance=copy(provenance);value.createdAt=ctx.now;value.updatedAt=ctx.now;
     if(section==='inventoryMols'){value.orgId=linked('inventoryOrgs',value.orgId);value.objectId=linked('inventoryObjects',value.objectId);}
     if(section==='inventoryItems')value.molId=linked('inventoryMols',value.molId);
@@ -209,8 +225,18 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
      if(!Array.isArray(value.rows))fail('INVENTORY_ROWS','Источник не содержит строки описи');const seen=new Set<Identifier>();
      value.rows=value.rows.map(raw=>{const entry=sessionRow(raw),external=id(entry.id);if(seen.has(external))fail('INVENTORY_ROW_ID','ID строки источника повторяется');seen.add(external);const clean={...entry};delete clean.importProvenance;return {...clean,id:namespace('inventoryRows',external,id(original.id)),itemId:linked('inventoryItems',entry.itemId),molId:linked('inventoryMols',entry.molId),orgId:linked('inventoryOrgs',entry.orgId),objectId:linked('inventoryObjects',entry.objectId),...(targets.has('inventoryOrgs')?{orgName:targets.get('inventoryOrgs')!.name!}:{}),...(targets.has('inventoryObjects')?{objectName:targets.get('inventoryObjects')!.name!}:{}),...(targets.has('inventoryMols')?{molName:targets.get('inventoryMols')!.name!}:{}),sourceMeta:{...sourceLocator(entry.sourceMeta),externalId:external,importSourceId:input.sourceId}};});
     }
-    values.push(value);changed.push({section,id:id(value.id),type:'create'});count++;
+    values.push(value);
+   }full[section]=values;}
+  // Validate every record in the signed source, including unselected documents.
+  // Existing records are replaced only in this disposable validation snapshot.
+  const validation:SectionRows={};for(const section of SECTIONS){const ids=new Set((full[section]||[]).map(value=>id(value.id)));validation[section]=[...(db[section]||[]).filter(value=>!ids.has(id(value.id))),...(full[section]||[])];}validateDatabase(validation);
+  const withoutTimes=(value:JsonRow):JsonRow=>{const result=copy(value);delete result.createdAt;delete result.updatedAt;return result;};
+  const appended:SectionRows={},changed:AssetInventoryResult['changed']=[];let count=0;
+  for(const section of SECTIONS){const values:JsonRow[]=[],existing=new Map((db[section]||[]).map(value=>[id(value.id),value]));for(const value of full[section]||[]){const external=id((value.sourceMeta as JsonRow).externalId),included=!batching||selected.get(section)!.has(external),prior=existing.get(id(value.id));
+    if(prior){if(!batching||!object(prior.sourceMeta)||prior.sourceMeta.importSourceId!==input.sourceId||!equal(withoutTimes(prior),withoutTimes(value)))fail('INVENTORY_IMPORT_COLLISION','Существующая запись не совпадает с подтверждённой записью этого источника');if(included&&(section==='inventoryItems'||section===SESSION))fail('INVENTORY_SOURCE_REPEATED','Выбранная опись или её имущество уже импортированы');continue;}
+    if(!included)continue;values.push(value);changed.push({section,id:id(value.id),type:'create'});count++;
    }appended[section]=[...(db[section]||[]),...values];}
+  if(batching&&count>1999)fail('INVENTORY_IMPORT_BATCH_LIMIT','В пакете больше 1999 новых записей; выберите меньше исходных описей');
   if(!count)fail('INVENTORY_IMPORT_EMPTY','В источнике нет записей инвентаризации');validateDatabase({...db,...appended});
   const warnings:AssetInventoryIssue[]=[];if(Array.isArray(source.warnings))for(const raw of source.warnings){const value=row(raw);warnings.push(issue(typeof value.code==='string'?value.code:'INVENTORY_IMPORT_WARNING',typeof value.message==='string'?value.message:'Источник требует сверки',typeof value.path==='string'?value.path:undefined,undefined,'warning'));}
   for(const value of appended[SESSION]||[])if(object(value.sourceMeta)&&value.sourceMeta.importSourceId===input.sourceId)warnings.push(...draftWarnings(value));
@@ -288,7 +314,39 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
   for(const value of rows){const list=groups.get(value.orgId as Identifier)||[];list.push(value);groups.set(value.orgId as Identifier,list);}
   const model:JsonRow={...copy(source),status:stored.status!,rows,summary:summary(rows),organizations:[...groups].map(([orgId,values])=>({orgId,name:values[0]!.orgName!,rows:copy(values),summary:summary(values)}))};if(stored.status==='approved')model.fingerprint=stored.fingerprint!;return freeze(model);
  }
+ /** Current catalog quantities and the last approved observation are separate
+  * measures. A projection never posts inventory differences to the catalog. */
+ function quantityModel(databaseValue:unknown,optionsValue:unknown={},contextValue:unknown={}):JsonRow {
+  const options=row(optionsValue),ctx=row(contextValue);rights(ctx);fields(options,['objectId','orgId','molId','account','search','asOf']);
+  for(const key of ['objectId','orgId','molId'])if(own(options,key))id(options[key]);
+  for(const key of ['account','search'])if(own(options,key))text(options[key],key,2000);
+  const asOf=own(options,'asOf')?date(options.asOf,'Дата сверки'):null,db=database(databaseValue);validateDatabase(db);
+  const search=String(options.search??'').trim().toLocaleLowerCase('ru-RU');
+  const index=(section:string):Map<Identifier,JsonRow>=>new Map((db[section]||[]).map(value=>[value.id as Identifier,value]));
+  const orgs=index('inventoryOrgs'),objects=index('inventoryObjects'),mols=index('inventoryMols');
+  const approved=(db[SESSION]||[]).filter(value=>value.status==='approved'&&(asOf===null||String(value.date)<=asOf&&String((value.approval as JsonRow).date)<=asOf));
+  // Draft revisions leave their last approved predecessor effective.
+  const roots=new Map<Identifier,JsonRow>();for(const value of approved){const previous=roots.get(value.rootId as Identifier);if(!previous||Number(value.revision)>Number(previous.revision))roots.set(value.rootId as Identifier,value);}
+  const observed=new Map<Identifier,{session:JsonRow;entry:JsonRow}[]>();for(const session of roots.values())for(const entry of session.rows as JsonRow[]){const values=observed.get(entry.itemId as Identifier)||[];values.push({session,entry});observed.set(entry.itemId as Identifier,values);}
+  const result:JsonRow[]=[];
+  for(const item of db.inventoryItems||[]){
+   const mol=mols.get(item.molId as Identifier)!,org=orgs.get(mol.orgId as Identifier)!,object=objects.get(mol.objectId as Identifier)!;
+   if(item.archived||mol.archived||org.archived||object.archived)continue;
+   if(own(options,'objectId')&&object.id!==options.objectId||own(options,'orgId')&&org.id!==options.orgId||own(options,'molId')&&mol.id!==options.molId||options.account&&mol.accountCode!==options.account)continue;
+   if(search&&![item.name,item.code,mol.name,org.name,object.name].some(value=>String(value).toLocaleLowerCase('ru-RU').includes(search)))continue;
+   const candidates=observed.get(item.id as Identifier)||[],latest=candidates.reduce((latest,value)=>String(value.session.date)>latest?String(value.session.date):latest,''),sameDate=candidates.filter(value=>value.session.date===latest);
+   sameDate.sort((a,b)=>String((b.session.approval as JsonRow).at).localeCompare(String((a.session.approval as JsonRow).at))||typed(a.session.id as Identifier).localeCompare(typed(b.session.id as Identifier)));
+   const selected=sameDate[0],entry=selected?.entry;
+   const signatures=new Set(sameDate.map(value=>stable([value.entry.objectId,value.entry.orgId,value.entry.molId,String(value.entry.unit).trim(),value.entry.qtyFact])));
+   const status=!entry?'unrecorded':signatures.size>1?'ambiguous':entry.objectId!==object.id||entry.orgId!==org.id||entry.molId!==mol.id?'scopeChanged':String(entry.unit).trim()!==String(item.unit).trim()?'unitChanged':'known';
+   const qtyAcct=item.qty as number|null,qtyFact=status==='known'?entry!.qtyFact as number|null:null,difference=qtyAcct===null||qtyFact===null?null:decimal.sub(qtyFact,qtyAcct);
+   result.push({id:item.id!,itemId:item.id!,objectId:object.id!,objectName:object.name!,orgId:org.id!,orgName:org.name!,molId:mol.id!,molName:mol.name!,accountCode:mol.accountCode!,name:item.name!,code:item.code!,unit:item.unit!,note:item.note!,qtyAcct,qtyAcctDecimal:qtyAcct===null?null:decimal.parse(qtyAcct),qtyFact,qtyFactDecimal:qtyFact===null?null:decimal.parse(qtyFact),difference:exactNumber(difference),differenceDecimal:difference,inventoryDate:selected?.session.date??null,sessionId:signatures.size>1?null:selected?.session.id??null,sessionTitle:signatures.size>1?null:selected?.session.title??null,comparisonStatus:status});
+  }
+  const groups=new Map<string,JsonRow[]>();for(const value of result){const unit=String(value.unit).trim(),key=stable([value.objectId,value.orgId,unit||['unknown',typeof value.itemId,value.itemId]]),group=groups.get(key)||[];group.push(value);groups.set(key,group);}
+  const totals:JsonRow[]=[...groups.values()].map(values=>{const first=values[0]!,acct=total(values.map(value=>value.qtyAcct as number|null)),fact=total(values.map(value=>value.qtyFact as number|null)),difference=acct.decimal===null||fact.decimal===null?null:decimal.sub(fact.decimal,acct.decimal),dates=values.map(value=>value.inventoryDate).filter((value):value is string=>typeof value==='string').sort();return {objectId:first.objectId!,objectName:first.objectName!,orgId:first.orgId!,orgName:first.orgName!,unit:String(first.unit).trim()||null,rows:values.length,qtyAcct:acct.value,qtyAcctDecimal:acct.decimal,qtyFact:fact.value,qtyFactDecimal:fact.decimal,difference:exactNumber(difference),differenceDecimal:difference,unknownAcct:acct.unknown,unknownFact:fact.unknown,inventoryDate:dates.length===values.length&&dates[0]===dates[dates.length-1]?dates[0]!:null,inventoryDateFrom:dates[0]??null,inventoryDateTo:dates[dates.length-1]??null};});
+  return freeze({rows:result,totals,summary:{rows:result.length,objects:new Set(result.map(value=>typed(value.objectId as Identifier))).size,mols:new Set(result.map(value=>typed(value.molId as Identifier))).size,unknownAcct:result.filter(value=>value.qtyAcct===null).length,unknownFact:result.filter(value=>value.qtyFact===null).length},issues:[]});
+ }
  function validate(value:unknown):{valid:true;issues:AssetInventoryIssue[];warnings:AssetInventoryIssue[]} {const db=database(value);validateDatabase(db);const warnings:AssetInventoryIssue[]=[];for(const session of db[SESSION]||[])if(session.status==='draft')warnings.push(...draftWarnings(session));return freeze({valid:true as const,issues:[],warnings});}
- return Object.freeze({apiVersion:1 as const,parse,dependencies,footprint,preview,plan,apply:plan,protectChanges,validateChanges:protectChanges,validate,snapshotDigest,exportModel});
+ return Object.freeze({apiVersion:1 as const,parse,dependencies,footprint,preview,plan,apply:plan,protectChanges,validateChanges:protectChanges,validate,snapshotDigest,exportModel,quantityModel});
 }
 export type AssetInventoryAPI=ReturnType<typeof createAssetInventory>;

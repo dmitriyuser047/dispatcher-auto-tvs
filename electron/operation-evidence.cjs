@@ -11,8 +11,32 @@ const digest=value=>'sha256:'+crypto.createHash('sha256').update(stable(value)).
 const identifier=value=>typeof value==='string'||typeof value==='number'&&Number.isFinite(value);
 const typed=(section,id)=>section+'|'+typeof id+':'+JSON.stringify(id),same=(a,b)=>stable(a)===stable(b);
 const frozen=value=>{if(value&&typeof value==='object'&&!Object.isFrozen(value)){Object.values(value).forEach(frozen);Object.freeze(value);}return value;};
+// Only this validator's owned, deeply frozen results can reuse validation.
+// Caller inputs, including frozen objects, never acquire this capability.
+const validatedProofs=new WeakSet();
+const subjectIndexes=new WeakMap();
 const fail=()=>{throw Object.assign(Error('Invalid frozen operation evidence'),{code:'OPERATION_EVIDENCE_INVALID'});};
-function safe(value){const seen=new Set();let count=0;function copy(item,depth){if(++count>1000000||depth>80)fail();if(item===null||typeof item==='string'||typeof item==='boolean'||typeof item==='number'&&Number.isFinite(item))return item;if(!item||typeof item!=='object'||seen.has(item))fail();const array=Array.isArray(item),proto=Object.getPrototypeOf(item);if(!array&&proto!==Object.prototype&&proto!==null)fail();seen.add(item);const result=array?[]:{};for(const key of Reflect.ownKeys(item)){if(array&&key==='length')continue;const property=Object.getOwnPropertyDescriptor(item,key);if(typeof key!=='string'||!property?.enumerable||property.get||property.set||['__proto__','constructor','prototype','toJSON'].includes(key)||array&&!/^(0|[1-9][0-9]*)$/.test(key))fail();result[key]=copy(property.value,depth+1);}if(array&&(result.length!==item.length||Object.keys(result).length!==item.length))fail();seen.delete(item);return result;}return copy(value,0);}
+function safe(value){
+ const seen=new Set(),memo=new WeakMap();let count=0;
+ function copy(item,depth){
+  if(++count>1000000||depth>80)fail();
+  if(item===null||typeof item==='string'||typeof item==='boolean'||typeof item==='number'&&Number.isFinite(item))return item;
+  if(!item||typeof item!=='object'||seen.has(item))fail();
+  const array=Array.isArray(item),proto=Object.getPrototypeOf(item);if(!array&&proto!==Object.prototype&&proto!==null)fail();
+  // Snapshots and their event rows deliberately share unchanged data. Own each
+  // subtree once instead of copying and counting those same bytes repeatedly.
+  const cached=memo.get(item);if(cached){if(depth+cached.height>80)fail();return cached.value;}
+  seen.add(item);const result=array?[]:{};let height=0;
+  for(const key of Reflect.ownKeys(item)){
+   if(array&&key==='length')continue;const property=Object.getOwnPropertyDescriptor(item,key);
+   if(typeof key!=='string'||!property?.enumerable||property.get||property.set||['__proto__','constructor','prototype','toJSON'].includes(key)||array&&!/^(0|[1-9][0-9]*)$/.test(key))fail();
+   const child=property.value;result[key]=copy(child,depth+1);height=Math.max(height,1+(child&&typeof child==='object'?memo.get(child).height:0));
+  }
+  if(array&&(result.length!==item.length||Object.keys(result).length!==item.length))fail();
+  seen.delete(item);memo.set(item,{value:result,height});return result;
+ }
+ return copy(value,0);
+}
 function section(value){if(!names.has(value))fail();return value;}
 function list(value){if(!Array.isArray(value)||value.length>100||value.some(name=>!names.has(name))||new Set(value).size!==value.length)fail();return value.slice().sort();}
 function operation(value){if(!object(value)||typeof value.id!=='string'||!value.id||value.id.length>200||!/^sha256:[a-f0-9]{64}$/.test(value.digest)||typeof value.actorId!=='string'||!value.actorId||typeof value.actorRole!=='string'||!value.actorRole||typeof value.databaseToken!=='string'||!value.databaseToken)fail();return {id:value.id,digest:value.digest,actorId:value.actorId,actorRole:value.actorRole,databaseToken:value.databaseToken};}
@@ -100,13 +124,14 @@ function validateSubject(subject){
  return subject;
 }
 function validateProof(input){
+ if(validatedProofs.has(input))return input;
  const proof=safe(input);if(!object(proof)||proof.version!==1||!['verified','legacy-unverified'].includes(proof.status)||!Array.isArray(proof.subjects)||proof.subjects.length>5000||!object(proof.request)||proof.request.version!==1)fail();list(proof.requiredSections);
  const request=proof.request,bound=operation(request.operation);if(own(request,'globalReadRequired')&&typeof request.globalReadRequired!=='boolean')fail();if(!object(request.actor)||request.actor.id!==bound.actorId||request.actor.role!==bound.actorRole||!(/^sha256:[a-f0-9]{64}$/.test(request.actor.policyStamp)||proof.status==='legacy-unverified'&&request.actor.policyStamp===null)||!Array.isArray(request.dependencies)||!Array.isArray(request.selectedTargets)||!Array.isArray(request.eventHashes)||request.eventHashes.some(value=>!/^sha256:[a-f0-9]{64}$/.test(value))||!Array.isArray(request.eventGuards)||request.eventGuards.length!==request.eventHashes.length)fail();
  for(const [index,event]of request.eventGuards.entries()){if(!object(event)||event.hash!==request.eventHashes[index]||!Array.isArray(event.fieldGuards))fail();validateFacts({...unknown(),fieldGuards:event.fieldGuards});}
  for(const dependency of request.dependencies)if(!object(dependency)||!names.has(dependency.section)||dependency.action!=='read')fail();
  for(const subject of [...proof.subjects,...request.selectedTargets])validateSubject(subject);
  if(proof.status==='verified'&&(request.mode!=='transaction'||!proof.requiredSections.length||request.dependencies.some(row=>!proof.requiredSections.includes(row.section))||[...proof.subjects,...request.selectedTargets].some(row=>!proof.requiredSections.includes(row.section))))fail();
- return frozen(proof);
+ const checked=frozen(proof);validatedProofs.add(checked);return checked;
 }
 function environment(principal){if(!object(principal)||typeof principal.id!=='string'||!principal.id||typeof principal.role!=='string'||!principal.role)fail();const empty=Object.fromEntries(schema.sections.map(name=>[name,[]])),base=access.create(empty,empty,principal);return {...base,current:base.principal};}
 function subjectContext(env,subject,phase=null){return {...env.context,resolve:(name,row,requested='before')=>{const selected=phase||requested;if(name!==subject.section||subject[selected]===null||!same(row,subject[selected]))return unknown();return subject[selected+'Facts'];}};}
@@ -127,16 +152,22 @@ function permitted(env,proof,bindActor){
  return proof.subjects.every(row=>subjectAllowed(env,row,{changedFields:true}))&&proof.request.selectedTargets.every(row=>subjectAllowed(env,row,{changedFields:row.fullReadRequired===true}));
 }
 function authorizeProof(proof,principal,receipt){try{const checked=validateProof(proof);if(receipt!==undefined&&!same(operation(receipt.operation||receipt),checked.request.operation))return false;return permitted(environment(principal),checked,true);}catch{return false;}}
-function eventSubject(event,proof){const fields=changed(event.before||null,event.after||null);return proof.subjects.find(row=>row.section===event.section&&same(row.changedFields,fields)&&['before','after'].every(phase=>(event[phase]??null)===null?row[phase]===null:digest(event[phase])===row[phase+'Hash']&&same(fragment(event[phase],row.changedFields,event.section),row[phase])));}
+function eventSubject(event,proof){
+ const fields=changed(event.before||null,event.after||null),hashes={before:(event.before??null)===null?null:digest(event.before),after:(event.after??null)===null?null:digest(event.after)};
+ const trusted=validatedProofs.has(proof);let index=trusted?subjectIndexes.get(proof):undefined;
+ if(!index){index=new Map();for(const row of proof.subjects){const key=stable([row.section,row.changedFields,row.beforeHash,row.afterHash]),candidates=index.get(key)||[];candidates.push(row);index.set(key,candidates);}if(trusted)subjectIndexes.set(proof,index);}
+ const candidates=index.get(stable([event.section,fields,hashes.before,hashes.after]))||[];
+ return candidates.find(row=>row.section===event.section&&same(row.changedFields,fields)&&['before','after'].every(phase=>(event[phase]??null)===null?row[phase]===null:hashes[phase]===row[phase+'Hash']&&same(fragment(event[phase],row.changedFields,event.section),row[phase])));
+}
 function projectEvent(eventValue,proofValue,principal){try{
- const event=safe(eventValue),proof=validateProof(proofValue),env=environment(principal);if(!names.has(event.section)||!access.sectionAllowed(env.current,'read','auditLog')||!proof.request.eventHashes.includes(digest(event))||event.operationId!==undefined&&event.operationId!==proof.request.operation.id)return null;
+ const event=safe(eventValue),proof=validateProof(proofValue),env=environment(principal),eventHash=digest(event);if(!names.has(event.section)||!access.sectionAllowed(env.current,'read','auditLog')||!proof.request.eventHashes.includes(eventHash)||event.operationId!==undefined&&event.operationId!==proof.request.operation.id)return null;
  if(!load('electron/document-access.cjs').auditAccess(env.current,event)||!load('electron/period-access.cjs').auditAccess(env.current,event))return null;
  const {archiveScope,...publicEvent}=event;let projected={...publicEvent},facts=[];
  if(event.before||event.after){const subject=eventSubject(event,proof);if(!subject||proof.status!=='verified'&&!legacyAllowed(env,proof))return null;
   for(const phase of ['before','after'])if(event[phase]){const row=event[phase],phaseFacts=subject[phase+'Facts'],ctx={...env.context,resolve:(section,value)=>section===event.section&&digest(value)===subject[phase+'Hash']?phaseFacts:unknown()},value=policy.projectRows(env.policy,event.section,[row],ctx)[0];if(!value)return null;projected[phase]=value;facts.push(phaseFacts);}
   if(Array.isArray(event.fields))projected.fields=event.fields.filter(field=>own(projected.before||{},field)||own(projected.after||{},field));
  }else {if(!permitted(env,proof,false))return null;facts=[...proof.subjects,...proof.request.selectedTargets].flatMap(row=>[row.beforeFacts,row.afterFacts].filter(Boolean));}
- const eventFacts={kind:facts.every(row=>row.kind==='shared')&&proof.status==='verified'?'shared':facts.length?'owned':'unknown',owners:facts.flatMap(row=>row.owners),readRequirements:{sections:[event.section],owners:facts.flatMap(row=>row.readRequirements?.owners||[]),complete:proof.status==='verified'&&facts.every(complete)},fieldGuards:proof.request.eventGuards.find(value=>value.hash===digest(event)).fieldGuards};
+ const eventFacts={kind:facts.every(row=>row.kind==='shared')&&proof.status==='verified'?'shared':facts.length?'owned':'unknown',owners:facts.flatMap(row=>row.owners),readRequirements:{sections:[event.section],owners:facts.flatMap(row=>row.readRequirements?.owners||[]),complete:proof.status==='verified'&&facts.every(complete)},fieldGuards:proof.request.eventGuards.find(value=>value.hash===eventHash).fieldGuards};
  projected=load('electron/period-access.cjs').visibleAuditRow(projected,env.current);
  return policy.projectRows(env.policy,'auditLog',[projected],{...env.context,resolve:()=>eventFacts})[0]||null;
  }catch{return null;}}

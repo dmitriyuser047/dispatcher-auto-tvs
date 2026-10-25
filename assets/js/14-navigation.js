@@ -7,6 +7,7 @@ const WORKSPACE_RENDERERS = Object.freeze({
   home: () => renderMainMenu(),
   system: () => renderPlatformSystem(),
   assetInventory: () => renderAssetInventorySection(),
+  objectQuantity: () => renderObjectQuantitySection(),
   generatorSpares: () => renderGeneratorSparesSection(),
   drivers: () => renderPersonnelSection(),
   operators: () => renderPersonnelSection(),
@@ -57,7 +58,7 @@ function renderWorkspaceSection(section, { opening = false } = {}) {
 
 // ─── SECTION SWITCHER ────────────────────────────────────
 function switchSection(section, options = {}) {
-  if(typeof activeSection!=='undefined'&&activeSection==='assetInventory'&&section!=='assetInventory'&&typeof assetInventoryWorkspaceLeave==='function'&&!assetInventoryWorkspaceLeave())return;
+  if(typeof activeSection!=='undefined'&&['assetInventory','objectQuantity'].includes(activeSection)&&section!==activeSection&&typeof assetInventoryWorkspaceLeave==='function'&&!assetInventoryWorkspaceLeave())return;
   showProgress();
   if(typeof wfSwitchWorkspace==='function')wfSwitchWorkspace(activeSection,section,options);
   activeSection = section;
@@ -66,7 +67,7 @@ function switchSection(section, options = {}) {
   const hasSidebar = section === 'tanks';
   const sectionTitles = {
     vehicles: 'Транспорт', generators: 'ДЭС', tanks: 'Ёмкости', drivers:'Водители', operators:'Операторы ДЭС', driverTimesheets:'Загрузка водителей', operatorTimesheets:'Загрузка машинистов ДЭС', workflows:'Рабочие процессы', dispatch:'Диспетчерская',
-    reestr: 'Реестр', toSchedule: 'График ТО', repairs: 'Журнал ремонта', assetInventory:'Инвентаризация ОС', generatorSpares:'ЗИП ДЭС',
+    reestr: 'Реестр', toSchedule: 'График ТО', repairs: 'Журнал ремонта', assetInventory:'Инвентаризация ОС', objectQuantity:'Количественный учёт', generatorSpares:'ЗИП ДЭС',
     finances: 'Финансы', contragents: 'Контрагенты', reports: 'Отчёты',
     costs: 'Стоимость работы', procurement: 'Планирование закупок', system:'Состояние программы',
     printForms: 'Печатные формы', fuelReport: 'Отчёт по топливу', fuelPurchases: 'ГСМ'
