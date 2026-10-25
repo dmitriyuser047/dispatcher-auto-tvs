@@ -30,7 +30,9 @@ test('system workspace inspects all modules without writing data and fits suppor
  const before=await page.evaluate(()=>JSON.stringify(data));
  for(const [width,theme]of [[1280,'light'],[960,'dark']]){
   await page.setViewportSize({width,height:900});await page.evaluate(theme=>{applyTheme(theme);switchSection('system');},theme);
-  assert.equal(await page.locator('.platform-modules article').count(),10);assert.match(await page.locator('.platform-workspace').innerText(),/Транспорт|Диспетчерская/);
+  assert.equal(await page.locator('.platform-modules article').count(),11);assert.match(await page.locator('.platform-workspace').innerText(),/Транспорт|Диспетчерская/);
+  const inventory=page.locator('.platform-modules article').filter({has:page.locator('strong',{hasText:/^Инвентаризация$/})});assert.equal(await inventory.count(),1);assert.match(await inventory.innerText(),/0 записей · 5 разделов/);
+  assert.deepEqual(await page.evaluate(()=>PlatformSchema.modules.find(module=>module.id==='assetInventory').sections),['inventoryOrgs','inventoryObjects','inventoryMols','inventoryItems','inventorySessions']);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  }
  assert.equal(await page.evaluate(()=>JSON.stringify(data)),before);assert.equal(await page.evaluate(()=>window.__writes),0);
