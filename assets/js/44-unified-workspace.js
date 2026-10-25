@@ -1,7 +1,7 @@
 // Shared application shell; workflows and accounting keep their existing models.
 const UNIFIED_NAV = [
  ['Рабочий день', [['home','Главная','grid'],['dispatch','Диспетчерская','calendar'],['workflows','Рабочие процессы','tool']]],
- ['Сотрудники', [['drivers','Водители','people','personnelDrivers'],['operators','Операторы ДЭС','people','personnelOperators']]],
+ ['Сотрудники', [['drivers','Водители','people','personnelDrivers'],['driverTimesheets','Загрузка водителей','calendar'],['operators','Операторы ДЭС','people','personnelOperators'],['operatorTimesheets','Загрузка машинистов ДЭС','calendar']]],
  ['Техника и топливо', [['vehicles','Транспорт','car','vehicles'],['generators','Генераторы','power','generators'],['tanks','Ёмкости','tank'],['fuelPurchases','ГСМ и заправки','fuel'],['fuelReport','Топливная аналитика','chart'],['procurement','Закупки','tank'],['toSchedule','Обслуживание','calendar'],['generatorSpares','ЗИП ДЭС','tool']]],
  ['Документы и расчёты', [['assetInventory','Инвентаризация ОС','grid'],['reestr','Реестр счетов','document'],['finances','Финансы','wallet'],['costs','Стоимость работы','chart'],['contragents','Контрагенты','people'],['reports','Отчёты','chart'],['printForms','Печатные формы','print']]],
 ];
@@ -20,7 +20,7 @@ function unifiedNavigate(section) {
  switchSection(section);
 }
 function unifiedRefreshNav() {
- document.querySelectorAll('#unifiedNav [data-section]').forEach(button=>{const active=button.dataset.section===activeSection,wasActive=button.classList.contains('active'),required=button.dataset.section==='costs'?'costEntries':['drivers','operators'].includes(button.dataset.section)?'drivers':null;button.hidden=!!required&&typeof _sync!=='undefined'&&!!_sync.access&&!(_sync.access.readable||[]).includes(required);button.classList.toggle('active',active);if(active&&!wasActive)button.scrollIntoView({block:'nearest',inline:'nearest'});if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
+ document.querySelectorAll('#unifiedNav [data-section]').forEach(button=>{const active=button.dataset.section===activeSection,wasActive=button.classList.contains('active'),required=['driverTimesheets','operatorTimesheets'].includes(button.dataset.section)?'assetDocuments':button.dataset.section==='costs'?'costEntries':['drivers','operators'].includes(button.dataset.section)?'drivers':null;button.hidden=!!required&&typeof _sync!=='undefined'&&!!_sync.access&&!(_sync.access.readable||[]).includes(required);button.classList.toggle('active',active);if(active&&!wasActive)button.scrollIntoView({block:'nearest',inline:'nearest'});if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
  document.querySelectorAll('#unifiedNav [data-count]').forEach(label=>{const key=label.dataset.count;if(key==='personnelDrivers'||key==='personnelOperators'){label.textContent=typeof personnelRows==='function'?personnelRows(key==='personnelDrivers'?'driver':'operator').filter(row=>!row.archived).length:0;}else label.textContent=(data[key]||[]).filter(row=>!row.archived).length;});
  const label=document.getElementById('unifiedSectionLabel');if(label)label.textContent=UNIFIED_NAV.flatMap(([,items])=>items).find(([section])=>section===activeSection)?.[1]||(activeSection==='system'?'Состояние программы':'Диспетчер');
 }

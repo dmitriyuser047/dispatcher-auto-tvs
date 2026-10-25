@@ -10,6 +10,8 @@ const WORKSPACE_RENDERERS = Object.freeze({
   generatorSpares: () => renderGeneratorSparesSection(),
   drivers: () => renderPersonnelSection(),
   operators: () => renderPersonnelSection(),
+  driverTimesheets: () => renderPersonnelTimesheets('driver'),
+  operatorTimesheets: () => renderPersonnelTimesheets('operator'),
   workflows: () => renderWorkflows(),
   dispatch: () => renderWorkflows(),
   toSchedule: () => renderToScheduleSection(),
@@ -63,7 +65,7 @@ function switchSection(section, options = {}) {
   const isHome = section === 'home';
   const hasSidebar = section === 'tanks';
   const sectionTitles = {
-    vehicles: 'Транспорт', generators: 'ДЭС', tanks: 'Ёмкости', drivers:'Водители', operators:'Операторы ДЭС', workflows:'Рабочие процессы', dispatch:'Диспетчерская',
+    vehicles: 'Транспорт', generators: 'ДЭС', tanks: 'Ёмкости', drivers:'Водители', operators:'Операторы ДЭС', driverTimesheets:'Загрузка водителей', operatorTimesheets:'Загрузка машинистов ДЭС', workflows:'Рабочие процессы', dispatch:'Диспетчерская',
     reestr: 'Реестр', toSchedule: 'График ТО', repairs: 'Журнал ремонта', assetInventory:'Инвентаризация ОС', generatorSpares:'ЗИП ДЭС',
     finances: 'Финансы', contragents: 'Контрагенты', reports: 'Отчёты',
     costs: 'Стоимость работы', procurement: 'Планирование закупок', system:'Состояние программы',

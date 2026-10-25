@@ -57,6 +57,10 @@ test('browser UMD imports the complete index core chain through platform-kernel 
  // This standalone renderer is intentionally absent from transaction workers.
  const all=[...fs.readFileSync(path.resolve(__dirname,'../index.html'),'utf8').matchAll(/<script src="assets\/core\/([^"]+)"/g)].map(match=>match[1]).filter(name=>!['generator-maintenance-print.js','generator-maintenance-spares.js'].includes(name)),until=all.indexOf('platform-kernel.js');assert.deepEqual(imports,all.slice(0,until+1).map(name=>'./'+name));
  const message=request();realm.onmessage({data:message});assert.equal(posts.length,0);tasks.shift()();assert.equal(posts[0].ok,true);assert.deepEqual(JSON.parse(JSON.stringify(posts[0].plan)),kernel.prepare(message.previous,message.next,message.context));
+ assert.equal(realm.PersonnelTimesheet.apiVersion,1);assert.equal(realm.PersonnelTimesheetDocument.apiVersion,1);
+ const doc=require('../assets/core/personnel-timesheet-document').makeRecord({version:1,kind:'operator',from:'2026-10-01',to:'2026-10-15',org:'Synthetic organization',title:'Synthetic worker timesheet',rows:[{id:'synthetic-row',name:'Synthetic employee',site:'North',days:{'2026-10-01':11}}]},{id:'synthetic-worker-timesheet',now:'2026-10-21T12:34:56.789Z'});
+ const withTimesheet=request({requestId:'timesheet-worker-request',next:{assetDocuments:[doc]}});realm.onmessage({data:withTimesheet});tasks.shift()();assert.equal(posts[1].ok,true,JSON.stringify(posts[1].error));assert.deepEqual(JSON.parse(JSON.stringify(posts[1].plan)),kernel.prepare(withTimesheet.previous,withTimesheet.next,withTimesheet.context));
+ const invalid=request({requestId:'invalid-timesheet-worker-request',next:{assetDocuments:[structuredClone(doc)]}});invalid.next.assetDocuments[0].personnelTimesheet.rows[0].days['2026-10-01']=-1;realm.onmessage({data:invalid});tasks.shift()();assert.equal(posts[2].ok,false);assert.equal(posts[2].error.code,'PERSONNEL_TIMESHEET_INVALID');
 });
 
 test('a real worker thread prepares the identical plan and returns original structured validation errors',async t=>{
