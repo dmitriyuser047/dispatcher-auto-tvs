@@ -262,7 +262,7 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
       }
       return true;
     }
-    if (!res || !res.conflicts) { if (res && res.error) throw new Error(res.error); return false; }
+    if (!res || !res.conflicts) { if (res && res.error) throw Object.assign(new Error(res.error),typeof res.code==='string'?{code:res.code}:{}); return false; }
     if(res.conflicts.includes('appMeta')&&changed.some(name=>name==='dispatchJobs'||name==='workOrders'))
       throw Object.assign(new Error('Учётный календарь изменился после проверки. Обновите данные и явно проверьте интервал заново.'),{code:'CALENDAR_CHANGED'});
     if (options && options.noMerge) throw new Error('База изменена другим пользователем. Обновите данные и проверьте строки заново.');

@@ -44,10 +44,11 @@ test('hidden native and packaged timesheets edit and persist both personnel kind
  assert.deepEqual(errors,[]);
 });
 
-test('packaged roster creates and links a saved driver timesheet in SQLite and reopens without duplicates',{timeout:90000,skip:!process.env.TVS_PACKAGED_EXE},async t=>{
+async function packagedRosterScenario(t,{background=false}={}){
  const temp=fs.realpathSync.native(os.tmpdir()),directory=fs.mkdtempSync(path.join(temp,'tvs-packaged-roster-')),pin=fs.lstatSync(directory),profile=path.join(directory,'profile'),sqlDir=path.join(directory,'sqlite');let app;
  t.after(async()=>{if(app){await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(win=>win.destroy())).catch(()=>{});await app.close().catch(()=>{});}const after=fs.lstatSync(directory);assert.equal(path.dirname(path.resolve(directory)),temp);assert.match(path.basename(directory),/^tvs-packaged-roster-/);assert.equal(after.isSymbolicLink(),false);assert.equal(after.dev,pin.dev);assert.equal(after.ino,pin.ino);fs.rmSync(directory,{recursive:true,force:true});});
  const timesheet=require('../assets/core/personnel-timesheet'),documents=require('../assets/core/personnel-timesheet-document'),seed=fixture();
+ if(background)seed.contragents=Array.from({length:1001},(_,index)=>({id:'synthetic-background-contractor-'+index,name:'Synthetic unchanged contractor '+index,org:'Synthetic organization'}));
  const source=timesheet.create({kind:'driver',from:'2026-10-01',to:'2026-10-15',org:'Synthetic organization',source:{fileName:'synthetic-driver-roster.xlsx',sheetName:'October'},rows:[
   {id:0,name:'Synthetic native driver',position:'Водитель',department:'Synthetic organization',personnelNumber:'002',site:'Synthetic site',days:{'2026-10-01':0,'2026-10-02':'МВ'}},
   {id:'0',name:'Synthetic imported new employee',position:'Водитель',department:'Synthetic organization',personnelNumber:'003',site:'Synthetic imported site',days:{'2026-10-01':11,'2026-10-02':'Д'},note:'Synthetic source marks'}
@@ -58,14 +59,19 @@ test('packaged roster creates and links a saved driver timesheet in SQLite and r
  app=await pw._electron.launch({executablePath:packaged,args:['--user-data-dir='+profile,'--tvs-test-hidden'],cwd:root});const page=await app.firstWindow(),errors=[];page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(15000);
  await page.waitForFunction(()=>typeof PersonnelTimesheetRoster==='object'&&typeof data!=='undefined'&&data.assetDocuments?.[0]?.id===0);
  await page.evaluate(async()=>{localStorage.setItem('changelogSeenVersion',await electronAPI.getAppVersion());if(document.getElementById('genericModal'))closeModal('genericModal');});
+ if(background)await page.evaluate(()=>{window.__rosterPrepareWorkers=0;const NativeWorker=window.Worker;window.Worker=new Proxy(NativeWorker,{construct(Target,args){if(String(args[0]).includes('transaction-worker.js'))window.__rosterPrepareWorkers++;return Reflect.construct(Target,args);}});});
  assert.equal(await app.evaluate(({app})=>app.getPath('userData')),profile);assert.match(await app.evaluate(({app})=>app.getAppPath()),/app\.asar$/i);assert.equal(await app.evaluate(({app})=>app.getVersion()),require('../package.json').version);assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().some(win=>win.isVisible())),false);assert.equal(await page.evaluate(()=>electronAPI.getDataPath()),sqlDir);
  await open(page,'driverTimesheets');await page.locator('[data-pt-saved]').selectOption('0');assert.equal(await page.locator('[data-pt-roster]').innerText(),'Добавить в справочник');await page.locator('[data-pt-roster]').click();
  assert.equal(await page.locator('[data-pt-roster-status=matched]').count(),1);assert.equal(await page.locator('[data-pt-roster-status=create]').count(),1);
  await page.locator('[data-pt-roster-confirm]').click();await page.waitForFunction(()=>!!document.querySelector('[data-pt-roster-open]')||!!document.querySelector('#personnelTimesheetRoster [role=alert]')?.textContent.trim());
- if(!await page.locator('[data-pt-roster-open]').count())throw Error(await page.locator('#personnelTimesheetRoster [role=alert]').innerText());
+ if(!await page.locator('[data-pt-roster-open]').count())throw Error((await page.locator('#personnelTimesheetRoster [role=alert]').innerText())+'; '+JSON.stringify(await page.evaluate(()=>({lastError:platformRuntimeStatus().lastError,background:platformPrepareBackgroundStatus()}))));
+ if(background)assert.ok(await page.evaluate(()=>window.__rosterPrepareWorkers)>0,'The large database must use the actual transaction worker');
  const saved=await read(sqlDir),employee=saved.drivers.find(row=>row.name==='Synthetic imported new employee');assert.ok(employee);assert.deepEqual(employee.personnelRoles,['driver']);assert.equal(saved.drivers.length,3);assert.equal(saved.assetDocuments.length,1);assert.equal(saved.assetDocuments[0].id,0);assert.equal(saved.assetDocuments[0].personnelTimesheet.rows[0].employeeId,'0');assert.equal(saved.assetDocuments[0].personnelTimesheet.rows[1].employeeId,employee.id);
  assert.deepEqual(saved.assetDocuments[0].personnelTimesheet.rows.map(({employeeId,...row})=>row),source.rows);for(const person of original.drivers)assert.deepEqual(saved.drivers.find(row=>row.id===person.id),person);for(const name of storage.SECTIONS)if(!['drivers','assetDocuments','auditLog'].includes(name))assert.deepEqual(saved[name],original[name],name+' is preserved');
  await page.locator('[data-pt-roster-open]').click();assert.equal(await page.evaluate(()=>activeSection),'drivers');assert.match(await page.locator('#mainContent').innerText(),/Synthetic imported new employee/);
  await page.reload();await page.waitForFunction(()=>typeof PersonnelTimesheetRoster==='object'&&data.drivers?.length===3);await open(page,'driverTimesheets');await page.locator('[data-pt-saved]').selectOption('0');await page.locator('[data-pt-roster]').click();assert.equal(await page.locator('[data-pt-roster-status=create]').count(),0);await page.locator('[data-pt-roster-confirm]').click();await page.locator('[data-pt-roster-open]').waitFor();
  const reopened=await read(sqlDir);assert.deepEqual(reopened,saved);assert.deepEqual(errors,[]);
-});
+}
+
+test('packaged roster creates and links a saved driver timesheet in SQLite and reopens without duplicates',{timeout:90000,skip:!process.env.TVS_PACKAGED_EXE},t=>packagedRosterScenario(t));
+test('packaged roster background preparation saves a large SQLite database without changing unrelated records',{timeout:90000,skip:!process.env.TVS_PACKAGED_EXE},t=>packagedRosterScenario(t,{background:true}));
