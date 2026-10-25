@@ -3,11 +3,12 @@ const {test,before,after,beforeEach,afterEach}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),http=require('node:http');
 const {createRequire}=require('node:module');
 let pw;try{pw=require('playwright');}catch{pw=createRequire(path.join(process.env.TVS_PLAYWRIGHT_MODULES||path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),'package.json'))('playwright');}
-const root=path.resolve(__dirname,'..'),screens=path.join(root,'audit/personnel-timesheets');
+const root=path.resolve(__dirname,'..'),screens=path.join(root,'audit/personnel-timesheets'),rosterScreens=path.join(root,'audit/personnel-timesheet-roster');
 const samples={operator:process.env.TVS_DES_TIMESHEET_SAMPLE||'',driver:process.env.TVS_DRIVER_TIMESHEET_SAMPLE||''};
 let browser,page,server,baseURL,errors;
 before(async()=>{
  fs.mkdirSync(screens,{recursive:true});
+ fs.mkdirSync(rosterScreens,{recursive:true});
  server=http.createServer((req,res)=>{
   let file;try{file=path.resolve(root,'.'+decodeURIComponent(new URL(req.url,'http://localhost').pathname));}catch{res.writeHead(400).end();return;}
   if(!file.startsWith(root+path.sep)&&file!==root){res.writeHead(403).end();return;}
@@ -34,14 +35,18 @@ beforeEach(async()=>{
    assetDocuments:[{id:'ordinary-document',title:'Обычный документ сотрудника',driverId:'ts-driver',number:'SYNTHETIC-DOC'}],
    assetAssignments:[],records:[],genRecords:[],shiftReports:[],fuelCards:[{id:'fc_cash',number:'НАЛИЧКА',provider:'Наличка',assignments:[]}],appMeta:[{id:'meta',toPlanInit:'test'}]
   };
-  window.__disk=sessionStorage.getItem('syntheticTimesheetDisk')||JSON.stringify(seed);window.__writes=0;window.__reject=false;window.__delay=0;window.__token='synthetic-timesheet-db';window.__revisions={};
+  window.__disk=sessionStorage.getItem('syntheticTimesheetDisk')||JSON.stringify(seed);window.__writes=0;window.__requests=[];window.__reject=false;window.__delay=0;window.__token='synthetic-timesheet-db';window.__revisions={};
   window.electronAPI={readSnapshot:async()=>{
    const db=JSON.parse(window.__disk);for(const name of PlatformSchema.sections){db[name]??=[];window.__revisions[name]??=1;}window.__disk=JSON.stringify(db);
    return JSON.stringify({data:db,revisions:{...window.__revisions},databaseToken:window.__token,platform:{apiVersion:1,operations:1,outbox:1,commands:1,schemaVersion:2,documentDrafts:1,personnelPlanning:1,calendar:1}});
   },writeSections:async raw=>{
-   window.__writes++;if(window.__delay)await new Promise(resolve=>setTimeout(resolve,window.__delay));
+   window.__writes++;window.__requests.push(JSON.parse(raw));if(window.__delay)await new Promise(resolve=>setTimeout(resolve,window.__delay));
    if(window.__reject)return{ok:false,error:'Synthetic timesheet save failure'};
-   const request=JSON.parse(raw),db=JSON.parse(window.__disk);for(const[name,rows]of Object.entries(request.sections)){db[name]=rows;window.__revisions[name]++;}
+   const request=JSON.parse(raw),db=JSON.parse(window.__disk);
+   if(window.__concurrentDriverArchive){window.__concurrentDriverArchive=false;db.drivers.find(row=>row.id==='ts-driver').archived=true;window.__revisions.drivers++;window.__disk=JSON.stringify(db);sessionStorage.setItem('syntheticTimesheetDisk',window.__disk);}
+   const conflicts=Object.keys(request.base||{}).filter(name=>request.base[name]!==window.__revisions[name]);
+   if(conflicts.length){window.__lastConflicts=conflicts;return{ok:false,conflicts,revisions:{...window.__revisions},databaseToken:request.databaseToken};}
+   for(const[name,rows]of Object.entries(request.sections)){db[name]=rows;window.__revisions[name]++;}
    window.__disk=JSON.stringify(db);sessionStorage.setItem('syntheticTimesheetDisk',window.__disk);return{ok:true,revisions:{...window.__revisions},databaseToken:request.databaseToken,canonicalSections:request.sections,operationReceipt:{id:request.operation?.id,status:'committed'}};
   }};
  });
@@ -60,6 +65,12 @@ async function stats(){return page.locator('[data-pt-summary] strong').allTextCo
 async function confirmReplacement(action){const waiting=page.locator('#confirmModal.open').waitFor();await action();await waiting;await page.locator('#confirmYes').click();}
 async function importSample(kind){await openSection(kind==='operator'?'operatorTimesheets':'driverTimesheets');await page.locator('[data-pt-file]').setInputFiles(samples[kind]);await page.locator('.pt-table').waitFor({timeout:8000}).catch(async error=>{throw Error(error.message+'; import error: '+await page.locator('[data-pt-error]').innerText());});}
 async function saveSheet(){await page.locator('[data-pt-save]').click();await page.waitForFunction(()=>document.querySelector('[data-pt-status]')?.textContent==='Сохранён в базе');}
+async function importSynthetic(kind,rows){
+ const bytes=await page.evaluate(({kind,rows})=>Array.from(new Uint8Array(PersonnelTimesheet.toXlsx(PersonnelTimesheet.create({kind,from:'2026-10-01',to:'2026-10-15',org:'Тестовая организация',rows:rows.map((row,index)=>({id:'synthetic-import-'+index,department:'Тестовая организация',position:kind==='operator'?'Машинист ДЭС':'Водитель',days:{'2026-10-01':0,'2026-10-02':'МВ','2026-10-03':11},note:'Синтетическая строка',...row}))}),XLSX))),{kind,rows});
+ await openSection(kind==='operator'?'operatorTimesheets':'driverTimesheets');await page.locator('[data-pt-file]').setInputFiles({name:'synthetic-'+kind+'-roster.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(bytes)});await page.locator('.pt-table').waitFor();
+}
+async function openRoster(){await page.locator('[data-pt-roster]').click();await page.locator('#personnelTimesheetRoster').waitFor();}
+async function commitRoster(){await page.locator('[data-pt-roster-confirm]').click();await page.waitForFunction(()=>document.querySelector('[data-pt-roster-open]')||document.querySelector('#personnelTimesheetRoster [role=alert]')?.textContent.trim(),{},{timeout:5000});if(!await page.locator('[data-pt-roster-open]').count())throw Error(await page.locator('#personnelTimesheetRoster [role=alert]').innerText()+'; '+JSON.stringify(await page.evaluate(()=>({platform:typeof _platformLastError==='undefined'?null:_platformLastError,requests:window.__requests.length,toast:document.querySelector('#toast')?.textContent}))));}
 async function noGlobalOverflow(){const box=await page.evaluate(()=>{const e=document.querySelector('.pt-table-scroll'),r=e.getBoundingClientRect();return{viewport:innerWidth,document:document.documentElement.scrollWidth,container:e.clientWidth,table:e.scrollWidth,left:r.left,right:r.right,main:document.querySelector('#mainContent').getBoundingClientRect().toJSON()};});assert.equal(box.document>box.viewport,false,JSON.stringify(box));assert.equal(box.table>box.container,true,JSON.stringify(box));}
 async function capture(name){await page.screenshot({path:path.join(screens,name+'.png'),fullPage:false});}
 async function captureGrid(name){
@@ -75,6 +86,63 @@ test('personnel cards and timesheets have separate navigation and read-only navi
   assert.equal(await page.locator('[data-pt-new]').count(),1);assert.equal(await page.locator('[data-pt-import]').count(),1);await page.locator('[data-pt-cards]').click();assert.equal(await page.evaluate(()=>activeSection),section);
  }
  assert.equal(await page.evaluate(()=>JSON.stringify(data)),before);assert.equal(await page.evaluate(()=>window.__writes),0);
+});
+
+test('a previously saved imported driver sheet explicitly adds new drivers, links existing cards and reopens the directory',async()=>{
+ const untouched=await page.evaluate(()=>({driver:JSON.stringify(data.drivers.find(row=>row.id==='ts-driver')),ordinary:JSON.stringify(data.assetDocuments[0]),records:JSON.stringify(data.records),generators:JSON.stringify(data.genRecords)}));
+ await importSynthetic('driver',[{name:'Тестовый водитель',personnelNumber:'SYNTHETIC-D01',site:'Другой объект из файла'},{name:'Новый водитель из таблицы',personnelNumber:'SYNTHETIC-D02',site:'Вторая площадка'}]);
+ assert.equal(await page.locator('[data-pt-save]').innerText(),'Сохранить только табель');assert.match(await page.locator('.pt-roster-hint').innerText(),/появились в разделе «Водители»/);
+ await saveSheet();assert.equal(await page.evaluate(()=>data.drivers.length),3);const recordId=await page.evaluate(()=>ptView('driver').original.id);
+ await page.reload();await page.waitForFunction(()=>typeof renderPersonnelTimesheets==='function'&&data.assetDocuments.some(row=>row.kind==='personnel-timesheet'));await openSection('driverTimesheets');await page.locator('[data-pt-saved]').selectOption('0');
+ assert.equal(await page.locator('[data-pt-roster]').innerText(),'Добавить в справочник');await openRoster();assert.equal(await page.locator('[data-pt-roster-status=create]').count(),1,await page.locator('#personnelTimesheetRoster').innerText());assert.equal(await page.locator('[data-pt-roster-status=matched]').count(),1,await page.locator('#personnelTimesheetRoster').innerText());
+ await page.screenshot({path:path.join(rosterScreens,'saved-driver-review.png'),fullPage:false});await commitRoster();
+ const result=await page.evaluate(()=>({drivers:data.drivers,sheet:ptView('driver').original,requests:window.__requests}));
+ assert.equal(result.drivers.length,4);const added=result.drivers.find(row=>row.name==='Новый водитель из таблицы');assert.deepEqual(added.personnelRoles,['driver']);assert.equal(added.personnelNumber,'SYNTHETIC-D02');assert.equal(added.org,'Тестовая организация');assert.equal(result.sheet.id,recordId);assert.equal(result.sheet.personnelTimesheet.rows[0].employeeId,'ts-driver');assert.equal(result.sheet.personnelTimesheet.rows[1].employeeId,added.id);assert.equal(result.sheet.personnelTimesheet.rows[1].days['2026-10-01'],0);assert.equal(result.sheet.personnelTimesheet.rows[1].days['2026-10-02'],'МВ');
+ assert.equal(JSON.stringify(result.drivers.find(row=>row.id==='ts-driver')),untouched.driver);assert.equal(await page.evaluate(()=>JSON.stringify(data.assetDocuments.find(row=>row.id==='ordinary-document'))),untouched.ordinary);assert.equal(await page.evaluate(()=>JSON.stringify(data.records)),untouched.records);assert.equal(await page.evaluate(()=>JSON.stringify(data.genRecords)),untouched.generators);
+ const request=result.requests.at(-1);assert.ok(Array.isArray(request.sections.drivers));assert.ok(Array.isArray(request.sections.assetDocuments));
+ await page.locator('[data-pt-roster-open]').click();assert.equal(await page.evaluate(()=>activeSection),'drivers');assert.match(await page.locator('#mainContent').innerText(),/Новый водитель из таблицы/);
+ await openSection('driverTimesheets');await openRoster();assert.equal(await page.locator('[data-pt-roster-status=create]').count(),0);await commitRoster();assert.equal(await page.evaluate(()=>data.drivers.length),4);assert.equal(await page.evaluate(()=>data.assetDocuments.filter(row=>row.kind==='personnel-timesheet').length),1);
+});
+
+test('operator roster review can skip ambiguous rows without deleting them from the timesheet',async()=>{
+ await page.evaluate(async()=>{data.drivers.push({id:'ambiguous-one',name:'Неоднозначный машинист',personnelRoles:['operator'],org:'Тестовая организация'},{id:'ambiguous-two',name:'Неоднозначный машинист',personnelRoles:['operator'],org:'Тестовая организация'});if(!await saveData(data))throw Error('Synthetic fixture was not saved');});
+ await importSynthetic('operator',[{name:'Новый машинист из таблицы',personnelNumber:'SYNTHETIC-O02'},{name:'Неоднозначный машинист'}]);await openRoster();
+ assert.equal(await page.locator('[data-pt-roster-status=blocked]').count(),1,await page.locator('#personnelTimesheetRoster').innerText());assert.equal(await page.locator('[data-pt-roster-confirm]').isDisabled(),true);
+ await page.locator('[data-pt-roster-status=blocked] [data-pt-roster-skip]').click();assert.equal(await page.locator('[data-pt-roster-status=skip]').count(),1);assert.equal(await page.locator('[data-pt-roster-confirm]').isEnabled(),true);await commitRoster();
+ const result=await page.evaluate(()=>({added:data.drivers.find(row=>row.name==='Новый машинист из таблицы'),rows:ptView('operator').model.rows,ambiguous:data.drivers.filter(row=>row.name==='Неоднозначный машинист').length}));assert.deepEqual(result.added.personnelRoles,['operator']);assert.equal(result.rows.length,2);assert.equal(result.rows[0].employeeId,result.added.id);assert.equal(Object.hasOwn(result.rows[1],'employeeId'),false);assert.equal(result.ambiguous,2);
+ await page.locator('[data-pt-roster-open]').click();assert.equal(await page.evaluate(()=>activeSection),'operators');assert.match(await page.locator('#mainContent').innerText(),/Новый машинист из таблицы/);
+});
+
+test('roster save waits for canonical acknowledgement, retains a failed draft and retries with stable identifiers',async()=>{
+ await importSynthetic('driver',[{name:'Водитель для повторной записи',personnelNumber:'SYNTHETIC-RETRY'}]);await openRoster();
+ const before=await page.evaluate(()=>({data:JSON.stringify(data),disk:window.__disk,model:JSON.stringify(ptView('driver').model)}));await page.evaluate(()=>{window.__reject=true;window.__delay=300;});await page.locator('[data-pt-roster-confirm]').click();await page.waitForFunction(()=>window.__writes===1);
+ assert.equal(await page.evaluate(()=>JSON.stringify(data)),before.data);assert.equal(await page.evaluate(()=>window.__disk),before.disk);assert.equal(await page.locator('[data-pt-roster-confirm]').isDisabled(),true);assert.equal(await page.locator('[data-pt-save]').isDisabled(),true);
+ await page.waitForFunction(()=>!!document.querySelector('#personnelTimesheetRoster [role=alert]')?.textContent.trim());assert.equal(await page.evaluate(()=>JSON.stringify(data)),before.data);assert.equal(await page.evaluate(()=>JSON.stringify(ptView('driver').model)),before.model);assert.equal(await page.locator('[data-pt-roster-confirm]').isEnabled(),true);
+ await page.evaluate(()=>{window.__reject=false;window.__delay=0;});await commitRoster();const requests=await page.evaluate(()=>window.__requests);assert.equal(requests.length,2);assert.equal(requests[0].operation.id,requests[1].operation.id);assert.equal(requests[0].sections.drivers.at(-1).id,requests[1].sections.drivers.at(-1).id);assert.equal(await page.evaluate(()=>data.drivers.filter(row=>row.name==='Водитель для повторной записи').length),1);
+});
+
+test('roster action requires directory write access and a stale review cannot save a changed source sheet',async()=>{
+ await importSynthetic('driver',[{name:'Сотрудник с ограничением',personnelNumber:'SYNTHETIC-ACCESS'}]);await openRoster();
+ await page.evaluate(()=>{ptView('driver').model.rows[0].name='Изменён после проверки';});await page.locator('[data-pt-roster-confirm]').click();assert.match(await page.locator('#personnelTimesheetRoster [role=alert]').innerText(),/Табель изменился/);assert.equal(await page.evaluate(()=>window.__writes),0);
+ await page.locator('[data-pt-roster-cancel]').click();await page.evaluate(()=>{_sync.access={user:{id:'documents-only',role:'accountant'},readable:PlatformSchema.sections.slice(),writable:['assetDocuments']};renderPersonnelTimesheets('driver');});assert.equal(await page.locator('[data-pt-roster]').count(),0);assert.equal(await page.evaluate(()=>window.__writes),0);
+});
+
+test('roster retry with a changed reason creates a fresh operation while preserving the proposed employee',async()=>{
+ await importSynthetic('driver',[{name:'Петров Пётр Петрович',personnelNumber:'SYNTHETIC-REASON'}]);await openRoster();
+ await page.evaluate(()=>{window.__reject=true;});await page.locator('[data-pt-roster-confirm]').click();await page.waitForFunction(()=>!!document.querySelector('#personnelTimesheetRoster [role=alert]')?.textContent.trim());
+ const first=await page.evaluate(()=>window.__requests[0]);await page.locator('#personnelTimesheetRoster [name=reason]').fill('Уточнённое основание переноса сотрудников');await page.evaluate(()=>{window.__reject=false;});await commitRoster();
+ const last=await page.evaluate(()=>window.__requests.at(-1));assert.notEqual(last.operation.id,first.operation.id);assert.equal(last.sections.drivers.at(-1).id,first.sections.drivers.at(-1).id);assert.equal(await page.evaluate(()=>data.drivers.filter(row=>row.name==='Петров Пётр Петрович').length),1);
+});
+
+test('all-matched roster saves both section baselines even when employee cards have no changes',async()=>{
+ const original=await page.evaluate(()=>JSON.stringify(data.drivers));await importSynthetic('driver',[{name:'Тестовый водитель',personnelNumber:'SYNTHETIC-D01'}]);await openRoster();assert.equal(await page.locator('[data-pt-roster-status=create]').count(),0);assert.equal(await page.locator('[data-pt-roster-status=matched]').count(),1);await commitRoster();
+ const request=await page.evaluate(()=>window.__requests.at(-1));assert.ok(Array.isArray(request.sections.drivers));assert.ok(Array.isArray(request.sections.assetDocuments));assert.ok(Number.isSafeInteger(request.base.drivers));assert.ok(Number.isSafeInteger(request.base.assetDocuments));assert.equal(JSON.stringify(request.sections.drivers),original);assert.equal(await page.evaluate(()=>JSON.stringify(data.drivers)),original);assert.equal(await page.evaluate(()=>data.assetDocuments.find(row=>row.kind==='personnel-timesheet').personnelTimesheet.rows[0].employeeId),'ts-driver');
+});
+
+test('all-matched roster refuses a concurrently archived employee and leaves the new document unsaved',async()=>{
+ await importSynthetic('driver',[{name:'Тестовый водитель',personnelNumber:'SYNTHETIC-D01'}]);await openRoster();const before=await page.evaluate(()=>({drivers:JSON.stringify(data.drivers),documents:JSON.stringify(data.assetDocuments),model:JSON.stringify(ptView('driver').model)}));await page.evaluate(()=>{window.__concurrentDriverArchive=true;});await page.locator('[data-pt-roster-confirm]').click();await page.waitForFunction(()=>!!document.querySelector('#personnelTimesheetRoster [role=alert]')?.textContent.trim());
+ assert.deepEqual(await page.evaluate(()=>window.__lastConflicts),['drivers']);assert.equal(await page.evaluate(()=>JSON.stringify(data.drivers)),before.drivers);assert.equal(await page.evaluate(()=>JSON.stringify(data.assetDocuments)),before.documents);assert.equal(await page.evaluate(()=>JSON.stringify(ptView('driver').model)),before.model);assert.equal(await page.locator('[data-pt-roster-open]').count(),0);assert.equal(await page.locator('[data-pt-roster-confirm]').isEnabled(),true);
+ const disk=await page.evaluate(()=>JSON.parse(window.__disk));assert.equal(disk.drivers.find(row=>row.id==='ts-driver').archived,true);assert.equal(JSON.stringify(disk.assetDocuments),before.documents);assert.equal(disk.assetDocuments.some(row=>row.kind==='personnel-timesheet'),false);
 });
 
 test('new operator sheet edits typed hours and codes, preserves zero versus blank, saves and reopens only a document',async()=>{

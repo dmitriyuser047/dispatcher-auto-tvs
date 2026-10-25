@@ -21,6 +21,7 @@ const ENTRIES=Object.freeze([
   ]}),
   Object.freeze({source:'src/core/entity-identity.ts',output:'assets/core/entity-identity.js',global:'EntityIdentity',factory:'createEntityIdentity'}),
   Object.freeze({source:'src/core/personnel-kinds.ts',output:'assets/core/personnel-kinds.js',global:'PersonnelKinds',factory:'createPersonnelKinds'}),
+  Object.freeze({source:'src/core/personnel-timesheet-roster.ts',output:'assets/core/personnel-timesheet-roster.js',global:'PersonnelTimesheetRoster',factory:'createPersonnelTimesheetRoster',dependencies:[{path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./personnel-kinds.js',global:'PersonnelKinds'},{path:'./personnel-timesheet.js',global:'PersonnelTimesheet',lazy:true},{path:'./request-fingerprint.js',global:'RequestFingerprint'}]}),
   Object.freeze({source:'src/core/record-identity.ts',output:'assets/core/record-identity.js',global:'RecordIdentity',factory:'createRecordIdentity',dependencies:[{path:'./platform-schema.js',global:'PlatformSchema'}]}),
   Object.freeze({source:'src/core/decimal-core.ts',output:'assets/core/decimal-core.js',global:'DecimalCore',factory:'createDecimalCore'}),
   Object.freeze({source:'src/core/effective-periods.ts',output:'assets/core/effective-periods.js',global:'EffectivePeriods',factory:'createEffectivePeriods',dependencies:[{path:'./decimal-core.js',global:'DecimalCore'}]}),

@@ -200,11 +200,16 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
   const requiredCanonical = options && options.requiredCanonicalSections || [];
   if (!Array.isArray(requiredCanonical) || requiredCanonical.some(name => !SYNC_SECTIONS.includes(name)))
     throw new Error('Некорректный список разделов для подтверждённого сохранения.');
+  const atomicSections=options?.atomicSections||[];
+  if(!Array.isArray(atomicSections)||atomicSections.some(name=>!SYNC_SECTIONS.includes(name)))
+    throw new Error('Некорректный список разделов атомарной проверки.');
   let cur = {};
-  const changedNow = () => SYNC_SECTIONS.filter(n => {
-    cur[n] = JSON.stringify(d[n] || []);
-    return cur[n] !== _sync.synced[n];
-  });
+  const changedNow = () => {
+    const actual=SYNC_SECTIONS.filter(n=>{cur[n]=JSON.stringify(d[n]||[]);return cur[n]!==_sync.synced[n];});
+    // Send reviewed read dependencies with their baseline versions as well.
+    // An unchanged directory must still invalidate links reviewed before a concurrent edit.
+    return actual.length?SYNC_SECTIONS.filter(name=>actual.includes(name)||atomicSections.includes(name)):[];
+  };
   let changed = changedNow();
   if (!changed.length) return true;
   const mergedNames = new Set();

@@ -48,6 +48,7 @@
     "src/core/business-calendar.ts",
     "src/core/calendar-operations.ts",
     "src/core/personnel-kinds.ts",
+    "src/core/personnel-timesheet-roster.ts",
     "src/core/personnel-planning.ts",
     "src/core/document-print.ts",
     "src/core/import-planner.ts",
