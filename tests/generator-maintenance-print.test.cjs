@@ -54,3 +54,11 @@ test('an existing approved snapshot needs no data migration or stock writes to p
 test('unknown documents and template versions are rejected rather than silently choosing a different form',()=>{
  const model=printing.prepare(database(),0);assert.throws(()=>printing.render(model,{document:'combined'}),{code:'MAINTENANCE_PRINT_DOCUMENT'});assert.throws(()=>printing.render({...model,templateVersion:3}),{code:'MAINTENANCE_PRINT_MODEL'});let calls=0;const options={};Object.defineProperty(options,'document',{enumerable:true,get(){calls++;return 'spares';}});assert.throws(()=>printing.render(model,options),{code:'MAINTENANCE_PRINT_DOCUMENT'});assert.equal(calls,0);
 });
+
+test('the separate ZIP document sums twelve saved monthly occurrences without substituting physical stock',()=>{
+ const db=database(),templates=structuredClone(db.generatorMaintenancePlans[0].rows);Object.assign(db.parts[1],{name:db.parts[0].name,article:db.parts[0].article,unit:db.parts[0].unit});
+ db.parts.push({id:'unplanned',generatorId:0,name:'UNPLANNED PHYSICAL STOCK',article:'UNPLANNED',unit:'шт'});db.partMovements=[{id:'stock',partId:0,date:'2026-10-01',kind:'receipt',qty:999}];
+ db.generatorMaintenancePlans[0].rows=Array.from({length:12},(_,month)=>templates.map((row,index)=>({...structuredClone(row),id:'monthly-'+index+'-'+month,plannedDate:'2027-'+String(month+1).padStart(2,'0')+'-01',plannedHours:(month+1)*250,components:[{partId:index===0?0:'0',qty:index===0?2:3}]}))).flat();
+ const before=JSON.stringify(db),model=printing.prepare(db,0),html=printing.render(model,{document:'spares'}),individual=[...html.matchAll(/<table class="generator-spares-table">[\s\S]*?<\/table>/g)].flatMap(table=>tableRows(table[0],'generator-spares-table')),organization=tableRows(html,'organization-spares-table');
+ assert.equal(model.templateVersion,2);assert.equal(model.snapshot.rows.length,24);assert.deepEqual(individual.map(row=>row[4]),['24','36']);assert.deepEqual(organization.map(row=>row[4]),['60']);assert.doesNotMatch(html,/UNPLANNED PHYSICAL STOCK|class="qty">999</);assert.match(html,/2027-01-01/);assert.match(html,/2027-12-01/);assert.equal(JSON.stringify(db),before);
+});

@@ -27,6 +27,7 @@ const XP_MODULES={
   generators:{title:'Дизельные генераторы',note:'Наработка, расход и обслуживание',icon:'power',count:()=>(data.generators||[]).filter(v=>!v.archived).length+' ДЭС'},
   tanks:{title:'Топливные ёмкости',note:'Остатки и движения',icon:'tank',count:()=>(data.tanks||[]).filter(v=>!v.archived).length},
   toSchedule:{title:'Обслуживание',note:'Регламенты и график ТО',icon:'calendar'},
+  generatorSpares:{title:'ЗИП ДЭС',note:'Перечни запчастей по ДЭС и итог по организации',icon:'tool'},
   repairs:{title:'Журнал ремонта',note:'Неисправности и затраты',icon:'tool',action:'openRepairsJournal()'},
   fuelPurchases:{title:'ГСМ и заправки',note:'Выписки, сверка и топливные карты',icon:'fuel'},
   fuelReport:{title:'Топливная аналитика',note:'Приход, расход и источники',icon:'chart'},
@@ -52,7 +53,7 @@ function renderLaunchpad(){
   try{recent=JSON.parse(localStorage.getItem('tvs-recent-sections')||'[]').filter(s=>XP_MODULES[s]&&visible(s));}catch{}
   for(const id of ['vehicles','fuelPurchases','reestr'])if(!recent.includes(id))recent.push(id);
   const groups=[
-    ['Техника и эксплуатация',['vehicles','generators','tanks','toSchedule','repairs']],
+    ['Техника и эксплуатация',['vehicles','generators','tanks','toSchedule','generatorSpares','repairs']],
     ['Сотрудники',['drivers','operators']],
     ['Топливо и финансы',['fuelPurchases','fuelReport','finances','costs','contragents','reports']],
     ['Документы и процессы',['reestr','workflows','procurement','printForms','pdf']],

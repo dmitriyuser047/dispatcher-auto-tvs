@@ -6,6 +6,13 @@ import type {InventoryStockAPI} from './inventory-stock';
 export interface GeneratorMaintenancePerson {name:string;position:string}
 export interface GeneratorMaintenanceComponent {partId:Identifier;qty:number|null}
 export interface GeneratorMaintenanceRow {id:Identifier;generatorId:Identifier;site:string;type:string;plannedHours:number|null;plannedDate:string;work:string;note:string;components:GeneratorMaintenanceComponent[]}
+export type GeneratorMaintenanceCalendarTemplate=Pick<GeneratorMaintenanceRow,'generatorId'|'site'|'type'|'work'|'note'|'components'>;
+export interface GeneratorMaintenanceOccurrence {id:Identifier;plannedDate:string;plannedHours:number|null;sourceIndex?:number}
+export interface GeneratorMaintenanceCalendarGroup {template:GeneratorMaintenanceCalendarTemplate;occurrences:GeneratorMaintenanceOccurrence[]}
+export interface GeneratorMaintenanceMonthlyInput {year:number;months:number[];day:number;ids:Identifier[];plannedHours?:(number|null)[]}
+export type GeneratorMaintenanceUtilization={mode:'monthly';hours:number|number[]}|{mode:'daily';hours:number};
+export interface GeneratorMaintenanceForecastInput {startDate:string;endDate:string;currentHours:number;intervalHours:number;firstDueHours:number;utilization:GeneratorMaintenanceUtilization}
+export interface GeneratorMaintenanceForecastOccurrence {plannedDate:string;plannedHours:number}
 export interface GeneratorMaintenancePayload {org:string;year:number|null;title:string;rows:GeneratorMaintenanceRow[];commission:{chairman:GeneratorMaintenancePerson;members:GeneratorMaintenancePerson[]}}
 export type GeneratorMaintenanceActionInput=
  |{action:'saveDraft';planId?:Identifier;payload:GeneratorMaintenancePayload;reason:string;reviewFingerprint:string}
@@ -53,6 +60,105 @@ export function createGeneratorMaintenance(contracts:Contracts,identity:EntityId
   });
   const commission=row(source.commission);fields(commission,['chairman','members']);if(!Array.isArray(commission.members)||commission.members.length>100)fail('MAINTENANCE_COMMISSION','Нужен список членов комиссии');
   return {org:text(source.org,'Организация',1000),year:year as number|null,title:text(source.title,'Название',1000),rows:items,commission:{chairman:person(commission.chairman),members:commission.members.map(person)}};
+ }
+ function calendarRows(value:unknown):GeneratorMaintenanceRow[] {
+  return payload({org:'',year:null,title:'',rows:value,commission:{chairman:{name:'',position:''},members:[]}}).rows;
+ }
+ /** This is an editable view of canonical rows, never a second stored format. */
+ function groupCalendarRows(value:unknown):GeneratorMaintenanceCalendarGroup[] {
+  const rows=calendarRows(value),groups:GeneratorMaintenanceCalendarGroup[]=[],indexed=new Map<string,GeneratorMaintenanceCalendarGroup>();
+  for(const [sourceIndex,entry]of rows.entries()){
+   const template:GeneratorMaintenanceCalendarTemplate={generatorId:entry.generatorId,site:entry.site,type:entry.type,work:entry.work,note:entry.note,components:entry.components},key=stable(template);
+   let group=indexed.get(key);if(!group){group={template,occurrences:[]};indexed.set(key,group);groups.push(group);}
+   group.occurrences.push({id:entry.id,plannedDate:entry.plannedDate,plannedHours:entry.plannedHours,sourceIndex});
+  }
+  return groups;
+ }
+ function expandCalendarGroups(value:unknown):GeneratorMaintenanceRow[] {
+  const groups=safe(value);if(!Array.isArray(groups)||groups.length>10000)fail('MAINTENANCE_CALENDAR_GROUPS','Нужен список карточек календаря ТО');
+  const expanded:{row:GeneratorMaintenanceRow;sourceIndex?:number;sequence:number}[]=[],sourceIndexes=new Set<number>();
+  for(const raw of groups){
+   if(!object(raw))fail('MAINTENANCE_CALENDAR_GROUPS','Карточка календаря должна быть объектом');fields(raw,['template','occurrences']);
+   if(!object(raw.template))fail('MAINTENANCE_CALENDAR_GROUPS','Укажите общий состав ТО');
+   fields(raw.template,['generatorId','site','type','work','note','components']);
+   const template=calendarRows([{...raw.template,id:'calendar-template',plannedDate:'',plannedHours:null}])[0]!;
+   if(!Array.isArray(raw.occurrences)||!raw.occurrences.length)fail('MAINTENANCE_CALENDAR_OCCURRENCES','Добавьте хотя бы одну дату либо строку с явно неизвестной датой для карточки ТО');
+   for(const rawOccurrence of raw.occurrences){
+    if(!object(rawOccurrence))fail('MAINTENANCE_CALENDAR_OCCURRENCES','Плановое ТО должно быть объектом');fields(rawOccurrence,['id','plannedDate','plannedHours','sourceIndex']);
+    const sourceIndex=rawOccurrence.sourceIndex;
+    if(own(rawOccurrence,'sourceIndex')){
+     if(typeof sourceIndex!=='number'||!Number.isSafeInteger(sourceIndex)||sourceIndex<0||sourceIndexes.has(sourceIndex))fail('MAINTENANCE_CALENDAR_ORDER','Исходный порядок плановых ТО неоднозначен');sourceIndexes.add(sourceIndex);
+    }
+    const row=calendarRows([{id:rawOccurrence.id,generatorId:template.generatorId,site:template.site,type:template.type,work:template.work,note:template.note,components:template.components,plannedDate:rawOccurrence.plannedDate,plannedHours:rawOccurrence.plannedHours}])[0]!;
+    expanded.push({row,...(typeof sourceIndex==='number'?{sourceIndex}:{}),sequence:expanded.length});
+    if(expanded.length>10000)fail('MAINTENANCE_ROWS','В графике допускается не более 10 000 плановых ТО');
+   }
+  }
+  // Reopening a draft must not reorder interleaved historical rows. Fresh
+  // occurrences have no sourceIndex and append after the retained old rows.
+  expanded.sort((left,right)=>left.sourceIndex===undefined?right.sourceIndex===undefined?left.sequence-right.sequence:1:right.sourceIndex===undefined?-1:left.sourceIndex-right.sourceIndex);
+  return calendarRows(expanded.map(entry=>entry.row));
+ }
+ function monthlyOccurrences(value:unknown):GeneratorMaintenanceOccurrence[] {
+  const input=row(value);fields(input,['year','months','day','ids','plannedHours']);
+  const year=input.year,selectedDay=input.day;
+  if(typeof year!=='number'||!Number.isInteger(year)||year<1900||year>9999)fail('MAINTENANCE_YEAR','Укажите целый год от 1900 до 9999');
+  if(typeof selectedDay!=='number'||!Number.isInteger(selectedDay)||selectedDay<1||selectedDay>31)fail('MAINTENANCE_DAY','Укажите число месяца от 1 до 31');
+  if(!Array.isArray(input.months)||input.months.length>12)fail('MAINTENANCE_MONTHS','Выберите месяцы от 1 до 12');
+  const months:number[]=[],seenMonths=new Set<number>();
+  for(const month of input.months){if(typeof month!=='number'||!Number.isInteger(month)||month<1||month>12||seenMonths.has(month))fail('MAINTENANCE_MONTHS','Каждый выбранный месяц должен быть указан один раз числом от 1 до 12');seenMonths.add(month);months.push(month);}
+  if(!Array.isArray(input.ids)||input.ids.length!==months.length)fail('MAINTENANCE_MONTH_IDS','Для каждого нового ТО нужен отдельный явно выделенный ID');
+  const ids=input.ids.map(id),seenIds=new Set<Identifier>();for(const identifier of ids){if(seenIds.has(identifier))fail('MAINTENANCE_ROW_ID','ID нового планового ТО повторяется');seenIds.add(identifier);}
+  const hours=input.plannedHours;if(hours!==undefined&&(!Array.isArray(hours)||hours.length!==months.length))fail('MAINTENANCE_MONTH_HOURS','Число отметок моточасов должно совпадать с числом выбранных месяцев');
+  return months.map((month,index)=>{
+   const plannedDate=String(year).padStart(4,'0')+'-'+String(month).padStart(2,'0')+'-'+String(selectedDay).padStart(2,'0');
+   if(!day(plannedDate))fail('MAINTENANCE_DATE','Дата '+plannedDate+' не существует. Выберите другое число месяца; дата не переносится автоматически.');
+   return {id:ids[index]!,plannedDate,plannedHours:quantity(Array.isArray(hours)?hours[index]:null,'Плановая отметка счётчика')};
+  });
+ }
+ /** Forecast only: the counter is read at the beginning of startDate and the
+  * explicitly supplied workload is distributed over calendar days. No past
+  * service, actual counter or utilization is inferred from another field. */
+ function forecastOccurrences(value:unknown):GeneratorMaintenanceForecastOccurrence[] {
+  const input=row(value);fields(input,['startDate','endDate','currentHours','intervalHours','firstDueHours','utilization']);
+  if(!day(input.startDate)||!day(input.endDate)||input.endDate<input.startDate)fail('MAINTENANCE_FORECAST_DATES','Укажите действительный период расчёта: начало не позже окончания');
+  const start=Date.parse(input.startDate+'T00:00:00Z'),end=Date.parse(input.endDate+'T00:00:00Z'),dayMilliseconds=86400000,days=(end-start)/dayMilliseconds+1;
+  if(days>3660)fail('MAINTENANCE_FORECAST_LIMIT','Период одного расчёта не может превышать 3 660 календарных дней');
+  const known=(value:unknown,field:string):number=>{const amount=quantity(value,field);if(amount===null)fail('MAINTENANCE_FORECAST_UNKNOWN','Укажите известное значение поля «'+field+'»; неизвестная наработка не заменяется нулём');return amount;};
+  const scaled=(hours:number):bigint=>{const [integer,fraction='']=String(hours).split('.');return BigInt(integer!)*1000n+BigInt(fraction.padEnd(3,'0'));};
+  const current=scaled(known(input.currentHours,'Счётчик в начале расчёта')),interval=scaled(known(input.intervalHours,'Интервал ТО')),firstDue=scaled(known(input.firstDueHours,'Следующая плановая отметка ТО'));
+  if(interval===0n)fail('MAINTENANCE_FORECAST_INTERVAL','Интервал ТО должен быть больше нуля');
+  if(firstDue<=current)fail('MAINTENANCE_FORECAST_OVERDUE','Следующая отметка ТО уже достигнута или пройдена. Проверьте исходный счётчик и явно задайте будущую плановую отметку; просроченное ТО не пропускается автоматически.');
+  if(!object(input.utilization))fail('MAINTENANCE_FORECAST_UTILIZATION','Укажите явный режим и ожидаемую наработку');fields(input.utilization,['mode','hours']);
+  const mode=input.utilization.mode,hours=input.utilization.hours;
+  let daily:bigint|null=null,monthly:bigint[]|null=null;
+  if(mode==='daily'){
+   const amount=known(hours,'Ожидаемые моточасы за календарный день');if(amount>24)fail('MAINTENANCE_FORECAST_UTILIZATION','Наработка одной ДЭС не может превышать 24 моточаса за календарный день');daily=scaled(amount);
+  }else if(mode==='monthly'){
+   if(Array.isArray(hours)){if(hours.length!==12)fail('MAINTENANCE_FORECAST_UTILIZATION','Для помесячной наработки укажите 12 значений: с января по декабрь');monthly=hours.map((amount,index)=>scaled(known(amount,'Моточасы за месяц '+(index+1))));}
+   else {const amount=scaled(known(hours,'Ожидаемые моточасы за месяц'));monthly=Array.from({length:12},()=>amount);}
+   if(monthly.some(amount=>amount>744000n))fail('MAINTENANCE_FORECAST_UTILIZATION','Месячная наработка одной ДЭС не может превышать 24 часа на каждый календарный день');
+  }else fail('MAINTENANCE_FORECAST_UTILIZATION','Выберите расчёт по явной дневной или месячной наработке');
+  // Every Gregorian month has 28, 29, 30 or 31 days. Their least common
+  // multiple keeps monthly fractions exact, including partial/leap months.
+  const calendarDenominator=377580n,result:GeneratorMaintenanceForecastOccurrence[]=[];
+  let projected=current*calendarDenominator,next=firstDue*calendarDenominator;
+  const plannedHours=(value:bigint):number=>{
+   const millihours=value/calendarDenominator,integer=millihours/1000n,fraction=(millihours%1000n).toString().padStart(3,'0').replace(/0+$/,''),text=integer.toString()+(fraction?'.'+fraction:'');
+   const amount=known(Number(text),'Плановая отметка счётчика');if(scaled(amount)!==millihours)fail('MAINTENANCE_FORECAST_RANGE','Плановую отметку нельзя передать без потери точности');return amount;
+  };
+  for(let date=start;date<=end;date+=dayMilliseconds){
+   const calendarDate=new Date(date),month=calendarDate.getUTCMonth(),monthDays=new Date(Date.UTC(calendarDate.getUTCFullYear(),month+1,0)).getUTCDate();
+   let workload:bigint;
+   if(daily!==null)workload=daily*calendarDenominator;
+   else {const amount=monthly![month]!;if(amount>BigInt(monthDays*24)*1000n)fail('MAINTENANCE_FORECAST_UTILIZATION','Ожидаемая наработка за '+calendarDate.toISOString().slice(0,7)+' превышает 24 моточаса на каждый календарный день');workload=amount*(calendarDenominator/BigInt(monthDays));}
+   projected+=workload;
+   while(projected>=next){
+    if(result.length===10000)fail('MAINTENANCE_FORECAST_LIMIT','Расчёт содержит больше 10 000 ТО. Уточните интервал или сократите период; строки не обрезаются автоматически.');
+    result.push({plannedDate:calendarDate.toISOString().slice(0,10),plannedHours:plannedHours(next)});next+=interval*calendarDenominator;
+   }
+  }
+  return result;
  }
  function parse(value:unknown,preview=false):GeneratorMaintenanceActionInput {
   const input=row(value),action=input.action;fields(input,action==='saveDraft'?['action','planId','payload','reason','reviewFingerprint']:action==='approve'?['action','planId','date','document','reason','reviewFingerprint']:['action','planId','reason','reviewFingerprint']);
@@ -142,6 +248,6 @@ export function createGeneratorMaintenance(contracts:Contracts,identity:EntityId
   for(const value of before)if(!seen.has(value.id as Identifier)&&(value.status==='approved'||own(value,'previousId')))fail('MAINTENANCE_DELETE','Утверждённый график или историю редакций нельзя удалить');return true;
  }
  function describe():JsonRow {return {section:SECTION,readSections:dependencies(),writeSections:footprint(),actions:['saveDraft','approve','revise'],noStockWrites:true};}
- return Object.freeze({apiVersion:1 as const,describe,dependencies,footprint,preview,apply,plan:apply,snapshotDigest,validateChanges});
+ return Object.freeze({apiVersion:1 as const,describe,dependencies,footprint,groupCalendarRows,expandCalendarGroups,monthlyOccurrences,forecastOccurrences,preview,apply,plan:apply,snapshotDigest,validateChanges});
 }
 export type GeneratorMaintenanceAPI=ReturnType<typeof createGeneratorMaintenance>;

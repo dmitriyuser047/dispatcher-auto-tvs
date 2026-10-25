@@ -22,7 +22,7 @@ test('all 3.5 sections work in the shared navigation and both restored 3.5.1 the
   await page.setViewportSize({width,height:width===960?700:900});
   for(const theme of ['light','dark']){
    await page.evaluate(theme=>applyTheme(theme),theme);
-   for(const section of ['home','dispatch','workflows','vehicles','generators','tanks','fuelPurchases','fuelReport','costs','procurement','toSchedule','reestr','finances','contragents','reports','printForms']){
+   for(const section of ['home','dispatch','workflows','vehicles','generators','generatorSpares','tanks','fuelPurchases','fuelReport','costs','procurement','toSchedule','reestr','finances','contragents','reports','printForms']){
     await page.locator('#unifiedNav [data-section="'+section+'"]').click();
     const state=await page.evaluate(()=>({active:activeSection,nav:document.querySelector('#unifiedNav [aria-current="page"]')?.dataset.section,overflow:document.documentElement.scrollWidth>innerWidth,accent:getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()}));
     assert.equal(state.active,section);assert.equal(state.nav,section);assert.equal(state.overflow,false);assert.equal(state.accent,theme==='dark'?'#7898ff':'#2e5bff');
