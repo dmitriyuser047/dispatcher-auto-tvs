@@ -36,7 +36,7 @@
     // Frozen historical readers and older generator adapters return plain maps.
     return Object.prototype.hasOwnProperty.call(balances,id)?balances[id]:undefined;
   }
-  function makeEngine(calculationVersion,liveJournal=false){
+  function makeEngine(calculationVersion,liveJournal=false,legacyReadProjection=false){
   const modern=calculationVersion>=2,temporal=calculationVersion>=3,corrected=calculationVersion>=4,allocated=calculationVersion>=5,verified=calculationVersion>=6;
   const has=(row,key)=>row&&Object.prototype.hasOwnProperty.call(row,key);
   const live=row=>!row.deleted&&!row.cancelled&&row.status!=='cancelled';
@@ -125,7 +125,8 @@ function fqValue(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
-function fqRecord(record, vehicle) {
+function fqRecord(record, vehicle) { return fuelRecord(record,vehicle,plus); }
+function fuelRecord(record, vehicle,add=plus) {
   const km = Math.max(0, fqValue(record.km) || 0);
   const storedNorm = fqValue(record.fuelUsed);
   const issueOnly=temporal&&record.km===0&&fqValue(record.fuelActual)==null&&storedNorm==null&&(fqValue(record.fuelIdle)==null||fqValue(record.fuelIdle)===0)&&
@@ -135,7 +136,7 @@ function fqRecord(record, vehicle) {
   const norm = storedNorm != null ? storedNorm : issueOnly?0:rate != null ? (allocated?allocatedNumber(decimal().div(decimal().mul(km,rate),100,{scale:12,rounding:'half-away-from-zero'})):modern?gsmRound(ratio(times(km,rate),100)):km * rate / 100) : null;
   const actual = fqValue(record.fuelActual), idleValue = fqValue(record.fuelIdle), idle = idleValue || 0;
   const driving = actual != null ? actual : norm;
-  return { driving, norm, idle, total: driving == null ? idleValue : plus(driving,idle), partial:driving == null && idleValue != null,
+  return { driving, norm, idle, total: driving == null ? idleValue : add(driving,idle), partial:driving == null && idleValue != null,
     source: actual != null ? 'actual' : norm != null ? 'norm' : 'missing',
     actual, actualKm: actual != null ? km : 0,
     normSource: storedNorm != null ? 'record' : issueOnly?'issue':norm != null ? (selected?'period':'vehicle') : 'missing',
@@ -627,13 +628,26 @@ function recordBalances(db, vehicleId, options) {
     .sort((a, b) => cmpDateAsc(a.date, b.date));
   const opening = boundary.mode==='explicit'?boundary.opening:fqValue(vehicle && vehicle.fuelBalance) || 0;
   const defaultFamily = fqFuelFamily(vehicleFuelGrade(vehicle));
-  const familyBalances = new Map([[defaultFamily, opening]]);
   const sources = boundary.mode==='explicit'?boundary.sources:vehicle && vehicle.fuelBalanceSources;
-  if (Array.isArray(sources) && sources.length && (corrected?Math.abs(minus(sources.reduce((sum, source) => plus(sum,(fqValue(source.qty) || 0)), 0),opening))===0:Math.abs(minus(sources.reduce((sum, source) => plus(sum,(fqValue(source.qty) || 0)), 0),opening)) < SOURCE_EPS)) {
+  // Historical JSON may contain binary arithmetic tails in numeric fuel facts.
+  // The current read projection keeps their decimal intermediates until its
+  // number boundary; posted algorithms and explicit accounting remain strict.
+  const numericTail=value=>typeof value==='number'&&Number.isFinite(value)&&(decimal().parse(value).split('.')[1]?.length||0)>12;
+  const legacyRead=legacyReadProjection&&boundary.mode==='legacy'&&(
+    numericTail(vehicle?.fuelBalance)||Array.isArray(sources)&&sources.some(source=>numericTail(source.qty))||
+    recs.some(row=>['fuelIssued','fuelActual','fuelUsed','fuelIdle','tankMeasured'].some(field=>numericTail(row[field]))));
+  const journalAdd=legacyRead?(left,right)=>decimal().add(left,right):plus;
+  const journalSub=legacyRead?(left,right)=>decimal().sub(left,right):minus;
+  const journalNumber=value=>{
+    if(!legacyRead)return value;
+    try{return decimal().toNumberExact(value);}catch(error){if(error.code!=='RANGE')throw error;return decimalNumber(value);}
+  };
+  const familyBalances = new Map([[defaultFamily, opening]]);
+  if (Array.isArray(sources) && sources.length && (corrected?Math.abs(journalSub(sources.reduce((sum, source) => journalAdd(sum,(fqValue(source.qty) || 0)), 0),opening))===0:Math.abs(journalSub(sources.reduce((sum, source) => journalAdd(sum,(fqValue(source.qty) || 0)), 0),opening)) < SOURCE_EPS)) {
     familyBalances.clear();
     sources.forEach(source => {
       const family = fqRecordFuelFamily({ fuelGrade: source.grade }, vehicle);
-      familyBalances.set(family, plus((familyBalances.get(family) || 0),(fqValue(source.qty) || 0)));
+      familyBalances.set(family, journalAdd((familyBalances.get(family) || 0),(fqValue(source.qty) || 0)));
     });
   }
   const { keyFor, lastOnDate, measurements } = fqMeasurementPlan(recs, vehicle);
@@ -641,18 +655,18 @@ function recordBalances(db, vehicleId, options) {
   const balMap = {},balanceEntries=[],unknownFamilies=new Set(verified&&!initialKnown?[defaultFamily]:[]);
   recs.forEach(r => {
     // Остаток считается по фактическому расходу; если не введён — по норме
-    const fuel = fqRecord(r, vehicle);
+    const fuel = legacyRead?fuelRecord(r,vehicle,journalAdd):fqRecord(r, vehicle);
     const family = fqRecordFuelFamily(r, vehicle);
     if(verified&&!initialKnown&&!confirmedFamilies.has(family))unknownFamilies.add(family);
     if(verified&&['km','kmGlonass','fuelIssued','fuelActual','fuelUsed','fuelIdle','tankMeasured'].some(field=>r[field]!=null&&!(typeof r[field]==='string'&&!r[field].trim())&&fqValue(r[field])===null))unknownFamilies.add(family);
     if(temporal&&(liveJournal||fuel.normPeriod)&&fuel.source==='missing'&&gsmNumber(r.km)>0)unknownFamilies.add(family);
-    let balance = minus(plus((familyBalances.get(family) || 0),(fqValue(r.fuelIssued) || 0)),(fuel.total || 0));
+    let balance = journalSub(journalAdd((familyBalances.get(family) || 0),(fqValue(r.fuelIssued) || 0)),(fuel.total || 0));
     // Замер остатка в баке — фактическое значение: расчёт с него начинается заново
     const key = keyFor(r);
     if (lastOnDate.get(key) === r.id && measurements.has(key)) {balance = Number(measurements.get(key).tankMeasured);unknownFamilies.delete(family);if(verified)confirmedFamilies.add(family);}
     familyBalances.set(family, balance);
-    const total=[...familyBalances.values()].reduce((sum,qty)=>plus(sum,qty),0);
-    const value=temporal&&unknownFamilies.size?null:corrected?total:modern?gsmRound(total):boundary.mode==='explicit'?total:+total.toFixed(2);
+    const total=[...familyBalances.values()].reduce((sum,qty)=>journalAdd(sum,qty),0);
+    const value=temporal&&unknownFamilies.size?null:corrected?journalNumber(total):modern?gsmRound(total):boundary.mode==='explicit'?total:+total.toFixed(2);
     if(liveJournal)balanceEntries.push([r.id,value]);else balMap[r.id]=value;
   });
   return liveJournal?recordBalanceMap(balanceEntries):balMap;
@@ -694,7 +708,7 @@ function recordBalances(db, vehicleId, options) {
   }
   // Posted acts keep all historical algorithms. Journal presentation evolves
   // separately, without rewriting an act's source contract or version.
-  const legacy=makeEngine(1),decimalVersion=makeEngine(2),temporalVersion=makeEngine(3),correctedVersion=makeEngine(4),allocatedVersion=makeEngine(5),current=makeEngine(6,true),live=current;
+  const legacy=makeEngine(1),decimalVersion=makeEngine(2),temporalVersion=makeEngine(3),correctedVersion=makeEngine(4),allocatedVersion=makeEngine(5),current=makeEngine(6,true),live=makeEngine(6,true,true);
   function forVersion(version){if(version!==1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6)throw Object.assign(Error('Неизвестная версия расчёта ГСМ'),{code:'CALCULATION_VERSION'});return version===1?legacy:version===2?decimalVersion:version===3?temporalVersion:version===4?correctedVersion:version===5?allocatedVersion:current;}
   return Object.freeze({...current,recordBalances:live.recordBalances,recordBalanceMap,recordBalanceAt,forVersion});
 });
