@@ -1,5 +1,5 @@
 /* Generated from src/ui/asset-inventory.ts, src/ui/asset-inventory-host.ts, src/ui/asset-inventory-files.ts, src/ui/inventory-documents.ts, src/ui/inventory-photos.ts by scripts/build-inventory-ui.cjs.
- * TypeScript 5.9.3; source/config sha256:6b1cd74f02466f4db48e0be3bf55f8b9673d15f526a5ebe457f854b40a7ebb2e. Do not edit directly. */
+ * TypeScript 5.9.3; source/config sha256:58f7ec054df5bc27bf77d55c00d056a9a322a99d98b5f9b36364f7e48ac5b0ef. Do not edit directly. */
 "use strict";
 /** Standalone property inventory UI. This adapter never accesses application globals,
  * paths, localStorage or fleet/stock data. All writes require a canonical host ACK. */
@@ -449,7 +449,8 @@ var AssetInventoryWorkspace;
                             touched.add(index);
                             qty.readOnly = match.checked;
                             const counted = countValue(row, match.checked, inputNumber(qty.value, 3));
-                            qty.value = valueText(counted.qtyFact);
+                            if (match.checked)
+                                qty.value = valueText(counted.qtyFact);
                             const cost = s.element.elements.namedItem('costFact' + index);
                             if (cost instanceof HTMLInputElement)
                                 cost.value = valueText(counted.costFact);
