@@ -1,5 +1,5 @@
 /* Generated from src/ui/asset-inventory.ts, src/ui/asset-inventory-host.ts, src/ui/asset-inventory-files.ts by scripts/build-inventory-ui.cjs.
- * TypeScript 5.9.3; source/config sha256:bc562227886eb63077547395da37ab8831ed6058227d31e6b143ad384e90bea7. Do not edit directly. */
+ * TypeScript 5.9.3; source/config sha256:b4617a922a29782e927a32965a1c40a28f3741daf55738f6644fc3ee0e80d075. Do not edit directly. */
 "use strict";
 /** Standalone property inventory UI. This adapter never accesses application globals,
  * paths, localStorage or fleet/stock data. All writes require a canonical host ACK. */
@@ -99,7 +99,7 @@ var AssetInventoryWorkspace;
             const db = snapshot.database, choices = new Map(), mols = active(db, 'inventoryMols').filter(mol => (filters.org === undefined || mol.orgId === filters.org) && (filters.object === undefined || mol.objectId === filters.object));
             const filterHtml = selectField('filterOrg', 'Организация', active(db, 'inventoryOrgs'), filters.org, choices, 'Все организации') + selectField('filterObject', 'Объект', active(db, 'inventoryObjects'), filters.object, choices, 'Все объекты') + selectField('filterMol', 'МОЛ', mols, filters.mol, choices, 'Все МОЛ') + '<label>Счёт<select name="filterAccount"><option value="">Все счета</option>' + [...new Set(mols.map(mol => str(mol.accountCode)).filter(Boolean))].map(account => '<option' + (account === filters.account ? ' selected' : '') + '>' + esc(account) + '</option>').join('') + '</select></label>' + control('filterSearch', 'Название / код', filters.search);
             const tabs = quantity ? ['quantity', 'registry'] : ['registry', 'sessions', 'documents'];
-            target.innerHTML = '<section class="asset-inventory" data-asset-inventory' + (quantity ? ' data-object-quantity' : '') + '><header class="ai-heading"><div><h2>' + heading + '</h2><p>' + (quantity ? 'Учётное имущество объектов и последний подтверждённый факт по утверждённым описям.' : 'Собственный реестр имущества, подсчёт по объектам и зафиксированные описи.') + '</p></div><div class="ai-actions">' + button('importLegacy', 'Импорт прежней базы', importOptions(snapshot)) + button('importXlsx', 'Импорт Excel', importOptions(snapshot)) + '</div></header>' + (!writable(snapshot) ? '<div class="ai-notice" role="status">' + esc(unavailable(snapshot)) + (!supported(snapshot) ? button('upgrade', 'Создать обновлённую копию') : '') + '</div>' : '') + '<div class="ai-filters">' + filterHtml + '</div><div class="ai-tabs" role="tablist" aria-label="Подразделы ' + (quantity ? 'количественного учета' : 'инвентаризации') + '">' + tabs.map(value => '<button type="button" role="tab" aria-selected="' + (value === tab) + '" data-ai-tab="' + value + '">' + ({ quantity: 'Остатки по объектам', registry: quantity ? 'Имущество' : 'Реестр имущества', sessions: 'Подсчёты', documents: 'Документы' }[value]) + '</button>').join('') + '</div><p data-ai-status role="status" aria-live="polite"></p><div data-ai-content>' + (tab === 'quantity' ? quantityHtml(snapshot) : tab === 'registry' ? registryHtml(snapshot) : sessionsHtml(snapshot)) + '</div></section>';
+            target.innerHTML = '<section class="asset-inventory" data-asset-inventory' + (quantity ? ' data-object-quantity' : '') + '><header class="ai-heading"><div><h2>' + heading + '</h2><p>' + (quantity ? 'Учётное имущество объектов и последний подтверждённый факт по утверждённым описям.' : 'Собственный реестр имущества, подсчёт по объектам и зафиксированные описи.') + '</p></div><div class="ai-actions">' + button('importLegacy', 'Импорт прежней базы', importOptions(snapshot)) + button('importXlsx', 'Импорт Excel', importOptions(snapshot)) + '</div></header>' + (snapshot.databaseIndependent ? '<section class="ai-notice" data-ai-database><strong>' + esc(snapshot.databaseLabel || 'База инвентаризации') + '</strong><p>Отдельная база имущества, МОЛ и описей. Импорт сохраняется здесь.</p>' + (host.openDatabaseFolder ? button('openDatabaseFolder', 'Открыть папку базы') : '') + '</section>' : '') + (!writable(snapshot) ? '<div class="ai-notice" role="status">' + esc(unavailable(snapshot)) + (!supported(snapshot) ? button('upgrade', 'Создать обновлённую копию') : '') + '</div>' : '') + '<div class="ai-filters">' + filterHtml + '</div><div class="ai-tabs" role="tablist" aria-label="Подразделы ' + (quantity ? 'количественного учета' : 'инвентаризации') + '">' + tabs.map(value => '<button type="button" role="tab" aria-selected="' + (value === tab) + '" data-ai-tab="' + value + '">' + ({ quantity: 'Остатки по объектам', registry: quantity ? 'Имущество' : 'Реестр имущества', sessions: 'Подсчёты', documents: 'Документы' }[value]) + '</button>').join('') + '</div><p data-ai-status role="status" aria-live="polite"></p><div data-ai-content>' + (tab === 'quantity' ? quantityHtml(snapshot) : tab === 'registry' ? registryHtml(snapshot) : sessionsHtml(snapshot)) + '</div></section>';
             target.querySelectorAll('.ai-filters input,.ai-filters select').forEach(element => element.addEventListener('change', () => { try {
                 if (!renderSnapshot)
                     throw Error('Откройте раздел заново');
@@ -169,7 +169,9 @@ var AssetInventoryWorkspace;
                 throw Error('Откройте раздел заново');
             assertSnapshot(renderSnapshot, renderSource);
             const action = element.dataset.aiAction, ref = refs.get(element.dataset.aiRef ?? '');
-            if (action === 'upgrade')
+            if (action === 'openDatabaseFolder' && host.openDatabaseFolder)
+                await host.openDatabaseFolder();
+            else if (action === 'upgrade')
                 host.openUpgrade();
             else if (action === 'catalog')
                 catalogList(element.dataset.aiSection);
@@ -538,17 +540,151 @@ var AssetInventoryWorkspace;
 let assetInventoryMountedWorkspace = null;
 let objectQuantityMountedWorkspace = null;
 let assetInventoryMountedIdentity = null;
+let assetInventoryDatabaseCache = null;
+let assetInventoryDatabaseLoading = null;
+let assetInventoryDatabaseGeneration = 0, assetInventoryRenderGeneration = 0;
+let assetInventoryVisibleMode = null;
 const assetInventoryOwnSections = ['inventoryOrgs', 'inventoryObjects', 'inventoryMols', 'inventoryItems', 'inventorySessions'];
+const assetInventoryCommandIntents = new Map();
+const assetInventoryEmptyDatabase = {};
+function assetInventoryDatabaseBridge() { return window.electronAPI?.inventoryDatabase; }
+function assetInventoryParentIdentity() { const context = platformSessionContext(); return JSON.stringify([_sync.databaseToken ?? null, _sync.epoch ?? null, context.policyStamp ?? null, context.actor ?? null, context.readable ?? null, context.writable ?? null, context.accessPolicy ?? null, context.fieldPermissions ?? null]); }
+function assetInventoryDatabaseToken() { return assetInventoryDatabaseBridge() ? (assetInventoryDatabaseCache?.parent === assetInventoryParentIdentity() ? assetInventoryDatabaseCache.token : null) : _sync.databaseToken ?? null; }
 function assetInventoryHostSnapshot() {
-    const context = platformSessionContext(), platform = _sync.platform, has = (names, name) => !Array.isArray(names) || names.includes('*') || names.includes(name);
-    const identity = JSON.stringify([_sync.databaseToken ?? null, _sync.epoch ?? null]);
-    return { database: data, identity, analysisStamp: wfCommandContextStamp(), isSQLite: platform?.storageKind === 'sqlite', schemaVersion: platform?.schemaVersion ?? 0, capabilities: platform?.negotiation?.selectedProfile?.capabilities ?? [], canRead: assetInventoryOwnSections.every(name => has(context.readable, name)), canWrite: context.blocked !== true && platform?.readOnly !== true && assetInventoryOwnSections.every(name => has(context.writable, name)), today: context.today };
+    const context = platformSessionContext(), has = (names, name) => !Array.isArray(names) || names.includes('*') || names.includes(name), parent = assetInventoryParentIdentity();
+    const independent = !!assetInventoryDatabaseBridge(), cache = assetInventoryDatabaseCache?.parent === parent ? assetInventoryDatabaseCache : null, platform = independent ? cache?.platform : _sync.platform;
+    const canRead = assetInventoryOwnSections.every(name => has(context.readable, name) && (!independent || has(cache?.access.readable, name)));
+    const today = independent && cache && typeof BusinessCalendar === 'object' ? BusinessCalendar.resolve(cache.database, new Date().toISOString()).today : context.today;
+    return { database: independent ? cache?.database ?? assetInventoryEmptyDatabase : data, identity: independent ? JSON.stringify([parent, cache?.token ?? null]) : parent, analysisStamp: independent ? JSON.stringify([cache?.stamp ?? 0, context.readable ?? null, context.writable ?? null]) : wfCommandContextStamp(), isSQLite: platform?.storageKind === 'sqlite', schemaVersion: platform?.schemaVersion ?? 0, capabilities: platform?.negotiation?.selectedProfile?.capabilities ?? platform?.capabilities ?? [], canRead, canWrite: (!independent ? context.blocked !== true : true) && platform?.readOnly !== true && (!independent || cache !== null) && assetInventoryOwnSections.every(name => has(context.writable, name) && (!independent || has(cache?.access.writable, name))), today, ...(independent ? { databaseIndependent: true, databaseLabel: 'База инвентаризации' } : {}) };
 }
+async function assetInventoryDatabaseRequest(action, request) {
+    const rpc = assetInventoryDatabaseBridge(), parent = assetInventoryParentIdentity(), generation = assetInventoryDatabaseGeneration, token = _sync.databaseToken;
+    if (!rpc || typeof token !== 'string' || !token)
+        throw Error('Нет подтверждённого подключения к базе инвентаризации');
+    const result = await rpc({ action, parentDatabaseToken: token, ...(request ? { request } : {}) });
+    if (parent !== assetInventoryParentIdentity() || generation !== assetInventoryDatabaseGeneration)
+        throw Error('База, пользователь или доступ изменились. Откройте раздел заново.');
+    return result;
+}
+function assetInventoryInstallDatabase(reply, parent) {
+    if (!reply.ok || !reply.data || typeof reply.databaseToken !== 'string' || !reply.databaseToken || !reply.platform || assetInventoryOwnSections.some(name => !Array.isArray(reply.data?.[name])))
+        throw Error(reply.error || 'База инвентаризации не подтвердила собственные данные');
+    const old = assetInventoryDatabaseCache?.parent === parent ? assetInventoryDatabaseCache : null, database = old?.database ?? {};
+    for (const name of [...assetInventoryOwnSections, 'appMeta'])
+        if (Array.isArray(reply.data[name]))
+            database[name] = JSON.parse(JSON.stringify(reply.data[name]));
+    assetInventoryDatabaseCache = { parent, token: reply.databaseToken, database, revisions: { ...reply.revisions }, platform: reply.platform, access: reply.access ?? {}, stamp: (old?.stamp ?? 0) + 1 };
+}
+async function assetInventoryLoadDatabase() {
+    if (assetInventoryDatabaseLoading)
+        return assetInventoryDatabaseLoading;
+    const parent = assetInventoryParentIdentity(), pending = (async () => { const reply = await assetInventoryDatabaseRequest('snapshot'); assetInventoryInstallDatabase(reply, parent); })();
+    assetInventoryDatabaseLoading = pending;
+    try {
+        await pending;
+    }
+    finally {
+        if (assetInventoryDatabaseLoading === pending)
+            assetInventoryDatabaseLoading = null;
+    }
+}
+async function assetInventoryExecuteCommand(command, options) {
+    if (!assetInventoryDatabaseBridge())
+        return platformExecuteCommand(command, options);
+    const cache = assetInventoryDatabaseCache, parent = assetInventoryParentIdentity(), id = options.operationId;
+    if (!cache || cache.parent !== parent)
+        return { ok: false, error: 'Сначала дождитесь загрузки базы инвентаризации' };
+    if (command.type !== 'AssetInventoryAction')
+        return { ok: false, error: 'В базе инвентаризации разрешены только действия с имуществом' };
+    const parsed = PlatformCommands.parseCommand(command), signature = JSON.stringify(parsed);
+    let entry = assetInventoryCommandIntents.get(id);
+    if (entry && (entry.parent !== parent || entry.signature !== signature))
+        return { ok: false, error: 'Идентификатор операции уже связан с другим действием' };
+    if (entry?.pending)
+        return entry.pending;
+    if (entry?.result?.ok)
+        return entry.result;
+    if (!entry) {
+        if (assetInventoryCommandIntents.size >= 128) {
+            const oldest = [...assetInventoryCommandIntents].find(([, value]) => !value.pending && !value.result?.unknown && value.result?.definitive !== false);
+            if (oldest)
+                assetInventoryCommandIntents.delete(oldest[0]);
+            else
+                return { ok: false, error: 'Проверьте неподтверждённые операции инвентаризации' };
+        }
+        const envelope = { protocolVersion: 1, databaseToken: cache.token, base: Object.fromEntries(PlatformCommands.dependencies(parsed).map(name => [name, cache.revisions[name] ?? 0])), operation: { id }, command: parsed };
+        envelope.operation.digest = PlatformKernel.requestDigest(envelope);
+        entry = { parent, signature, envelope, pending: null, result: null };
+        assetInventoryCommandIntents.set(id, entry);
+    }
+    const intent = entry, snapshot = assetInventoryHostSnapshot(), pending = (async () => {
+        let sent = false;
+        try {
+            if (!snapshot.canRead || !snapshot.canWrite)
+                throw Error('Нет права изменения базы инвентаризации');
+            sent = true;
+            const result = await assetInventoryDatabaseRequest('execute', intent.envelope);
+            if (!result.ok)
+                return result;
+            const receipt = result.operationReceipt, operation = intent.envelope.operation;
+            if (result.databaseToken !== cache.token || receipt?.id !== id || receipt.digest !== operation.digest || !['committed', 'replayed'].includes(receipt.status ?? ''))
+                throw Error('Сервер не подтвердил квитанцию операции инвентаризации');
+            const expected = [...new Set([...PlatformCommands.footprint(parsed), 'auditLog'])], canonical = result.canonicalSections, changed = result.changed ?? Object.keys(canonical ?? {});
+            // The command footprint permits changes; unchanged catalogs are omitted by
+            // the server. Require canonical rows for each actual acknowledged change.
+            if (!canonical || changed.some(name => !expected.includes(name) || !Array.isArray(canonical[name])) || Object.keys(canonical).some(name => !expected.includes(name) || !Array.isArray(canonical[name])))
+                throw Error('Сервер не вернул канонические данные инвентаризации');
+            PlatformContracts.validateSections(canonical, [...assetInventoryOwnSections, 'auditLog']);
+            if (Object.keys(canonical).some(name => !Number.isSafeInteger(result.revisions?.[name]) || Number(result.revisions?.[name]) < 0))
+                throw Error('Сервер не подтвердил версии сохранённых разделов');
+            const current = assetInventoryHostSnapshot();
+            if (cache !== assetInventoryDatabaseCache || snapshot.identity !== current.identity || snapshot.analysisStamp !== current.analysisStamp || !current.canRead || !current.canWrite)
+                throw Error('База или доступ к инвентаризации изменились во время сохранения');
+            for (const [name, rows] of Object.entries(canonical)) {
+                if (assetInventoryOwnSections.includes(name))
+                    cache.database[name] = JSON.parse(JSON.stringify(rows));
+            }
+            cache.revisions = { ...cache.revisions, ...result.revisions };
+            cache.stamp++;
+            return result;
+        }
+        catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : String(error), ...(sent ? { unknown: true, definitive: false } : {}) };
+        }
+    })();
+    intent.pending = pending;
+    try {
+        const result = await pending;
+        intent.result = result;
+        return result;
+    }
+    finally {
+        intent.pending = null;
+    }
+}
+async function assetInventoryImportSource(request) {
+    if (assetInventoryDatabaseBridge())
+        return assetInventoryDatabaseRequest('importSource', request);
+    const rpc = window.electronAPI?.importSource;
+    if (!rpc)
+        throw Error('Безопасный импорт файлов недоступен в этом подключении. Обновите программу.');
+    return rpc(request);
+}
+async function assetInventoryExportRequest(request) {
+    if (assetInventoryDatabaseBridge())
+        return assetInventoryDatabaseRequest('export', request);
+    const rpc = window.electronAPI?.assetInventoryExport;
+    if (!rpc)
+        throw Error('Выгрузка инвентаризации недоступна в этом подключении. Обновите программу.');
+    return rpc(request);
+}
+async function assetInventoryOpenDatabaseFolder() { const result = await assetInventoryDatabaseRequest('openFolder'); if (!result.ok)
+    throw Error(result.error || 'Не удалось открыть папку базы инвентаризации'); }
 function assetInventoryWorkspaceInstance(mode = 'inventory') {
     const existing = mode === 'quantity' ? objectQuantityMountedWorkspace : assetInventoryMountedWorkspace;
     if (existing)
         return existing;
-    const workspace = AssetInventoryWorkspace.create({ mode, core: AssetInventory, snapshot: assetInventoryHostSnapshot, operationId: () => wfId('asset-inventory'), execute: (input, options) => platformExecuteCommand({ type: 'AssetInventoryAction', version: 1, input }, options), openUpgrade: () => lifecycleUpgradeOpen(), confirmDiscard: message => window.confirm(message), importFile: request => assetInventoryImportWizard(request), exportFile: request => assetInventoryExportDocument({ format: request.format, sessionId: request.sessionId }) });
+    const workspace = AssetInventoryWorkspace.create({ mode, core: AssetInventory, snapshot: assetInventoryHostSnapshot, operationId: () => wfId('asset-inventory'), execute: (input, options) => assetInventoryExecuteCommand({ type: 'AssetInventoryAction', version: 1, input }, options), openUpgrade: () => lifecycleUpgradeOpen(), confirmDiscard: message => window.confirm(message), importFile: request => assetInventoryImportWizard(request), exportFile: request => assetInventoryExportDocument({ format: request.format, sessionId: request.sessionId }), ...(assetInventoryDatabaseBridge() ? { openDatabaseFolder: assetInventoryOpenDatabaseFolder } : {}) });
     if (mode === 'quantity')
         objectQuantityMountedWorkspace = workspace;
     else
@@ -562,13 +698,49 @@ function renderAssetInventoryMode(mode) {
     const container = document.getElementById('mainContent');
     if (!container)
         throw Error('Не найден раздел программы');
+    const independent = !!assetInventoryDatabaseBridge(), parent = assetInventoryParentIdentity(), sameView = assetInventoryVisibleMode === mode;
+    if (independent && assetInventoryDatabaseCache && assetInventoryDatabaseCache.parent !== parent)
+        assetInventoryWorkspaceRevoke();
     const snapshot = assetInventoryHostSnapshot(), workspace = assetInventoryWorkspaceInstance(mode);
-    if (assetInventoryMountedIdentity !== null && assetInventoryMountedIdentity !== snapshot.identity)
+    if (!independent) {
+        if (assetInventoryMountedIdentity !== null && assetInventoryMountedIdentity !== snapshot.identity)
+            assetInventoryWorkspaceRevoke();
+        if (!snapshot.canRead)
+            assetInventoryWorkspaceRevoke();
+        assetInventoryMountedIdentity = snapshot.identity;
+        workspace.render(container);
+        return;
+    }
+    if (!snapshot.canRead) {
         assetInventoryWorkspaceRevoke();
-    if (!snapshot.canRead)
-        assetInventoryWorkspaceRevoke();
-    assetInventoryMountedIdentity = snapshot.identity;
-    workspace.render(container);
+        workspace.render(container);
+        return;
+    }
+    assetInventoryVisibleMode = mode;
+    if (sameView && assetInventoryDatabaseCache?.parent === parent) {
+        assetInventoryMountedIdentity = snapshot.identity;
+        workspace.render(container);
+        return;
+    }
+    const generation = ++assetInventoryRenderGeneration;
+    container.innerHTML = '<section class="asset-inventory"><h2>' + (mode === 'quantity' ? 'Количественный учёт' : 'Инвентаризация ОС') + '</h2><p data-ai-database-loading role="status">Загружается база инвентаризации…</p></section>';
+    void assetInventoryLoadDatabase().then(() => { if (generation !== assetInventoryRenderGeneration || assetInventoryVisibleMode !== mode || parent !== assetInventoryParentIdentity())
+        return; assetInventoryMountedIdentity = assetInventoryHostSnapshot().identity; workspace.render(container); }).catch(error => {
+        if (generation !== assetInventoryRenderGeneration || assetInventoryVisibleMode !== mode)
+            return;
+        container.replaceChildren();
+        const section = document.createElement('section'), heading = document.createElement('h2'), message = document.createElement('p'), retry = document.createElement('button');
+        section.className = 'asset-inventory';
+        heading.textContent = 'База инвентаризации';
+        message.setAttribute('role', 'alert');
+        message.setAttribute('data-ai-database-error', '');
+        message.textContent = error instanceof Error ? error.message : String(error);
+        retry.className = 'btn btn-secondary';
+        retry.textContent = 'Повторить загрузку';
+        retry.onclick = () => { assetInventoryVisibleMode = null; renderAssetInventoryMode(mode); };
+        section.append(heading, message, retry);
+        container.append(section);
+    });
 }
 function assetInventoryWorkspaceLeave() {
     for (const workspace of [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace])
@@ -576,18 +748,26 @@ function assetInventoryWorkspaceLeave() {
             showToast('Завершите сохранение или закройте форму учёта имущества.');
             return false;
         }
+    assetInventoryVisibleMode = null;
+    assetInventoryRenderGeneration++;
     return true;
 }
-async function assetInventoryWorkspaceFlush() { let ready = true; for (const workspace of [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace])
+async function assetInventoryWorkspaceFlush() { let ready = true; const pending = [...assetInventoryCommandIntents.values()].flatMap(intent => intent.pending ? [intent.pending] : []); for (const workspace of [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace])
     if (workspace && !await workspace.flush())
-        ready = false; return ready; }
-function assetInventoryWorkspaceHasPendingEdits() { return [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace].some(workspace => workspace?.hasPendingEdits()); }
+        ready = false; if ((await Promise.allSettled(pending)).some(result => result.status !== 'fulfilled' || !result.value.ok))
+    ready = false; return ready; }
+function assetInventoryWorkspaceHasPendingEdits() { return [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace].some(workspace => workspace?.hasPendingEdits()) || [...assetInventoryCommandIntents.values()].some(intent => !!intent.pending); }
 function assetInventoryWorkspaceRevoke() {
     assetInventoryFilesRevoke();
-    // Forced session changes revoke both views of the shared private register.
     for (const workspace of [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace])
         workspace?.invalidate();
     assetInventoryMountedIdentity = null;
+    assetInventoryVisibleMode = null;
+    assetInventoryDatabaseCache = null;
+    assetInventoryDatabaseLoading = null;
+    assetInventoryDatabaseGeneration++;
+    assetInventoryRenderGeneration++;
+    assetInventoryCommandIntents.clear();
 }
 /** Browser-selected bytes only. The host decodes, binds and stores sources;
  * this UI never supplies interpreted rows or a filesystem path. */
@@ -603,7 +783,6 @@ var AssetInventoryFiles;
     const string = (value) => typeof value === 'string' ? value : '';
     const text = (error) => error instanceof Error ? error.message : String(error);
     const source = (snapshot) => JSON.stringify(ownSections.map(name => [name, snapshot.database[name] ?? []]));
-    const bridge = () => window.electronAPI ?? {};
     function required(parent, selector) { const node = parent.querySelector(selector); if (!node)
         throw Error('Окно работы с файлами закрыто'); return node; }
     function field(s, name) { return required(s.form, '[name="' + name + '"]'); }
@@ -621,7 +800,7 @@ var AssetInventoryFiles;
         return current;
     }
     function check(s, baseline = true) { if (active !== s || s.revoked || !s.form.isConnected)
-        throw Error('Окно импорта закрыто или относится к другому сеансу'); verify(s.captured, baseline ? s.sourceText : null, true); if (_sync.databaseToken !== s.token)
+        throw Error('Окно импорта закрыто или относится к другому сеансу'); verify(s.captured, baseline ? s.sourceText : null, true); if (assetInventoryDatabaseToken() !== s.token)
         throw Error('Выбрана другая база. Откройте импорт заново.'); }
     function showError(s, error) { if (active === s && !s.revoked)
         required(s.form, '[data-ai-file-error]').textContent = text(error); }
@@ -823,9 +1002,7 @@ var AssetInventoryFiles;
                 throw Error(format === 'legacy' ? 'Для переноса прежней базы выберите JSON-файл.' : 'Выберите исходную книгу XLS или XLSX.');
             if (field(s, 'reason').value.trim().length < 3)
                 throw Error('Укажите основание импорта не короче трёх символов');
-            const rpc = bridge().importSource;
-            if (!rpc)
-                throw Error('Безопасный импорт файлов недоступен в этом подключении. Обновите программу.');
+            const rpc = assetInventoryImportSource;
             s.file = file;
             clearPreview(s, false);
             lock(s, true);
@@ -918,7 +1095,7 @@ var AssetInventoryFiles;
             showError(s, '');
             let ack;
             try {
-                ack = await platformExecuteCommand({ type: 'AssetInventoryAction', version: 1, input: { ...input, reviewFingerprint: s.preview.fingerprint } }, { operationId: s.operationId });
+                ack = await assetInventoryExecuteCommand({ type: 'AssetInventoryAction', version: 1, input: { ...input, reviewFingerprint: s.preview.fingerprint } }, { operationId: s.operationId });
             }
             catch (error) {
                 s.uncertain = true;
@@ -952,7 +1129,7 @@ var AssetInventoryFiles;
         catch (error) {
             return { ok: false, error: text(error) };
         }
-        const token = _sync.databaseToken;
+        const token = assetInventoryDatabaseToken();
         if (typeof token !== 'string' || !token)
             return { ok: false, error: 'Сначала дождитесь подтверждения подключения к базе' };
         return new Promise(resolve => {
@@ -1006,16 +1183,14 @@ var AssetInventoryFiles;
     }
     AssetInventoryFiles.openImport = openImport;
     async function exportDocument(request) {
-        const captured = assetInventoryHostSnapshot(), baseline = source(captured), token = _sync.databaseToken;
+        const captured = assetInventoryHostSnapshot(), baseline = source(captured), token = assetInventoryDatabaseToken();
         try {
             verify(captured, baseline, false);
             if (typeof token !== 'string' || !token)
                 throw Error('Нет подтверждённого подключения к базе');
             if (!(captured.database.inventorySessions ?? []).some(row => row.id === request.sessionId))
                 throw Error('Опись не найдена в доступных данных');
-            const rpc = bridge().assetInventoryExport;
-            if (!rpc)
-                throw Error('Выгрузка инвентаризации недоступна в этом подключении. Обновите программу.');
+            const rpc = assetInventoryExportRequest;
             const result = await rpc({ format: request.format, sessionId: request.sessionId, databaseToken: token });
             if (result.ok) {
                 try {

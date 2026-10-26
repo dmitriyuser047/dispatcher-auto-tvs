@@ -6,8 +6,6 @@ namespace AssetInventoryFiles {
  type Snapshot=AssetInventoryWorkspace.Snapshot;
  type Result=AssetInventoryWorkspace.FileResult;
  type Format='legacy'|'osv'|'comparison';
- interface Reply {ok:boolean;cancelled?:boolean;unknown?:boolean;definitive?:boolean;error?:string;message?:string;databaseToken?:string;sourceId?:string;source?:Row;canImport?:boolean;issues?:unknown;warnings?:unknown;preview?:Row;input?:Row;action?:string}
- interface Bridge {importSource?(request:Row):Promise<Reply>;assetInventoryExport?(request:{format:'xlsx'|'pdf';sessionId:Id;databaseToken:string}):Promise<Reply>}
  interface State {
   overlay:HTMLDivElement;form:HTMLFormElement;captured:Snapshot;sourceText:string;token:string;
   file:File|null;reader:FileReader|null;base64:string|null;sourceId:string|null;source:Row|null;mappingText:string;stagedFile:File|null;
@@ -24,7 +22,6 @@ namespace AssetInventoryFiles {
  const string=(value:unknown):string=>typeof value==='string'?value:'';
  const text=(error:unknown):string=>error instanceof Error?error.message:String(error);
  const source=(snapshot:Snapshot):string=>JSON.stringify(ownSections.map(name=>[name,snapshot.database[name]??[]]));
- const bridge=():Bridge=>(window as unknown as {electronAPI?:Bridge}).electronAPI??{};
  function required<T extends Element>(parent:ParentNode,selector:string):T {const node=parent.querySelector<T>(selector);if(!node)throw Error('Окно работы с файлами закрыто');return node;}
  function field(s:State,name:string):HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement {return required(s.form,'[name="'+name+'"]');}
  function supported(snapshot:Snapshot):boolean {return snapshot.isSQLite&&snapshot.schemaVersion===6&&snapshot.capabilities.some(value=>value.name==='inventoryV1'&&value.version===1);}
@@ -36,7 +33,7 @@ namespace AssetInventoryFiles {
   if(write&&!current.canWrite)throw Error('Нет права импорта данных инвентаризации.');
   return current;
  }
- function check(s:State,baseline=true):void {if(active!==s||s.revoked||!s.form.isConnected)throw Error('Окно импорта закрыто или относится к другому сеансу');verify(s.captured,baseline?s.sourceText:null,true);if(_sync.databaseToken!==s.token)throw Error('Выбрана другая база. Откройте импорт заново.');}
+ function check(s:State,baseline=true):void {if(active!==s||s.revoked||!s.form.isConnected)throw Error('Окно импорта закрыто или относится к другому сеансу');verify(s.captured,baseline?s.sourceText:null,true);if(assetInventoryDatabaseToken()!==s.token)throw Error('Выбрана другая база. Откройте импорт заново.');}
  function showError(s:State,error:unknown):void {if(active===s&&!s.revoked)required<HTMLElement>(s.form,'[data-ai-file-error]').textContent=text(error);}
  function lock(s:State,busy:boolean):void {
   s.busy=busy;
@@ -134,7 +131,7 @@ namespace AssetInventoryFiles {
    const map=mapping(s),format=map.format;
    if(format==='legacy'?!/\.json$/i.test(file.name):! /\.xlsx?$/i.test(file.name))throw Error(format==='legacy'?'Для переноса прежней базы выберите JSON-файл.':'Выберите исходную книгу XLS или XLSX.');
    if(field(s,'reason').value.trim().length<3)throw Error('Укажите основание импорта не короче трёх символов');
-   const rpc=bridge().importSource;if(!rpc)throw Error('Безопасный импорт файлов недоступен в этом подключении. Обновите программу.');
+   const rpc=assetInventoryImportSource;
    s.file=file;clearPreview(s,false);lock(s,true);showError(s,'');
    const mapText=JSON.stringify(map);
    if(!s.sourceId||s.mappingText!==mapText||s.stagedFile!==file){
@@ -170,7 +167,7 @@ namespace AssetInventoryFiles {
    if(s.preview?.canApply!==true||inputText!==s.reviewInput||!required<HTMLInputElement>(s.form,'[name=confirm]').checked)throw Error('Сначала проверьте весь источник и подтвердите импорт');
    if(!s.operationId)s.operationId=wfId('asset-inventory-import');lock(s,true);showError(s,'');
    let ack:AssetInventoryWorkspace.Ack;
-   try{ack=await platformExecuteCommand({type:'AssetInventoryAction',version:1,input:{...input,reviewFingerprint:s.preview.fingerprint}},{operationId:s.operationId});}catch(error){s.uncertain=true;throw error;}
+   try{ack=await assetInventoryExecuteCommand({type:'AssetInventoryAction',version:1,input:{...input,reviewFingerprint:s.preview.fingerprint}},{operationId:s.operationId});}catch(error){s.uncertain=true;throw error;}
    if(!ack.ok){s.uncertain=ack.unknown===true||ack.definitive===false;throw Error(ack.error||ack.message||'Импорт не подтверждён. Выбранный файл и параметры сохранены.');}
    s.uncertain=true;check(s,false);canonical(s,ack);s.uncertain=false;finish(s,{ok:true,message:'Импорт всего источника подтверждён. Проверьте реестр и черновики описей.'});
   }catch(error){showError(s,(s.uncertain?'Результат операции пока не подтверждён; повтор использует ту же квитанцию. ':'')+text(error));}finally{if(active===s&&!s.revoked)lock(s,false);}
@@ -178,7 +175,7 @@ namespace AssetInventoryFiles {
  export async function openImport(request:{format:'legacy'|'xlsx';scope:AssetInventoryWorkspace.Scope}):Promise<Result> {
   if(active)return {ok:false,error:'Сначала завершите открытый импорт'};
   const captured=assetInventoryHostSnapshot();try{verify(captured,source(captured),true);}catch(error){return {ok:false,error:text(error)};}
-  const token=_sync.databaseToken;if(typeof token!=='string'||!token)return {ok:false,error:'Сначала дождитесь подтверждения подключения к базе'};
+  const token=assetInventoryDatabaseToken();if(typeof token!=='string'||!token)return {ok:false,error:'Сначала дождитесь подтверждения подключения к базе'};
   return new Promise(resolve=>{
    const overlay=document.createElement('div');overlay.className='ai-overlay ai-file-overlay';overlay.tabIndex=-1;
    overlay.innerHTML='<section class="ai-dialog" role="dialog" aria-modal="true" aria-label="Импорт инвентаризации"><header><h3>Импорт инвентаризации ОС</h3><button type="button" class="btn btn-secondary" data-ai-file-close>Закрыть</button></header><form class="ai-form" data-ai-files-form><p>Выберите исходный файл размером до 25 МБ. Сервер проверит весь источник перед подтверждением. Просмотр не меняет реестр и описи.</p><div class="ai-grid"><label>Исходный файл<input type="file" name="file" accept="'+(request.format==='legacy'?'.json':'.xls,.xlsx')+'"></label><label>Формат<select name="format">'+(request.format==='legacy'?'<option value="legacy">Прежняя база инвентаризации (JSON)</option>':'<option value="osv">Оборотно-сальдовая ведомость</option><option value="comparison">Сличительная ведомость</option>')+'</select></label><label>Дата источника<input type="date" name="date" required></label><label>Название описи (если нужно)<input name="title"></label><label>Название организации, если нет в источнике<input name="defaultOrgName"></label><label>Название объекта, если нет в источнике<input name="defaultObjectName"></label></div><fieldset data-ai-file-targets><legend>Собственные справочники для Excel (необязательно)</legend><p>Выбирайте только при подтверждённом совпадении источника. Существующие записи не будут переименованы.</p><div class="ai-grid"><label>Организация<select name="targetOrg"></select></label><label>Объект<select name="targetObject"></select></label><label>МОЛ / счёт<select name="targetMol"></select></label></div></fieldset><label class="ai-confirm" data-ai-file-opening><input type="checkbox" name="useOpeningIfNoClosing">Если остатка на конец нет, использовать остаток на начало (только по явному подтверждению)</label><label>Основание импорта<textarea name="reason" required minlength="3"></textarea></label><p class="ai-error" data-ai-file-error role="alert"></p><div data-ai-file-preview></div><label class="ai-confirm" data-ai-file-confirm hidden><input type="checkbox" name="confirm">Подтверждаю импорт всего проверенного источника</label><p data-ai-file-status role="status" aria-live="polite"></p><div class="ai-actions"><button type="button" class="btn btn-secondary" data-ai-file-review>Проверить источник</button><button type="submit" class="btn btn-primary" data-ai-file-commit disabled>Импортировать</button></div></form></section>';
@@ -197,11 +194,11 @@ namespace AssetInventoryFiles {
   });
  }
  export async function exportDocument(request:{format:'xlsx'|'pdf';sessionId:Id}):Promise<Result> {
-  const captured=assetInventoryHostSnapshot(),baseline=source(captured),token=_sync.databaseToken;
+  const captured=assetInventoryHostSnapshot(),baseline=source(captured),token=assetInventoryDatabaseToken();
   try{
    verify(captured,baseline,false);if(typeof token!=='string'||!token)throw Error('Нет подтверждённого подключения к базе');
    if(!(captured.database.inventorySessions??[]).some(row=>row.id===request.sessionId))throw Error('Опись не найдена в доступных данных');
-   const rpc=bridge().assetInventoryExport;if(!rpc)throw Error('Выгрузка инвентаризации недоступна в этом подключении. Обновите программу.');
+   const rpc=assetInventoryExportRequest;
    const result=await rpc({format:request.format,sessionId:request.sessionId,databaseToken:token});
    if(result.ok){try{verify(captured,baseline,false);}catch{return {ok:true,message:'Файл сохранён, но база или доступ изменились. Проверьте текущий сеанс.'};}return {ok:true,message:result.message||'Файл сохранён'};}
    verify(captured,baseline,false);return result.cancelled?{ok:false,cancelled:true}:{ok:false,error:result.error||result.message||(result.unknown?'Результат сохранения файла неизвестен. Проверьте выбранную папку.':'Файл не сохранён')};

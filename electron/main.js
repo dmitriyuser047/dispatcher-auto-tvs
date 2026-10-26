@@ -703,19 +703,21 @@ app.whenReady().then(() => {
       return { ok: false, error: e.message };
     }
   });
-  ipcMain.handle('asset-inventory-export',async(event,payload)=>{
+  async function exportAssetInventory(event,payload,inventoryContext=null){
     let written=false;
     try{
-      const fileContext=await captureFileContext(event),context=fileContext.operation;
+      const fileContext=inventoryContext||await captureFileContext(event),context=fileContext.operation;
       if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(key=>!['format','sessionId','databaseToken'].includes(key))||!['xlsx','pdf'].includes(payload.format))throw Object.assign(Error('Неверные параметры выгрузки описи'),{code:'INVENTORY_EXPORT_REQUEST'});
-      if(payload.databaseToken!==context.databaseToken)throw Object.assign(Error('База изменилась. Откройте опись заново.'),{code:'DATABASE_CHANGED'});
+      const inventoryToken=inventoryContext?payload.databaseToken:context.databaseToken;
+      if(typeof inventoryToken!=='string'||!inventoryToken||payload.databaseToken!==inventoryToken)throw Object.assign(Error('База изменилась. Откройте опись заново.'),{code:'DATABASE_CHANGED'});
       const exporter=require('./asset-inventory-export.js');
       const read=async fingerprint=>{
         await assertFileContext(fileContext);const request={...payload,...(fingerprint?{sourceFingerprint:fingerprint}:{})};
-        const result=context.client?await server.postInventoryReport(context.host,context.port,JSON.stringify(request)):exporter.prepare(context.directory,request,context.principal);
+        const databaseRequest={action:'report',parentDatabaseToken:context.databaseToken,request};
+        const result=inventoryContext?(context.client?await server.postInventoryDatabase(context.host,context.port,databaseRequest):await require('./inventory-database.cjs').handle(context.directory,databaseRequest,context.principal,{assertCurrent:()=>assertFileContextSync(fileContext)})):(context.client?await server.postInventoryReport(context.host,context.port,JSON.stringify(request)):exporter.prepare(context.directory,request,context.principal));
         await assertFileContext(fileContext);
         if(result?.ok!==true)throw Object.assign(Error(result?.error||'Опись недоступна для выгрузки'),{code:result?.code||'INVENTORY_EXPORT_SOURCE'});
-        if(result.databaseToken!==context.databaseToken||result.sessionId!==payload.sessionId||result.format!==payload.format||result.templateVersion!==1||!/^sha256:[a-f0-9]{64}$/.test(result.sourceFingerprint||''))throw Object.assign(Error('Источник выгрузки не подтверждён'),{code:'INVENTORY_EXPORT_SOURCE'});
+        if(result.databaseToken!==inventoryToken||result.sessionId!==payload.sessionId||result.format!==payload.format||result.templateVersion!==1||!/^sha256:[a-f0-9]{64}$/.test(result.sourceFingerprint||''))throw Object.assign(Error('Источник выгрузки не подтверждён'),{code:'INVENTORY_EXPORT_SOURCE'});
         require('../assets/core/platform-contracts.js').validateSections({appMeta:[{model:result.model}]},storage.SECTIONS);return result;
       };
       const prepared=await read(),defaultFileName=selectedFileName(prepared.defaultFileName,payload.format,'Инвентаризация.'+payload.format);
@@ -730,6 +732,26 @@ app.whenReady().then(() => {
       await assertFileContext(fileContext);await shell.openPath(destination);await assertFileContext(fileContext);
       return {ok:true,path:destination,format:payload.format,sourceFingerprint:prepared.sourceFingerprint,sha256:exporter.digestBytes(bytes)};
     }catch(error){return {ok:false,code:error.code||'INVENTORY_EXPORT_FAILED',error:(written?'Файл сохранён, но подтверждение изменилось. Проверьте выбранную опись. ':'')+error.message,fileWritten:written};}
+  }
+  ipcMain.handle('asset-inventory-export',(event,payload)=>exportAssetInventory(event,payload));
+  ipcMain.handle('inventory-database',async(event,payload)=>{
+    let writing=false;
+    try{
+      if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(key=>!['action','parentDatabaseToken','request'].includes(key))||!['snapshot','execute','importSource','export','openFolder'].includes(payload.action))throw Object.assign(Error('Неверное действие базы инвентаризации'),{code:'INVENTORY_DATABASE_REQUEST'});
+      const file=await captureFileContext(event),context=file.operation;
+      if(payload.parentDatabaseToken!==context.databaseToken)throw Object.assign(Error('Основная база изменилась. Откройте раздел заново.'),{code:'DATABASE_CHANGED'});
+      await assertFileContext(file);
+      if(payload.action==='export')return await exportAssetInventory(event,payload.request,file);
+      if(payload.action==='openFolder'){
+        if(context.client)throw Error('Папка базы инвентаризации находится на сервере.');
+        await require('./inventory-database.cjs').handle(context.directory,{action:'snapshot',parentDatabaseToken:context.databaseToken},context.principal,{assertCurrent:()=>assertFileContextSync(file)});
+        await assertFileContext(file);const error=await shell.openPath(require('./inventory-database.cjs').directory(context.directory));
+        await assertFileContext(file);return error?{ok:false,error}:{ok:true};
+      }
+      writing=payload.action==='execute';
+      const result=context.client?await server.postInventoryDatabase(context.host,context.port,payload):await require('./inventory-database.cjs').handle(context.directory,payload,context.principal,{getPrincipal:()=>{assertFileContextSync(file);return context.principal;},assertCurrent:()=>assertFileContextSync(file)});
+      await assertFileContext(file);return result;
+    }catch(error){return {ok:false,code:error.code||'INVENTORY_DATABASE_FAILED',error:error.message,...(Array.isArray(error.issues)?{issues:error.issues}:{}),...((error.unknown===true||error.definitive===false||writing&&error.code==='SESSION_CHANGED')?{unknown:true,definitive:false}:{})};}
   });
   ipcMain.handle('document-print',async(event,payload)=>{
     let archiveAck={};

@@ -177,6 +177,14 @@ function start({port,dataDir,backupFn,backup,serverName,key,settings,users,tls,r
     if(req.method==='POST'&&req.url==='/api/import-source'){
       void (async()=>{try{const payload=await readBody(req,MAX_IMPORT_BODY),principal=currentPrincipal();const result=await require('./import-source.cjs').handle(dataDir,payload,{principal,...writerContext(req,session.proof),getPrincipal:currentPrincipal});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'IMPORT_SOURCE_FAILED',error:error.message});}})();return;
     }
+    if(req.method==='POST'&&req.url==='/api/inventory-database'){
+      void(async()=>{try{
+        const payload=await readBody(req,MAX_IMPORT_BODY),principal=currentPrincipal();
+        const assertCurrent=()=>currentWritePrincipal(session,authenticateRequest,principal);
+        const result=await require('./inventory-database.cjs').handle(dataDir,payload,principal,{getPrincipal:assertCurrent,assertCurrent});
+        acknowledgeWrite(assertCurrent);respond(res,result.ok===false?409:200,result);
+      }catch(error){writeFailure(res,error);}})();return;
+    }
     if(req.method==='POST'&&req.url==='/api/document-print'){
       void (async()=>{try{const payload=await readBody(req),principal=currentPrincipal();const result=await require('./document-archive.cjs').handle(dataDir,payload,{principal,...writerContext(req,session.proof),renderPdf,getPrincipal:currentPrincipal});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'DOCUMENT_PRINT_FAILED',error:error.message});}})();return;
     }
@@ -283,7 +291,7 @@ async function request(host,port,apiPath,body,timeout=15000,transportOptions={})
   const options = await endpointOptions(host,port,apiPath);
   options.timeout = timeout; options.method = body == null ? 'GET' : 'POST';
   if (body != null) {
-    if (typeof body !== 'string' || Buffer.byteLength(body) > (apiPath==='/api/import-source'?MAX_IMPORT_BODY:MAX_BODY)) throw new Error('Слишком большой или неверный запрос');
+    if (typeof body !== 'string' || Buffer.byteLength(body) > (['/api/import-source','/api/inventory-database'].includes(apiPath)?MAX_IMPORT_BODY:MAX_BODY)) throw new Error('Слишком большой или неверный запрос');
     options.headers = {...options.headers,'X-TVS-Writer-Schema':String(require('./storage-format.cjs').SCHEMA_VERSION),'Content-Type':'application/json; charset=utf-8','Content-Length':Buffer.byteLength(body)};
     if(transportOptions.ticket!==undefined){if(typeof transportOptions.ticket!=='string'||Buffer.byteLength(transportOptions.ticket)>4096)throw Object.assign(Error('Требуется повторная проверка совместимости'),{code:'PROTOCOL_RENEGOTIATE',status:428});options.headers['X-TVS-Write-Ticket']=transportOptions.ticket;}
   }
@@ -333,6 +341,7 @@ async function postImportSource(host,port,jsonStr,options){const response=await 
 async function postDocumentPrint(host,port,jsonStr,options){const response=await request(host,port,'/api/document-print',jsonStr,45000,options);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_DOCUMENT_PRINT'};return parseResponse(response,true);}
 async function postInventoryReport(host,port,jsonStr){const response=await request(host,port,'/api/inventory-report',jsonStr,45000);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_INVENTORY_REPORT'};return parseResponse(response,true);}
 async function negotiate(host,port,hello){const json=JSON.stringify(hello);if(typeof json!=='string'||Buffer.byteLength(json)>32*1024)throw Object.assign(Error('Некорректный профиль совместимости'),{code:'NEGOTIATION_INVALID',status:400});return parseResponse(await request(host,port,'/api/negotiate',json));}
+async function postInventoryDatabase(host,port,payload){const response=await request(host,port,'/api/inventory-database',JSON.stringify(payload),90000);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_INVENTORY_DATABASE',error:'Обновите сервер: отдельная база инвентаризации пока не поддерживается.'};return parseResponse(response,true);}
 async function ping(host,port) { try { return parseResponse(await request(host,port,'/api/ping',null,5000)); } catch { return null; } }
 
-module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,postCommands,postDocumentPrint,postInventoryReport,postImportSource,negotiate,localWriteOptions,configureKey,configureTransport,configureAccess};
+module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,postCommands,postDocumentPrint,postInventoryReport,postImportSource,postInventoryDatabase,negotiate,localWriteOptions,configureKey,configureTransport,configureAccess};
