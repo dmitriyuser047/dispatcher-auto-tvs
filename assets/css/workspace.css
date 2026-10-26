@@ -269,6 +269,19 @@ header .icon-btn:hover { color: var(--accent); background: var(--ws-accent-soft)
 .layout { grid-column: 2; grid-row: 2; min-width: 0; min-height: 0; display: flex; overflow: hidden; background: var(--bg); }
 .main, #mainContent { min-width: 0; min-height: 0; background: var(--bg); }
 #mainContent.main { padding: 26px 28px !important; gap: 20px; overflow-x: hidden; overflow-y: auto; }
+/* Keep the active mileage journal ahead of the vehicle overview. Flex items
+   with overflow:hidden otherwise collapse to their border when the overview
+   fills the viewport, clipping both the rows and their scrollbars. */
+#mainContent:has(> #historyTableWrap) > * { flex-shrink: 0; order: 3; }
+#mainContent:has(> #historyTableWrap) > .vehicle-journal-months { order: 1; min-width: 0; }
+.vehicle-journal-months .month-tabs { max-height: 112px; overflow: auto; }
+#mainContent > #historyTableWrap { order: 2; min-width: 0; max-width: 100%; }
+#historyTableWrap .table-scroll { min-width: 0; max-height: clamp(200px, calc(100dvh - 380px), 560px); scrollbar-gutter: stable; }
+#historyTableWrap .table-toolbar > div { min-width: 0; }
+#historyTableWrap .table-toolbar-left > span { display: inline-block; }
+#historyTableWrap .table-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+#historyTableWrap.fullscreen { width: auto; max-width: none; min-height: 0; animation: none; }
+#historyTableWrap.fullscreen .table-scroll { min-height: 0; max-height: none; }
 #mainContent > div:has(> .vehicle-cards-toolbar) { padding: 0 !important; height: auto !important; min-height: 100%; overflow: visible !important; }
 #mainContent > div[style*="padding:24px 28px"],
 #mainContent > div[style*="padding:28px"] { padding: 0 !important; }
