@@ -737,7 +737,7 @@ app.whenReady().then(() => {
   ipcMain.handle('inventory-database',async(event,payload)=>{
     let writing=false;
     try{
-      if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(key=>!['action','parentDatabaseToken','request'].includes(key))||!['snapshot','execute','importSource','export','openFolder','documentsList','documentsUpload','documentRead','documentSave'].includes(payload.action))throw Object.assign(Error('Неверное действие базы инвентаризации'),{code:'INVENTORY_DATABASE_REQUEST'});
+      if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(key=>!['action','parentDatabaseToken','request'].includes(key))||!['snapshot','execute','importSource','export','openFolder','documentsList','documentsUpload','documentRead','documentSave','photosList','photosUpload','photoRead'].includes(payload.action))throw Object.assign(Error('Неверное действие базы инвентаризации'),{code:'INVENTORY_DATABASE_REQUEST'});
       const file=await captureFileContext(event),context=file.operation;
       if(payload.parentDatabaseToken!==context.databaseToken)throw Object.assign(Error('Основная база изменилась. Откройте раздел заново.'),{code:'DATABASE_CHANGED'});
       await assertFileContext(file);
@@ -764,7 +764,7 @@ app.whenReady().then(() => {
         await assertFileContext(file);const error=await shell.openPath(require('./inventory-database.cjs').directory(context.directory));
         await assertFileContext(file);return error?{ok:false,error}:{ok:true};
       }
-      writing=['execute','documentsUpload'].includes(payload.action);
+      writing=['execute','documentsUpload','photosUpload'].includes(payload.action);
       const result=context.client?await server.postInventoryDatabase(context.host,context.port,payload):await require('./inventory-database.cjs').handle(context.directory,payload,context.principal,{getPrincipal:()=>{assertFileContextSync(file);return context.principal;},assertCurrent:()=>assertFileContextSync(file)});
       await assertFileContext(file);return result;
     }catch(error){return {ok:false,code:error.code||'INVENTORY_DATABASE_FAILED',error:error.message,...(Array.isArray(error.issues)?{issues:error.issues}:{}),...((error.unknown===true||error.definitive===false||writing&&error.code==='SESSION_CHANGED')?{unknown:true,definitive:false}:{})};}

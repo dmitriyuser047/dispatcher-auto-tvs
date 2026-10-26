@@ -50,10 +50,25 @@ function seed(parent){
  for(const name of SECTIONS)storage.validateRows(name,data[name]);
  // Preserve only originals actually referenced by the inventory being copied.
  // Existing signatures and provenance survive the move into an independent DB.
- const artifacts=new Map();require('./import-source.cjs').validateManaged(data,name=>{
+ const artifacts=new Map();let artifactBytes=0;
+ const capture=(name,limit)=>{const bytes=regular(path.join(parent,...name.split('/')),limit),prior=artifacts.get(name);if(prior&&!prior.equals(bytes))fail('INVENTORY_SOURCE_CHANGED','Исходный файл изменился при подготовке базы',409);if(!prior){artifactBytes+=bytes.length;if(artifacts.size>=10000||artifactBytes>512*1024*1024)fail('INVENTORY_SOURCE_LIMIT','Исходные документы инвентаризации превышают допустимый размер отдельной копии');artifacts.set(name,bytes);}return bytes;};
+ require('./import-source.cjs').validateManaged(data,name=>{
   if(!/^import-sources\/(?:import-authority\.key|[a-f0-9]{64}\.[a-z0-9]{1,6})$/.test(name))fail('INVENTORY_SOURCE_PATH','Недопустимый путь исходника');
-  assertDirectory(path.join(parent,'import-sources'));const bytes=regular(path.join(parent,...name.split('/')),40*1024*1024);artifacts.set(name,bytes);return bytes;
- });return {data,artifacts};
+  assertDirectory(path.join(parent,'import-sources'));return capture(name,40*1024*1024);
+ });
+ // A restored inventory backup may itself be selected as the application
+ // profile. Keep its standalone originals and row-bound photos when opening
+ // the section creates the independent child store for that restored profile.
+ for(const folder of ['inventory-documents','inventory-photos']){
+  const full=path.join(parent,folder);try{fs.lstatSync(full);}catch(error){if(error.code==='ENOENT')continue;throw error;}
+  const pin=assertDirectory(full),names=fs.readdirSync(full).sort(),entries=names.map(name=>folder+'/'+name);
+  for(const name of entries)capture(name,name.endsWith('.bin')?25*1024*1024:2*1024*1024);
+  if(folder==='inventory-documents')require('./inventory-documents.cjs').validateManaged(entries,name=>artifacts.get(name));
+  else require('./inventory-photos.cjs').validateManaged(data,entries,name=>artifacts.get(name));
+  const after=assertDirectory(full);if(after.dev!==pin.dev||after.ino!==pin.ino||JSON.stringify(fs.readdirSync(full).sort())!==JSON.stringify(names))fail('INVENTORY_SOURCE_CHANGED','Список исходных файлов изменился при подготовке базы',409);
+  for(const name of entries)if(!regular(path.join(parent,...name.split('/')),name.endsWith('.bin')?25*1024*1024:2*1024*1024).equals(artifacts.get(name)))fail('INVENTORY_SOURCE_CHANGED','Исходный файл изменился при подготовке базы',409);
+ }
+ return {data,artifacts};
 }
 function ensure(parentDir){
  const parent=parentDirectory(parentDir),target=directory(parent);
@@ -62,7 +77,9 @@ function ensure(parentDir){
  try{
   sqlite.create(stage,{data:input.data});
   for(const [name,bytes]of input.artifacts){const full=path.join(stage,...name.split('/'));if(!fs.existsSync(path.dirname(full)))fs.mkdirSync(path.dirname(full));fs.writeFileSync(full,bytes,{flag:'wx',mode:0o600});}
-  require('./import-source.cjs').validateState(stage,sqlite.readAll(stage));
+  const stagedData=sqlite.readAll(stage),entries=[...input.artifacts.keys()],read=name=>regular(path.join(stage,...name.split('/')),40*1024*1024);
+  require('./import-source.cjs').validateState(stage,stagedData);
+  require('./inventory-documents.cjs').validateManaged(entries,read);require('./inventory-photos.cjs').validateManaged(stagedData,entries,read);
   try{fs.renameSync(stage,target);published=true;}
   catch(error){if(!fs.existsSync(target))throw error;assertDirectory(target);if(!sqlite.exists(target))throw error;}
   assertDirectory(target);return target;
@@ -96,7 +113,7 @@ async function importSource(parentDir,payload,value,options={}){
 }
 function report(parentDir,payload,value){const user=checkedUser(value);row(payload);const dir=ensure(parentDir);fence(dir,payload);return require('./asset-inventory-export.js').prepare(dir,payload,user);}
 async function handle(parentDir,payload,value,options={}){
- row(payload);if(Object.keys(payload).some(name=>!['action','parentDatabaseToken','request'].includes(name))||!['snapshot','execute','importSource','report','documentsList','documentsUpload','documentRead'].includes(payload.action)||typeof payload.parentDatabaseToken!=='string'||!payload.parentDatabaseToken)fail('INVENTORY_REQUEST','Не подтверждена текущая база программы');
+ row(payload);if(Object.keys(payload).some(name=>!['action','parentDatabaseToken','request'].includes(name))||!['snapshot','execute','importSource','report','documentsList','documentsUpload','documentRead','photosList','photosUpload','photoRead'].includes(payload.action)||typeof payload.parentDatabaseToken!=='string'||!payload.parentDatabaseToken)fail('INVENTORY_REQUEST','Не подтверждена текущая база программы');
  const parent=parentDirectory(parentDir),user=checkedUser(value),stamp=JSON.stringify([user.id,user.role,user.policyStamp]);
  const current=()=>{
   if(parentToken(parent)!==payload.parentDatabaseToken)fail('DATABASE_CHANGED','Основная база изменилась. Откройте раздел заново.',409);
@@ -105,11 +122,14 @@ async function handle(parentDir,payload,value,options={}){
  if(options.assertCurrent)await options.assertCurrent();current();
  const extra={getPrincipal:current,...(options.now?{now:options.now}:{})};
  let result;
- if(['documentsList','documentsUpload','documentRead'].includes(payload.action)){
+ if(['photosList','photosUpload','photoRead'].includes(payload.action)){
+  const photos=require('./inventory-photos.cjs'),dir=ensure(parent),method={photosList:'list',photosUpload:'upload',photoRead:'read'}[payload.action];
+  result=await photos[method](dir,row(payload.request),current(),extra);
+ }else if(['documentsList','documentsUpload','documentRead'].includes(payload.action)){
   const documents=require('./inventory-documents.cjs'),dir=ensure(parent),method={documentsList:'list',documentsUpload:'upload',documentRead:'read'}[payload.action];
   result=await documents[method](dir,row(payload.request),current(),extra);
  }else result=payload.action==='snapshot'?snapshot(parent,current()):payload.action==='execute'?execute(parent,row(payload.request),current(),extra):payload.action==='importSource'?await importSource(parent,row(payload.request),current(),extra):report(parent,row(payload.request),current());
  try{if(options.assertCurrent)await options.assertCurrent();current();return result;}
- catch(error){if(payload.action==='documentsUpload'&&result?.ok){error.unknown=true;error.definitive=false;}throw error;}
+ catch(error){if(['documentsUpload','photosUpload'].includes(payload.action)&&result?.ok){error.unknown=true;error.definitive=false;}throw error;}
 }
 module.exports=Object.freeze({SECTIONS,directory,snapshot,execute,importSource,report,handle});

@@ -1,6 +1,6 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
-const ROOT=path.resolve(__dirname,'..'),SOURCES=['src/ui/asset-inventory.ts','src/ui/asset-inventory-host.ts','src/ui/asset-inventory-files.ts','src/ui/inventory-documents.ts'],CONFIG='tsconfig.inventory-ui.json',OUTPUT='assets/js/69-asset-inventory.js';
+const ROOT=path.resolve(__dirname,'..'),SOURCES=['src/ui/asset-inventory.ts','src/ui/asset-inventory-host.ts','src/ui/asset-inventory-files.ts','src/ui/inventory-documents.ts','src/ui/inventory-photos.ts'],CONFIG='tsconfig.inventory-ui.json',OUTPUT='assets/js/69-asset-inventory.js';
 function compileInventoryUI(){
  const ts=require('typescript');if(ts.version!=='5.9.3')throw Error('Expected pinned TypeScript 5.9.3, received '+ts.version);
  const file=path.join(ROOT,CONFIG),loaded=ts.readConfigFile(file,ts.sys.readFile),format=ds=>ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>ROOT,getCanonicalFileName:f=>f,getNewLine:()=> '\n'});

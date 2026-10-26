@@ -1,5 +1,5 @@
 'use strict';
-function validateSources(data,read,files){require('./import-source.cjs').validateManaged(data,read);require('./attachment-access.cjs').validateManaged(data,read);require('./inventory-documents.cjs').validateManaged(files,read);}
+function validateSources(data,read,files){require('./import-source.cjs').validateManaged(data,read);require('./attachment-access.cjs').validateManaged(data,read);require('./inventory-documents.cjs').validateManaged(files,read);require('./inventory-photos.cjs').validateManaged(data,files,read);}
 
 // Format 3 preserves the immutable operation closure. Legacy formats 1/2 remain readable. No Electron, profile selection or settings
 // mutation lives here; callers must explicitly provide every source/target path.
@@ -9,7 +9,7 @@ const schema = require('../assets/core/platform-schema.js');
 const contracts = require('../assets/core/platform-contracts.js');
 const storage = require('./storage');
 const sqlite = require('./sqlite-storage.cjs');
-const SECTIONS = schema.sections, MANAGED = ['attachments', 'import-sources', 'reestr-knowledge','document-archive','migration-history','inventory-documents'];
+const SECTIONS = schema.sections, MANAGED = ['attachments', 'import-sources', 'reestr-knowledge','document-archive','migration-history','inventory-documents','inventory-photos'];
 const MAX_BYTES = 512 * 1024 * 1024, MAX_FILES = 10000;
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);

@@ -1,5 +1,5 @@
-/* Generated from src/ui/asset-inventory.ts, src/ui/asset-inventory-host.ts, src/ui/asset-inventory-files.ts, src/ui/inventory-documents.ts by scripts/build-inventory-ui.cjs.
- * TypeScript 5.9.3; source/config sha256:b579df09ce3600f61950fafdba8f2900333f5dcfe509a25a9c9015bf65a2a985. Do not edit directly. */
+/* Generated from src/ui/asset-inventory.ts, src/ui/asset-inventory-host.ts, src/ui/asset-inventory-files.ts, src/ui/inventory-documents.ts, src/ui/inventory-photos.ts by scripts/build-inventory-ui.cjs.
+ * TypeScript 5.9.3; source/config sha256:6b1cd74f02466f4db48e0be3bf55f8b9673d15f526a5ebe457f854b40a7ebb2e. Do not edit directly. */
 "use strict";
 /** Standalone property inventory UI. This adapter never accesses application globals,
  * paths, localStorage or fleet/stock data. All writes require a canonical host ACK. */
@@ -204,7 +204,7 @@ var AssetInventoryWorkspace;
         function close(force = false) { if (!form)
             return true; if (form.pending)
             return false; if (!force && !form.committed && dirty(form) && !host.confirmDiscard('Закрыть форму и потерять несохранённые значения инвентаризации?'))
-            return false; form.overlay.remove(); form = null; return true; }
+            return false; form.dispose?.(); form.overlay.remove(); form = null; return true; }
         function dirty(s) { return JSON.stringify([...new FormData(s.element)].filter(([key]) => key !== 'confirm')) !== s.initial; }
         function show(title, html, choices = new Map()) {
             if (!close())
@@ -387,7 +387,16 @@ var AssetInventoryWorkspace;
             throw Error(unavailable(snapshot)); const choices = new Map(), s = show('Начать подсчёт по объекту', '<p>Учётные данные и названия будут скопированы в новую опись. Позже изменения реестра не перепишут эту опись.</p><div class="ai-grid">' + selectField('objectId', 'Объект', active(snapshot.database, 'inventoryObjects'), filters.object, choices) + selectField('orgId', 'Организация', active(snapshot.database, 'inventoryOrgs'), filters.org, choices, 'Все организации объекта') + control('date', 'Дата описи', snapshot.today, 'date') + control('title', 'Название описи') + '</div>' + footer('Создать черновик'), choices); s.input = () => { const orgId = selected(s, 'orgId', true); return { action: 'createSession', objectId: selected(s, 'objectId'), ...(orgId === undefined ? {} : { orgId }), date: field(s.element, 'date').value, title: field(s.element, 'title').value, reason: field(s.element, 'reason').value }; }; seal(s); }
         function commissionHtml(value) { const commission = object(value.commission), chairman = object(commission.chairman), members = list(commission.members); return '<fieldset><legend>Комиссия</legend><div class="ai-grid">' + control('chairmanName', 'ФИО председателя', str(chairman.name)) + control('chairmanPosition', 'Должность председателя', str(chairman.position)) + '</div><div data-ai-members>' + members.map((person, index) => memberHtml(person, index)).join('') + '</div>' + button('addMember', 'Добавить члена комиссии') + '</fieldset>'; }
         function memberHtml(person, index) { return '<div class="ai-member" data-ai-member="' + index + '">' + control('memberName' + index, 'ФИО', str(person.name)) + control('memberPosition' + index, 'Должность', str(person.position)) + button('removeMember', 'Убрать') + '</div>'; }
-        function factsHtml(model, editable) { return '<div class="ai-scroll ai-facts"><table><thead><tr><th>Организация / МОЛ / счёт</th><th>Имущество / код</th><th>Ед.</th><th>Кол-во учёт</th><th>Кол-во факт</th>' + (quantity ? '' : '<th>Стоимость учёт</th><th>Стоимость факт</th>') + '<th>Решение</th><th>Примечание</th></tr></thead><tbody>' + list(model.rows).map((row, index) => '<tr data-ai-fact="' + index + '"><td>' + esc(row.orgName) + '<small>' + esc(row.molName) + ' · ' + esc(row.accountCode) + '</small></td><td>' + esc(row.name) + '<small>' + esc(row.code) + '</small></td><td>' + esc(row.unit || 'Не задано') + '</td><td>' + esc(numberText(row.qtyAcct)) + '</td><td>' + (editable ? '<input aria-label="Фактическое количество: ' + esc(row.name) + '" name="qtyFact' + index + '" value="' + esc(valueText(row.qtyFact)) + '" inputmode="decimal">' : esc(numberText(row.qtyFact))) + '</td>' + (quantity ? '' : '<td>' + esc(numberText(row.costAcct)) + '</td><td>' + (editable ? '<input aria-label="Фактическая стоимость: ' + esc(row.name) + '" name="costFact' + index + '" value="' + esc(valueText(row.costFact)) + '" inputmode="decimal">' : esc(numberText(row.costFact))) + '</td>') + '<td>' + (editable ? '<select aria-label="Решение: ' + esc(row.name) + '" name="action' + index + '">' + [['', 'Не выбрано'], ['writeoff', 'Списать'], ['transfer', 'Передать']].map(([value, label]) => '<option value="' + value + '"' + (row.action === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select>' : esc(row.action === 'writeoff' ? 'Списать' : row.action === 'transfer' ? 'Передать' : 'Не выбрано')) + '</td><td>' + (editable ? '<input aria-label="Примечание: ' + esc(row.name) + '" name="note' + index + '" value="' + esc(row.note) + '">' : esc(row.note)) + '</td></tr>').join('') + '</tbody></table></div>'; }
+        function countMatches(row) { return row.countMode === 'samePrice' ? row.matches === true : typeof row.qtyAcct === 'number' && row.qtyFact === row.qtyAcct && row.costFact === row.costAcct; }
+        function countValue(row, matches, qtyFact) { if (!host.core.countValue)
+            throw Error('Обновите программу: расчёт по фиксированной цене не загружен.'); return host.core.countValue(row, { matches, qtyFact }); }
+        function priceText(row) { const value = host.core.countValue?.(row, { matches: false, qtyFact: null }).unitPriceDecimal; return typeof value === 'string' ? value.replace('.', ',') : 'Не задана'; }
+        function factsHtml(model, editable) {
+            return '<div class="ai-scroll ai-facts"><table><thead><tr><th>Организация / МОЛ / счёт</th><th>Имущество / код</th><th>Ед.</th><th>Кол-во учёт</th><th>Совпадает</th><th>Кол-во факт</th>' + (quantity ? '' : '<th>Цена за единицу</th><th>Сумма учёт</th><th>Сумма факт</th>') + '<th>Решение</th><th>Примечание</th>' + (host.mountPhotos ? '<th>Фото позиции</th>' : '') + '</tr></thead><tbody>' + list(model.rows).map((row, index) => {
+                const matches = countMatches(row), unknown = typeof row.qtyAcct !== 'number', legacy = row.countMode !== 'samePrice' && (row.qtyFact !== null || row.costFact !== null);
+                return '<tr data-ai-fact="' + index + '" data-ai-count-row="' + index + '"><td>' + esc(row.orgName) + '<small>' + esc(row.molName) + ' · ' + esc(row.accountCode) + '</small></td><td>' + esc(row.name) + '<small>' + esc(row.code) + '</small></td><td>' + esc(row.unit || 'Не задано') + '</td><td>' + esc(numberText(row.qtyAcct)) + '</td><td><label class="ai-match"><input type="checkbox" name="matches' + index + '" aria-label="Совпадает: ' + esc(row.name) + '"' + (matches ? ' checked' : '') + (!editable || unknown ? ' disabled' : '') + '>Совпадает</label></td><td>' + (editable ? '<input aria-label="Фактическое количество: ' + esc(row.name) + '" name="qtyFact' + index + '" value="' + esc(valueText(row.qtyFact)) + '" inputmode="decimal"' + (matches ? ' readonly' : '') + '>' : esc(numberText(row.qtyFact))) + '</td>' + (quantity ? '' : '<td><span data-ai-count-price="' + index + '">' + esc(priceText(row)) + '</span></td><td>' + esc(numberText(row.costAcct)) + '</td><td>' + (editable ? '<input aria-label="Фактическая стоимость: ' + esc(row.name) + '" name="costFact' + index + '" value="' + esc(valueText(row.costFact)) + '" readonly inputmode="decimal">' : esc(numberText(row.costFact))) + (editable && legacy ? '<small data-ai-count-legacy="' + index + '">Сохранённая сумма. Изменение количества или галочки пересчитает её по учётной цене.</small>' : '') + '</td>') + '<td>' + (editable ? '<select aria-label="Решение: ' + esc(row.name) + '" name="action' + index + '">' + [['', 'Не выбрано'], ['writeoff', 'Списать'], ['transfer', 'Передать']].map(([value, label]) => '<option value="' + value + '"' + (row.action === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select>' : esc(row.action === 'writeoff' ? 'Списать' : row.action === 'transfer' ? 'Передать' : 'Не выбрано')) + '</td><td>' + (editable ? '<input aria-label="Примечание: ' + esc(row.name) + '" name="note' + index + '" value="' + esc(row.note) + '">' : esc(row.note)) + '</td>' + (host.mountPhotos ? '<td data-ai-photo-row="' + index + '"></td>' : '') + '</tr>';
+            }).join('') + '</tbody></table></div>';
+        }
         function summaryHtml(model) { const summary = object(model.summary), costs = object(summary.costs); return '<div class="ai-summary"><p>Позиций: ' + esc(summary.rows) + ' · проверено: ' + esc(summary.checked) + ' · недостача: ' + esc(summary.shortage) + ' · излишек: ' + esc(summary.surplus) + '</p>' + list(summary.quantities).map(group => '<p>' + esc(group.unit || 'Единица не задана') + ': учёт ' + esc(exactText(group, 'qtyAcct')) + '; факт ' + esc(exactText(group, 'qtyFact')) + '; разница ' + esc(exactText(group, 'difference')) + '.</p>').join('') + (quantity ? '' : '<p>Стоимость: учёт ' + esc(exactText(costs, 'costAcct')) + '; факт ' + esc(exactText(costs, 'costFact')) + '; разница ' + esc(exactText(costs, 'difference')) + '.</p>') + '<p class="ai-muted">Разные единицы не складываются. Неизвестные значения исключают полный итог.</p></div>'; }
         function openSession(id) {
             try {
@@ -402,7 +411,8 @@ var AssetInventoryWorkspace;
                 const s = show('Опись: ' + str(model.objectName), html);
                 s.sessionId = id;
                 s.original = clone(session);
-                s.input = () => { const facts = list(session.rows).map((row, index) => ({ rowId: row.id, qtyFact: inputNumber(field(s.element, 'qtyFact' + index).value, 3), costFact: quantity ? (row.costFact ?? null) : inputNumber(field(s.element, 'costFact' + index).value, 2), action: field(s.element, 'action' + index).value, note: field(s.element, 'note' + index).value })), members = [...s.element.querySelectorAll('[data-ai-member]')].map(node => { const inputs = node.querySelectorAll('input'); return { name: inputs[0]?.value ?? '', position: inputs[1]?.value ?? '' }; }); return { action: 'saveDraft', sessionId: id, payload: { date: field(s.element, 'date').value, title: field(s.element, 'title').value, note: field(s.element, 'note').value, commission: { chairman: { name: field(s.element, 'chairmanName').value, position: field(s.element, 'chairmanPosition').value }, members }, facts }, reason: field(s.element, 'reason').value }; };
+                const touched = new Set();
+                s.input = () => { const facts = list(session.rows).map((row, index) => { const qtyFact = inputNumber(field(s.element, 'qtyFact' + index).value, 3), matches = field(s.element, 'matches' + index).checked, newMode = row.countMode === 'samePrice' || touched.has(index) || row.qtyFact === null && row.costFact === null, counts = newMode ? countValue(row, matches, qtyFact) : { qtyFact, costFact: row.costFact ?? null }; return { qtyFact: counts.qtyFact, costFact: counts.costFact, ...(newMode ? { countMode: 'samePrice', matches } : {}), rowId: row.id, action: field(s.element, 'action' + index).value, note: field(s.element, 'note' + index).value }; }), members = [...s.element.querySelectorAll('[data-ai-member]')].map(node => { const inputs = node.querySelectorAll('input'); return { name: inputs[0]?.value ?? '', position: inputs[1]?.value ?? '' }; }); return { action: 'saveDraft', sessionId: id, payload: { date: field(s.element, 'date').value, title: field(s.element, 'title').value, note: field(s.element, 'note').value, commission: { chairman: { name: field(s.element, 'chairmanName').value, position: field(s.element, 'chairmanPosition').value }, members }, facts }, reason: field(s.element, 'reason').value }; };
                 s.element.querySelectorAll('[data-ai-action]').forEach(element => element.onclick = () => { try {
                     check(s);
                     const action = element.dataset.aiAction;
@@ -431,11 +441,44 @@ var AssetInventoryWorkspace;
                     formError(s, error);
                 } });
                 if (!readonly) {
+                    list(session.rows).forEach((row, index) => {
+                        const match = field(s.element, 'matches' + index), qty = field(s.element, 'qtyFact' + index);
+                        const update = () => { if (s.pending || s.uncertain)
+                            return; try {
+                            check(s, true, true);
+                            touched.add(index);
+                            qty.readOnly = match.checked;
+                            const counted = countValue(row, match.checked, inputNumber(qty.value, 3));
+                            qty.value = valueText(counted.qtyFact);
+                            const cost = s.element.elements.namedItem('costFact' + index);
+                            if (cost instanceof HTMLInputElement)
+                                cost.value = valueText(counted.costFact);
+                            s.element.querySelector('[data-ai-count-legacy="' + index + '"]')?.remove();
+                            invalidateReview(s);
+                            formError(s, '');
+                        }
+                        catch (error) {
+                            const cost = s.element.elements.namedItem('costFact' + index);
+                            if (cost instanceof HTMLInputElement)
+                                cost.value = '';
+                            formError(s, error);
+                        } };
+                        match.addEventListener('change', () => { qty.value = match.checked ? valueText(row.qtyAcct) : ''; update(); });
+                        qty.addEventListener('input', update);
+                    });
                     bindMembers(s);
                     seal(s);
                 }
                 else
                     s.initial = JSON.stringify([...new FormData(s.element)]);
+                if (host.mountPhotos)
+                    s.dispose = host.mountPhotos({ container: s.element, sessionId: id, rows: list(session.rows), readOnly: readonly, isCurrent: () => { try {
+                            check(s, false);
+                            return true;
+                        }
+                        catch {
+                            return false;
+                        } }, setPending: pending => { s.pending = pending; } });
             }
             catch (error) {
                 status(errorMessage(error), true);
@@ -542,7 +585,7 @@ var AssetInventoryWorkspace;
             return false; container = null; renderSnapshot = null; refs.clear(); return true; }
         // Only a forced session/access revocation uses this path. Ordinary navigation
         // must retain dirty drafts and respect the pending-write unmount barrier.
-        function invalidate() { form?.overlay.remove(); form = null; if (container)
+        function invalidate() { form?.dispose?.(); form?.overlay.remove(); form = null; if (container)
             container.replaceChildren(); container = null; renderSnapshot = null; renderSource = ''; refs.clear(); filters = { account: '', search: '' }; }
         return { render, unmount, invalidate, flush, hasPendingEdits, openCatalog, openSession };
     }
@@ -695,7 +738,7 @@ function assetInventoryWorkspaceInstance(mode = 'inventory') {
     const existing = mode === 'quantity' ? objectQuantityMountedWorkspace : assetInventoryMountedWorkspace;
     if (existing)
         return existing;
-    const workspace = AssetInventoryWorkspace.create({ mode, core: AssetInventory, snapshot: assetInventoryHostSnapshot, operationId: () => wfId('asset-inventory'), execute: (input, options) => assetInventoryExecuteCommand({ type: 'AssetInventoryAction', version: 1, input }, options), openUpgrade: () => lifecycleUpgradeOpen(), confirmDiscard: message => window.confirm(message), importFile: request => assetInventoryImportWizard(request), exportFile: request => assetInventoryExportDocument({ format: request.format, sessionId: request.sessionId }), ...(assetInventoryDatabaseBridge() ? { openDatabaseFolder: assetInventoryOpenDatabaseFolder, openDocuments: () => InventoryDocuments.open() } : {}) });
+    const workspace = AssetInventoryWorkspace.create({ mode, core: AssetInventory, snapshot: assetInventoryHostSnapshot, operationId: () => wfId('asset-inventory'), execute: (input, options) => assetInventoryExecuteCommand({ type: 'AssetInventoryAction', version: 1, input }, options), openUpgrade: () => lifecycleUpgradeOpen(), confirmDiscard: message => window.confirm(message), importFile: request => assetInventoryImportWizard(request), exportFile: request => assetInventoryExportDocument({ format: request.format, sessionId: request.sessionId }), ...(assetInventoryDatabaseBridge() ? { openDatabaseFolder: assetInventoryOpenDatabaseFolder, openDocuments: () => InventoryDocuments.open(), mountPhotos: input => InventoryPhotos.mount(input) } : {}) });
     if (mode === 'quantity')
         objectQuantityMountedWorkspace = workspace;
     else
@@ -1404,3 +1447,178 @@ var InventoryDocuments;
         finish(active, { ok: false, error: 'База или права изменились. Окно файлов очищено.' }); }
     InventoryDocuments.revoke = revoke;
 })(InventoryDocuments || (InventoryDocuments = {}));
+/** Photos are attached to a saved count row independently of unsaved counts. */
+var InventoryPhotos;
+(function (InventoryPhotos) {
+    const LIMIT = 25 * 1024 * 1024, MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+    const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c));
+    async function encoded(file) { const bytes = new Uint8Array(await file.arrayBuffer()); let raw = ''; for (let i = 0; i < bytes.length; i += 32768)
+        raw += String.fromCharCode(...bytes.subarray(i, i + 32768)); return btoa(raw); }
+    function mount(options) {
+        const form = options.container, token = assetInventoryDatabaseToken();
+        let disposed = false, busy = false;
+        const loaded = new Set(), loading = new Set(), selected = new Map();
+        let photos = [], observer = null;
+        const current = () => !disposed && form.isConnected && options.isCurrent() && token !== null && assetInventoryDatabaseToken() === token;
+        const cells = new Map();
+        options.rows.forEach((_row, index) => { const cell = form.querySelector('[data-ai-photo-row="' + index + '"]'); if (cell)
+            cells.set(index, cell); });
+        function status(index, text, error = false) { const target = cells.get(index)?.querySelector('[data-ai-photo-status]'); if (target && current()) {
+            target.textContent = text;
+            target.classList.toggle('ai-error', error);
+        } }
+        async function request(action, input) { if (!current())
+            throw Error('Опись или доступ изменились. Откройте фото заново.'); const result = await assetInventoryDatabaseRequest(action, { databaseToken: token, sessionId: options.sessionId, ...input }); if (!current())
+            throw Error('Опись или доступ изменились.'); if (!result.ok)
+            throw Error(result.error || 'Операция с фото не подтверждена.'); if (result.databaseToken !== undefined && result.databaseToken !== token)
+            throw Error('Ответ фото относится к другой базе.'); return result; }
+        async function load(photo, index) {
+            if (loaded.has(photo.id) || loading.has(photo.id) || !current())
+                return;
+            loading.add(photo.id);
+            try {
+                const reply = await request('photoRead', { rowId: photo.rowId, id: photo.id });
+                if (!MIMES.has(reply.mimeType ?? '') || typeof reply.base64 !== 'string' || reply.base64.length > Math.ceil(LIMIT / 3) * 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(reply.base64))
+                    throw Error('Не получен безопасный оригинал изображения.');
+                const image = cells.get(index)?.querySelector('img[data-ai-photo-preview="' + photo.id + '"]');
+                if (image) {
+                    image.src = 'data:' + reply.mimeType + ';base64,' + reply.base64;
+                    image.hidden = false;
+                    loaded.add(photo.id);
+                }
+            }
+            catch (error) {
+                status(index, error instanceof Error ? error.message : String(error), true);
+            }
+            finally {
+                loading.delete(photo.id);
+            }
+        }
+        function render() {
+            if (!current())
+                return;
+            observer?.disconnect();
+            loaded.clear();
+            for (const [index, cell] of cells) {
+                const row = options.rows[index], own = photos.filter(photo => photo.rowId === row.id);
+                cell.innerHTML = '<div class="ai-photo-list">' + own.map(photo => '<button type="button" class="ai-photo-thumb" data-ai-photo-open="' + esc(photo.id) + '" aria-label="Открыть фото: ' + esc(photo.name) + '"><img data-ai-photo-preview="' + esc(photo.id) + '" alt="' + esc(photo.name) + '" hidden loading="lazy"><span>' + esc(photo.name) + '</span></button>').join('') + '</div>' + (options.readOnly ? '' : '<label class="ai-photo-upload">Добавить фото<input type="file" data-ai-photo-input="' + index + '" accept="image/jpeg,image/png,image/webp,image/gif" multiple></label>') + '<small data-ai-photo-status role="status" aria-live="polite"></small>';
+                cell.querySelector('[data-ai-photo-input]')?.addEventListener('change', event => { const input = event.target; if (input.files?.length)
+                    void upload(index, [...input.files], input); });
+                cell.querySelectorAll('[data-ai-photo-open]').forEach(button => button.onclick = () => { const photo = own.find(value => value.id === button.dataset.aiPhotoOpen); if (photo)
+                    void show(photo, index); });
+                cell.querySelectorAll('input,button').forEach(element => { element.disabled = busy; });
+                if (observer)
+                    observer.observe(cell);
+                else
+                    for (const photo of own.slice(0, 3))
+                        void load(photo, index);
+            }
+        }
+        async function refresh() { const reply = await request('photosList', {}); if (!Array.isArray(reply.photos))
+            throw Error('Не получен список фотографий.'); photos = reply.photos; render(); }
+        async function upload(index, files, input) {
+            if (busy || options.readOnly || !current())
+                return;
+            cells.get(index)?.querySelector('[data-ai-photo-retry]')?.remove();
+            const row = options.rows[index];
+            if (files.length > 20 || files.some(file => file.size === 0 || file.size > LIMIT) || files.reduce((sum, file) => sum + file.size, 0) > LIMIT) {
+                status(index, 'Выберите до 20 фотографий общим размером до 25 МБ.', true);
+                return;
+            }
+            const signature = JSON.stringify(files.map(file => [file.name, file.size, file.lastModified]));
+            let intent = selected.get(index);
+            if (!intent || intent.signature !== signature) {
+                intent = { signature, operationId: wfId('inventory-photo') };
+                selected.set(index, intent);
+            }
+            const states = [...form.querySelectorAll('input,select,textarea,button')].map(element => ({ element, disabled: element.disabled }));
+            states.forEach(({ element }) => { element.disabled = true; });
+            busy = true;
+            status(index, 'Загружается фото…');
+            const pending = (async () => { const data = []; for (const file of files) {
+                data.push({ name: file.name, base64: await encoded(file) });
+                if (!current())
+                    throw Error('Опись изменилась во время чтения фото.');
+            } const reply = await request('photosUpload', { rowId: row.id, files: data, operationId: intent.operationId }); await refresh(); input.value = ''; selected.delete(index); for (const photo of photos.filter(value => value.rowId === row.id))
+                await load(photo, index); status(index, 'Фото сохранено.' + (reply.warnings?.length ? ' ' + reply.warnings.map(value => value.message).join(' ') : '')); })();
+            options.setPending(pending);
+            try {
+                await pending;
+            }
+            catch (error) {
+                status(index, error instanceof Error ? error.message : String(error), true);
+                if (current()) {
+                    input.value = '';
+                    const retry = document.createElement('button');
+                    retry.type = 'button';
+                    retry.className = 'btn btn-secondary';
+                    retry.dataset.aiPhotoRetry = '';
+                    retry.textContent = 'Повторить загрузку';
+                    retry.onclick = () => { void upload(index, files, input); };
+                    cells.get(index)?.append(retry);
+                }
+            }
+            finally {
+                options.setPending(null);
+                busy = false;
+                if (current()) {
+                    states.forEach(({ element, disabled }) => { element.disabled = disabled; });
+                    for (const cell of cells.values())
+                        cell.querySelectorAll('input,button').forEach(element => { element.disabled = false; });
+                }
+            }
+        }
+        let viewer = null;
+        async function show(photo, index) { if (busy || !current())
+            return; try {
+            await load(photo, index);
+            if (!current())
+                return;
+            const original = cells.get(index)?.querySelector('img[data-ai-photo-preview="' + photo.id + '"]');
+            if (!original?.src)
+                throw Error('Фото пока не прочитано.');
+            viewer?.remove();
+            viewer = document.createElement('div');
+            viewer.className = 'ai-overlay ai-photo-overlay';
+            const dialog = document.createElement('section'), image = document.createElement('img'), close = document.createElement('button');
+            dialog.className = 'ai-dialog ai-photo-viewer';
+            dialog.setAttribute('role', 'dialog');
+            dialog.setAttribute('aria-label', photo.name);
+            image.src = original.src;
+            image.alt = photo.name;
+            close.type = 'button';
+            close.className = 'btn btn-secondary';
+            close.textContent = 'Закрыть фото';
+            close.onclick = () => { viewer?.remove(); viewer = null; };
+            dialog.append(close, image);
+            viewer.append(dialog);
+            document.body.append(viewer);
+            viewer.onkeydown = event => { if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                close.click();
+            } };
+            close.focus();
+        }
+        catch (error) {
+            status(index, error instanceof Error ? error.message : String(error), true);
+        } }
+        if (typeof IntersectionObserver !== 'undefined')
+            observer = new IntersectionObserver(entries => { for (const entry of entries)
+                if (entry.isIntersecting) {
+                    const pair = [...cells].find(([, cell]) => cell === entry.target);
+                    if (pair)
+                        for (const photo of photos.filter(value => value.rowId === options.rows[pair[0]]?.id))
+                            void load(photo, pair[0]);
+                } }, { rootMargin: '200px' });
+        for (const [index, cell] of cells) {
+            cell.innerHTML = '<small data-ai-photo-status role="status">Загружаются фотографии…</small>';
+            status(index, 'Загружаются фотографии…');
+        }
+        void refresh().catch(error => { for (const index of cells.keys())
+            status(index, error instanceof Error ? error.message : String(error), true); });
+        return () => { disposed = true; observer?.disconnect(); viewer?.remove(); viewer = null; for (const cell of cells.values())
+            cell.replaceChildren(); loaded.clear(); loading.clear(); selected.clear(); };
+    }
+    InventoryPhotos.mount = mount;
+})(InventoryPhotos || (InventoryPhotos = {}));

@@ -8,7 +8,7 @@ export interface AssetInventoryItemPayload extends AssetInventoryNamedPayload {m
 export type AssetInventoryCatalogPayload=AssetInventoryNamedPayload|AssetInventoryMolPayload|AssetInventoryItemPayload;
 export interface AssetInventoryPerson {name:string;position:string}
 export interface AssetInventoryCommission {chairman:AssetInventoryPerson;members:AssetInventoryPerson[]}
-export interface AssetInventoryFact {rowId:Identifier;qtyFact:number|null;costFact:number|null;action:''|'writeoff'|'transfer';note:string}
+export interface AssetInventoryFact {rowId:Identifier;qtyFact:number|null;costFact:number|null;action:''|'writeoff'|'transfer';note:string;countMode?:'samePrice';matches?:boolean}
 export interface AssetInventoryDraftPayload {date:string;title:string;note:string;commission:AssetInventoryCommission;facts:AssetInventoryFact[]}
 export interface AssetInventoryCorrection {rowId:Identifier;unit:string;qtyAcct:number|null;costAcct:number|null}
 export type AssetInventoryActionInput=
@@ -74,6 +74,22 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
   if(value===null)return null;if(typeof value!=='number'||!Number.isFinite(value))fail('INVENTORY_NUMBER','В поле «'+label+'» нужно число или явно неизвестное null');
   try{return decimal.toNumberExact(decimal.parse(value,{scale,nonNegative:true,max:scale===2?'1000000000000000':'1000000000000'}));}catch{ return fail('INVENTORY_NUMBER','Проверьте неотрицательное значение и точность поля «'+label+'»');}
  }
+ function countValue(value:unknown,inputValue:unknown):{countMode:'samePrice';matches:boolean;qtyFact:number|null;costFact:number|null;unitPriceDecimal:string|null;unitPrice:number|null} {
+  const source=row(value),input=row(inputValue);fields(input,['matches','qtyFact']);if(typeof input.matches!=='boolean')fail('INVENTORY_MATCH','Укажите, совпадает ли количество с учётом');
+  const qtyAcct=numeric(source.qtyAcct,'Учётное количество',3),costAcct=numeric(source.costAcct,'Учётная стоимость',2),entered=numeric(input.qtyFact,'Фактическое количество',3);
+  if(input.matches&&qtyAcct===null)fail('INVENTORY_MATCH_UNKNOWN','Нельзя подтвердить совпадение с неизвестным учётным количеством');
+  const priceKnown=qtyAcct!==null&&qtyAcct>0&&costAcct!==null,unitPriceDecimal=priceKnown?decimal.div(costAcct,qtyAcct,{scale:6,rounding:'half-away-from-zero'}):null;
+  const qtyFact=input.matches?qtyAcct:entered;let costFact:number|null=null;
+  if(input.matches)costFact=costAcct;
+  else if(priceKnown&&qtyFact!==null){
+   const amount=decimal.div(decimal.mul(costAcct,qtyFact),qtyAcct,{scale:2,rounding:'half-away-from-zero'});
+   try{costFact=decimal.toNumberExact(decimal.parse(amount,{scale:2,nonNegative:true,max:'1000000000000000'}));}catch{return fail('INVENTORY_NUMBER','Фактическая сумма выходит за допустимый диапазон');}
+  }
+  return freeze({countMode:'samePrice' as const,matches:input.matches,qtyFact,costFact,unitPriceDecimal,unitPrice:exactNumber(unitPriceDecimal)});
+ }
+ function countMeta(source:JsonRow):{countMode:'samePrice';matches:boolean}|null {
+  if(!own(source,'countMode')&&!own(source,'matches'))return null;if(source.countMode!=='samePrice'||typeof source.matches!=='boolean')fail('INVENTORY_COUNT_MODE','Проверьте режим подсчёта и отметку совпадения');return {countMode:'samePrice',matches:source.matches};
+ }
  function catalogSection(value:unknown):AssetInventoryCatalogSection {if(typeof value!=='string'||!(CATALOGS as readonly string[]).includes(value))fail('INVENTORY_SECTION','Выберите собственный справочник инвентаризации');return value as AssetInventoryCatalogSection;}
  function catalogPayload(section:AssetInventoryCatalogSection,value:unknown):JsonRow {
   const source=row(value),allowed=section==='inventoryMols'?['name','note','orgId','objectId','accountCode']:section==='inventoryItems'?['name','note','molId','code','unit','qty','cost']:['name','note'];fields(source,allowed);
@@ -84,7 +100,7 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
  }
  function person(value:unknown):AssetInventoryPerson {const source=row(value);fields(source,['name','position']);return {name:text(source.name,'ФИО',500),position:text(source.position,'Должность',500)};}
  function commission(value:unknown):AssetInventoryCommission {const source=row(value);fields(source,['chairman','members']);if(!Array.isArray(source.members)||source.members.length>100)fail('INVENTORY_COMMISSION','Нужен список членов комиссии');return {chairman:person(source.chairman),members:source.members.map(person)};}
- function fact(value:unknown):AssetInventoryFact {const source=row(value);fields(source,['rowId','qtyFact','costFact','action','note']);if(!['','writeoff','transfer'].includes(source.action as string))fail('INVENTORY_ACTION','Неизвестное решение по позиции');return {rowId:id(source.rowId),qtyFact:numeric(source.qtyFact,'Фактическое количество',3),costFact:numeric(source.costFact,'Фактическая стоимость',2),action:source.action as AssetInventoryFact['action'],note:text(source.note,'Примечание строки',20000)};}
+ function fact(value:unknown):AssetInventoryFact {const source=row(value);fields(source,['rowId','qtyFact','costFact','action','note','countMode','matches']);if(!['','writeoff','transfer'].includes(source.action as string))fail('INVENTORY_ACTION','Неизвестное решение по позиции');return {rowId:id(source.rowId),qtyFact:numeric(source.qtyFact,'Фактическое количество',3),costFact:numeric(source.costFact,'Фактическая стоимость',2),action:source.action as AssetInventoryFact['action'],note:text(source.note,'Примечание строки',20000),...(countMeta(source)??{})};}
  function draftPayload(value:unknown):AssetInventoryDraftPayload {const source=row(value);fields(source,['date','title','note','commission','facts']);if(!Array.isArray(source.facts)||source.facts.length>100000)fail('INVENTORY_FACTS','Нужны фактические данные всех строк описи');const facts=source.facts.map(fact),seen=new Set<Identifier>();for(const item of facts){if(seen.has(item.rowId))fail('INVENTORY_ROW_ID','Фактические данные строки повторяются');seen.add(item.rowId);}return {date:date(source.date,'Дата описи'),title:text(source.title,'Название',2000),note:text(source.note,'Примечание',20000),commission:commission(source.commission),facts};}
  function parse(value:unknown,preview=false):AssetInventoryActionInput {
   const source=row(value),action=source.action;
@@ -118,11 +134,11 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
   if(own(value,'archived')&&typeof value.archived!=='boolean')fail('INVENTORY_ARCHIVED','Архивный признак должен быть логическим');
   for(const key of ['createdAt','updatedAt'])if(own(value,key)&&(typeof value[key]!=='string'||!Number.isFinite(Date.parse(value[key] as string))))fail('INVENTORY_TIME','Некорректная дата изменения справочника');
  }
- const ROW_FIELDS=['id','itemId','molId','orgId','objectId','orgName','objectName','molName','name','code','accountCode','unit','qtyAcct','costAcct','qtyFact','costFact','action','note','sourceMeta','importProvenance'] as const;
+ const ROW_FIELDS=['id','itemId','molId','orgId','objectId','orgName','objectName','molName','name','code','accountCode','unit','qtyAcct','costAcct','qtyFact','costFact','action','note','sourceMeta','importProvenance','countMode','matches'] as const;
  function sessionRow(value:unknown):JsonRow {
   const source=row(value);fields(source,ROW_FIELDS);const result:JsonRow={};for(const key of ['id','itemId','molId','orgId','objectId'])result[key]=id(source[key]);for(const key of ['orgName','objectName','molName','name','code','accountCode','unit'])result[key]=text(source[key],key,2000);
   Object.assign(result,{qtyAcct:numeric(source.qtyAcct,'Учётное количество',3),costAcct:numeric(source.costAcct,'Учётная стоимость',2),qtyFact:numeric(source.qtyFact,'Фактическое количество',3),costFact:numeric(source.costFact,'Фактическая стоимость',2)});
-  if(!['','writeoff','transfer'].includes(source.action as string))fail('INVENTORY_ACTION','Неизвестное решение по позиции');result.action=source.action!;result.note=text(source.note,'Примечание строки',20000);if(own(source,'sourceMeta'))result.sourceMeta=row(source.sourceMeta);if(own(source,'importProvenance'))result.importProvenance=row(source.importProvenance);return result;
+  if(!['','writeoff','transfer'].includes(source.action as string))fail('INVENTORY_ACTION','Неизвестное решение по позиции');result.action=source.action!;result.note=text(source.note,'Примечание строки',20000);if(own(source,'sourceMeta'))result.sourceMeta=row(source.sourceMeta);if(own(source,'importProvenance'))result.importProvenance=row(source.importProvenance);const mode=countMeta(source);if(mode){const expected=countValue(result,{matches:mode.matches,qtyFact:result.qtyFact!});if(!equal(expected.qtyFact,result.qtyFact)||!equal(expected.costFact,result.costFact))fail('INVENTORY_COUNT_VALUE','Количество или сумма не соответствуют подтверждённому подсчёту по учётной цене');Object.assign(result,mode);}return result;
  }
  function sessionContent(value:JsonRow):JsonRow {
   const result:JsonRow={version:1,sessionId:value.id!,objectId:value.objectId!,objectName:value.objectName!,date:value.date!,title:value.title!,note:value.note!,rows:copy(value.rows!),commission:copy(value.commission!),rootId:value.rootId!,revision:value.revision!};
@@ -265,14 +281,14 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
     if(prior.status!=='draft')fail('INVENTORY_FROZEN','Утверждённая опись неизменяема. Создайте новую редакцию');changed={...copy(prior),updatedAt:ctx.now};
     if(input.action==='saveDraft'){
      const body=input.payload,rows=changed.rows as JsonRow[];if(body.facts.length!==rows.length)fail('INVENTORY_FACTS','Передайте фактические данные каждой строки описи');const facts=new Map(body.facts.map(value=>[value.rowId,value]));
-     changed.rows=rows.map(value=>{const entry=facts.get(value.id as Identifier);if(!entry)fail('INVENTORY_FACTS','Не найдены фактические данные строки описи');return {...value,qtyFact:entry.qtyFact,costFact:entry.costFact,action:entry.action,note:entry.note};});Object.assign(changed,{date:body.date,title:body.title,note:body.note,commission:copy(body.commission) as unknown as JsonValue});
+     changed.rows=rows.map(value=>{const entry=facts.get(value.id as Identifier);if(!entry)fail('INVENTORY_FACTS','Не найдены фактические данные строки описи');const result:JsonRow={...value,qtyFact:entry.qtyFact,costFact:entry.costFact,action:entry.action,note:entry.note};if(entry.countMode==='samePrice'){const counted=countValue(value,{matches:entry.matches!,qtyFact:entry.qtyFact});Object.assign(result,{countMode:counted.countMode,matches:counted.matches,qtyFact:counted.qtyFact,costFact:counted.costFact});}else{delete result.countMode;delete result.matches;}return result;});Object.assign(changed,{date:body.date,title:body.title,note:body.note,commission:copy(body.commission) as unknown as JsonValue});
     }else if(input.action==='approve'){
      if(input.date>ctx.today||String(changed.date)>ctx.today||input.date<String(changed.date))fail('INVENTORY_APPROVAL_DATE','Дата утверждения должна быть не раньше описи и не позже рабочей даты');
      const issues=physicalIssues(changed);if(issues.length)return {sections:{},changed:[],session:changed,entityIds:{sessionId:id(changed.id)},issues,warnings:[]};
      changed.status='approved';changed.approval={date:input.date,document:input.document,at:ctx.now,actor:ctx.actor.name};changed.snapshot=sessionContent(changed);changed.fingerprint=snapshotDigest(changed.snapshot);
     }else if(input.action==='amendDraft'){
      const corrections=new Map(input.corrections.map(value=>[value.rowId,value])),rows=changed.rows as JsonRow[];for(const key of corrections.keys())if(!rows.some(value=>value.id===key))fail('INVENTORY_CORRECTIONS','Исправление относится к неизвестной строке');const history=Array.isArray(changed.amendments)?copy(changed.amendments):[];
-     changed.rows=rows.map(value=>{const correction=corrections.get(value.id as Identifier);if(!correction)return value;const before:JsonRow={unit:value.unit!,qtyAcct:value.qtyAcct!,costAcct:value.costAcct!},after:JsonRow={unit:correction.unit,qtyAcct:correction.qtyAcct,costAcct:correction.costAcct};if(!equal(before,after))history.push({rowId:value.id!,before,after,reason:input.reason,at:ctx.now,actor:ctx.actor.name});return {...value,...after};});changed.amendments=history;
+     changed.rows=rows.map(value=>{const correction=corrections.get(value.id as Identifier);if(!correction)return value;const before:JsonRow={unit:value.unit!,qtyAcct:value.qtyAcct!,costAcct:value.costAcct!},after:JsonRow={unit:correction.unit,qtyAcct:correction.qtyAcct,costAcct:correction.costAcct};if(!equal(before,after))history.push({rowId:value.id!,before,after,reason:input.reason,at:ctx.now,actor:ctx.actor.name});const result={...value,...after};if(!equal(before,after)){delete result.countMode;delete result.matches;}return result;});changed.amendments=history;
     }
    }
   }
@@ -347,6 +363,6 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
   return freeze({rows:result,totals,summary:{rows:result.length,objects:new Set(result.map(value=>typed(value.objectId as Identifier))).size,mols:new Set(result.map(value=>typed(value.molId as Identifier))).size,unknownAcct:result.filter(value=>value.qtyAcct===null).length,unknownFact:result.filter(value=>value.qtyFact===null).length},issues:[]});
  }
  function validate(value:unknown):{valid:true;issues:AssetInventoryIssue[];warnings:AssetInventoryIssue[]} {const db=database(value);validateDatabase(db);const warnings:AssetInventoryIssue[]=[];for(const session of db[SESSION]||[])if(session.status==='draft')warnings.push(...draftWarnings(session));return freeze({valid:true as const,issues:[],warnings});}
- return Object.freeze({apiVersion:1 as const,parse,dependencies,footprint,preview,plan,apply:plan,protectChanges,validateChanges:protectChanges,validate,snapshotDigest,exportModel,quantityModel});
+ return Object.freeze({apiVersion:1 as const,parse,dependencies,footprint,preview,plan,apply:plan,protectChanges,validateChanges:protectChanges,validate,snapshotDigest,exportModel,quantityModel,countValue});
 }
 export type AssetInventoryAPI=ReturnType<typeof createAssetInventory>;
