@@ -96,7 +96,7 @@ async function importSource(parentDir,payload,value,options={}){
 }
 function report(parentDir,payload,value){const user=checkedUser(value);row(payload);const dir=ensure(parentDir);fence(dir,payload);return require('./asset-inventory-export.js').prepare(dir,payload,user);}
 async function handle(parentDir,payload,value,options={}){
- row(payload);if(Object.keys(payload).some(name=>!['action','parentDatabaseToken','request'].includes(name))||!['snapshot','execute','importSource','report'].includes(payload.action)||typeof payload.parentDatabaseToken!=='string'||!payload.parentDatabaseToken)fail('INVENTORY_REQUEST','Не подтверждена текущая база программы');
+ row(payload);if(Object.keys(payload).some(name=>!['action','parentDatabaseToken','request'].includes(name))||!['snapshot','execute','importSource','report','documentsList','documentsUpload','documentRead'].includes(payload.action)||typeof payload.parentDatabaseToken!=='string'||!payload.parentDatabaseToken)fail('INVENTORY_REQUEST','Не подтверждена текущая база программы');
  const parent=parentDirectory(parentDir),user=checkedUser(value),stamp=JSON.stringify([user.id,user.role,user.policyStamp]);
  const current=()=>{
   if(parentToken(parent)!==payload.parentDatabaseToken)fail('DATABASE_CHANGED','Основная база изменилась. Откройте раздел заново.',409);
@@ -104,7 +104,12 @@ async function handle(parentDir,payload,value,options={}){
  };
  if(options.assertCurrent)await options.assertCurrent();current();
  const extra={getPrincipal:current,...(options.now?{now:options.now}:{})};
- const result=payload.action==='snapshot'?snapshot(parent,current()):payload.action==='execute'?execute(parent,row(payload.request),current(),extra):payload.action==='importSource'?await importSource(parent,row(payload.request),current(),extra):report(parent,row(payload.request),current());
- if(options.assertCurrent)await options.assertCurrent();current();return result;
+ let result;
+ if(['documentsList','documentsUpload','documentRead'].includes(payload.action)){
+  const documents=require('./inventory-documents.cjs'),dir=ensure(parent),method={documentsList:'list',documentsUpload:'upload',documentRead:'read'}[payload.action];
+  result=await documents[method](dir,row(payload.request),current(),extra);
+ }else result=payload.action==='snapshot'?snapshot(parent,current()):payload.action==='execute'?execute(parent,row(payload.request),current(),extra):payload.action==='importSource'?await importSource(parent,row(payload.request),current(),extra):report(parent,row(payload.request),current());
+ try{if(options.assertCurrent)await options.assertCurrent();current();return result;}
+ catch(error){if(payload.action==='documentsUpload'&&result?.ok){error.unknown=true;error.definitive=false;}throw error;}
 }
 module.exports=Object.freeze({SECTIONS,directory,snapshot,execute,importSource,report,handle});

@@ -1,5 +1,5 @@
 /* Generated from src/server by scripts/build-inventory-server.cjs.
- * TypeScript 5.9.3; Node types 24.19.2; source/config sha256:8a7fc6b8092c258ae6cf000c69b509fbff1b4ab0ffc7e2085e20891dc5f18165. Do not edit directly. */
+ * TypeScript 5.9.3; Node types 24.19.2; source/config sha256:09b8a05e40a0eda724e6721d75cb97bb8b75bf4afd537dc8cdfd6a9477d0f584. Do not edit directly. */
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.decode = decode;
@@ -76,14 +76,14 @@ async function workbook(file, tempDirectory) {
     return { name: file.name, sheets: result };
 }
 async function decode(request) {
-    if (!request || !request.file || typeof request.file.name !== 'string' || !request.mapping || !['legacy', 'osv', 'comparison'].includes(request.mapping.format) || !(request.file.bytes instanceof Uint8Array))
+    if (!request || !request.file || typeof request.file.name !== 'string' || !request.mapping || !['auto', 'legacy', 'osv', 'comparison'].includes(request.mapping.format) || !(request.file.bytes instanceof Uint8Array))
         fail('IMPORT_FILE', 'Нужен исходный файл и подтверждённый профиль разбора');
     const bytes = Buffer.from(request.file.bytes);
     if (!bytes.length || bytes.length > LIMIT)
         fail('IMPORT_LIMIT', 'Исходный файл должен занимать от 1 байта до 25 МБ');
     const ext = path.extname(request.file.name).toLowerCase();
     let result;
-    if (request.mapping.format === 'legacy') {
+    if (request.mapping.format === 'legacy' || request.mapping.format === 'auto' && ext === '.json') {
         if (ext !== '.json')
             fail('IMPORT_FORMAT', 'Для прежней базы нужен исходный JSON');
         let value;
@@ -102,6 +102,8 @@ async function decode(request) {
             if (request.mapping[key] !== undefined)
                 options[key] = request.mapping[key];
         result = decoder.legacy(value, options);
+        if (request.mapping.format === 'auto')
+            result = { ...result, detectedFormat: 'legacy' };
     }
     else {
         if (!['.xls', '.xlsx'].includes(ext))

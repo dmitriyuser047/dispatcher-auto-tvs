@@ -1,5 +1,5 @@
 /* Generated from src/server by scripts/build-inventory-server.cjs.
- * TypeScript 5.9.3; Node types 24.19.2; source/config sha256:8a7fc6b8092c258ae6cf000c69b509fbff1b4ab0ffc7e2085e20891dc5f18165. Do not edit directly. */
+ * TypeScript 5.9.3; Node types 24.19.2; source/config sha256:09b8a05e40a0eda724e6721d75cb97bb8b75bf4afd537dc8cdfd6a9477d0f584. Do not edit directly. */
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handle = handle;
@@ -15,12 +15,12 @@ function record(value) { if (!value || typeof value !== 'object' || Array.isArra
     fail('IMPORT_MAPPING', 'Нужен объект параметров импорта'); return value; }
 function mapping(value, support) {
     const row = record(support.json(value ?? {})), allowed = ['format', 'defaultOrgName', 'defaultObjectName', 'date', 'title', 'useOpeningIfNoClosing', 'target'];
-    if (Object.keys(row).some(key => !allowed.includes(key)) || !['legacy', 'osv', 'comparison'].includes(row.format))
-        fail('IMPORT_MAPPING', 'Выберите явный формат прежней базы, ОСВ или описи');
+    if (Object.keys(row).some(key => !allowed.includes(key)) || !['auto', 'legacy', 'osv', 'comparison'].includes(row.format))
+        fail('IMPORT_MAPPING', 'Выберите автоматическое распознавание или явный формат прежней базы, ОСВ или описи');
     for (const key of ['defaultOrgName', 'defaultObjectName', 'date', 'title'])
         if (Object.hasOwn(row, key) && (typeof row[key] !== 'string' || row[key].length > 2000 || !String(row[key]).trim()))
             fail('IMPORT_MAPPING', 'Заполните непустые параметры импорта');
-    if (Object.hasOwn(row, 'useOpeningIfNoClosing') && (typeof row.useOpeningIfNoClosing !== 'boolean' || row.format !== 'osv'))
+    if (Object.hasOwn(row, 'useOpeningIfNoClosing') && (typeof row.useOpeningIfNoClosing !== 'boolean' || !['osv', 'auto'].includes(row.format)))
         fail('IMPORT_MAPPING', 'Начальное сальдо доступно только для ОСВ');
     if (Object.hasOwn(row, 'target')) {
         if (row.format === 'legacy')
@@ -96,7 +96,10 @@ async function stage(dir, payload, options, support) {
             return { ok: true, canImport: false, issues: result.issues, warnings: result.warnings, databaseToken: token };
         if (!result.data || Object.keys(result.data).length !== SECTIONS.length || SECTIONS.some(name => !Array.isArray(result.data[name])) || !SECTIONS.some(name => result.data[name].length))
             fail('IMPORT_EMPTY', 'В исходнике нет собственных данных инвентаризации');
-        const preliminary = { version: 1, profile: PROFILE, sha256: sha(file.bytes), format: selected.format === 'legacy' ? 'inventory-legacy-json' : selected.format === 'osv' ? 'inventory-osv' : 'inventory-comparison', parserVersion: 1, name: file.name, data: result.data, sections: SECTIONS.slice(), sourceScopes: SECTIONS.slice(), warnings: result.warnings, accessScope: { version: 1, policyStamp: current.policyStamp || '' }, ...(selected.target ? { target: selected.target } : {}) };
+        const detected = result.detectedFormat || selected.format;
+        if (detected === 'legacy' && selected.target)
+            fail('IMPORT_MAPPING', 'Прежняя база переносится отдельным набором справочников');
+        const preliminary = { version: 1, profile: PROFILE, sha256: sha(file.bytes), format: detected === 'legacy' ? 'inventory-legacy-json' : detected === 'osv' ? 'inventory-osv' : 'inventory-comparison', parserVersion: 1, name: file.name, data: result.data, sections: SECTIONS.slice(), sourceScopes: SECTIONS.slice(), warnings: result.warnings, accessScope: { version: 1, policyStamp: current.policyStamp || '' }, ...(selected.target ? { target: selected.target } : {}) };
         support.verifyScopedSource(storage.readAll(dir), preliminary, current, true);
         const folder = support.root(dir, true), original = support.descriptor(file);
         support.writeImmutable(path.join(folder, original.id), file.bytes);

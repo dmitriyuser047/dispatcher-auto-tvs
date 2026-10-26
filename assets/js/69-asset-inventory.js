@@ -1,5 +1,5 @@
-/* Generated from src/ui/asset-inventory.ts, src/ui/asset-inventory-host.ts, src/ui/asset-inventory-files.ts by scripts/build-inventory-ui.cjs.
- * TypeScript 5.9.3; source/config sha256:b4617a922a29782e927a32965a1c40a28f3741daf55738f6644fc3ee0e80d075. Do not edit directly. */
+/* Generated from src/ui/asset-inventory.ts, src/ui/asset-inventory-host.ts, src/ui/asset-inventory-files.ts, src/ui/inventory-documents.ts by scripts/build-inventory-ui.cjs.
+ * TypeScript 5.9.3; source/config sha256:b579df09ce3600f61950fafdba8f2900333f5dcfe509a25a9c9015bf65a2a985. Do not edit directly. */
 "use strict";
 /** Standalone property inventory UI. This adapter never accesses application globals,
  * paths, localStorage or fleet/stock data. All writes require a canonical host ACK. */
@@ -99,7 +99,7 @@ var AssetInventoryWorkspace;
             const db = snapshot.database, choices = new Map(), mols = active(db, 'inventoryMols').filter(mol => (filters.org === undefined || mol.orgId === filters.org) && (filters.object === undefined || mol.objectId === filters.object));
             const filterHtml = selectField('filterOrg', 'Организация', active(db, 'inventoryOrgs'), filters.org, choices, 'Все организации') + selectField('filterObject', 'Объект', active(db, 'inventoryObjects'), filters.object, choices, 'Все объекты') + selectField('filterMol', 'МОЛ', mols, filters.mol, choices, 'Все МОЛ') + '<label>Счёт<select name="filterAccount"><option value="">Все счета</option>' + [...new Set(mols.map(mol => str(mol.accountCode)).filter(Boolean))].map(account => '<option' + (account === filters.account ? ' selected' : '') + '>' + esc(account) + '</option>').join('') + '</select></label>' + control('filterSearch', 'Название / код', filters.search);
             const tabs = quantity ? ['quantity', 'registry'] : ['registry', 'sessions', 'documents'];
-            target.innerHTML = '<section class="asset-inventory" data-asset-inventory' + (quantity ? ' data-object-quantity' : '') + '><header class="ai-heading"><div><h2>' + heading + '</h2><p>' + (quantity ? 'Учётное имущество объектов и последний подтверждённый факт по утверждённым описям.' : 'Собственный реестр имущества, подсчёт по объектам и зафиксированные описи.') + '</p></div><div class="ai-actions">' + button('importLegacy', 'Импорт прежней базы', importOptions(snapshot)) + button('importXlsx', 'Импорт Excel', importOptions(snapshot)) + '</div></header>' + (snapshot.databaseIndependent ? '<section class="ai-notice" data-ai-database><strong>' + esc(snapshot.databaseLabel || 'База инвентаризации') + '</strong><p>Отдельная база имущества, МОЛ и описей. Импорт сохраняется здесь.</p>' + (host.openDatabaseFolder ? button('openDatabaseFolder', 'Открыть папку базы') : '') + '</section>' : '') + (!writable(snapshot) ? '<div class="ai-notice" role="status">' + esc(unavailable(snapshot)) + (!supported(snapshot) ? button('upgrade', 'Создать обновлённую копию') : '') + '</div>' : '') + '<div class="ai-filters">' + filterHtml + '</div><div class="ai-tabs" role="tablist" aria-label="Подразделы ' + (quantity ? 'количественного учета' : 'инвентаризации') + '">' + tabs.map(value => '<button type="button" role="tab" aria-selected="' + (value === tab) + '" data-ai-tab="' + value + '">' + ({ quantity: 'Остатки по объектам', registry: quantity ? 'Имущество' : 'Реестр имущества', sessions: 'Подсчёты', documents: 'Документы' }[value]) + '</button>').join('') + '</div><p data-ai-status role="status" aria-live="polite"></p><div data-ai-content>' + (tab === 'quantity' ? quantityHtml(snapshot) : tab === 'registry' ? registryHtml(snapshot) : sessionsHtml(snapshot)) + '</div></section>';
+            target.innerHTML = '<section class="asset-inventory" data-asset-inventory' + (quantity ? ' data-object-quantity' : '') + '><header class="ai-heading"><div><h2>' + heading + '</h2><p>' + (quantity ? 'Учётное имущество объектов и последний подтверждённый факт по утверждённым описям.' : 'Собственный реестр имущества, подсчёт по объектам и зафиксированные описи.') + '</p></div><div class="ai-actions">' + (host.openDocuments ? button('sourceDocuments', 'Загрузить файлы / архив') : '') + button('importLegacy', 'Импорт прежней базы', importOptions(snapshot)) + button('importXlsx', 'Импорт Excel', importOptions(snapshot)) + '</div></header>' + (snapshot.databaseIndependent ? '<section class="ai-notice" data-ai-database><strong>' + esc(snapshot.databaseLabel || 'База инвентаризации') + '</strong><p>Отдельная база имущества, МОЛ и описей. Импорт сохраняется здесь.</p>' + (host.openDatabaseFolder ? button('openDatabaseFolder', 'Открыть папку базы') : '') + '</section>' : '') + (!writable(snapshot) ? '<div class="ai-notice" role="status">' + esc(unavailable(snapshot)) + (!supported(snapshot) ? button('upgrade', 'Создать обновлённую копию') : '') + '</div>' : '') + '<div class="ai-filters">' + filterHtml + '</div><div class="ai-tabs" role="tablist" aria-label="Подразделы ' + (quantity ? 'количественного учета' : 'инвентаризации') + '">' + tabs.map(value => '<button type="button" role="tab" aria-selected="' + (value === tab) + '" data-ai-tab="' + value + '">' + ({ quantity: 'Остатки по объектам', registry: quantity ? 'Имущество' : 'Реестр имущества', sessions: 'Подсчёты', documents: 'Документы' }[value]) + '</button>').join('') + '</div><p data-ai-status role="status" aria-live="polite"></p><div data-ai-content>' + (tab === 'quantity' ? quantityHtml(snapshot) : tab === 'registry' ? registryHtml(snapshot) : sessionsHtml(snapshot)) + '</div></section>';
             target.querySelectorAll('.ai-filters input,.ai-filters select').forEach(element => element.addEventListener('change', () => { try {
                 if (!renderSnapshot)
                     throw Error('Откройте раздел заново');
@@ -183,6 +183,17 @@ var AssetInventoryWorkspace;
                 openSession(ref.id);
             else if (action === 'createSession')
                 createSession();
+            else if (action === 'sourceDocuments' && host.openDocuments) {
+                const pending = host.openDocuments();
+                filePending = pending.then(() => { });
+                try {
+                    const result = await pending;
+                    status(result.message || '');
+                }
+                finally {
+                    filePending = null;
+                }
+            }
             else if (action === 'importLegacy' || action === 'importXlsx')
                 await importFile(action === 'importLegacy' ? 'legacy' : 'xlsx');
         }
@@ -684,7 +695,7 @@ function assetInventoryWorkspaceInstance(mode = 'inventory') {
     const existing = mode === 'quantity' ? objectQuantityMountedWorkspace : assetInventoryMountedWorkspace;
     if (existing)
         return existing;
-    const workspace = AssetInventoryWorkspace.create({ mode, core: AssetInventory, snapshot: assetInventoryHostSnapshot, operationId: () => wfId('asset-inventory'), execute: (input, options) => assetInventoryExecuteCommand({ type: 'AssetInventoryAction', version: 1, input }, options), openUpgrade: () => lifecycleUpgradeOpen(), confirmDiscard: message => window.confirm(message), importFile: request => assetInventoryImportWizard(request), exportFile: request => assetInventoryExportDocument({ format: request.format, sessionId: request.sessionId }), ...(assetInventoryDatabaseBridge() ? { openDatabaseFolder: assetInventoryOpenDatabaseFolder } : {}) });
+    const workspace = AssetInventoryWorkspace.create({ mode, core: AssetInventory, snapshot: assetInventoryHostSnapshot, operationId: () => wfId('asset-inventory'), execute: (input, options) => assetInventoryExecuteCommand({ type: 'AssetInventoryAction', version: 1, input }, options), openUpgrade: () => lifecycleUpgradeOpen(), confirmDiscard: message => window.confirm(message), importFile: request => assetInventoryImportWizard(request), exportFile: request => assetInventoryExportDocument({ format: request.format, sessionId: request.sessionId }), ...(assetInventoryDatabaseBridge() ? { openDatabaseFolder: assetInventoryOpenDatabaseFolder, openDocuments: () => InventoryDocuments.open() } : {}) });
     if (mode === 'quantity')
         objectQuantityMountedWorkspace = workspace;
     else
@@ -743,6 +754,10 @@ function renderAssetInventoryMode(mode) {
     });
 }
 function assetInventoryWorkspaceLeave() {
+    if (InventoryDocuments.hasPending() || AssetInventoryFiles.hasPending()) {
+        showToast('Завершите работу с файлами инвентаризации.');
+        return false;
+    }
     for (const workspace of [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace])
         if (workspace && !workspace.unmount()) {
             showToast('Завершите сохранение или закройте форму учёта имущества.');
@@ -752,12 +767,14 @@ function assetInventoryWorkspaceLeave() {
     assetInventoryRenderGeneration++;
     return true;
 }
-async function assetInventoryWorkspaceFlush() { let ready = true; const pending = [...assetInventoryCommandIntents.values()].flatMap(intent => intent.pending ? [intent.pending] : []); for (const workspace of [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace])
+async function assetInventoryWorkspaceFlush() { if (InventoryDocuments.hasPending() || AssetInventoryFiles.hasPending())
+    return false; let ready = true; const pending = [...assetInventoryCommandIntents.values()].flatMap(intent => intent.pending ? [intent.pending] : []); for (const workspace of [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace])
     if (workspace && !await workspace.flush())
         ready = false; if ((await Promise.allSettled(pending)).some(result => result.status !== 'fulfilled' || !result.value.ok))
     ready = false; return ready; }
-function assetInventoryWorkspaceHasPendingEdits() { return [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace].some(workspace => workspace?.hasPendingEdits()) || [...assetInventoryCommandIntents.values()].some(intent => !!intent.pending); }
+function assetInventoryWorkspaceHasPendingEdits() { return InventoryDocuments.hasPending() || AssetInventoryFiles.hasPending() || [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace].some(workspace => workspace?.hasPendingEdits()) || [...assetInventoryCommandIntents.values()].some(intent => !!intent.pending); }
 function assetInventoryWorkspaceRevoke() {
+    InventoryDocuments.revoke();
     assetInventoryFilesRevoke();
     for (const workspace of [assetInventoryMountedWorkspace, objectQuantityMountedWorkspace])
         workspace?.invalidate();
@@ -875,6 +892,8 @@ var AssetInventoryFiles;
             return;
         finish(s, { ok: false, cancelled: true });
     }
+    function hasPending() { return active !== null; }
+    AssetInventoryFiles.hasPending = hasPending;
     function revoke() {
         const s = active;
         if (!s)
@@ -915,9 +934,9 @@ var AssetInventoryFiles;
     }
     function mapping(s) {
         const format = field(s, 'format').value, date = field(s, 'date').value;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
-            throw Error('Укажите дату источника. Она не подставляется автоматически.');
-        const result = { format, date };
+        if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date) || !date && format !== 'auto')
+            throw Error('Укажите дату источника или выберите автоматический разбор документа.');
+        const result = { format, ...(date ? { date } : {}) };
         for (const name of ['defaultOrgName', 'defaultObjectName', 'title']) {
             const value = field(s, name).value;
             if (value.trim())
@@ -972,6 +991,9 @@ var AssetInventoryFiles;
         if (ownSections.some(section => !Array.isArray(data[section])))
             throw Error('Сервер не подтвердил полный состав собственных разделов источника');
         let html = '<h4>Состав выбранного источника</h4><p>' + ownSections.map(section => sectionLabels[section] + ': ' + items(data[section]).length).map(esc).join(' · ') + '</p>';
+        const sessions = items(data.inventorySessions);
+        if (sessions.length)
+            html += '<div data-ai-source-sessions class="ai-summary">' + sessions.map(session => '<p><strong>' + esc(session.objectName) + '</strong> · ' + esc(session.orgName || 'Организация из строк описи') + ' · дата описи ' + esc(session.date) + ' · позиций ' + items(session.rows).length + '</p>').join('') + '</div>';
         const positions = items(data.inventoryItems);
         html += '<div class="ai-scroll"><table><thead><tr><th>Имущество</th><th>Код</th><th>Единица</th><th>Учётное количество</th><th>Учётная стоимость</th></tr></thead><tbody>' + positions.slice(0, 50).map(row => '<tr><td>' + esc(row.name) + '</td><td>' + esc(row.code) + '</td><td>' + esc(row.unit || 'Не задано') + '</td><td>' + esc(typeof row.qty === 'number' ? row.qty : 'Неизвестно') + '</td><td>' + esc(typeof row.cost === 'number' ? row.cost : 'Неизвестно') + '</td></tr>').join('') + '</tbody></table></div>';
         if (positions.length > 50)
@@ -994,7 +1016,7 @@ var AssetInventoryFiles;
             return;
         try {
             check(s);
-            const file = required(s.form, '[name=file]').files?.[0];
+            const file = required(s.form, '[name=file]').files?.[0] ?? s.file;
             if (!file)
                 throw Error('Выберите исходный файл');
             const map = mapping(s), format = map.format;
@@ -1136,12 +1158,19 @@ var AssetInventoryFiles;
             const overlay = document.createElement('div');
             overlay.className = 'ai-overlay ai-file-overlay';
             overlay.tabIndex = -1;
-            overlay.innerHTML = '<section class="ai-dialog" role="dialog" aria-modal="true" aria-label="Импорт инвентаризации"><header><h3>Импорт инвентаризации ОС</h3><button type="button" class="btn btn-secondary" data-ai-file-close>Закрыть</button></header><form class="ai-form" data-ai-files-form><p>Выберите исходный файл размером до 25 МБ. Сервер проверит весь источник перед подтверждением. Просмотр не меняет реестр и описи.</p><div class="ai-grid"><label>Исходный файл<input type="file" name="file" accept="' + (request.format === 'legacy' ? '.json' : '.xls,.xlsx') + '"></label><label>Формат<select name="format">' + (request.format === 'legacy' ? '<option value="legacy">Прежняя база инвентаризации (JSON)</option>' : '<option value="osv">Оборотно-сальдовая ведомость</option><option value="comparison">Сличительная ведомость</option>') + '</select></label><label>Дата источника<input type="date" name="date" required></label><label>Название описи (если нужно)<input name="title"></label><label>Название организации, если нет в источнике<input name="defaultOrgName"></label><label>Название объекта, если нет в источнике<input name="defaultObjectName"></label></div><fieldset data-ai-file-targets><legend>Собственные справочники для Excel (необязательно)</legend><p>Выбирайте только при подтверждённом совпадении источника. Существующие записи не будут переименованы.</p><div class="ai-grid"><label>Организация<select name="targetOrg"></select></label><label>Объект<select name="targetObject"></select></label><label>МОЛ / счёт<select name="targetMol"></select></label></div></fieldset><label class="ai-confirm" data-ai-file-opening><input type="checkbox" name="useOpeningIfNoClosing">Если остатка на конец нет, использовать остаток на начало (только по явному подтверждению)</label><label>Основание импорта<textarea name="reason" required minlength="3"></textarea></label><p class="ai-error" data-ai-file-error role="alert"></p><div data-ai-file-preview></div><label class="ai-confirm" data-ai-file-confirm hidden><input type="checkbox" name="confirm">Подтверждаю импорт всего проверенного источника</label><p data-ai-file-status role="status" aria-live="polite"></p><div class="ai-actions"><button type="button" class="btn btn-secondary" data-ai-file-review>Проверить источник</button><button type="submit" class="btn btn-primary" data-ai-file-commit disabled>Импортировать</button></div></form></section>';
+            overlay.innerHTML = '<section class="ai-dialog" role="dialog" aria-modal="true" aria-label="Импорт инвентаризации"><header><h3>Импорт инвентаризации ОС</h3><button type="button" class="btn btn-secondary" data-ai-file-close>Закрыть</button></header><form class="ai-form" data-ai-files-form><p>Выберите исходный файл размером до 25 МБ. Сервер проверит весь источник перед подтверждением. Просмотр не меняет реестр и описи.</p><div class="ai-grid"><label>Исходный файл<input type="file" name="file" accept="' + (request.format === 'legacy' ? '.json' : '.xls,.xlsx') + '"></label><label>Формат<select name="format">' + (request.format === 'legacy' ? '<option value="legacy">Прежняя база инвентаризации (JSON)</option>' : '<option value="auto">Определить по содержимому файла</option><option value="osv">Оборотно-сальдовая ведомость</option><option value="comparison">Сличительная ведомость</option>') + '</select></label><label>Дата, если её нет в документе<input type="date" name="date"></label><label>Название описи (если нужно)<input name="title"></label><label>Название организации, если нет в источнике<input name="defaultOrgName"></label><label>Название объекта, если нет в источнике<input name="defaultObjectName"></label></div><fieldset data-ai-file-targets><legend>Собственные справочники для Excel (необязательно)</legend><p>Выбирайте только при подтверждённом совпадении источника. Существующие записи не будут переименованы.</p><div class="ai-grid"><label>Организация<select name="targetOrg"></select></label><label>Объект<select name="targetObject"></select></label><label>МОЛ / счёт<select name="targetMol"></select></label></div></fieldset><label class="ai-confirm" data-ai-file-opening><input type="checkbox" name="useOpeningIfNoClosing">Если остатка на конец нет, использовать остаток на начало (только по явному подтверждению)</label><label>Основание импорта<textarea name="reason" required minlength="3"></textarea></label><p class="ai-error" data-ai-file-error role="alert"></p><div data-ai-file-preview></div><label class="ai-confirm" data-ai-file-confirm hidden><input type="checkbox" name="confirm">Подтверждаю импорт всего проверенного источника</label><p data-ai-file-status role="status" aria-live="polite"></p><div class="ai-actions"><button type="button" class="btn btn-secondary" data-ai-file-review>Проверить источник</button><button type="submit" class="btn btn-primary" data-ai-file-commit disabled>Импортировать</button></div></form></section>';
             if (request.format === 'legacy')
                 required(overlay, 'form>p').insertAdjacentHTML('afterend', '<p class="ai-muted">Прежняя база переносится целиком в собственные справочники. Текущие фильтры раздела не ограничивают и не объединяют её данные.</p>');
             document.body.append(overlay);
             const s = { overlay, form: required(overlay, 'form'), captured, sourceText: source(captured), token, file: null, reader: null, base64: null, sourceId: null, source: null, mappingText: '', stagedFile: null, preview: null, reviewInput: '', operationId: null, uncertain: false, busy: false, revoked: false, choices: new Map(), warnings: [], resolve };
             active = s;
+            if (request.selectedFile) {
+                s.file = request.selectedFile;
+                const chosen = document.createElement('p');
+                chosen.dataset.aiSelectedOriginal = '';
+                chosen.textContent = 'Исходный файл: ' + request.selectedFile.name;
+                required(s.form, '[name=file]').insertAdjacentElement('afterend', chosen);
+            }
             field(s, 'targetOrg').innerHTML = options(s, 'inventoryOrgs', request.scope.orgId);
             field(s, 'targetObject').innerHTML = options(s, 'inventoryObjects', request.scope.objectId);
             field(s, 'targetMol').innerHTML = options(s, 'inventoryMols', request.scope.molId);
@@ -1170,8 +1199,10 @@ var AssetInventoryFiles;
                 lock(s, false);
             else
                 clearPreview(s, element.name !== 'reason'); });
-            s.form.addEventListener('change', event => { const element = event.target; if (element.name === 'file')
-                s.file = element.files?.[0] ?? null; if (element.name === 'format')
+            s.form.addEventListener('change', event => { const element = event.target; if (element.name === 'file') {
+                s.file = element.files?.[0] ?? null;
+                s.form.querySelector('[data-ai-selected-original]')?.remove();
+            } if (element.name === 'format')
                 formatVisibility(s); if (element.name === 'confirm')
                 lock(s, false);
             else
@@ -1213,3 +1244,163 @@ var AssetInventoryFiles;
 function assetInventoryImportWizard(request) { return AssetInventoryFiles.openImport(request); }
 function assetInventoryExportDocument(request) { return AssetInventoryFiles.exportDocument(request); }
 function assetInventoryFilesRevoke() { AssetInventoryFiles.revoke(); }
+/** Original inventory documents, including files without countable positions. */
+var InventoryDocuments;
+(function (InventoryDocuments) {
+    const LIMIT = 25 * 1024 * 1024;
+    let active = null, importing = false, generation = 0;
+    const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c));
+    function node(s, selector) { const element = s.overlay.querySelector(selector); if (!element)
+        throw Error('Окно файлов закрыто'); return element; }
+    function check(s, write = false) { const snapshot = assetInventoryHostSnapshot(); if (active !== s || !s.overlay.isConnected || snapshot.identity !== s.identity || assetInventoryDatabaseToken() !== s.token || !snapshot.canRead)
+        throw Error('База или доступ изменились. Откройте файлы заново.'); if (write && !snapshot.canWrite)
+        throw Error('Нет права загрузки файлов инвентаризации.'); }
+    async function request(s, action, input = {}) { check(s, action === 'documentsUpload'); const result = await assetInventoryDatabaseRequest(action, { ...input, databaseToken: s.token }); check(s); if (!result.ok)
+        throw Error(result.error || 'Операция с файлом не подтверждена'); if (result.databaseToken !== undefined && result.databaseToken !== s.token)
+        throw Error('Ответ относится к другой базе инвентаризации'); return result; }
+    function message(s, text, error = false) { if (active !== s)
+        return; const target = node(s, '[data-ai-documents-status]'); target.textContent = text; target.classList.toggle('ai-error', error); }
+    function lock(s, busy) { s.busy = busy; s.overlay.querySelectorAll('input,button').forEach(element => { element.disabled = busy; }); node(s, '[data-ai-documents-upload]').disabled = busy || s.files.length === 0 || !assetInventoryHostSnapshot().canWrite; node(s, '[name=files]').disabled = busy || !assetInventoryHostSnapshot().canWrite; }
+    function finish(s, result) { if (active !== s)
+        return; s.overlay.remove(); s.files = []; active = null; s.resolve(result); }
+    function close(s) { if (s.busy)
+        return; if (s.files.length && !window.confirm('Закрыть окно? Выбранные файлы ещё не загружены.'))
+        return; finish(s, { ok: true, message: s.message }); }
+    function render(s) {
+        const labels = { inventory: 'Опись / ведомость', order: 'Приказ', act: 'Акт', archive: 'Архив', other: 'Документ' };
+        node(s, '[data-ai-documents-list]').innerHTML = '<p class="ai-muted">Сохранено файлов: ' + s.documents.length + '. Оригиналы не изменяют остатки. Позиции из описи добавляются после разбора и подтверждения.</p><div class="ai-scroll"><table><thead><tr><th>Файл / путь в архиве</th><th>Вид</th><th>Размер</th><th>Действия</th></tr></thead><tbody>' + s.documents.map(doc => '<tr data-ai-document-id="' + esc(doc.id) + '"><td>' + esc(doc.name) + '<small>' + esc(doc.path) + (doc.container ? ' · ' + esc(doc.container) : '') + '</small></td><td>' + esc(labels[doc.kind] || 'Документ') + '</td><td>' + esc((doc.bytes / 1024).toLocaleString('ru-RU', { maximumFractionDigits: 1 })) + ' КБ</td><td><div class="ai-actions"><button type="button" class="btn btn-secondary" data-ai-document-download="' + esc(doc.id) + '">Сохранить файл</button>' + (['.xls', '.xlsx', '.json'].includes(doc.extension.toLowerCase()) && assetInventoryHostSnapshot().canWrite ? '<button type="button" class="btn btn-secondary" data-ai-document-import="' + esc(doc.id) + '">Разобрать опись</button>' : '') + '</div></td></tr>').join('') + '</tbody></table></div>';
+        s.overlay.querySelectorAll('[data-ai-document-download]').forEach(button => button.onclick = () => { void save(s, button.dataset.aiDocumentDownload ?? ''); });
+        s.overlay.querySelectorAll('[data-ai-document-import]').forEach(button => button.onclick = () => { void importDocument(s, button.dataset.aiDocumentImport ?? ''); });
+    }
+    async function refresh(s) { const reply = await request(s, 'documentsList'); if (!Array.isArray(reply.documents))
+        throw Error('Не получен список файлов'); s.documents = reply.documents; render(s); }
+    function bytes(encoded) { const raw = atob(encoded), data = new Uint8Array(raw.length); for (let i = 0; i < raw.length; i++)
+        data[i] = raw.charCodeAt(i); return data; }
+    async function encoded(file) { const array = new Uint8Array(await file.arrayBuffer()); let raw = ''; for (let i = 0; i < array.length; i += 32768)
+        raw += String.fromCharCode(...array.subarray(i, i + 32768)); return btoa(raw); }
+    async function upload(s) { if (s.busy)
+        return; try {
+        check(s, true);
+        if (!s.files.length)
+            throw Error('Выберите файлы или архив');
+        if (s.files.some(file => file.size > LIMIT) || s.files.reduce((sum, file) => sum + file.size, 0) > LIMIT)
+            throw Error('За одну загрузку можно выбрать до 25 МБ исходных файлов.');
+        lock(s, true);
+        message(s, 'Загружаются и проверяются оригиналы…');
+        const files = [];
+        for (const file of s.files) {
+            files.push({ name: file.name, base64: await encoded(file) });
+            check(s, true);
+        }
+        const reply = await request(s, 'documentsUpload', { files, operationId: s.operationId });
+        s.files = [];
+        node(s, '[name=files]').value = '';
+        await refresh(s);
+        s.message = 'Файлы сохранены: ' + (reply.addedCount ?? 0) + '. Уже были в базе: ' + (reply.reusedCount ?? 0) + '.' + (reply.warnings?.length ? ' ' + reply.warnings.map(warning => warning.message).join(' ') : '');
+        message(s, s.message);
+    }
+    catch (error) {
+        message(s, error instanceof Error ? error.message : String(error), true);
+    }
+    finally {
+        if (active === s)
+            lock(s, false);
+    } }
+    async function save(s, id) { if (s.busy)
+        return; try {
+        lock(s, true);
+        const reply = await request(s, 'documentSave', { id });
+        message(s, reply.cancelled ? 'Сохранение отменено' : 'Оригинал сохранён в выбранную папку.');
+    }
+    catch (error) {
+        message(s, error instanceof Error ? error.message : String(error), true);
+    }
+    finally {
+        if (active === s)
+            lock(s, false);
+    } }
+    async function importDocument(s, id) {
+        if (s.busy)
+            return;
+        const currentGeneration = generation;
+        try {
+            check(s, true);
+            lock(s, true);
+            const reply = await request(s, 'documentRead', { id });
+            if (typeof reply.name !== 'string' || typeof reply.base64 !== 'string')
+                throw Error('Не получен оригинал файла');
+            const file = new File([bytes(reply.base64)], reply.name);
+            finish(s, { ok: true, message: s.message });
+            importing = true;
+            await Promise.resolve();
+            if (currentGeneration !== generation)
+                return;
+            const result = await AssetInventoryFiles.openImport({ format: /\.json$/i.test(file.name) ? 'legacy' : 'xlsx', scope: {}, selectedFile: file });
+            if (currentGeneration !== generation)
+                return;
+            if (result.ok && assetInventoryVisibleMode)
+                renderAssetInventoryMode(assetInventoryVisibleMode);
+            else if (result.error)
+                showToast(result.error);
+        }
+        catch (error) {
+            if (active === s)
+                message(s, error instanceof Error ? error.message : String(error), true);
+            else if (currentGeneration === generation)
+                showToast(error instanceof Error ? error.message : String(error));
+        }
+        finally {
+            if (currentGeneration === generation)
+                importing = false;
+            if (active === s)
+                lock(s, false);
+        }
+    }
+    async function open() {
+        if (active || importing)
+            return { ok: false, error: 'Сначала завершите открытое окно файлов' };
+        const snapshot = assetInventoryHostSnapshot(), token = assetInventoryDatabaseToken();
+        if (!snapshot.canRead || !token)
+            return { ok: false, error: 'Сначала откройте базу инвентаризации' };
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.className = 'ai-overlay';
+            overlay.tabIndex = -1;
+            overlay.innerHTML = '<section class="ai-dialog" role="dialog" aria-modal="true" aria-label="Файлы инвентаризации"><header><h3>Файлы инвентаризации</h3><button type="button" class="btn btn-secondary" data-ai-documents-close>Закрыть</button></header><form class="ai-form" data-ai-documents-form><p>Загрузите один или несколько файлов любого формата. RAR и ZIP будут распакованы с сохранением исходного архива и всех документов. Приказы, акты и сканы сохраняются как оригиналы; разбор описи выполняется отдельно.</p><label>Файлы или архив<input type="file" name="files" multiple></label><div class="ai-actions"><button type="submit" class="btn btn-primary" data-ai-documents-upload disabled>Загрузить</button></div><p data-ai-documents-status role="status" aria-live="polite"></p><div data-ai-documents-list></div></form></section>';
+            document.body.append(overlay);
+            const s = { overlay, form: nodeFromOverlay(overlay), identity: snapshot.identity, token, files: [], operationId: '', busy: false, documents: [], resolve, message: '' };
+            active = s;
+            node(s, '[name=files]').onchange = event => { const input = event.target; s.files = [...(input.files ?? [])]; s.operationId = wfId('inventory-files'); lock(s, false); };
+            s.form.onsubmit = event => { event.preventDefault(); void upload(s); };
+            node(s, '[data-ai-documents-close]').onclick = () => close(s);
+            overlay.onkeydown = event => { if (event.key === 'Escape') {
+                event.preventDefault();
+                close(s);
+            }
+            else if (event.key === 'Tab') {
+                const list = [...overlay.querySelectorAll('button:not(:disabled),input:not(:disabled)')], first = list[0], last = list[list.length - 1];
+                if (event.shiftKey && document.activeElement === first) {
+                    event.preventDefault();
+                    last?.focus();
+                }
+                else if (!event.shiftKey && document.activeElement === last) {
+                    event.preventDefault();
+                    first?.focus();
+                }
+            } };
+            lock(s, true);
+            void refresh(s).catch(error => message(s, error instanceof Error ? error.message : String(error), true)).finally(() => { if (active === s) {
+                lock(s, false);
+                node(s, '[name=files]').disabled = !snapshot.canWrite;
+            } });
+        });
+    }
+    InventoryDocuments.open = open;
+    function nodeFromOverlay(overlay) { const form = overlay.querySelector('form'); if (!form)
+        throw Error('Не создано окно файлов'); return form; }
+    function hasPending() { return importing || !!active && (active.busy || active.files.length > 0); }
+    InventoryDocuments.hasPending = hasPending;
+    function revoke() { generation++; importing = false; if (active)
+        finish(active, { ok: false, error: 'База или права изменились. Окно файлов очищено.' }); }
+    InventoryDocuments.revoke = revoke;
+})(InventoryDocuments || (InventoryDocuments = {}));

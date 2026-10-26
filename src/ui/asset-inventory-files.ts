@@ -5,7 +5,7 @@ namespace AssetInventoryFiles {
  type Row=AssetInventoryWorkspace.Row;
  type Snapshot=AssetInventoryWorkspace.Snapshot;
  type Result=AssetInventoryWorkspace.FileResult;
- type Format='legacy'|'osv'|'comparison';
+ type Format='legacy'|'osv'|'comparison'|'auto';
  interface State {
   overlay:HTMLDivElement;form:HTMLFormElement;captured:Snapshot;sourceText:string;token:string;
   file:File|null;reader:FileReader|null;base64:string|null;sourceId:string|null;source:Row|null;mappingText:string;stagedFile:File|null;
@@ -66,6 +66,7 @@ namespace AssetInventoryFiles {
   if(s.file&&!window.confirm('Закрыть предпросмотр импорта? Реестр и описи ещё не изменены.'))return;
   finish(s,{ok:false,cancelled:true});
  }
+ export function hasPending():boolean {return active!==null;}
  export function revoke():void {
   const s=active;if(!s)return;s.revoked=true;s.reader?.abort();s.reader=null;s.base64=null;s.file=null;s.stagedFile=null;s.source=null;s.preview=null;
   required<HTMLInputElement>(s.form,'[name=file]').value='';s.overlay.remove();s.choices.clear();active=null;
@@ -83,8 +84,8 @@ namespace AssetInventoryFiles {
  }
  function mapping(s:State):Row {
   const format=field(s,'format').value as Format,date=field(s,'date').value;
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw Error('Укажите дату источника. Она не подставляется автоматически.');
-  const result:Row={format,date};
+  if(date&&!/^\d{4}-\d{2}-\d{2}$/.test(date)||!date&&format!=='auto')throw Error('Укажите дату источника или выберите автоматический разбор документа.');
+  const result:Row={format,...(date?{date}:{})};
   for(const name of ['defaultOrgName','defaultObjectName','title']){const value=field(s,name).value;if(value.trim())result[name]=value;}
   if(format==='osv')result.useOpeningIfNoClosing=(field(s,'useOpeningIfNoClosing') as HTMLInputElement).checked;
   if(format!=='legacy'){
@@ -114,6 +115,7 @@ namespace AssetInventoryFiles {
  function sourceHtml(sourceValue:Row):string {
   const data=record(sourceValue.data);if(ownSections.some(section=>!Array.isArray(data[section])))throw Error('Сервер не подтвердил полный состав собственных разделов источника');
   let html='<h4>Состав выбранного источника</h4><p>'+ownSections.map(section=>sectionLabels[section]+': '+items(data[section]).length).map(esc).join(' · ')+'</p>';
+  const sessions=items(data.inventorySessions);if(sessions.length)html+='<div data-ai-source-sessions class="ai-summary">'+sessions.map(session=>'<p><strong>'+esc(session.objectName)+'</strong> · '+esc(session.orgName||'Организация из строк описи')+' · дата описи '+esc(session.date)+' · позиций '+items(session.rows).length+'</p>').join('')+'</div>';
   const positions=items(data.inventoryItems);html+='<div class="ai-scroll"><table><thead><tr><th>Имущество</th><th>Код</th><th>Единица</th><th>Учётное количество</th><th>Учётная стоимость</th></tr></thead><tbody>'+positions.slice(0,50).map(row=>'<tr><td>'+esc(row.name)+'</td><td>'+esc(row.code)+'</td><td>'+esc(row.unit||'Не задано')+'</td><td>'+esc(typeof row.qty==='number'?row.qty:'Неизвестно')+'</td><td>'+esc(typeof row.cost==='number'?row.cost:'Неизвестно')+'</td></tr>').join('')+'</tbody></table></div>';
   if(positions.length>50)html+='<p>Показаны первые 50 из '+positions.length+' позиций. Будет проверен весь источник.</p>';
   return html+'<p class="ai-muted">Неизвестные значения не заменяются нулём. Единицы и учётные значения черновика можно позднее исправить отдельно с сохранением причины. Импорт не утверждает описи.</p>';
@@ -127,7 +129,7 @@ namespace AssetInventoryFiles {
  async function review(s:State):Promise<void> {
   if(s.busy||s.uncertain)return;
   try{
-   check(s);const file=required<HTMLInputElement>(s.form,'[name=file]').files?.[0];if(!file)throw Error('Выберите исходный файл');
+   check(s);const file=required<HTMLInputElement>(s.form,'[name=file]').files?.[0]??s.file;if(!file)throw Error('Выберите исходный файл');
    const map=mapping(s),format=map.format;
    if(format==='legacy'?!/\.json$/i.test(file.name):! /\.xlsx?$/i.test(file.name))throw Error(format==='legacy'?'Для переноса прежней базы выберите JSON-файл.':'Выберите исходную книгу XLS или XLSX.');
    if(field(s,'reason').value.trim().length<3)throw Error('Укажите основание импорта не короче трёх символов');
@@ -172,16 +174,16 @@ namespace AssetInventoryFiles {
    s.uncertain=true;check(s,false);canonical(s,ack);s.uncertain=false;finish(s,{ok:true,message:'Импорт всего источника подтверждён. Проверьте реестр и черновики описей.'});
   }catch(error){showError(s,(s.uncertain?'Результат операции пока не подтверждён; повтор использует ту же квитанцию. ':'')+text(error));}finally{if(active===s&&!s.revoked)lock(s,false);}
  }
- export async function openImport(request:{format:'legacy'|'xlsx';scope:AssetInventoryWorkspace.Scope}):Promise<Result> {
+ export async function openImport(request:{format:'legacy'|'xlsx';scope:AssetInventoryWorkspace.Scope;selectedFile?:File}):Promise<Result> {
   if(active)return {ok:false,error:'Сначала завершите открытый импорт'};
   const captured=assetInventoryHostSnapshot();try{verify(captured,source(captured),true);}catch(error){return {ok:false,error:text(error)};}
   const token=assetInventoryDatabaseToken();if(typeof token!=='string'||!token)return {ok:false,error:'Сначала дождитесь подтверждения подключения к базе'};
   return new Promise(resolve=>{
    const overlay=document.createElement('div');overlay.className='ai-overlay ai-file-overlay';overlay.tabIndex=-1;
-   overlay.innerHTML='<section class="ai-dialog" role="dialog" aria-modal="true" aria-label="Импорт инвентаризации"><header><h3>Импорт инвентаризации ОС</h3><button type="button" class="btn btn-secondary" data-ai-file-close>Закрыть</button></header><form class="ai-form" data-ai-files-form><p>Выберите исходный файл размером до 25 МБ. Сервер проверит весь источник перед подтверждением. Просмотр не меняет реестр и описи.</p><div class="ai-grid"><label>Исходный файл<input type="file" name="file" accept="'+(request.format==='legacy'?'.json':'.xls,.xlsx')+'"></label><label>Формат<select name="format">'+(request.format==='legacy'?'<option value="legacy">Прежняя база инвентаризации (JSON)</option>':'<option value="osv">Оборотно-сальдовая ведомость</option><option value="comparison">Сличительная ведомость</option>')+'</select></label><label>Дата источника<input type="date" name="date" required></label><label>Название описи (если нужно)<input name="title"></label><label>Название организации, если нет в источнике<input name="defaultOrgName"></label><label>Название объекта, если нет в источнике<input name="defaultObjectName"></label></div><fieldset data-ai-file-targets><legend>Собственные справочники для Excel (необязательно)</legend><p>Выбирайте только при подтверждённом совпадении источника. Существующие записи не будут переименованы.</p><div class="ai-grid"><label>Организация<select name="targetOrg"></select></label><label>Объект<select name="targetObject"></select></label><label>МОЛ / счёт<select name="targetMol"></select></label></div></fieldset><label class="ai-confirm" data-ai-file-opening><input type="checkbox" name="useOpeningIfNoClosing">Если остатка на конец нет, использовать остаток на начало (только по явному подтверждению)</label><label>Основание импорта<textarea name="reason" required minlength="3"></textarea></label><p class="ai-error" data-ai-file-error role="alert"></p><div data-ai-file-preview></div><label class="ai-confirm" data-ai-file-confirm hidden><input type="checkbox" name="confirm">Подтверждаю импорт всего проверенного источника</label><p data-ai-file-status role="status" aria-live="polite"></p><div class="ai-actions"><button type="button" class="btn btn-secondary" data-ai-file-review>Проверить источник</button><button type="submit" class="btn btn-primary" data-ai-file-commit disabled>Импортировать</button></div></form></section>';
+   overlay.innerHTML='<section class="ai-dialog" role="dialog" aria-modal="true" aria-label="Импорт инвентаризации"><header><h3>Импорт инвентаризации ОС</h3><button type="button" class="btn btn-secondary" data-ai-file-close>Закрыть</button></header><form class="ai-form" data-ai-files-form><p>Выберите исходный файл размером до 25 МБ. Сервер проверит весь источник перед подтверждением. Просмотр не меняет реестр и описи.</p><div class="ai-grid"><label>Исходный файл<input type="file" name="file" accept="'+(request.format==='legacy'?'.json':'.xls,.xlsx')+'"></label><label>Формат<select name="format">'+(request.format==='legacy'?'<option value="legacy">Прежняя база инвентаризации (JSON)</option>':'<option value="auto">Определить по содержимому файла</option><option value="osv">Оборотно-сальдовая ведомость</option><option value="comparison">Сличительная ведомость</option>')+'</select></label><label>Дата, если её нет в документе<input type="date" name="date"></label><label>Название описи (если нужно)<input name="title"></label><label>Название организации, если нет в источнике<input name="defaultOrgName"></label><label>Название объекта, если нет в источнике<input name="defaultObjectName"></label></div><fieldset data-ai-file-targets><legend>Собственные справочники для Excel (необязательно)</legend><p>Выбирайте только при подтверждённом совпадении источника. Существующие записи не будут переименованы.</p><div class="ai-grid"><label>Организация<select name="targetOrg"></select></label><label>Объект<select name="targetObject"></select></label><label>МОЛ / счёт<select name="targetMol"></select></label></div></fieldset><label class="ai-confirm" data-ai-file-opening><input type="checkbox" name="useOpeningIfNoClosing">Если остатка на конец нет, использовать остаток на начало (только по явному подтверждению)</label><label>Основание импорта<textarea name="reason" required minlength="3"></textarea></label><p class="ai-error" data-ai-file-error role="alert"></p><div data-ai-file-preview></div><label class="ai-confirm" data-ai-file-confirm hidden><input type="checkbox" name="confirm">Подтверждаю импорт всего проверенного источника</label><p data-ai-file-status role="status" aria-live="polite"></p><div class="ai-actions"><button type="button" class="btn btn-secondary" data-ai-file-review>Проверить источник</button><button type="submit" class="btn btn-primary" data-ai-file-commit disabled>Импортировать</button></div></form></section>';
    if(request.format==='legacy')required<HTMLElement>(overlay,'form>p').insertAdjacentHTML('afterend','<p class="ai-muted">Прежняя база переносится целиком в собственные справочники. Текущие фильтры раздела не ограничивают и не объединяют её данные.</p>');
    document.body.append(overlay);
-   const s:State={overlay,form:required(overlay,'form'),captured,sourceText:source(captured),token,file:null,reader:null,base64:null,sourceId:null,source:null,mappingText:'',stagedFile:null,preview:null,reviewInput:'',operationId:null,uncertain:false,busy:false,revoked:false,choices:new Map(),warnings:[],resolve};active=s;
+   const s:State={overlay,form:required(overlay,'form'),captured,sourceText:source(captured),token,file:null,reader:null,base64:null,sourceId:null,source:null,mappingText:'',stagedFile:null,preview:null,reviewInput:'',operationId:null,uncertain:false,busy:false,revoked:false,choices:new Map(),warnings:[],resolve};active=s;if(request.selectedFile){s.file=request.selectedFile;const chosen=document.createElement('p');chosen.dataset.aiSelectedOriginal='';chosen.textContent='Исходный файл: '+request.selectedFile.name;required<HTMLInputElement>(s.form,'[name=file]').insertAdjacentElement('afterend',chosen);}
    (field(s,'targetOrg') as HTMLSelectElement).innerHTML=options(s,'inventoryOrgs',request.scope.orgId);
    (field(s,'targetObject') as HTMLSelectElement).innerHTML=options(s,'inventoryObjects',request.scope.objectId);
    (field(s,'targetMol') as HTMLSelectElement).innerHTML=options(s,'inventoryMols',request.scope.molId);
@@ -189,7 +191,7 @@ namespace AssetInventoryFiles {
    overlay.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close(s);}else if(event.key==='Tab'){const enabled=[...overlay.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)')].filter(node=>node.getClientRects().length>0),first=enabled[0],last=enabled[enabled.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}};
    s.form.onsubmit=event=>{event.preventDefault();void commit(s);};required<HTMLButtonElement>(s.form,'[data-ai-file-review]').onclick=()=>{void review(s);};
    s.form.addEventListener('input',event=>{const element=event.target as HTMLInputElement;if(element.name==='confirm')lock(s,false);else clearPreview(s,element.name!=='reason');});
-   s.form.addEventListener('change',event=>{const element=event.target as HTMLInputElement;if(element.name==='file')s.file=element.files?.[0]??null;if(element.name==='format')formatVisibility(s);if(element.name==='confirm')lock(s,false);else clearPreview(s,element.name!=='reason');});
+   s.form.addEventListener('change',event=>{const element=event.target as HTMLInputElement;if(element.name==='file'){s.file=element.files?.[0]??null;s.form.querySelector('[data-ai-selected-original]')?.remove();}if(element.name==='format')formatVisibility(s);if(element.name==='confirm')lock(s,false);else clearPreview(s,element.name!=='reason');});
    formatVisibility(s);lock(s,false);field(s,'file').focus();
   });
  }

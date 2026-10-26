@@ -3,9 +3,9 @@ import type {DecimalCoreAPI} from './decimal-core';
 
 export interface InventoryExcelSheet {name:string;rows:JsonValue[][];formattedRows?:(string|null)[][]}
 export interface InventoryExcelBook {name:string;sheets:InventoryExcelSheet[]}
-export interface InventoryExcelOptions {format:'osv'|'comparison';defaultOrgName?:string;defaultObjectName?:string;date?:string;title?:string;useOpeningIfNoClosing?:boolean}
+export interface InventoryExcelOptions {format:'auto'|'osv'|'comparison';defaultOrgName?:string;defaultObjectName?:string;date?:string;title?:string;useOpeningIfNoClosing?:boolean}
 export interface InventoryExcelIssue {severity:'error'|'warning';code:string;message:string;sheet:string;row?:number;column?:number}
-export interface InventoryExcelResult {data:SectionRows;issues:InventoryExcelIssue[];warnings:InventoryExcelIssue[];canImport:boolean}
+export interface InventoryExcelResult {data:SectionRows;issues:InventoryExcelIssue[];warnings:InventoryExcelIssue[];canImport:boolean;detectedFormat?:'osv'|'comparison'}
 interface Contracts {apiVersion:number;validateSections(value:unknown,names:readonly string[]):SectionRows}
 interface ExcelError extends Error {code:string;status:number}
 const SECTIONS=['inventoryOrgs','inventoryObjects','inventoryMols','inventoryItems','inventorySessions'] as const;
@@ -30,7 +30,7 @@ export function createAssetInventoryExcel(contracts:Contracts,decimal:DecimalCor
  function freeze<T>(value:T):T {if(value&&typeof value==='object'&&!Object.isFrozen(value)){for(const child of Object.values(value))freeze(child);Object.freeze(value);}return value;}
  function decode(bookValue:unknown,optionsValue:unknown):InventoryExcelResult {
   const source=safe(bookValue),options=safe(optionsValue);keys(source,['name','sheets']);keys(options,['format','defaultOrgName','defaultObjectName','date','title','useOpeningIfNoClosing']);
-  if(typeof source.name!=='string'||source.name.length>2000||!Array.isArray(source.sheets)||!source.sheets.length||source.sheets.length>100||!['osv','comparison'].includes(options.format as string))fail('Укажите книгу, листы и явный формат импорта');
+  if(typeof source.name!=='string'||source.name.length>2000||!Array.isArray(source.sheets)||!source.sheets.length||source.sheets.length>100||!['auto','osv','comparison'].includes(options.format as string))fail('Укажите книгу, листы и формат импорта');
   for(const name of ['defaultOrgName','defaultObjectName','title'])if(own(options,name)&&(typeof options[name]!=='string'||(options[name] as string).length>2000))fail('Некорректное имя или заголовок импорта');
   if(own(options,'date')&&!day(options.date))fail('Укажите действительную дату описи');if(own(options,'useOpeningIfNoClosing')&&typeof options.useOpeningIfNoClosing!=='boolean')fail('Некорректный выбор начального сальдо');
   const data:SectionRows=Object.fromEntries(SECTIONS.map(name=>[name,[]])),issues:InventoryExcelIssue[]=[],warnings:InventoryExcelIssue[]=[],orgs=new Map<string,JsonRow>(),objects=new Map<string,JsonRow>(),mols=new Map<string,JsonRow>();let cells=0,rowsCount=0;
@@ -121,22 +121,100 @@ export function createAssetInventoryExcel(contracts:Contracts,decimal:DecimalCor
    }
    for(const session of sessions.values()){const entries=session.rows as JsonRow[],ids=new Set(entries.map(row=>row.orgId));if(ids.size===1){session.orgId=entries[0]!.orgId!;session.orgName=entries[0]!.orgName!;}}
   }
-  const canonicalBook=options.format==='comparison'&&source.sheets.some(value=>object(value)&&Array.isArray(value.rows)&&value.rows.some(row=>Array.isArray(row)&&CANONICAL_HEADERS.every((header,c)=>normal(row[c])===normal(header))));
+  type PrintLayout=12|13;
+  interface Cover {sheet:InventoryExcelSheet|null;org:string;place:string;date:string;documentDate:string;mol:string;raw:JsonRow}
+  function printedLayout(sheet:InventoryExcelSheet):PrintLayout|null {
+   const head=sheet.rows.slice(0,35),hasNames=head.some(row=>/наимен|товарно-материаль/i.test(label(row[1])))&&head.some(row=>/измерен|океи|наиме/i.test(label(row[3])+' '+label(row[4])));
+   if(!hasNames)return null;const thirteen=head.some(row=>/^наличие$/i.test(label(row[7]))),twelve=head.some(row=>/^наличие$/i.test(label(row[6])));
+   return thirteen&&!twelve?13:twelve&&!thirteen?12:null;
+  }
+  function dateText(value:unknown):string {
+   if(typeof value==='number'&&Number.isInteger(value)&&value>=1&&value<=2958465){const result=new Date(Date.UTC(1899,11,30+value)).toISOString().slice(0,10);return day(result)?result:'';}
+   const raw=normal(value),iso=/\b(\d{4}-\d{2}-\d{2})\b/.exec(raw);if(iso&&day(iso[1]))return iso[1];
+   const months:Record<string,string>={января:'01',февраля:'02',марта:'03',апреля:'04',мая:'05',июня:'06',июля:'07',августа:'08',сентября:'09',октября:'10',ноября:'11',декабря:'12'},match=/(\d{1,2})\s*(?:[.\/-]|[»«"'\s])+\s*(\d{1,2}|января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s*(?:[.\/-]|[»«"'\s])+\s*(\d{4})(?!\d)/.exec(raw);
+   if(!match)return '';const result=match[3]+'-'+(months[match[2]!]??match[2]!.padStart(2,'0'))+'-'+match[1]!.padStart(2,'0');return day(result)?result:'';
+  }
+  function placeCode(value:unknown):string {const raw=label(value),match=/(?:^|[\s(])КП\s*[-–]?\s*(\d+(?:\s*[Gg])?)/iu.exec(raw);if(match)return match[1]!.replace(/\s/g,'').toUpperCase();return /склад\s+нов(?:ый|ого)?\s*уренгой/i.test(raw)?'warehouse-urengoy':'';}
+  function shortPlace(code:string,cover:Cover):string {return code===placeCode(cover.place)?cover.place:code==='warehouse-urengoy'?'Склад Новый Уренгой':'КП '+code;}
+  function accountHeading(value:string):string {const match=/(?:сч[её]т\s*)?((?:МЦ\s*\.\s*\d+)|(?:\d{2}(?:\.\d+)*))/iu.exec(value);if(/МЦ\s*\.\s*\d+/i.test(value))return /МЦ\s*\.\s*\d+/i.exec(value)![0].replace(/\s/g,'').toUpperCase();if(/сч[её]т\s*\d/i.test(value)&&match)return match[1]!;return /^основные\s+средства/i.test(value)?'01':'';}
+  function printedCover(sheets:InventoryExcelSheet[]):Cover {
+   const covers=sheets.filter(sheet=>sheet.rows.slice(0,35).some(row=>row.some(value=>/ИНВ\s*[-–]\s*19/i.test(label(value))))),sheet=covers[0]??null,result:Cover={sheet,org:sheet?orgName(sheet):label(options.defaultOrgName),place:sheet?headerValue(sheet,'object'):'',date:'',documentDate:'',mol:'',raw:{}};
+   if(covers.length>1)issue('EXCEL_PRINT_COVER_AMBIGUOUS','В книге несколько титульных страниц ИНВ-19; проверьте принадлежность листов',sheet?.name??'');
+   if(sheet)for(let r=0;r<Math.min(sheet.rows.length,50);r++){
+    const row=sheet.rows[r]!,joined=row.map(text).join(' ');
+    if(/структурное подразделение/i.test(joined)&&!result.place)result.place=label(sheet.rows[r-1]?.[0]);
+    if(/по состоянию на/i.test(joined)){const parsed=dateText(joined);if(parsed)result.date=parsed;else issue('EXCEL_SOURCE_DATE_INVALID','Дата остатков на титульной странице не распознана; укажите её явно',sheet.name,r,undefined,true);result.raw.asOfOriginal=joined;}
+    for(let c=0;c<row.length;c++){
+     if(normal(row[c])==='дата составления'){for(let next=r+1;next<Math.min(sheet.rows.length,r+4);next++){const parsed=dateText(sheet.rows[next]?.[c]);if(parsed){result.documentDate=parsed;break;}}}
+     if(/фамилия.*имя.*отчество/i.test(label(row[c]))&&!result.mol)result.mol=label(sheet.rows[r-1]?.[c]);
+     if(/дата (?:начала|окончания) инвентаризации/i.test(label(row[c]))){const raw=row.slice(c+1).find(value=>!blank(value));if(raw!==undefined&&!dateText(raw))issue('EXCEL_SOURCE_DATE_INVALID','В титуле есть недействительная дата: '+label(raw)+'; оригинал сохранён',sheet.name,r,undefined,true);}
+    }
+   }
+   if(!result.place)result.place=label(options.defaultObjectName);
+   if(options.date&&result.date&&options.date!==result.date)issue('EXCEL_DATE_OVERRIDE','Указанная дата отличается от даты остатков '+result.date+'; будет использована явно указанная дата',sheet?.name??'',undefined,undefined,true);
+   result.date=text(options.date)||result.date||(own(result.raw,'asOfOriginal')?'':result.documentDate);
+   result.raw={...result.raw,organization:result.org,object:result.place,molName:result.mol,date:result.date,documentDate:result.documentDate,...(sheet?{sheet:sheet.name}:{})};return result;
+  }
+  const printSessions=new Map<string,JsonRow>();
+  function printed(sheet:InventoryExcelSheet,index:number,kind:PrintLayout,cover:Cover):void {
+   if(!cover.date)issue('EXCEL_DATE_REQUIRED','На титуле не найдена дата остатков; укажите дату описи',sheet.name);
+   const headings=sheet.rows.map((row,r)=>({row:r,text:typeof row[0]==='string'&&blank(row[1])?label(row[0]):''})).filter(entry=>entry.text),counts=new Map<string,number>();for(const heading of headings){const code=placeCode(heading.text);if(code)counts.set(code,(counts.get(code)??0)+1);}
+   const sheetCode=/^(?:КП\s*)?\d+\s*G?$/i.test(sheet.name.trim())?sheet.name.replace(/^КП\s*/i,'').replace(/\s/g,'').toUpperCase():'',dominant=sheetCode&&(counts.get(sheetCode)??0)>=2?sheetCode:'';
+   let code=dominant||placeCode(cover.place),place=code?shortPlace(code,cover):cover.place,accountCode=accountHeading(sheet.name),currentMol=code===placeCode(cover.place)?cover.mol:'',group='s'+index+':print:0',groupIndex=0,heading='',firstData=false;
+   const warned=new Set<string>();
+   function warning(key:string,message:string,row:number):void {if(warned.has(key))return;warned.add(key);issue(key,message,sheet.name,row,undefined,true);}
+   for(let r=0;r<sheet.rows.length;r++){
+    const row=sheet.rows[r]!,name=label(row[1]),unit=label(row[4]),ordinal=/^\d+$/.test(label(row[0]));if(row.every(blank)||['1','2','3','4','5'].every((value,c)=>label(row[c])===value))continue;
+    const header=/^(?:наименование|товарно-материальные|бухгалтер|с результатами|ответственн|председатель|члены комиссии|материально)/i.test(name),hasNumber=row.slice(5,kind).some(value=>typeof value==='number'&&Number.isFinite(value)||typeof value==='string'&&/^[+-]?\d/.test(value.trim()));
+    const candidate=!header&&typeof row[1]==='string'&&!!name&&!/^итого|^всего/i.test(name)&&!row.some(value=>/^итого$/i.test(label(value)))&&(ordinal||!!unit&&!/^(?:наиме|5|итого)/i.test(unit)||r>=4&&(hasNumber||!blank(row[2])&&!/^(?:код|номенклат)/i.test(label(row[2]))));
+    if(!candidate){
+     if(typeof row[0]!=='string'||blank(row[0])||!blank(row[1])||/^но-|^номер|^с результат|^подпис|^ответственн|^бухгалтер|^председател|^члены|^материально/i.test(normal(row[0])))continue;
+     const title=label(row[0]);if(/^\d+$/.test(title))continue;let nextCode=placeCode(title);
+     if(!firstData&&dominant&&nextCode&&nextCode!==dominant){warning('EXCEL_PRINT_STALE_HEADING','Первый заголовок объекта противоречит имени листа и последующим разделам; использован объект КП '+dominant,r);nextCode=dominant;}
+     if(nextCode){if(nextCode!==placeCode(cover.place))warning('EXCEL_PRINT_LOCAL_OBJECT','Заголовки книги содержат объект '+shortPlace(nextCode,cover)+', отличный от титула. Строки распределяются по локальным разделам; проверьте их перед импортом',r);code=nextCode;place=shortPlace(code,cover);}
+     const personal=/^[А-ЯЁ][а-яё-]+\s+[А-ЯЁ][а-яё-]+\s+[А-ЯЁ][а-яё-]+$/u.test(title);
+     if(personal){if(cover.mol&&normal(title)!==normal(cover.mol))warning('EXCEL_PRINT_MOL_CONFLICT','В локальном разделе указано ФИО «'+title+'», отличающееся от титула. Оно сохранено в соответствующих строках для проверки',r);currentMol=title;}else currentMol=code===placeCode(cover.place)?cover.mol:'';
+     const nextAccount=accountHeading(title);if(nextAccount)accountCode=nextAccount;
+     heading=title;group='s'+index+':print:'+ ++groupIndex;if(/^списано(?:\s|$)/i.test(title))warning('EXCEL_PRINT_DISPOSAL_GROUP','В источнике есть отдельный блок «'+title+'». Строки сохранены для проверки без автоматического списания или объединения остатков',r);continue;
+    }
+    firstData=true;const linked=owners(cover.org,place,sheet,index,r);if(!linked)continue;
+    const ownerName=currentMol||'МОЛ не указан в файле';if(!currentMol)warning('EXCEL_MOL_UNKNOWN','ФИО ответственного для части строк не указано однозначно; неизвестные данные не подставлены',r);
+    const owner=mol(linked.org,linked.place,ownerName,accountCode,group,metadata(sheet,index,r)),qty=numeric(row[5],3,sheet.name,r,5),cost=kind===13?numeric(row[6],2,sheet.name,r,6):null,factColumn=kind===13?7:6,fact=numeric(row[factColumn],3,sheet.name,r,factColumn),factCost=numeric(row[factColumn+1],2,sheet.name,r,factColumn+1),entry=item(owner,name,identifierText(sheet,r,2),unit,qty,cost,sheet,index,r),meta=entry.sourceMeta as JsonRow;
+    meta.layout='printed'+kind;meta.groupHeading=heading;meta.coverObject=cover.place;meta.coverMolName=cover.mol;
+    const key=JSON.stringify([linked.org.id,linked.place.id,cover.date]);let session=printSessions.get(key);
+    if(!session){const id='session:'+data.inventorySessions!.length;session={id,objectId:linked.place.id!,objectName:linked.place.name!,orgId:linked.org.id!,orgName:linked.org.name!,date:cover.date,title:label(options.title)||'Инвентаризационная опись',note:'',status:'draft',rows:[],commission:{chairman:{name:'',position:''},members:[]},rootId:id,revision:1,sourceMeta:{format:'comparison',book:source.name!,sheet:sheet.name,sheets:[sheet.name],layout:'printed',cover:cover.raw}};printSessions.set(key,session);data.inventorySessions!.push(session);}else{const meta=session.sourceMeta as JsonRow,names=meta.sheets as JsonValue[];if(!names.includes(sheet.name))names.push(sheet.name);}
+    const note=row.slice(kind).map(text).filter(value=>value.trim()).join('; '),record:JsonRow={id:'row:'+data.inventoryItems!.length,itemId:entry.id!,molId:owner.id!,orgId:linked.org.id!,objectId:linked.place.id!,orgName:linked.org.name!,objectName:linked.place.name!,molName:owner.name!,name,code:entry.code!,accountCode,unit,qtyAcct:qty,costAcct:cost,qtyFact:fact,costFact:factCost,action:'',note,sourceMeta:meta};(session.rows as JsonRow[]).push(record);
+   }
+  }
+  const canonicalBook=options.format!=='osv'&&source.sheets.some(value=>object(value)&&Array.isArray(value.rows)&&value.rows.some(row=>Array.isArray(row)&&CANONICAL_HEADERS.every((header,c)=>normal(row[c])===normal(header))));
   function generatedAuxiliary(sheet:InventoryExcelSheet):boolean {
    const name=normal(sheet.name),first=sheet.rows[0]||[],matches=(headers:string[]):boolean=>headers.every((value,c)=>normal(first[c])===normal(value));
    if(name==='итоги')return matches(['Организация','Единица','Учёт, кол.','Факт, кол.','Расхождение, кол.']);
    if(name==='поправки')return matches(['Дата','Основание','Пользователь','Имущество','До исправления','После исправления']);
    return name==='комиссия'&&normal(first[0])==='председатель'&&sheet.rows.some(row=>normal(row[0])==='контрольный отпечаток'&&/^sha256:[a-f0-9]{64}$/.test(label(row[1])))&&sheet.rows.some(row=>normal(row[0])==='подписи проставляются на бумажном экземпляре');
   }
+  const sheets:InventoryExcelSheet[]=[];
   for(let index=0;index<source.sheets.length;index++){
    const raw=source.sheets[index];if(!object(raw))fail('Некорректный лист книги');keys(raw,['name','rows','formattedRows']);if(typeof raw.name!=='string'||!raw.name||raw.name.length>2000||!Array.isArray(raw.rows))fail('Нужны имя листа и строки ячеек');
    for(const row of raw.rows){if(!Array.isArray(row)||row.length>128||++rowsCount>200000)fail('Превышен предел строк или колонок');for(const cell of row){if(++cells>2000000||cell!==null&&typeof cell!=='string'&&typeof cell!=='number'||typeof cell==='string'&&cell.length>20000)fail('В ячейках допустимы только ограниченные текстовые и числовые значения');}}
    if(own(raw,'formattedRows')){if(!Array.isArray(raw.formattedRows)||raw.formattedRows.length!==raw.rows.length)fail('Форматированные строки должны соответствовать исходным');for(let r=0;r<raw.rows.length;r++){const values=raw.formattedRows[r];if(!Array.isArray(values)||values.length!==(raw.rows[r] as JsonValue[]).length||values.some(value=>value!==null&&(typeof value!=='string'||value.length>20000)))fail('Некорректная сетка форматированных ячеек');}}
-   const sheet=raw as unknown as InventoryExcelSheet;if(canonicalBook&&generatedAuxiliary(sheet)){issue('EXCEL_AUXILIARY_SHEET','Служебный лист сохранён в оригинале. Итоги, подписи и поправки не утверждают импортируемый черновик',sheet.name,undefined,undefined,true);continue;}if(options.format==='osv')osv(sheet,index);else comparison(sheet,index);
+   sheets.push(raw as unknown as InventoryExcelSheet);
+  }
+  const hasPrint=options.format!=='osv'&&sheets.some(sheet=>printedLayout(sheet)!==null),cover=hasPrint?printedCover(sheets):null;let detected:'osv'|'comparison'|null=null;
+  for(let index=0;index<sheets.length;index++){
+   const sheet=sheets[index]!;
+   if(canonicalBook&&generatedAuxiliary(sheet)){issue('EXCEL_AUXILIARY_SHEET','Служебный лист сохранён в оригинале. Итоги, подписи и поправки не утверждают импортируемый черновик',sheet.name,undefined,undefined,true);continue;}
+   const kind=hasPrint?printedLayout(sheet):null;if(kind&&cover){if(detected==='osv')issue('EXCEL_MIXED_FORMAT','На листах смешаны ОСВ и описи; разделите книгу или выберите явный формат',sheet.name);printed(sheet,index,kind,cover);detected='comparison';continue;}
+   if(hasPrint&&(sheet===cover?.sheet||sheet.rows.every(row=>row.slice(1).every(blank)))){issue('EXCEL_AUXILIARY_SHEET','Титульный или справочный лист сохранён в оригинале; он не создаёт дополнительные остатки',sheet.name,undefined,undefined,true);continue;}
+   if(options.format==='auto'){
+    if(layout(sheet)){if(detected==='osv')issue('EXCEL_MIXED_FORMAT','На листах смешаны ОСВ и описи; разделите книгу или выберите явный формат',sheet.name);detected='comparison';comparison(sheet,index);}
+    else if(sheet.rows.some((row,r)=>account(identifierText(sheet,r,0))&&(blank(row[1])||[row[1],row[2],row[4]].some(value=>label(value)==='БУ')))){if(detected==='comparison')issue('EXCEL_MIXED_FORMAT','На листах смешаны ОСВ и описи; разделите книгу или выберите явный формат',sheet.name);detected='osv';osv(sheet,index);}
+    else issue('EXCEL_UNRECOGNIZED_SHEET','Лист не является распознаваемой описью или ОСВ. Документ можно сохранить в файлах инвентаризации; для учёта нужен просмотр структуры',sheet.name);
+   }else if(options.format==='osv')osv(sheet,index);else comparison(sheet,index);
   }
   for(const entry of data.inventoryItems!)if(entry.qty===null){const meta=object(entry.sourceMeta)?entry.sourceMeta:{};issue('EXCEL_QUANTITY_UNKNOWN','Учётное количество неизвестно и сохранено как null',text(meta.sheet),undefined,undefined,true);}
   if(!data.inventoryItems!.length)issue('EXCEL_NO_ITEMS','В книге не найдено ни одной позиции имущества','');
-  return freeze({data,issues,warnings,canImport:issues.length===0&&data.inventoryItems!.length>0});
+  return freeze({data,issues,warnings,canImport:issues.length===0&&data.inventoryItems!.length>0,...(options.format==='auto'&&detected?{detectedFormat:detected}:{})});
  }
  return Object.freeze({apiVersion:1 as const,decode});
 }

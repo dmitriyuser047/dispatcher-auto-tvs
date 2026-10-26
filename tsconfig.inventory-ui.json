@@ -16,5 +16,5 @@
     "newLine": "lf",
     "outFile": ".typed-inventory-ui/asset-inventory.js"
   },
-  "files": ["src/ui/asset-inventory.ts", "src/ui/asset-inventory-host.ts", "src/ui/asset-inventory-files.ts"]
+  "files": ["src/ui/asset-inventory.ts", "src/ui/asset-inventory-host.ts", "src/ui/asset-inventory-files.ts", "src/ui/inventory-documents.ts"]
 }

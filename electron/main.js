@@ -737,18 +737,34 @@ app.whenReady().then(() => {
   ipcMain.handle('inventory-database',async(event,payload)=>{
     let writing=false;
     try{
-      if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(key=>!['action','parentDatabaseToken','request'].includes(key))||!['snapshot','execute','importSource','export','openFolder'].includes(payload.action))throw Object.assign(Error('Неверное действие базы инвентаризации'),{code:'INVENTORY_DATABASE_REQUEST'});
+      if(!payload||typeof payload!=='object'||Array.isArray(payload)||Object.keys(payload).some(key=>!['action','parentDatabaseToken','request'].includes(key))||!['snapshot','execute','importSource','export','openFolder','documentsList','documentsUpload','documentRead','documentSave'].includes(payload.action))throw Object.assign(Error('Неверное действие базы инвентаризации'),{code:'INVENTORY_DATABASE_REQUEST'});
       const file=await captureFileContext(event),context=file.operation;
       if(payload.parentDatabaseToken!==context.databaseToken)throw Object.assign(Error('Основная база изменилась. Откройте раздел заново.'),{code:'DATABASE_CHANGED'});
       await assertFileContext(file);
       if(payload.action==='export')return await exportAssetInventory(event,payload.request,file);
+      if(payload.action==='documentSave'){
+        let saved=false;
+        try{
+          if(!payload.request||typeof payload.request!=='object'||Array.isArray(payload.request)||Object.keys(payload.request).some(key=>!['id','databaseToken'].includes(key)))throw Error('Неверный запрос оригинала');
+          const read=async()=>{await assertFileContext(file);const request={action:'documentRead',parentDatabaseToken:context.databaseToken,request:payload.request};const result=context.client?await server.postInventoryDatabase(context.host,context.port,request):await require('./inventory-database.cjs').handle(context.directory,request,context.principal,{assertCurrent:()=>assertFileContextSync(file)});await assertFileContext(file);if(!result?.ok||result.databaseToken!==payload.request.databaseToken||typeof result.base64!=='string'||typeof result.name!=='string'||!Number.isSafeInteger(result.bytes)||result.bytes<0||result.bytes>25*1024*1024)throw Error(result?.error||'Оригинал недоступен');const bytes=Buffer.from(result.base64,'base64');if(bytes.length!==result.bytes||require('node:crypto').createHash('sha256').update(bytes).digest('hex')!==result.sha256)throw Error('Контрольная сумма оригинала не совпала');return {...result,content:bytes};};
+          const original=await read(),name=original.name;
+          if(!name||name.length>240||path.basename(name)!==name||/[<>:"/\\|?*\x00-\x1f]/.test(name)||/[. ]$/.test(name))throw Error('Недопустимое имя оригинала');
+          const choice=await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender),{title:'Сохранить оригинал документа',defaultPath:path.join(app.getPath('documents'),name),filters:[{name:'Все файлы',extensions:['*']}]});
+          await assertFileContext(file);if(choice.canceled||!choice.filePath)return {ok:true,cancelled:true,databaseToken:payload.request.databaseToken};
+          const destination=path.join(fs.realpathSync(path.dirname(choice.filePath)),path.basename(choice.filePath));
+          for(const base of [context.directory,app.getPath('userData')].filter(Boolean)){const relative=path.relative(path.resolve(base),destination);if(relative===''||!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep))throw Error('Выберите папку сохранения вне рабочей базы и профиля программы');}
+          const verified=await read();if(verified.sha256!==original.sha256)throw Error('Оригинал изменился во время выбора папки');
+          await require('./safe-file.cjs').writeRegularFileAtomic(destination,verified.content,{maxBytes:25*1024*1024,assertCurrent:()=>assertFileContextSync(file)});saved=true;await read();
+          return {ok:true,databaseToken:payload.request.databaseToken,sha256:original.sha256,bytes:original.bytes};
+        }catch(error){return {ok:false,error:(saved?'Файл сохранён, но подтверждение изменилось. ':'')+error.message,fileWritten:saved};}
+      }
       if(payload.action==='openFolder'){
         if(context.client)throw Error('Папка базы инвентаризации находится на сервере.');
         await require('./inventory-database.cjs').handle(context.directory,{action:'snapshot',parentDatabaseToken:context.databaseToken},context.principal,{assertCurrent:()=>assertFileContextSync(file)});
         await assertFileContext(file);const error=await shell.openPath(require('./inventory-database.cjs').directory(context.directory));
         await assertFileContext(file);return error?{ok:false,error}:{ok:true};
       }
-      writing=payload.action==='execute';
+      writing=['execute','documentsUpload'].includes(payload.action);
       const result=context.client?await server.postInventoryDatabase(context.host,context.port,payload):await require('./inventory-database.cjs').handle(context.directory,payload,context.principal,{getPrincipal:()=>{assertFileContextSync(file);return context.principal;},assertCurrent:()=>assertFileContextSync(file)});
       await assertFileContext(file);return result;
     }catch(error){return {ok:false,code:error.code||'INVENTORY_DATABASE_FAILED',error:error.message,...(Array.isArray(error.issues)?{issues:error.issues}:{}),...((error.unknown===true||error.definitive===false||writing&&error.code==='SESSION_CHANGED')?{unknown:true,definitive:false}:{})};}

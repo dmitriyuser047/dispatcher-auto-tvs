@@ -1,5 +1,5 @@
 /* Generated from src/server by scripts/build-inventory-server.cjs.
- * TypeScript 5.9.3; Node types 24.19.2; source/config sha256:8a7fc6b8092c258ae6cf000c69b509fbff1b4ab0ffc7e2085e20891dc5f18165. Do not edit directly. */
+ * TypeScript 5.9.3; Node types 24.19.2; source/config sha256:09b8a05e40a0eda724e6721d75cb97bb8b75bf4afd537dc8cdfd6a9477d0f584. Do not edit directly. */
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.prepare = prepare;

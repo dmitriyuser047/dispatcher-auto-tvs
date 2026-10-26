@@ -6,9 +6,9 @@ import {parentPort,workerData} from 'node:worker_threads';
 
 export type Json=null|boolean|number|string|Json[]|{[key:string]:Json};
 export type Row={[key:string]:Json};
-export interface Mapping {format:'legacy'|'osv'|'comparison';defaultOrgName?:string;defaultObjectName?:string;date?:string;title?:string;useOpeningIfNoClosing?:boolean;target?:Row}
+export interface Mapping {format:'auto'|'legacy'|'osv'|'comparison';defaultOrgName?:string;defaultObjectName?:string;date?:string;title?:string;useOpeningIfNoClosing?:boolean;target?:Row}
 export interface DecodeRequest {file:{name:string;bytes:Uint8Array};mapping:Mapping;tempDirectory:string}
-export interface DecodeResult {data:Record<string,Row[]>;issues:Row[];warnings:Row[];canImport:boolean}
+export interface DecodeResult {data:Record<string,Row[]>;issues:Row[];warnings:Row[];canImport:boolean;detectedFormat?:'legacy'|'osv'|'comparison'}
 interface DecodeError extends Error {code?:string;status?:number}
 interface ArchiveBudget {input(bytes:number):void}
 interface ArchiveTools {createArchiveBudget(options:Record<string,number>):ArchiveBudget;extractZipBounded(bytes:Buffer,directory:string,budget:ArchiveBudget):unknown}
@@ -47,12 +47,12 @@ async function workbook(file:{name:string;bytes:Buffer},tempDirectory:string):Pr
 }
 
 export async function decode(request:DecodeRequest):Promise<DecodeResult> {
- if(!request||!request.file||typeof request.file.name!=='string'||!request.mapping||!['legacy','osv','comparison'].includes(request.mapping.format)||!(request.file.bytes instanceof Uint8Array))fail('IMPORT_FILE','Нужен исходный файл и подтверждённый профиль разбора');
+ if(!request||!request.file||typeof request.file.name!=='string'||!request.mapping||!['auto','legacy','osv','comparison'].includes(request.mapping.format)||!(request.file.bytes instanceof Uint8Array))fail('IMPORT_FILE','Нужен исходный файл и подтверждённый профиль разбора');
  const bytes=Buffer.from(request.file.bytes);if(!bytes.length||bytes.length>LIMIT)fail('IMPORT_LIMIT','Исходный файл должен занимать от 1 байта до 25 МБ');const ext=path.extname(request.file.name).toLowerCase();let result:DecodeResult;
- if(request.mapping.format==='legacy'){
+ if(request.mapping.format==='legacy'||request.mapping.format==='auto'&&ext==='.json'){
   if(ext!=='.json')fail('IMPORT_FORMAT','Для прежней базы нужен исходный JSON');let value:unknown;try{value=JSON.parse(rawString(bytes));}catch(error){if((error as DecodeError).code)throw error;fail('IMPORT_JSON','Исходный JSON не прочитан');}
   if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['orgs','objects','mols','inventories','locGroupNames'].includes(key))||!['objects','mols','inventories'].some(key=>Object.hasOwn(value as object,key)))fail('IMPORT_JSON','Это не поддерживаемый исходный файл прежней инвентаризации');
-  const decoder=require('../assets/core/asset-inventory-import.js') as {legacy(value:unknown,options:Record<string,string>):DecodeResult},options:Record<string,string>={};for(const key of ['defaultOrgName','defaultObjectName'] as const)if(request.mapping[key]!==undefined)options[key]=request.mapping[key]!;result=decoder.legacy(value,options);
+  const decoder=require('../assets/core/asset-inventory-import.js') as {legacy(value:unknown,options:Record<string,string>):DecodeResult},options:Record<string,string>={};for(const key of ['defaultOrgName','defaultObjectName'] as const)if(request.mapping[key]!==undefined)options[key]=request.mapping[key]!;result=decoder.legacy(value,options);if(request.mapping.format==='auto')result={...result,detectedFormat:'legacy'};
  }else{
   if(!['.xls','.xlsx'].includes(ext))fail('IMPORT_FORMAT','Для табличного импорта нужен исходный XLS или XLSX');const book=await workbook({name:request.file.name,bytes},request.tempDirectory),decoder=require('../assets/core/asset-inventory-excel.js') as {decode(book:unknown,options:Record<string,unknown>):DecodeResult},options:Record<string,unknown>={format:request.mapping.format};for(const key of ['defaultOrgName','defaultObjectName','date','title','useOpeningIfNoClosing'] as const)if(request.mapping[key]!==undefined)options[key]=request.mapping[key];result=decoder.decode(book,options);
  }

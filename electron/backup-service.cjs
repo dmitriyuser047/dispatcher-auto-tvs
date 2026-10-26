@@ -1,5 +1,5 @@
 'use strict';
-function validateSources(data,read){require('./import-source.cjs').validateManaged(data,read);require('./attachment-access.cjs').validateManaged(data,read);}
+function validateSources(data,read,files){require('./import-source.cjs').validateManaged(data,read);require('./attachment-access.cjs').validateManaged(data,read);require('./inventory-documents.cjs').validateManaged(files,read);}
 
 // Format 3 preserves the immutable operation closure. Legacy formats 1/2 remain readable. No Electron, profile selection or settings
 // mutation lives here; callers must explicitly provide every source/target path.
@@ -9,7 +9,7 @@ const schema = require('../assets/core/platform-schema.js');
 const contracts = require('../assets/core/platform-contracts.js');
 const storage = require('./storage');
 const sqlite = require('./sqlite-storage.cjs');
-const SECTIONS = schema.sections, MANAGED = ['attachments', 'import-sources', 'reestr-knowledge','document-archive','migration-history'];
+const SECTIONS = schema.sections, MANAGED = ['attachments', 'import-sources', 'reestr-knowledge','document-archive','migration-history','inventory-documents'];
 const MAX_BYTES = 512 * 1024 * 1024, MAX_FILES = 10000;
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -277,7 +277,7 @@ function readPackage(archivePath) {
     if(sourceDescriptor?.schemaVersion>=4&&manifest.version!==3||manifest.version===3&&!(sourceDescriptor?.schemaVersion>=4)||manifest.version<3&&entries.some(entry=>entry.entryName==='operation-state.json'||entry.entryName.startsWith('operation-ledger/')))fail('BACKUP_OPERATION_STATE','Версия пакета не сохраняет историю операций исходной базы');
     if(manifest.version===3){checked.operationSeed=readOperations(files);if(JSON.stringify(checked.operationSeed.hotRows)!==JSON.stringify(data.auditLog))fail('BACKUP_OPERATION_STATE','Горячая история не соответствует полному журналу операций');}
     checked.referencedFileCount = references(data, files);
-    require('./document-archive.cjs').validateManaged(data,name=>files.find(entry=>entry.name===name)?.bytes);validateSources(data,name=>files.find(entry=>entry.name===name)?.bytes);
+    require('./document-archive.cjs').validateManaged(data,name=>files.find(entry=>entry.name===name)?.bytes);validateSources(data,name=>files.find(entry=>entry.name===name)?.bytes,files);
     return checked;
 }
 function verifyPackage({ archivePath }) { return report(readPackage(archivePath)); }
@@ -327,7 +327,7 @@ function createPackage({ sourceDir, archivePath, settings = {}, knowledgeDir,all
             add(entry.name, bytes);
         }
         references(snapshot.data, files);
-        require('./document-archive.cjs').validateManaged(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null);validateSources(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null);
+        require('./document-archive.cjs').validateManaged(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null);validateSources(snapshot.data,name=>before.some(entry=>entry.name===name)?readFile(path.join(source,...name.split('/'))):null,before);
         const sourceFingerprint = sha(JSON.stringify(before));
         zip.addFile('manifest.json', Buffer.from(JSON.stringify({ format: 'tvs-backup', version: snapshot.operationSeed?3:2, database:{descriptor:snapshot.sourceDescriptor,identity:snapshot.sourceIdentity}, createdAt: new Date().toISOString(), files, revisions: packageRevisions, sourceFormat: snapshot.sourceFormat, sourceFingerprint })));
         stage = path.join(parent, '.tvs-backup-package-' + crypto.randomUUID() + '.zip');
