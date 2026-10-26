@@ -98,7 +98,10 @@ function openVehicleJournal(view) {
       renderDetail(v);
     }
   };
-  if (v) renderDetail(v);
+  if (v) {
+    renderDetail(v);
+    document.getElementById('mainContent').scrollTop = 0;
+  }
 }
 
 function getMonthsForVehicle(id) {
@@ -117,11 +120,30 @@ const MONTHS_RU = ['Январь','Февраль','Март','Апрель','М
 const MONTHS_SHORT = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
 const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 
+// NumberFormat construction is expensive in a wide journal. Keep only the
+// fixed display formats here; never retain records or calculated balances.
+const vehicleDetailNumberFormats = new Map();
+function vehicleDetailNumber(value, options) {
+  if (typeof value !== 'number') return value.toLocaleString('ru', options);
+  const key = JSON.stringify(options || null);
+  let format = vehicleDetailNumberFormats.get(key);
+  if (!format) {
+    format = new Intl.NumberFormat('ru', options);
+    vehicleDetailNumberFormats.set(key, format);
+  }
+  return format.format(value);
+}
+
 function renderDetail(v) {
   const recs = recsFor(v.id);
   const valuationHtml=typeof costValuationCardHtml==='function'?costValuationCardHtml({section:'vehicles',id:v.id}):'';
   const totalKm = recs.reduce((s, r) => s + (r.km || 0), 0);
-  const fuelRecs=recs.filter(r=>fuelAccountingCurrentIncludes('vehicles',v,r.date));
+  // Resolve the boundary and business date once for this render, rather than
+  // validating the calendar again for every journal row.
+  const fuelBoundary = fuelAccountingFor('vehicles', v);
+  const fuelToday = fuelBoundary.mode === 'legacy' ? '' : dispatcherLocalDate();
+  const includesFuel = date => fuelBoundary.mode === 'legacy' || AccountingBoundary.classify(fuelBoundary, date) === 'current';
+  const fuelRecs=recs.filter(r=>fuelBoundary.mode==='legacy'||r.date<=fuelToday&&includesFuel(r.date));
   const totalFuel = fuelRecs.reduce((s, r) => s + (r.fuelActual || 0), 0);
   const totalFuelIssued = fuelRecs.reduce((s, r) => s + (r.fuelIssued || 0), 0);
   const fuelKm=fuelRecs.reduce((s,r)=>s+(r.km||0),0);
@@ -130,10 +152,6 @@ function renderDetail(v) {
   const fuelLabels = { diesel: 'Дизельное', gasoline: 'Бензин', gas: 'Газ (ГБО)' };
   const fuelClasses = { diesel: 'diesel', gasoline: 'gasoline', gas: 'gas' };
 
-  const months = getMonthsForVehicle(v.id);
-  // ensure current selected is valid
-  const curKey = `${selectedYear}-${selectedMonth}`;
-
   // monthly records
   const monthRecs = recs.filter(r => {
     const d = new Date(r.date);
@@ -141,9 +159,11 @@ function renderDetail(v) {
   }).sort((a, b) => cmpDateAsc(a.date, b.date));
 
   const monthKm = monthRecs.reduce((s, r) => s + (r.km || 0), 0);
-  const monthFuel = monthRecs.filter(r=>fuelAccountingIncludes('vehicles',v,r.date)).reduce((s, r) => s + (r.fuelActual || 0), 0);
+  const monthFuel = vehicleDetailView === 'journal' ? monthRecs.filter(r=>includesFuel(r.date)).reduce((s, r) => s + (r.fuelActual || 0), 0) : 0;
   // build month tabs grouped by year
   let monthTabsHtml = '';
+  if (vehicleDetailView === 'journal') {
+  const months = getMonthsForVehicle(v.id);
   if (months.length === 0) {
     monthTabsHtml = '<span style="color:var(--text3);font-size:12px">Нет данных</span>';
   } else {
@@ -166,17 +186,17 @@ function renderDetail(v) {
   if (!hasNow) {
     monthTabsHtml += `<div class="month-tab ${selectedYear === nowY && selectedMonth === nowM ? 'active' : ''}" onclick="selectMonth(${nowY},${nowM})" style="border-style:dashed">${MONTHS_SHORT[nowM-1]} ${nowY}</div>`;
   }
+  }
 
   // fuel balance running total (all vehicle records sorted by date)
   const balMap = computeFuelBalances(v.id);
 
   // current fuel balance = balance after last record (or initial if no records)
-  const allRecsSorted = recs.slice().sort((a, b) => cmpDateAsc(a.date, b.date));
-  const lastRec = allRecsSorted[allRecsSorted.length - 1];
   const currentFuelBalance = fuelAccountingCurrentBalance('vehicles',v,recs,balMap);
 
   // rows
   let tableRows = '';
+  if (vehicleDetailView === 'journal') {
   if (monthRecs.length === 0) {
     tableRows = `<tr><td colspan="13" class="empty-table">Нет записей за этот месяц. Нажмите «+ Запись» чтобы добавить.</td></tr>`;
   } else {
@@ -196,13 +216,13 @@ function renderDetail(v) {
       tableRows += `<tr>
         <td style="text-align:center;padding:0;width:28px"><input type="checkbox" class="rec-check" data-recid="${htmlEsc(r.id)}" onchange="recUpdateToolbar()"></td>
         <td class="td-day">${fullDate} <span style="color:var(--text3)">${dayName}</span></td>
-        <td class="td-num">${r.km ? r.km.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
-        <td class="td-num">${r.odoStart ? r.odoStart.toLocaleString('ru') : '—'} → ${r.odoEnd ? r.odoEnd.toLocaleString('ru') : '—'}</td>
-        <td class="td-num">${r.fuelIssued ? r.fuelIssued.toLocaleString('ru', {maximumFractionDigits:1}) + ' <span style="font-size:10px;color:var(--text3)">' + recordFuelGrade(r, v) + '</span>' + (r.fuelSum ? '<div style="font-size:10px;color:var(--text3)">' + (+r.fuelSum).toLocaleString('ru', {maximumFractionDigits:2}) + ' ₽</div>' : '') + (r.fuelCardNum && typeof fcFormat === 'function' ? '<div style="font-size:10px;color:var(--text3);font-family:monospace">карта ' + fcFormat(r.fuelCardNum) + '</div>' : '') : '—'}</td>
-        <td class="td-num">${r.fuelUsed ? r.fuelUsed.toLocaleString('ru', {maximumFractionDigits:1}) : '—'}</td>
-        <td class="td-num">${r.fuelActual != null ? r.fuelActual.toLocaleString('ru', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</td>
-        <td class="td-num">${r.fuelIdle != null ? r.fuelIdle.toLocaleString('ru', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</td>
-        <td class="td-num" style="color:${balColor};font-weight:600">${balance != null ? balance.toLocaleString('ru', {minimumFractionDigits:2, maximumFractionDigits:3}) : fuelAccountingIncludes('vehicles',v,r.date)?'—':'<small>До начала учёта</small>'}</td>
+        <td class="td-num">${r.km ? vehicleDetailNumber(r.km, {maximumFractionDigits:1}) : '—'}</td>
+        <td class="td-num">${r.odoStart ? vehicleDetailNumber(r.odoStart) : '—'} → ${r.odoEnd ? vehicleDetailNumber(r.odoEnd) : '—'}</td>
+        <td class="td-num">${r.fuelIssued ? vehicleDetailNumber(r.fuelIssued, {maximumFractionDigits:1}) + ' <span style="font-size:10px;color:var(--text3)">' + recordFuelGrade(r, v) + '</span>' + (r.fuelSum ? '<div style="font-size:10px;color:var(--text3)">' + vehicleDetailNumber(+r.fuelSum, {maximumFractionDigits:2}) + ' ₽</div>' : '') + (r.fuelCardNum && typeof fcFormat === 'function' ? '<div style="font-size:10px;color:var(--text3);font-family:monospace">карта ' + fcFormat(r.fuelCardNum) + '</div>' : '') : '—'}</td>
+        <td class="td-num">${r.fuelUsed ? vehicleDetailNumber(r.fuelUsed, {maximumFractionDigits:1}) : '—'}</td>
+        <td class="td-num">${r.fuelActual != null ? vehicleDetailNumber(r.fuelActual, {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</td>
+        <td class="td-num">${r.fuelIdle != null ? vehicleDetailNumber(r.fuelIdle, {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</td>
+        <td class="td-num" style="color:${balColor};font-weight:600">${balance != null ? vehicleDetailNumber(balance, {minimumFractionDigits:2, maximumFractionDigits:3}) : includesFuel(r.date)?'—':'<small>До начала учёта</small>'}</td>
         <td class="td-num">${normL100 !== null ? normL100.toFixed(1) : '—'}</td>
         <td class="td-num">${factL100 !== null ? factL100.toFixed(1) + factDevHtml : '—'}</td>
         <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.driver || '—')}</td>
@@ -216,6 +236,7 @@ function renderDetail(v) {
         </td>
       </tr>`;
     });
+  }
   }
 
   const vehicleHeaderHtml = `
@@ -408,7 +429,7 @@ function renderDetail(v) {
   } else if (vehicleDetailView === 'journal') {
     // --- Full journal view ---
     document.getElementById('mainContent').innerHTML = vehicleHeaderHtml + statsHtml + valuationHtml + `
-    <div>
+    <div class="vehicle-journal-months">
       <div class="section-header">
         <div class="section-title">История по месяцам</div>
         <button class="btn btn-ghost btn-sm" onclick="exportToXlsx()">
@@ -429,7 +450,7 @@ function renderDetail(v) {
           <span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:10px">${monthRecs.length} записей · ${Math.round(monthKm).toLocaleString('ru')} км · ${monthFuel.toLocaleString('ru',{maximumFractionDigits:1})} л</span>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
-          <button class="btn btn-ghost btn-sm" onclick="toggleHistoryFullscreen()" id="historyFsBtn" title="${historyFullscreen ? 'Свернуть' : 'Развернуть на весь экран'}">
+          <button class="btn btn-ghost btn-sm" onclick="toggleHistoryFullscreen()" id="historyFsBtn" aria-pressed="${historyFullscreen}" title="${historyFullscreen ? 'Свернуть' : 'Развернуть на весь экран'}">
             ${historyFullscreen
               ? `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg> Свернуть`
               : `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg> На весь экран`}

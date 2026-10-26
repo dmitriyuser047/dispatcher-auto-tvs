@@ -499,18 +499,30 @@ function calcFuelAuto(force=false) {
   const status=document.getElementById('rec_norm_status');if(status)status.textContent=norm==null?'На эту дату норма не задана':'Расчёт по норме на дату записи';
 }
 
+function setHistoryFullscreen(expanded) {
+  historyFullscreen = !!expanded;
+  const wrap = document.getElementById('historyTableWrap');
+  if (!wrap) return;
+  // Keep the existing rows, selection and scroll instead of recalculating the journal.
+  wrap.classList.toggle('fullscreen', historyFullscreen);
+  const button = document.getElementById('historyFsBtn');
+  if (button) {
+    button.title = historyFullscreen ? 'Свернуть' : 'Развернуть на весь экран';
+    button.setAttribute('aria-pressed', String(historyFullscreen));
+    button.innerHTML = historyFullscreen
+      ? '<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg> Свернуть'
+      : '<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg> На весь экран';
+  }
+}
+
 function toggleHistoryFullscreen() {
-  historyFullscreen = !historyFullscreen;
-  const v = data.vehicles.find(x => x.id === selectedVehicleId);
-  if (v) renderDetail(v);
+  setHistoryFullscreen(!historyFullscreen);
 }
 
 // Закрыть полноэкранный режим по Escape
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && historyFullscreen) {
-    historyFullscreen = false;
-    const v = data.vehicles.find(x => x.id === selectedVehicleId);
-    if (v) renderDetail(v);
+    setHistoryFullscreen(false);
   }
 });
 

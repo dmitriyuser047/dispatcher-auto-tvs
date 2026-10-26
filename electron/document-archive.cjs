@@ -21,7 +21,10 @@ function checkedCapsule(bytes,expected){if(sha(bytes)!==expected)fail('DOCUMENT_
 function capsule(dataDir,archiveId){id(archiveId);const final=safeFile(dataDir,archiveId+'.json'),staged=safeFile(dataDir,archiveId+'.stage'),file=final&&stat(final)?final:staged;const bytes=readBytes(file,file===final?staged:final);return {value:checkedCapsule(bytes,archiveId),bytes,file,final,staged};}
 function chain(dataDir,data){const output=[],seen=new Set();for(let current=head(data);current!==null;){if(seen.has(current)||seen.size>=MAX_CHAIN)fail('DOCUMENT_ARCHIVE_CHAIN','Повреждена цепочка печатного архива',409);seen.add(current);const item=capsule(dataDir,current);output.push({id:current,...item});current=item.value.previous;}return output;}
 function recover(dataDir,data,options={}){
- data??=storage().readAll(dataDir);
+ // Recovery follows only the committed archive head. Do not reload every
+ // business section after an otherwise completed save; retain the storage
+ // lock/format checks and validate every reachable capsule and artifact below.
+ data??={appMeta:storage().readSection(dataDir,'appMeta').rows};
  const entries=chain(dataDir,data);
  let pending=entries.some(item=>item.file===item.staged||stat(item.staged));
  for(const item of entries)if(item.value.type==='document-print-artifact'){
