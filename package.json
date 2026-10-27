@@ -1,6 +1,6 @@
 {
   "name": "dispetcherizaciya-avto",
-  "version": "3.5.19",
+  "version": "3.5.20",
   "author": "ООО Технрайз Велл Сервис",
   "description": "Диспетчеризация авто группы компаний ООО Технрайз Велл Сервис",
   "main": "electron/main.js",

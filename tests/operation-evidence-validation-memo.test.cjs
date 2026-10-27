@@ -52,7 +52,8 @@ test('reconstructed or tampered proofs retain full validation and the existing r
 
 function observeAdapterProofs(callback){
  const entry=require.cache[require.resolve('../electron/operation-evidence.cjs')],original=entry.exports,observed={validations:0,proofs:[]};
- entry.exports={...original,validateProof(value){observed.validations++;return original.validateProof(value);},projectEvent(event,proof,current){observed.proofs.push(proof);assert.equal(original.validateProof(proof),proof,'Adapter must retain the owned validated result');return original.projectEvent(event,proof,current);}};
+ const observe=proof=>{observed.proofs.push(proof);assert.equal(original.validateProof(proof),proof,'Adapter must retain the owned validated result');};
+ entry.exports={...original,validateProof(value){observed.validations++;return original.validateProof(value);},projectEvent(event,proof,current){observe(proof);return original.projectEvent(event,proof,current);},createEventProjector(current){const projector=original.createEventProjector(current);return {...projector,projectEvent(event,proof){observe(proof);return projector.projectEvent(event,proof);}};}};
  try{return callback(observed);}finally{entry.exports=original;}
 }
 

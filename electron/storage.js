@@ -132,7 +132,7 @@ function withDatabaseLock(dataDir, action) {
   if (fs.existsSync(recovery)) { releaseLock(file, fd, owner); throw lockError(recovery, 'Проверяется аварийная блокировка.'); }
   heldLocks.set(key, owner);
   try {
-    const result = action(physical);
+    const result = require('./operation-ledger.cjs').withReadScope(() => action(physical));
     if (result && typeof result.then === 'function') throw new Error('Блокировка базы поддерживает только синхронные операции');
     return result;
   } finally { heldLocks.delete(key); releaseLock(file, fd, owner); }

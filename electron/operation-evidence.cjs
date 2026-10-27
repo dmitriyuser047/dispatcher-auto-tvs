@@ -41,7 +41,8 @@ function section(value){if(!names.has(value))fail();return value;}
 function list(value){if(!Array.isArray(value)||value.length>100||value.some(name=>!names.has(name))||new Set(value).size!==value.length)fail();return value.slice().sort();}
 function operation(value){if(!object(value)||typeof value.id!=='string'||!value.id||value.id.length>200||!/^sha256:[a-f0-9]{64}$/.test(value.digest)||typeof value.actorId!=='string'||!value.actorId||typeof value.actorRole!=='string'||!value.actorRole||typeof value.databaseToken!=='string'||!value.databaseToken)fail();return {id:value.id,digest:value.digest,actorId:value.actorId,actorRole:value.actorRole,databaseToken:value.databaseToken};}
 const unknown=()=>({kind:'unknown',owners:[],readRequirements:{sections:[],owners:[],complete:false}});
-function validateFacts(value){if(!object(value))fail();policy.permits(null,'vehicles','read',{id:'evidence-validation'},{readable:schema.sections,writable:[],resolve:()=>value});return value;}
+let factsReader;
+function validateFacts(value){if(!object(value))fail();factsReader??=policy.createReader(null,{readable:schema.sections,writable:[],resolve:unknown});factsReader.permits('vehicles','read',{id:'evidence-validation'},()=>value);return value;}
 const complete=facts=>facts!==null&&facts.kind!=='unknown'&&facts.readRequirements?.complete!==false;
 function changed(before,after){return [...new Set([...Object.keys(before||{}),...Object.keys(after||{})])].filter(key=>key!=='id'&&(!own(before||{},key)||!own(after||{},key)||!same(before[key],after[key]))).sort();}
 function fragment(row,fields,sectionName){if(row===null)return null;const result={},identity=schema.descriptors[sectionName]?.identity,identityFields=[identity?.field,identity?.natural?.field,...(identity?.composite||[]),...(sectionName==='documentDrafts'?['section']:[])].filter(Boolean);if(own(row,'id'))result.id=row.id;for(const field of [...identityFields,...fields])if(own(row,field))result[field]=row[field];return result;}
@@ -149,16 +150,22 @@ function validateProof(input){
  if(proof.status==='verified'&&(request.mode!=='transaction'||!proof.requiredSections.length||request.dependencies.some(row=>!proof.requiredSections.includes(row.section))||[...proof.subjects,...request.selectedTargets].some(row=>!proof.requiredSections.includes(row.section))))fail();
  const checked=frozen(proof);validatedProofs.add(checked);return checked;
 }
-function environment(principal){if(!object(principal)||typeof principal.id!=='string'||!principal.id||typeof principal.role!=='string'||!principal.role)fail();const empty=Object.fromEntries(schema.sections.map(name=>[name,[]])),base=access.create(empty,empty,principal);return {...base,current:base.principal};}
+function environment(principal){if(!object(principal)||typeof principal.id!=='string'||!principal.id||typeof principal.role!=='string'||!principal.role)fail();const empty=Object.fromEntries(schema.sections.map(name=>[name,[]])),base=access.create(empty,empty,principal);return {...base,current:base.principal,reader:policy.createReader(base.policy,base.context)};}
 function subjectContext(env,subject,phase=null){return {...env.context,resolve:(name,row,requested='before')=>{const selected=phase||requested;if(name!==subject.section||subject[selected]===null||!same(row,subject[selected]))return unknown();return subject[selected+'Facts'];}};}
-function projectSubject(env,subject,phase){if(subject[phase]===null)return null;const row=policy.projectRows(env.policy,subject.section,[subject[phase]],subjectContext(env,subject,phase))[0]||null;return row&&subject.section==='fuelPeriods'?load('electron/period-access.cjs').visibleRow(row,env.current):row;}
+function projectSubject(env,subject,phase){if(subject[phase]===null)return null;const row=env.reader.projectRows(subject.section,[subject[phase]],subjectContext(env,subject,phase).resolve)[0]||null;return row&&subject.section==='fuelPeriods'?load('electron/period-access.cjs').visibleRow(row,env.current):row;}
 function subjectAllowed(env,subject,{changedFields=false}={}){if(!load('electron/document-access.cjs').auditAccess(env.current,subject)||!load('electron/period-access.cjs').auditAccess(env.current,subject))return false;for(const phase of ['before','after'])if(subject[phase]!==null){const row=projectSubject(env,subject,phase);if(!row)return false;if(changedFields)for(const field of subject.changedFields)if(own(subject[phase],field)&&(!own(row,field)||!(subject.section==='fuelPeriods'&&field==='closureEvents')&&!same(row[field],subject[phase][field])))return false;}return true;}
-function legacyAllowed(env,proof){
+const legacyReadEnvironments=new WeakMap();
+function legacyEnvironmentAllowed(env){
+ if(legacyReadEnvironments.has(env))return legacyReadEnvironments.get(env);
+ const allowed=legacyEnvironmentCheck(env);legacyReadEnvironments.set(env,allowed);return allowed;
+}
+function legacyEnvironmentCheck(env){
  if(env.current.role!=='admin'||env.context.readFields&&Object.values(env.context.readFields).some(fields=>!fields.includes('*'))||env.context.writeFields&&Object.values(env.context.writeFields).some(fields=>!fields.includes('*')))return false;
  for(const rule of Object.values(env.policy?.sections||{}))if(rule.readFields&&!rule.readFields.includes('*')||rule.writeFields&&!rule.writeFields.includes('*'))return false;
  const actions=[...Object.values(env.context.actions||{}),...Object.values(env.policy?.sections||{}).map(rule=>rule.actions).filter(Boolean),...(env.policy?.grants||[]).map(grant=>grant.actions).filter(Boolean)];if(actions.some(value=>!value.includes('*')))return false;
- return schema.sections.every(name=>policy.permits(env.policy,name,'read',{id:'unverified-history'},{...env.context,resolve:unknown}))&&proof.requiredSections.every(name=>access.sectionAllowed(env.current,'read',name));
+ return schema.sections.every(name=>env.reader.permits(name,'read',{id:'unverified-history'},unknown));
 }
+function legacyAllowed(env,proof){return legacyEnvironmentAllowed(env)&&proof.requiredSections.every(name=>access.sectionAllowed(env.current,'read',name));}
 function isGloballyUnrestricted(principal){try{return legacyAllowed(environment(principal),{requiredSections:schema.sections});}catch{return false;}}
 function permitted(env,proof,bindActor){
  if(proof.request.globalReadRequired===true&&!legacyAllowed(env,{requiredSections:schema.sections}))return false;
@@ -175,23 +182,28 @@ function eventSubject(event,proof){
  const candidates=index.get(stable([event.section,fields,hashes.before,hashes.after]))||[];
  return candidates.find(row=>row.section===event.section&&same(row.changedFields,fields)&&['before','after'].every(phase=>(event[phase]??null)===null?row[phase]===null:hashes[phase]===row[phase+'Hash']&&same(fragment(event[phase],row.changedFields,event.section),row[phase])));
 }
-function projectEvent(eventValue,proofValue,principal){try{
- const event=safe(eventValue),proof=validateProof(proofValue),env=environment(principal),eventHash=digest(event);if(!names.has(event.section)||!access.sectionAllowed(env.current,'read','auditLog')||!proof.request.eventHashes.includes(eventHash)||event.operationId!==undefined&&event.operationId!==proof.request.operation.id)return null;
+function projectEvent(eventValue,proofValue,principal){try{return projectEventInEnvironment(eventValue,proofValue,environment(principal));}catch{return null;}}
+function projectEventInEnvironment(eventValue,proofValue,env){try{
+ const event=safe(eventValue),proof=validateProof(proofValue),eventHash=digest(event);if(!names.has(event.section)||!access.sectionAllowed(env.current,'read','auditLog')||!proof.request.eventHashes.includes(eventHash)||event.operationId!==undefined&&event.operationId!==proof.request.operation.id)return null;
  if(!load('electron/document-access.cjs').auditAccess(env.current,event)||!load('electron/period-access.cjs').auditAccess(env.current,event))return null;
  const {archiveScope,...publicEvent}=event;let projected={...publicEvent},facts=[];
  if(event.before||event.after){const subject=eventSubject(event,proof);if(!subject||proof.status!=='verified'&&!legacyAllowed(env,proof))return null;
-  for(const phase of ['before','after'])if(event[phase]){const row=event[phase],phaseFacts=subject[phase+'Facts'],ctx={...env.context,resolve:(section,value)=>section===event.section&&digest(value)===subject[phase+'Hash']?phaseFacts:unknown()},value=policy.projectRows(env.policy,event.section,[row],ctx)[0];if(!value)return null;projected[phase]=value;facts.push(phaseFacts);}
+  for(const phase of ['before','after'])if(event[phase]){const row=event[phase],phaseFacts=subject[phase+'Facts'],resolve=(section,value)=>section===event.section&&digest(value)===subject[phase+'Hash']?phaseFacts:unknown(),value=env.reader.projectRows(event.section,[row],resolve)[0];if(!value)return null;projected[phase]=value;facts.push(phaseFacts);}
   if(Array.isArray(event.fields))projected.fields=event.fields.filter(field=>own(projected.before||{},field)||own(projected.after||{},field));
  }else {if(!permitted(env,proof,false))return null;facts=[...proof.subjects,...proof.request.selectedTargets].flatMap(row=>[row.beforeFacts,row.afterFacts].filter(Boolean));}
  const eventFacts={kind:facts.every(row=>row.kind==='shared')&&proof.status==='verified'?'shared':facts.length?'owned':'unknown',owners:facts.flatMap(row=>row.owners),readRequirements:{sections:[event.section],owners:facts.flatMap(row=>row.readRequirements?.owners||[]),complete:proof.status==='verified'&&facts.every(complete)},fieldGuards:proof.request.eventGuards.find(value=>value.hash===eventHash).fieldGuards};
  projected=load('electron/period-access.cjs').visibleAuditRow(projected,env.current);
- return policy.projectRows(env.policy,'auditLog',[projected],{...env.context,resolve:()=>eventFacts})[0]||null;
+ return env.reader.projectRows('auditLog',[projected],()=>eventFacts)[0]||null;
  }catch{return null;}}
-function projectLegacyEvent(eventValue,principal){try{
- const event=safe(eventValue),env=environment(principal);if(!object(event)||!names.has(event.section))return null;
+function projectLegacyEvent(eventValue,principal){try{return projectLegacyEventInEnvironment(eventValue,environment(principal));}catch{return null;}}
+function projectLegacyEventInEnvironment(eventValue,env){try{
+ const event=safe(eventValue);if(!object(event)||!names.has(event.section))return null;
  const actionLists=[...Object.values(env.context.actions||{}),...Object.values(env.policy?.sections||{}).map(rule=>rule.actions).filter(Boolean),...(env.policy?.grants||[]).map(grant=>grant.actions).filter(Boolean)];if(actionLists.some(actions=>!actions.includes('*')))return null;
  const required=new Set(['auditLog',event.section]);for(const field of ['changedSections','archiveReadSections','importReadSections'])if(own(event,field)){if(!Array.isArray(event[field])||event[field].some(name=>!names.has(name)))return null;event[field].forEach(name=>required.add(name));}
  if(!legacyAllowed(env,{requiredSections:[...required]})||!load('electron/document-access.cjs').auditAccess(env.current,event)||!load('electron/period-access.cjs').auditAccess(env.current,event))return null;
  const {archiveScope,...projected}=event;return frozen(load('electron/period-access.cjs').visibleAuditRow(projected,env.current));
  }catch{return null;}}
-module.exports=Object.freeze({apiVersion:1,createProof,createLegacyProof,authorizeProof,projectEvent,projectLegacyEvent,validateProof,isGloballyUnrestricted});
+// One owned permission snapshot per synchronous response; never shared across
+// requests or keyed by a mutable caller principal.
+function createEventProjector(principal){try{const env=environment(principal);return Object.freeze({projectEvent:(event,proof)=>projectEventInEnvironment(event,proof,env),projectLegacyEvent:event=>projectLegacyEventInEnvironment(event,env)});}catch{return Object.freeze({projectEvent:()=>null,projectLegacyEvent:()=>null});}}
+module.exports=Object.freeze({apiVersion:1,createProof,createLegacyProof,authorizeProof,projectEvent,projectLegacyEvent,createEventProjector,validateProof,isGloballyUnrestricted});

@@ -172,7 +172,18 @@ export function createAccessPolicy(contracts:Contracts,schema:Registry,identity:
  }
  function rows(value:unknown):JsonRow[] {const result=safe(value,'ACCESS_ROW_INVALID');if(!Array.isArray(result)||result.some(item=>!object(item)))fail('ACCESS_ROW_INVALID','Нужен массив строк');return result as JsonRow[];}
  function permits(value:unknown,section:string,action:string,input:unknown,context:AccessContext,phase:AccessPhase='before'):boolean {if(phase!=='before'&&phase!=='after')fail('ACCESS_CONTEXT_INVALID','Некорректная фаза области');const prepared=prepare(value,context),row=record(input,'ACCESS_ROW_INVALID');return sectionAllowed(prepared,section,action)&&prepared.policy?.grants.length!==0&&rowAllowed(prepared,section,action,facts(prepared,section,row,phase));}
- function projectRows(value:unknown,section:string,input:readonly Readonly<JsonRow>[],context:AccessContext):JsonRow[] {const prepared=prepare(value,context),source=rows(input);if(!sectionAllowed(prepared,section,'read')||prepared.policy?.grants.length===0)return [];return source.flatMap(row=>{const scope=facts(prepared,section,row,'before');return rowAllowed(prepared,section,'read',scope)?[projectOne(prepared,section,row,scope)]:[];});}
+ function projectPrepared(prepared:Prepared,section:string,input:readonly Readonly<JsonRow>[]):JsonRow[] {const source=rows(input);if(!sectionAllowed(prepared,section,'read')||prepared.policy?.grants.length===0)return [];return source.flatMap(row=>{const scope=facts(prepared,section,row,'before');return rowAllowed(prepared,section,'read',scope)?[projectOne(prepared,section,row,scope)]:[];});}
+ function projectRows(value:unknown,section:string,input:readonly Readonly<JsonRow>[],context:AccessContext):JsonRow[] {return projectPrepared(prepare(value,context),section,input);}
+ // Own the validated policy and role ceiling for one host response. Row facts
+ // are still resolved and checked for every projection, including field guards.
+ function createReader(value:unknown,context:AccessContext){
+  const prepared=prepare(value,context);
+  const using=(resolve:AccessContext['resolve']|undefined):Prepared=>{if(resolve===undefined)return prepared;if(typeof resolve!=='function')fail('ACCESS_CONTEXT_INVALID','Не подтверждено разрешение областей строк');return {...prepared,resolve};};
+  return Object.freeze({
+   projectRows:(section:string,input:readonly Readonly<JsonRow>[],resolve?:AccessContext['resolve']):JsonRow[]=>projectPrepared(using(resolve),section,input),
+   permits:(section:string,action:string,input:unknown,resolve?:AccessContext['resolve'],phase:AccessPhase='before'):boolean=>{if(phase!=='before'&&phase!=='after')fail('ACCESS_CONTEXT_INVALID','Некорректная фаза области');const selected=using(resolve),row=record(input,'ACCESS_ROW_INVALID');return sectionAllowed(selected,section,action)&&selected.policy?.grants.length!==0&&rowAllowed(selected,section,action,facts(selected,section,row,phase));}
+  });
+ }
  function rowKey(section:string,row:JsonRow,index:number):string {return contracts.identifier(row.id)?identity.typedKey(section,row.id):'legacy-position:'+index;}
  function groups(section:string,input:JsonRow[]):Map<string,{row:JsonRow;index:number}[]> {const result=new Map<string,{row:JsonRow;index:number}[]>();input.forEach((row,index)=>{const key=rowKey(section,row,index),members=result.get(key)||[];members.push({row,index});result.set(key,members);});return result;}
  function restore(prepared:Prepared,section:string,before:JsonRow,submitted:JsonRow,scope:AccessRowFacts):JsonRow {
@@ -245,6 +256,6 @@ export function createAccessPolicy(contracts:Contracts,schema:Registry,identity:
    for(const alias of aliases){const descriptor=Object.getOwnPropertyDescriptor(source,alias);if(!descriptor)continue;if(descriptor.get||descriptor.set||!descriptor.enumerable)fail('ACCESS_CONTEXT_INVALID','Исполняемые и скрытые факты запрещены');return frozen(typeof descriptor.value==='string'?{state:'known' as const,value:descriptor.value}:{state:'unknown' as const});}
   }return frozen({state:'unknown' as const});
  }
- return Object.freeze({apiVersion:1 as const,normalize,policyStamp,permits,projectRows,mergeVisibleChanges,validateChanges,fact});
+ return Object.freeze({apiVersion:1 as const,normalize,policyStamp,permits,projectRows,createReader,mergeVisibleChanges,validateChanges,fact});
 }
 export type AccessPolicyAPI=ReturnType<typeof createAccessPolicy>;

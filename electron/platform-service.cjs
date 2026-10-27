@@ -24,8 +24,8 @@ function boundReceipt(binding,id){
   }
   return binding.receipts.get(id);
 }
-function projectHistoryEvent(event,principal,binding){
-  const evidence=require('./operation-evidence.cjs'),stored=typeof event?.operationId==='string'?boundReceipt(binding,event.operationId):null;
+function projectHistoryEvent(event,principal,binding,projector){
+  const evidence=projector||require('./operation-evidence.cjs'),stored=typeof event?.operationId==='string'?boundReceipt(binding,event.operationId):null;
   return publicAuditRow(stored?.kind==='receipt'&&!stored.legacy?evidence.projectEvent(event,stored.proof,principal):evidence.projectLegacyEvent(event,principal));
 }
 function publicAuditRow(row){if(!row)return null;const {archiveScope,...publicRow}=row;return publicRow;}
@@ -48,19 +48,21 @@ function principalOf(principal) {
 }
 function visibleAudit(rows, principal, database) {
   const binding=historyBindings.get(rows);
-  if(binding)return (rows||[]).map(row=>projectHistoryEvent(row,principal||{id:'local-profile',name:'Локальный пользователь',role:'admin'},binding)).filter(Boolean);
+  if(binding){const current=principal||{id:'local-profile',name:'Локальный пользователь',role:'admin'},projector=require('./operation-evidence.cjs').createEventProjector(current);return (rows||[]).map(row=>projectHistoryEvent(row,current,binding,projector)).filter(Boolean);}
   // Older history has no sealed completeness or ownership witness. A limited
   // reader cannot acquire one by finding only the remaining hot siblings.
   if(accessContext().hasNarrowing(principal))return [];
   const db=database||{auditLog:rows||[]}, scoped=accessContext().hasNarrowing(principal), context=accessContext().create(db,db,{...principal,id:principal?.id||'legacy-role-check'});
-  return (rows || []).filter(row => row && typeof row.section === 'string' && require('./document-access.cjs').permitted(principal, 'read', row.section) &&
-    (!(row.printCapture||row.printArtifact)||Array.isArray(row.archiveReadSections)&&row.archiveReadSections.every(name=>require('./document-access.cjs').permitted(principal,'read',name)))&&
-    (!row.importReadSections||row.importReadSections.every(name=>require('./document-access.cjs').permitted(principal,'read',name)))&&
-    (row.type !== 'transaction' || Array.isArray(row.changedSections) && row.changedSections.every(name => require('./document-access.cjs').permitted(principal, 'read', name)))&&require('./document-access.cjs').auditAccess(principal,row)&&require('./period-access.cjs').auditAccess(principal,row))
+  const reader=require('../assets/core/access-policy.js').createReader(context.policy,context.context),permissions=new Map();
+  const canRead=name=>{if(!permissions.has(name))permissions.set(name,require('./document-access.cjs').permitted(principal,'read',name));return permissions.get(name);};
+  return (rows || []).filter(row => row && typeof row.section === 'string' && canRead(row.section) &&
+    (!(row.printCapture||row.printArtifact)||Array.isArray(row.archiveReadSections)&&row.archiveReadSections.every(canRead))&&
+    (!row.importReadSections||row.importReadSections.every(canRead))&&
+    (row.type !== 'transaction' || Array.isArray(row.changedSections) && row.changedSections.every(canRead))&&require('./document-access.cjs').auditAccess(principal,row)&&require('./period-access.cjs').auditAccess(principal,row))
     .filter(row=>!scoped||auditRowAllowed(row,principal,db,context)).map(row=>{
       let result=require('./period-access.cjs').visibleAuditRow(row,principal);
       if(row.type==='transaction'){const {archiveScope,...publicRow}=result;return publicRow;}
-      const project=(value,phase)=>value?context.projectRows(row.section,[value],phase)[0]:undefined;
+      const project=(value,phase)=>value?reader.projectRows(row.section,[value],(name,item)=>context.context.resolve(name,item,phase))[0]:undefined;
       const before=project(result.before,'before'),after=project(result.after,'after');
       const fields=Array.isArray(row.fields)?row.fields.filter(field=>(before&&Object.hasOwn(before,field))||(after&&Object.hasOwn(after,field))):row.fields;
       return {...result,...(row.before?{before}:{}),...(row.after?{after}:{}),...(fields?{fields}:{})};
