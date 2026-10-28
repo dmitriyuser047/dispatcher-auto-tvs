@@ -13,6 +13,7 @@ const integrity=require('../assets/core/platform-integrity.js');
 const FORMAT='tvs-platform-sqlite',VERSION=1,FILE='platform.sqlite';
 const storageFormat=require('./storage-format.cjs'),SCHEMA_VERSION=storageFormat.SCHEMA_VERSION;
 const held=new Map();
+const operationReads=new WeakMap(),OPERATION_READ_BYTES=64*1024*1024,OPERATION_READ_ENTRIES=256;
 const own=(object,key)=>Object.prototype.hasOwnProperty.call(object,key);
 const plain=value=>value!==null&&Object.prototype.toString.call(value)==='[object Object]';
 const present=value=>value!==undefined&&value!==null&&value!=='';
@@ -122,7 +123,7 @@ function transaction(dataDir,action,options={}){
     const result=resultSync(action);if(session.failure)throw session.failure;if(options.beforeCommit)resultSync(()=>options.beforeCommit());
     db.exec('COMMIT;');began=false;return result;
   }catch(error){if(began)try{db.exec('ROLLBACK;');}catch{}throw error;}
-  finally{held.delete(target.key);db.close();cleanRead();}
+  finally{held.delete(target.key);operationReads.delete(db);db.close();cleanRead();}
 }
 function connection(dataDir){const session=held.get(location(dataDir).key);if(!session)fail('SQLITE_TRANSACTION','Нет активного соединения SQLite');return session.db;}
 function readRows(dataDir,name){
@@ -175,7 +176,15 @@ function readRevisions(dataDir){return transaction(dataDir,()=>{
 function schemaVersion(dataDir){return transaction(dataDir,()=>validateFormat(connection(dataDir)),{readOnly:true});}
 function readDescriptor(dataDir){return transaction(dataDir,()=>{const db=connection(dataDir),version=validateFormat(db);return version>=3?storageFormat.validateDescriptor(JSON.parse(db.prepare("SELECT value FROM metadata WHERE key='compatibility'").get().value),version):storageFormat.describe(version);},{readOnly:true});}
 function readOperationState(dataDir){return transaction(dataDir,()=>{const db=connection(dataDir);if(validateFormat(db)<4)fail('SQLITE_OPERATION_STATE','История операций доступна начиная со схемы4');return storageFormat.validateOperationState(JSON.parse(db.prepare("SELECT value FROM metadata WHERE key='operation_state'").get().value));},{readOnly:true});}
-function readOperationObject(dataDir,id){if(typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id))fail('SQLITE_OPERATION_HASH','Некорректный ключ истории');return transaction(dataDir,()=>{const row=connection(dataDir).prepare('SELECT json FROM operation_ledger_objects WHERE hash=?').get(id);return row?Buffer.from(row.json):null;},{readOnly:true});}
+function readOperationObject(dataDir,id){if(typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id))fail('SQLITE_OPERATION_HASH','Некорректный ключ истории');return transaction(dataDir,()=>{
+ // The physical SQLite transaction owns a consistent snapshot. Ledger objects
+ // are append-only; misses are not cached, and every caller gets separate bytes.
+ const db=connection(dataDir);let cache=operationReads.get(db);if(!cache){cache={entries:new Map(),bytes:0};operationReads.set(db,cache);}
+ if(cache.entries.has(id)){const bytes=cache.entries.get(id);cache.entries.delete(id);cache.entries.set(id,bytes);return Buffer.from(bytes);}
+ const row=db.prepare('SELECT json FROM operation_ledger_objects WHERE hash=?').get(id);if(!row)return null;const bytes=Buffer.from(row.json);
+ if(bytes.length<=8*1024*1024){while(cache.entries.size>=OPERATION_READ_ENTRIES||cache.bytes+bytes.length>OPERATION_READ_BYTES){const first=cache.entries.keys().next().value;cache.bytes-=cache.entries.get(first).length;cache.entries.delete(first);}cache.entries.set(id,bytes);cache.bytes+=bytes.length;return Buffer.from(bytes);}
+ return bytes;
+ },{readOnly:true});}
 function operationWriter(dataDir){const session=held.get(location(dataDir).key);if(!session||session.scopes.some(Boolean))fail('SQLITE_OPERATION_TRANSACTION','История записывается только внутри текущей физической транзакции');return session.db;}
 function putOperationObjects(dataDir,objects){const db=operationWriter(dataDir);if(!Array.isArray(objects))fail('SQLITE_OPERATION_HASH','Некорректный набор объектов истории');const put=db.prepare('INSERT OR IGNORE INTO operation_ledger_objects VALUES(?,?)');for(const object of objects){if(!plain(object)||typeof object.id!=='string'||!/^[a-f0-9]{64}$/.test(object.id)||typeof object.json!=='string'||Buffer.byteLength(object.json)>8*1024*1024||crypto.createHash('sha256').update(object.json).digest('hex')!==object.id)fail('SQLITE_OPERATION_HASH','Повреждён объект истории');put.run(object.id,object.json);if(db.prepare('SELECT json FROM operation_ledger_objects WHERE hash=?').get(object.id).json!==object.json)fail('SQLITE_OPERATION_HASH','Объект истории изменился');}}
 function writeOperationState(dataDir,value){operationWriter(dataDir).prepare("UPDATE metadata SET value=? WHERE key='operation_state'").run(JSON.stringify(storageFormat.validateOperationState(value)));}

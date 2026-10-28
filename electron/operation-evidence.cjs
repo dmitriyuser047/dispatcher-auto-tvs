@@ -42,7 +42,12 @@ function list(value){if(!Array.isArray(value)||value.length>100||value.some(name
 function operation(value){if(!object(value)||typeof value.id!=='string'||!value.id||value.id.length>200||!/^sha256:[a-f0-9]{64}$/.test(value.digest)||typeof value.actorId!=='string'||!value.actorId||typeof value.actorRole!=='string'||!value.actorRole||typeof value.databaseToken!=='string'||!value.databaseToken)fail();return {id:value.id,digest:value.digest,actorId:value.actorId,actorRole:value.actorRole,databaseToken:value.databaseToken};}
 const unknown=()=>({kind:'unknown',owners:[],readRequirements:{sections:[],owners:[],complete:false}});
 let factsReader;
-function validateFacts(value){if(!object(value))fail();factsReader??=policy.createReader(null,{readable:schema.sections,writable:[],resolve:unknown});factsReader.permits('vehicles','read',{id:'evidence-validation'},()=>value);return value;}
+function validateFacts(value,ownedChecks){if(!object(value))fail();
+ // This memo is supplied only after safe() owns the complete proof. Raw resolver
+ // facts and caller objects always take the full validation path.
+ const key=ownedChecks?stable(value):null;if(key!==null&&ownedChecks.has(key))return value;
+ factsReader??=policy.createReader(null,{readable:schema.sections,writable:[],resolve:unknown});factsReader.permits('vehicles','read',{id:'evidence-validation'},()=>value);
+ if(key!==null&&key.length<=4096&&ownedChecks.size<256)ownedChecks.add(key);return value;}
 const complete=facts=>facts!==null&&facts.kind!=='unknown'&&facts.readRequirements?.complete!==false;
 function changed(before,after){return [...new Set([...Object.keys(before||{}),...Object.keys(after||{})])].filter(key=>key!=='id'&&(!own(before||{},key)||!own(after||{},key)||!same(before[key],after[key]))).sort();}
 function fragment(row,fields,sectionName){if(row===null)return null;const result={},identity=schema.descriptors[sectionName]?.identity,identityFields=[identity?.field,identity?.natural?.field,...(identity?.composite||[]),...(sectionName==='documentDrafts'?['section']:[])].filter(Boolean);if(own(row,'id'))result.id=row.id;for(const field of [...identityFields,...fields])if(own(row,field))result[field]=row[field];return result;}
@@ -133,27 +138,30 @@ function createLegacyProof(receiptValue,{requiredSections}={}){
  const sections=list(requiredSections??receipt.changedSections??[]);return frozen({version:1,status:'legacy-unverified',requiredSections:sections,subjects:[],request:{version:1,mode:'legacy',actor:{id:bound.actorId,role:bound.actorRole,policyStamp:null},operation:bound,originalAt:receipt.at,dependencies:sections.map(section=>({section,action:'read'})),selectedTargets:[],eventHashes:[],eventGuards:[],issues:['original-access-proof-unverified']}});
 }
 
-function validateSubject(subject){
+function validateSubject(subject,ownedChecks){
  if(!object(subject)||!names.has(subject.section)||!Array.isArray(subject.changedFields)||subject.changedFields.length>1000||new Set(subject.changedFields).size!==subject.changedFields.length||subject.changedFields.some(field=>typeof field!=='string'||!field)||!['create','update','delete'].includes(subject.action)||own(subject,'id')&&!identifier(subject.id))fail();
- for(const phase of ['before','after']){const row=subject[phase],facts=subject[phase+'Facts'],hash=subject[phase+'Hash'];if(row===null){if(facts!==null||hash!==null)fail();}else {if(!object(row)||!/^sha256:[a-f0-9]{64}$/.test(hash))fail();validateFacts(facts);if(own(subject,'id')&&row.id!==subject.id)fail();}}
+ for(const phase of ['before','after']){const row=subject[phase],facts=subject[phase+'Facts'],hash=subject[phase+'Hash'];if(row===null){if(facts!==null||hash!==null)fail();}else {if(!object(row)||!/^sha256:[a-f0-9]{64}$/.test(hash))fail();validateFacts(facts,ownedChecks);if(own(subject,'id')&&row.id!==subject.id)fail();}}
  if(subject.before===null&&subject.after===null||subject.action!==(subject.before===null?'create':subject.after===null?'delete':'update'))fail();
  if(own(subject,'fullReadRequired')&&(subject.fullReadRequired!==true||subject.kind!=='archive-source'||subject.before===null||subject.after!==null||!same(subject.changedFields,Object.keys(subject.before).sort())))fail();
  return subject;
 }
 function validateProof(input){
  if(validatedProofs.has(input))return input;
- const proof=safe(input);if(!object(proof)||proof.version!==1||!['verified','legacy-unverified'].includes(proof.status)||!Array.isArray(proof.subjects)||proof.subjects.length>5000||!object(proof.request)||proof.request.version!==1)fail();list(proof.requiredSections);
- const request=proof.request,bound=operation(request.operation);if(own(request,'globalReadRequired')&&typeof request.globalReadRequired!=='boolean')fail();if(!object(request.actor)||request.actor.id!==bound.actorId||request.actor.role!==bound.actorRole||!(/^sha256:[a-f0-9]{64}$/.test(request.actor.policyStamp)||proof.status==='legacy-unverified'&&request.actor.policyStamp===null)||!Array.isArray(request.dependencies)||!Array.isArray(request.selectedTargets)||!Array.isArray(request.eventHashes)||request.eventHashes.some(value=>!/^sha256:[a-f0-9]{64}$/.test(value))||!Array.isArray(request.eventGuards)||request.eventGuards.length!==request.eventHashes.length)fail();
- for(const [index,event]of request.eventGuards.entries()){if(!object(event)||event.hash!==request.eventHashes[index]||!Array.isArray(event.fieldGuards))fail();validateFacts({...unknown(),fieldGuards:event.fieldGuards});}
+ // Only the ledger's own decoded, deeply frozen JSON can avoid the defensive
+ // copy. Its decoder enforces the same node/depth/key/type limits. Proof shape
+ // and every access fact are still validated below before acquiring this mark.
+ const proof=load('electron/operation-ledger.cjs').isOwnedStrictJSON(input)?input:safe(input);if(!object(proof)||proof.version!==1||!['verified','legacy-unverified'].includes(proof.status)||!Array.isArray(proof.subjects)||proof.subjects.length>5000||!object(proof.request)||proof.request.version!==1)fail();list(proof.requiredSections);
+ const request=proof.request,bound=operation(request.operation),ownedChecks=new Set();if(own(request,'globalReadRequired')&&typeof request.globalReadRequired!=='boolean')fail();if(!object(request.actor)||request.actor.id!==bound.actorId||request.actor.role!==bound.actorRole||!(/^sha256:[a-f0-9]{64}$/.test(request.actor.policyStamp)||proof.status==='legacy-unverified'&&request.actor.policyStamp===null)||!Array.isArray(request.dependencies)||!Array.isArray(request.selectedTargets)||!Array.isArray(request.eventHashes)||request.eventHashes.some(value=>!/^sha256:[a-f0-9]{64}$/.test(value))||!Array.isArray(request.eventGuards)||request.eventGuards.length!==request.eventHashes.length)fail();
+ for(const [index,event]of request.eventGuards.entries()){if(!object(event)||event.hash!==request.eventHashes[index]||!Array.isArray(event.fieldGuards))fail();validateFacts({...unknown(),fieldGuards:event.fieldGuards},ownedChecks);}
  for(const dependency of request.dependencies)if(!object(dependency)||!names.has(dependency.section)||dependency.action!=='read')fail();
- for(const subject of [...proof.subjects,...request.selectedTargets])validateSubject(subject);
+ for(const subject of [...proof.subjects,...request.selectedTargets])validateSubject(subject,ownedChecks);
  if(proof.status==='verified'&&(request.mode!=='transaction'||!proof.requiredSections.length||request.dependencies.some(row=>!proof.requiredSections.includes(row.section))||[...proof.subjects,...request.selectedTargets].some(row=>!proof.requiredSections.includes(row.section))))fail();
  const checked=frozen(proof);validatedProofs.add(checked);return checked;
 }
 function environment(principal){if(!object(principal)||typeof principal.id!=='string'||!principal.id||typeof principal.role!=='string'||!principal.role)fail();const empty=Object.fromEntries(schema.sections.map(name=>[name,[]])),base=access.create(empty,empty,principal);return {...base,current:base.principal,reader:policy.createReader(base.policy,base.context)};}
 function subjectContext(env,subject,phase=null){return {...env.context,resolve:(name,row,requested='before')=>{const selected=phase||requested;if(name!==subject.section||subject[selected]===null||!same(row,subject[selected]))return unknown();return subject[selected+'Facts'];}};}
 function projectSubject(env,subject,phase){if(subject[phase]===null)return null;const row=env.reader.projectRows(subject.section,[subject[phase]],subjectContext(env,subject,phase).resolve)[0]||null;return row&&subject.section==='fuelPeriods'?load('electron/period-access.cjs').visibleRow(row,env.current):row;}
-function subjectAllowed(env,subject,{changedFields=false}={}){if(!load('electron/document-access.cjs').auditAccess(env.current,subject)||!load('electron/period-access.cjs').auditAccess(env.current,subject))return false;for(const phase of ['before','after'])if(subject[phase]!==null){const row=projectSubject(env,subject,phase);if(!row)return false;if(changedFields)for(const field of subject.changedFields)if(own(subject[phase],field)&&(!own(row,field)||!(subject.section==='fuelPeriods'&&field==='closureEvents')&&!same(row[field],subject[phase][field])))return false;}return true;}
+function subjectAllowed(env,subject,{changedFields=false}={}){if(!load('electron/document-access.cjs').auditAccess(env.current,subject)||!load('electron/period-access.cjs').auditAccess(env.current,subject))return false;if(subject.section!=='fuelPeriods'&&legacyEnvironmentAllowed(env))return true;for(const phase of ['before','after'])if(subject[phase]!==null){const row=projectSubject(env,subject,phase);if(!row)return false;if(changedFields)for(const field of subject.changedFields)if(own(subject[phase],field)&&(!own(row,field)||!(subject.section==='fuelPeriods'&&field==='closureEvents')&&!same(row[field],subject[phase][field])))return false;}return true;}
 const legacyReadEnvironments=new WeakMap();
 function legacyEnvironmentAllowed(env){
  if(legacyReadEnvironments.has(env))return legacyReadEnvironments.get(env);
@@ -165,12 +173,13 @@ function legacyEnvironmentCheck(env){
  const actions=[...Object.values(env.context.actions||{}),...Object.values(env.policy?.sections||{}).map(rule=>rule.actions).filter(Boolean),...(env.policy?.grants||[]).map(grant=>grant.actions).filter(Boolean)];if(actions.some(value=>!value.includes('*')))return false;
  return schema.sections.every(name=>env.reader.permits(name,'read',{id:'unverified-history'},unknown));
 }
-function legacyAllowed(env,proof){return legacyEnvironmentAllowed(env)&&proof.requiredSections.every(name=>access.sectionAllowed(env.current,'read',name));}
+function canReadSection(env,name){return legacyEnvironmentAllowed(env)?names.has(name):access.sectionAllowed(env.current,'read',name);}
+function legacyAllowed(env,proof){return legacyEnvironmentAllowed(env)&&proof.requiredSections.every(name=>names.has(name));}
 function isGloballyUnrestricted(principal){try{return legacyAllowed(environment(principal),{requiredSections:schema.sections});}catch{return false;}}
 function permitted(env,proof,bindActor){
  if(proof.request.globalReadRequired===true&&!legacyAllowed(env,{requiredSections:schema.sections}))return false;
  if(bindActor&&(env.current.id!==proof.request.actor.id||env.current.role!==proof.request.actor.role))return false;
- if(!proof.requiredSections.length||proof.requiredSections.some(name=>!access.sectionAllowed(env.current,'read',name)))return false;
+ if(!proof.requiredSections.length||proof.requiredSections.some(name=>!canReadSection(env,name)))return false;
  if(proof.status!=='verified')return legacyAllowed(env,proof);
  return proof.subjects.every(row=>subjectAllowed(env,row,{changedFields:true}))&&proof.request.selectedTargets.every(row=>subjectAllowed(env,row,{changedFields:row.fullReadRequired===true}));
 }
@@ -184,7 +193,7 @@ function eventSubject(event,proof){
 }
 function projectEvent(eventValue,proofValue,principal){try{return projectEventInEnvironment(eventValue,proofValue,environment(principal));}catch{return null;}}
 function projectEventInEnvironment(eventValue,proofValue,env){try{
- const event=safe(eventValue),proof=validateProof(proofValue),eventHash=digest(event);if(!names.has(event.section)||!access.sectionAllowed(env.current,'read','auditLog')||!proof.request.eventHashes.includes(eventHash)||event.operationId!==undefined&&event.operationId!==proof.request.operation.id)return null;
+ const event=safe(eventValue),proof=validateProof(proofValue),eventHash=digest(event);if(!names.has(event.section)||!canReadSection(env,'auditLog')||!proof.request.eventHashes.includes(eventHash)||event.operationId!==undefined&&event.operationId!==proof.request.operation.id)return null;
  if(!load('electron/document-access.cjs').auditAccess(env.current,event)||!load('electron/period-access.cjs').auditAccess(env.current,event))return null;
  const {archiveScope,...publicEvent}=event;let projected={...publicEvent},facts=[];
  if(event.before||event.after){const subject=eventSubject(event,proof);if(!subject||proof.status!=='verified'&&!legacyAllowed(env,proof))return null;
