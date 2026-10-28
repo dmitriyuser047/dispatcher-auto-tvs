@@ -56,10 +56,10 @@ test('a delayed old rights poll cannot replace a newer completed load',async()=>
  assert.equal(h.context.inspect().data.vehicles[0].id,'ALLOWED-NEW');assert.equal(h.context.inspect().access.policyStamp,stamp('b'));
 });
 function localFixture(h){h.state.current={version:1,mode:'local',identity:'local:database',databaseToken:'database',access:null,policyStamp:null};h.state.snapshot={data:{vehicles:[{id:'LOCAL-EXACT'}],records:[]},databaseToken:'database',revisions:{vehicles:1,records:1},platform:{apiVersion:1}};}
-test('the serialized local-busy result preserves only the already confirmed local baseline',async()=>{
+test('the serialized busy result preserves only an already confirmed baseline',async()=>{
  const h=harness();localFixture(h);await h.context.load();const before=JSON.stringify(h.context.inspect()),normal=h.state.current;h.state.current={version:1,unavailable:'DB_BUSY'};await h.context.poll();assert.equal(JSON.stringify(h.context.inspect()),before);assert.equal(h.state.revisionCalls,0);
  h.state.current=normal;await h.context.poll();assert.equal(JSON.stringify(h.context.inspect()),before);assert.equal(h.state.revisionCalls,1);
- const client=harness();await client.context.load();client.state.current={version:1,unavailable:'DB_BUSY'};await client.context.poll();assert.equal(client.context.inspect().blocked,true);assert.equal(client.context.inspect().enabled,false);assert.equal(client.context.inspect().key,null);assert.equal(client.state.revisionCalls,0);
+ const client=harness();await client.context.load();client.state.current={version:1,unavailable:'DB_BUSY'};await client.context.poll();assert.equal(client.context.inspect().blocked,false);assert.equal(client.context.inspect().enabled,true);assert.ok(client.context.inspect().key);assert.equal(client.state.revisionCalls,0);
 });
 test('the serialized revocation clears private rows, open forms and cached authority',async()=>{
  const h=harness();await h.context.load();h.state.modal=true;h.state.current={version:1,unavailable:'ACCESS_REVOKED'};await h.context.poll();const result=h.context.inspect();assert.equal(result.data.vehicles.length,0);assert.equal(result.blocked,true);assert.equal(result.enabled,false);assert.equal(result.access,null);assert.equal(result.token,null);assert.equal(result.key,null);assert.equal(h.state.closed,1);assert.equal(h.state.revisionCalls,0);
@@ -72,4 +72,10 @@ test('an unavailable startup context cannot load rows or restore an old cache',a
 });
 test('late busy or revocation results cannot disable a newer completed scope',async()=>{
  for(const code of ['DB_BUSY','ACCESS_REVOKED']){const h=harness();await h.context.load();let release;h.api.getDataCacheContext=()=>new Promise(resolve=>{release=()=>resolve({version:1,unavailable:code});});const old=h.context.poll();h.state.current=current('b');h.state.snapshot=snapshot('b','ALLOWED-NEW');h.api.getDataCacheContext=async()=>structuredClone(h.state.current);await h.context.load();release();await old;const result=h.context.inspect();assert.equal(result.data.vehicles[0].id,'ALLOWED-NEW');assert.equal(result.access.policyStamp,stamp('b'));assert.equal(result.enabled,true);assert.equal(result.blocked,false);}
+});
+
+test('a main-verified busy server does not clear the loaded client view or invalidate an in-flight save',async()=>{
+ const h=harness();await h.context.load();const before=JSON.stringify(h.context.inspect());h.state.modal=true;h.state.current={version:1,unavailable:'DB_BUSY'};
+ await h.context.poll();assert.equal(JSON.stringify(h.context.inspect()),before);assert.equal(h.state.closed,0);assert.equal(h.state.revisionCalls,0);
+ h.state.current={version:1,unavailable:'ACCESS_REVOKED'};await h.context.poll();assert.equal(h.context.inspect().enabled,false);assert.equal(h.context.inspect().data.vehicles.length,0);
 });

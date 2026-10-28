@@ -69,3 +69,16 @@ test('canonical IPC acknowledgement cannot share a mutable live document with an
   data.fuelWriteoffs[0].snapshot.liters=1;assert.equal(data.auditLog[0].after.snapshot.liters,923.537);assert.equal(row.snapshot.liters,923.537);
   data.auditLog[0].after.snapshot.liters=2;assert.equal(audit.after.snapshot.liters,923.537);assert.match(sandbox.state.synced.auditLog,/923\.537/);
 });
+
+test('compact section save omits local audit hints and installs an independent canonical delta',async()=>{
+ const row={id:'compact-act',status:'posted',snapshot:{liters:20}},event={id:'server-event',section:'fuelWriteoffs',after:row},old={id:'confirmed-old',section:'vehicles'};
+ const {sandbox,writes,data}=await context(payload=>{assert.equal(Object.hasOwn(payload.sections,'auditLog'),false);return {ok:true,databaseToken:'test-database',revisions:{fuelWriteoffs:5,auditLog:4},canonicalSections:{fuelWriteoffs:[row]},auditDelta:{version:1,baseRevision:3,revision:4,appended:[event]}};});
+ sandbox.state.platform={compactAck:1};sandbox.state.revs.auditLog=3;sandbox.state.synced.auditLog=JSON.stringify([old]);data.auditLog=[old,{id:'untrusted-hint'}];
+ assert.equal(await sandbox.save(data,{...required,requiredCanonicalSections:['fuelWriteoffs','auditLog']}),true);assert.equal(writes.sections,1);assert.deepEqual(JSON.parse(JSON.stringify(data.auditLog)),[old,event]);assert.equal(sandbox.state.revs.auditLog,4);
+ data.fuelWriteoffs[0].snapshot.liters=99;assert.equal(data.auditLog[1].after.snapshot.liters,20);assert.equal(row.snapshot.liters,20);
+});
+
+test('an audit-only client hint cannot become a persisted no-op baseline in compact mode',async()=>{
+ const {sandbox,writes,data}=await context(()=>{throw Error('No business changes may be sent');});sandbox.state.platform={compactAck:1};data.fuelWriteoffs=[];data.auditLog=[{id:'never-persisted'}];
+ assert.equal(await sandbox.save(data),true);assert.equal(writes.sections,0);assert.deepEqual(JSON.parse(JSON.stringify(data.auditLog)),[]);assert.equal(sandbox.state.synced.auditLog,'[]');
+});

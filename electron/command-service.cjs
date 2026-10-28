@@ -21,7 +21,7 @@ function permitted(principal,action,name){
 }
 function requireAccess(principal,action,names){if(names.some(name=>!permitted(principal,action,name)))fail('ACCESS_DENIED','Недостаточно прав для выполнения этой команды.',403);}
 const stable=value=>require('../assets/core/platform-kernel.js').stableSerialize(value);
-function filteredResult(result,principal,database){return platform.filteredResult(result,principal,database);}
+function filteredResult(result,principal,database,options){return platform.filteredResult(result,principal,database,options);}
 function semanticAction(command){
   const names={DocumentAction:'document',FuelAction:'fuel',ProcurementAction:'procurement',CostAction:'cost',RepairAction:'repair',CalendarAction:'calendar',PeriodAction:'period',GeneratorMaintenanceAction:'maintenance',AssetInventoryAction:'inventory'};
   if(names[command.type])return names[command.type]+':'+command.input.action;
@@ -101,7 +101,7 @@ function executeInternal(dataDir,input,options={}){
         const changed=info.receipt.changedSections;
         if(!Array.isArray(changed)||changed.some(name=>!schema.sections.includes(name)))fail('COMMAND_RECEIPT','Повреждена квитанция команды',500);
         requireAccess(principal,'read',changed);
-        return filteredResult(platform.replayResult(snapshot.data,snapshot.revisions,token,info,changed),principal,snapshot.data);
+        return filteredResult(platform.replayResult(snapshot.data,snapshot.revisions,token,info,changed),principal,snapshot.data,options);
       }
       authorizeNewIntent();
       storage.assertWriteCompatibility(dataDir,options,command.type==='ImportAction'?'controlledImports':command.type==='PrintAction'?'documentPrint':undefined);
@@ -127,7 +127,7 @@ function executeInternal(dataDir,input,options={}){
       // after receipt lookup and before backup/commit. Do not prevalidate a
       // correction without its independently reproducible document proof.
       const result=storage.writeSections(dataDir,{databaseToken:token,base:envelope.base,sections:planned.sections,operation:envelope.operation},
-        {principal,now,commandIntent:envelope,...(importSource?{importSource}:{}),requireNegotiatedWriter:options.requireNegotiatedWriter,assertWriteCompatibility:options.assertWriteCompatibility,requireWriterSchema:options.requireWriterSchema,writerSchemaVersion:options.writerSchemaVersion,beforeCommit:options.beforeCommit});
+        {principal,now,commandIntent:envelope,...(importSource?{importSource}:{}),requireNegotiatedWriter:options.requireNegotiatedWriter,assertWriteCompatibility:options.assertWriteCompatibility,requireWriterSchema:options.requireWriterSchema,writerSchemaVersion:options.writerSchemaVersion,compactAck:options.compactAck,beforeCommit:options.beforeCommit});
       return {...result,command:true};
     };
     // Do not split snapshot, dependency checks and business/audit writes across

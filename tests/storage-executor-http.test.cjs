@@ -141,3 +141,18 @@ test('repeated HTTP stop awaits the same still-active storage drain after the se
  h.state.onPhase=info=>{if(info.phase==='beforeCommit'&&!first){first=h.api.stop();second=h.api.stop().then(()=>{completedAtSecond=h.state.completed;});}};
  const response=await call(h.port,'/api/sections',request,headers);cleanFailure(response,503,'SERVER_STOPPED');assert.ok(first&&second);await Promise.all([first,second]);assert.equal(completedAtSecond,1);assert.deepEqual(storage.readSnapshot(h.dir),before);
 });
+for(const format of ['json','sqlite'])test(format+' compact HTTP ACK retains exact receipt replay and recovers a lost reply once without issuing another write',async t=>{
+ const h=await fixture(t,format,{backup:false}),request=h.sections('compact-lost-reply'),headers={...await h.headers(),'X-TVS-Write-Response':'compact-v1'};let sends=0;const sent=[];
+ const box=require('../electron/command-outbox.cjs').createCommandOutbox({rootDir:path.join(h.root,'compact-outbox')});h.api.configureKey(token);
+ const context={scope:require('node:crypto').createHash('sha256').update('compact-lost-reply').digest('hex'),databaseToken:request.databaseToken,supportsOperations:true,client:true};
+ const recovery=require('../electron/operation-recovery.cjs').createOperationRecovery({outbox:box,recoverTransport:()=>true,
+  send:async(_context,json)=>{sent.push(json);const response=await call(h.port,'/api/sections',JSON.parse(json),headers);assert.equal(response.status,200,response.text);if(++sends===1)throw Object.assign(Error('Synthetic lost ACK'),{code:'ECONNRESET'});return response.body;},
+  lookup:(_context,id,digest)=>h.api.getJson('127.0.0.1',h.port,'/api/operation?id='+encodeURIComponent(id)+'&digest='+encodeURIComponent(digest))});
+ const result=await recovery.execute(context,request);assert.equal(result.ok,true);assert.equal(sends,2);assert.equal(sent[0],sent[1]);assert.equal(result.operationReceipt.status,'replayed');assert.equal(Object.hasOwn(result.canonicalSections,'auditLog'),false);assert.equal(result.auditDelta.invalidated,true);assert.equal(box.list(context.scope)[0].status,'committed');
+ const final=storage.readSnapshot(h.dir);assert.equal(final.data.vehicles[0].note,'Synthetic worker edit');assert.equal(final.data.auditLog.filter(row=>row.type==='transaction'&&row.operationId===request.operation.id).length,1);
+});
+
+test('busy HTTP ping exposes current authenticated grants and never treats busy as a successful identity check',async t=>{
+ const h=await fixture(t,'json',{backup:false});h.api.configureKey(token);const lock=path.join(h.dir,'.tvs-database.lock');fs.writeFileSync(lock,JSON.stringify({host:os.hostname(),pid:process.pid,nonce:'synthetic-live-busy'}),{flag:'wx'});
+ try{await assert.rejects(h.api.getJson('127.0.0.1',h.port,'/api/ping'),error=>{assert.equal(error.status,503);assert.equal(error.code,'DB_BUSY');assert.equal(error.publicAccess.user.id,'admin');return true;});h.change({enabled:false});await assert.rejects(h.api.getJson('127.0.0.1',h.port,'/api/ping'),{status:401});}finally{fs.unlinkSync(lock);}
+});

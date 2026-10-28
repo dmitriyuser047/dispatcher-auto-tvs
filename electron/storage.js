@@ -132,7 +132,7 @@ function withDatabaseLock(dataDir, action) {
   if (fs.existsSync(recovery)) { releaseLock(file, fd, owner); throw lockError(recovery, 'Проверяется аварийная блокировка.'); }
   heldLocks.set(key, owner);
   try {
-    const result = require('./operation-ledger.cjs').withReadScope(() => action(physical));
+    const result = require('./operation-ledger.cjs').withReadScope(() => require('./operation-store.cjs').withFileReadScope(() => action(physical)));
     if (result && typeof result.then === 'function') throw new Error('Блокировка базы поддерживает только синхронные операции');
     return result;
   } finally { heldLocks.delete(key); releaseLock(file, fd, owner); }
@@ -274,19 +274,19 @@ function commitSections(dataDir, sections, revisions, options={}) {
   if(changed.some(name=>!SECTIONS.includes(name)))throw Object.assign(Error('Неизвестный раздел сохранения'),{code:'STORAGE_TRANSACTION'});
   managed.verifyDirectory(sectionsDir(dataDir),true);
   for(const name of changed){validateRows(name,sections[name]);current[name]=managed.read(sectionFile(dataDir,name),64*1024*1024);before[name]=current[name]?.bytes.toString('base64')??null;after[name]=Buffer.from(JSON.stringify(sections[name])).toString('base64');}
-  let operation,operationState;
+  let operation,operationState,validatedCommit;
   if(options.initialSeed){
     if(base||fs.existsSync(legacyFile(dataDir))||changed.length!==SECTIONS.length||Object.values(before).some(value=>value!==null))throw Object.assign(Error('Инициализация разрешена только новой базе'),{code:'OPERATION_INITIALIZE'});
     const seed=store.validateSeed({operationState:options.initialSeed.operationState,operationObjects:options.initialSeed.objects,hotRows:sections.auditLog});store.putObjects(dataDir,seed.objects);operationState=seed.operationState;operation={objects:seed.objects.map(object=>object.id)};
   }else{
     if(!base)throw Object.assign(Error('Отсутствует состояние текущей базы'),{code:'OPERATION_STATE_MISSING'});
-    const previousHotRows=changed.includes('auditLog')?JSON.parse(Buffer.from(before.auditLog,'base64')):readRows(dataDir,'auditLog'),plan=store.validateCommit(dataDir,{expectedOperationState:options.expectedOperationState??store.readState(dataDir),nextOperationState:options.nextOperationState??storageFormat.createOperationState(store.readState(dataDir).head),operationPlans:options.operationPlans??[]},{previousHotRows,nextHotRows:sections.auditLog??previousHotRows});store.putObjects(dataDir,plan.objects);operation=plan.reference;operationState=plan.nextOperationState;
+    const previousHotRows=changed.includes('auditLog')?JSON.parse(Buffer.from(before.auditLog,'base64')):readRows(dataDir,'auditLog'),plan=store.validateCommit(dataDir,{expectedOperationState:options.expectedOperationState??store.readState(dataDir),nextOperationState:options.nextOperationState??storageFormat.createOperationState(store.readState(dataDir).head),operationPlans:options.operationPlans??[]},{previousHotRows,nextHotRows:sections.auditLog??previousHotRows});store.putObjects(dataDir,plan.objects);operation=plan.reference;operationState=plan.nextOperationState;validatedCommit=plan;
   }
   const encoded=Buffer.from(JSON.stringify(storageFormat.encodeRevisions(revisions,storageFormat.describe(storageFormat.SCHEMA_VERSION),operationState))),tx={version:2,schemaVersion:storageFormat.SCHEMA_VERSION,initial:!!options.initialSeed,before,after,base:base?.bytes.toString('base64')??null,next:encoded.toString('base64'),operation},journalBytes=Buffer.from(JSON.stringify(tx));
   const journalSnapshot=managed.atomic(journal,journalBytes,null,192*1024*1024);
   try {
     // Revalidate the complete durable intent before the first business change.
-    validateCurrentTransaction(dataDir,managed,journalSnapshot,tx);
+    validateCurrentTransaction(dataDir,managed,journalSnapshot,tx,validatedCommit);
     changed.forEach(name=>managed.atomic(sectionFile(dataDir,name),Buffer.from(after[name],'base64'),current[name],64*1024*1024));
     managed.atomic(revisionsFile(dataDir),encoded,base);
   } catch (e) {
@@ -299,7 +299,7 @@ function commitSections(dataDir, sections, revisions, options={}) {
 
 function transactionFailure(){throw Object.assign(Error('Журнал сохранения или файлы базы изменены. Автоматическое восстановление остановлено.'),{code:'STORAGE_TRANSACTION',status:409});}
 function journalBytes(value,nullable=false){if(value===null&&nullable)return null;if(typeof value!=='string'||value.length>256*1024*1024||! /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value))transactionFailure();const bytes=Buffer.from(value,'base64');if(bytes.toString('base64')!==value)transactionFailure();return bytes;}
-function validateCurrentTransaction(dataDir,managed,snapshot,tx){
+function validateCurrentTransaction(dataDir,managed,snapshot,tx,witness){
   const object=value=>value&&typeof value==='object'&&!Array.isArray(value),keys=value=>Object.keys(value).sort().join('|');
   if(!object(tx)||keys(tx)!==['version','schemaVersion','initial','before','after','base','next','operation'].sort().join('|')||tx.version!==2||tx.schemaVersion!==storageFormat.SCHEMA_VERSION||typeof tx.initial!=='boolean'||!object(tx.before)||!object(tx.after)||keys(tx.before)!==keys(tx.after)||Object.keys(tx.before).some(name=>!SECTIONS.includes(name)))transactionFailure();
   const before={},after={},files={},base=journalBytes(tx.base,true),next=journalBytes(tx.next),decode=bytes=>{const value=storageFormat.decodeRevisions(JSON.parse(bytes));if(value.schemaVersion!==storageFormat.SCHEMA_VERSION)transactionFailure();return value;},nextDecoded=decode(next),baseDecoded=base?decode(base):null;
@@ -307,7 +307,7 @@ function validateCurrentTransaction(dataDir,managed,snapshot,tx){
   const revisionSnapshot=managed.read(revisionsFile(dataDir)),actual=revisionSnapshot?.bytes??null,committed=!!actual?.equals(next);if(!committed&&!(actual===null&&base===null)&&!actual?.equals(base??Buffer.alloc(0)))transactionFailure();
   const store=require('./operation-store.cjs');
   if(tx.initial){if(base!==null||fs.existsSync(legacyFile(dataDir))||Object.keys(before).length!==SECTIONS.length||Object.values(before).some(value=>value!==null)||!object(tx.operation)||keys(tx.operation)!=='objects'||!Array.isArray(tx.operation.objects))transactionFailure();const objects=tx.operation.objects.map(id=>{const bytes=store.readObject(dataDir,id);if(!bytes)transactionFailure();return {id,json:bytes.toString('utf8')};});store.validateSeed({operationState:nextDecoded.operationState,operationObjects:objects,hotRows:JSON.parse(after.auditLog)});}
-  else{if(!baseDecoded||!object(tx.operation)||JSON.stringify(baseDecoded.operationState)!==JSON.stringify(tx.operation.expectedOperationState)||JSON.stringify(nextDecoded.operationState)!==JSON.stringify(tx.operation.nextOperationState))transactionFailure();const hot=managed.read(sectionFile(dataDir,'auditLog'),64*1024*1024);if(!hot)transactionFailure();store.validateCommit(dataDir,tx.operation,{previousHotRows:JSON.parse(before.auditLog??hot.bytes),nextHotRows:JSON.parse(after.auditLog??hot.bytes),recovery:true});}
+  else{if(!baseDecoded||!object(tx.operation)||JSON.stringify(baseDecoded.operationState)!==JSON.stringify(tx.operation.expectedOperationState)||JSON.stringify(nextDecoded.operationState)!==JSON.stringify(tx.operation.nextOperationState))transactionFailure();const hot=managed.read(sectionFile(dataDir,'auditLog'),64*1024*1024);if(!hot)transactionFailure();const views={previousHotRows:JSON.parse(before.auditLog??hot.bytes),nextHotRows:JSON.parse(after.auditLog??hot.bytes)};if(!store.verifyCommitWitness(dataDir,witness,{...tx.operation,...views}))store.validateCommit(dataDir,tx.operation,{...views,recovery:true});}
   managed.assertFile(path.join(sectionsDir(dataDir),'.transaction.json'),snapshot,192*1024*1024);
   return {before,after,files,base,next,committed,revisionSnapshot};
 }
@@ -414,7 +414,7 @@ function writeAll(dataDir, data, options = {}) {
   const operation = platform.operationInfo(previous, data, { ...options, databaseToken:token });
   // A confirmed command can be retried after its own commit advanced revisions.
   // Resolve it before CAS, just as writeSections does.
-  if (operation?.receipt) return platform.filteredResult(platform.replayResult(previous, revisions, token, operation, Object.keys(data)),options.principal,previous);
+  if (operation?.receipt) return platform.filteredResult(platform.replayResult(previous, revisions, token, operation, Object.keys(data)),options.principal,previous,options);
   assertWriteCompatibility(dataDir,options);
   if(options.requireNegotiatedWriter===true&&(typeof options.databaseToken!=='string'||!options.databaseToken))throw Object.assign(Error('Для записи нужен явный идентификатор прочитанной базы'),{code:'DATABASE_TOKEN_REQUIRED',status:428});
   require('./document-archive.cjs').validateState(dataDir,previous);
@@ -450,7 +450,7 @@ function writeAll(dataDir, data, options = {}) {
       const canonical = prepareWriteoffSections(previous, sections, options);
       validatePlanningChanges(previous, canonical); return canonical;
     } });
-  if (prepared.replayed) return platform.filteredResult(platform.replayResult(previous, revisions, token, prepared.operation, Object.keys(data)),options.principal,previous);
+  if (prepared.replayed) return platform.filteredResult(platform.replayResult(previous, revisions, token, prepared.operation, Object.keys(data)),options.principal,previous,options);
   prepared=require('./document-archive.cjs').prepareCommit(dataDir,previous,prepared,options);
   data = prepared.sections;
   const changed = [];
@@ -473,7 +473,7 @@ function writeAll(dataDir, data, options = {}) {
   if(changed.length||history.nextOperationState)commitSections(dataDir, history.sections, revisions,history);
   return platform.filteredResult({ ok:true, changed, revisions, databaseToken:token, canonicalSections:history.sections,
     ...(prepared.archiveHeadChanged?{archiveHeadChanged:true}:{}),...(prepared.archive?{archive:prepared.archive}:{}),
-    ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) },options.principal,{...previous,...sections});
+    ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) },options.principal,{...previous,...sections},options);
 }
 
 /** Один раздел и его версия */
@@ -492,7 +492,7 @@ function readSnapshot(dataDir,options={}) {
   require('./document-archive.cjs').validateState(dataDir,database);
   const data=options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?platform.visibleRows(name,database[name],options.principal,database):[]])):database;
   const version=schemaVersion(dataDir);
-  return {data,revisions:options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?revisions[name]:0])):revisions,databaseToken:databaseToken(dataDir),...(options.principal?{scopeViews:platform.scopeViews(database,revisions,options.principal)}:{}),platform:{apiVersion:1,storageKind:sqliteBackend(dataDir)?'sqlite':'json',operations:1,outbox:1,receiptQuery:1,commands:1,...(require('./access-context.cjs').hasNarrowing(options.principal)?{scopedAccess:1}:{}),schemaVersion:version,currentSchemaVersion:storageFormat.SCHEMA_VERSION,descriptor:descriptor(dataDir),readOnly:version<storageFormat.SCHEMA_VERSION,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,calendar:version>=2?1:0,personnelPlanning:version>=2?1:0,documentPrint:version>=2?1:0,controlledImports:version>=2?1:0,needsSchemaUpgrade:version<storageFormat.SCHEMA_VERSION}};
+  return {data,revisions:options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?revisions[name]:0])):revisions,databaseToken:databaseToken(dataDir),...(options.principal?{scopeViews:platform.scopeViews(database,revisions,options.principal)}:{}),platform:{apiVersion:1,storageKind:sqliteBackend(dataDir)?'sqlite':'json',operations:1,outbox:1,compactAck:1,receiptQuery:1,commands:1,...(require('./access-context.cjs').hasNarrowing(options.principal)?{scopedAccess:1}:{}),schemaVersion:version,currentSchemaVersion:storageFormat.SCHEMA_VERSION,descriptor:descriptor(dataDir),readOnly:version<storageFormat.SCHEMA_VERSION,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,calendar:version>=2?1:0,personnelPlanning:version>=2?1:0,documentPrint:version>=2?1:0,controlledImports:version>=2?1:0,needsSchemaUpgrade:version<storageFormat.SCHEMA_VERSION}};
 }
 function readOperation(dataDir,query,principal){
   if(schemaVersion(dataDir)>=4)return require('./platform-service.cjs').readReceipt(dataDir,query,principal);
@@ -521,7 +521,7 @@ function writeSections(dataDir, payload, options = {}) {
   const platform = require('./platform-service.cjs');
   const context = { ...options,dataDir, operation:payload?.operation || options.operation, scopeViews:payload?.scopeViews||options.scopeViews, base, revisions, databaseToken:token };
   const operation = platform.operationInfo(previous, sections, context);
-  if (operation?.receipt) return platform.filteredResult(platform.replayResult(previous, revisions, token, operation, names),options.principal,previous);
+  if (operation?.receipt) return platform.filteredResult(platform.replayResult(previous, revisions, token, operation, names),options.principal,previous,options);
   assertWriteCompatibility(dataDir,options);
   require('./document-archive.cjs').validateState(dataDir,previous);
   assertWritable(dataDir,options);
@@ -561,7 +561,7 @@ function writeSections(dataDir, payload, options = {}) {
   }
   if(changed.length||history.nextOperationState)commitSections(dataDir, history.sections, revisions,history);
   return platform.filteredResult({ ok: true, changed, revisions, databaseToken: token,
-    canonicalSections:pending,...(prepared.archiveHeadChanged?{archiveHeadChanged:true}:{}),...(prepared.archive?{archive:prepared.archive}:{}), ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) },options.principal,{...previous,...pending});
+    canonicalSections:pending,...(prepared.archiveHeadChanged?{archiveHeadChanged:true}:{}),...(prepared.archive?{archive:prepared.archive}:{}), ...(prepared.operationReceipt ? { operationReceipt:prepared.operationReceipt } : {}) },options.principal,{...previous,...pending},options);
 }
 
 function archiveHistory(dataDir,input,options={}){

@@ -18,11 +18,11 @@ function writerContext(req,proof=_writeProof) {
   const raw=req.headers['x-tvs-writer-schema'];
   const version=typeof raw==='string'&&/^[1-9][0-9]{0,8}$/.test(raw)?Number(raw):raw===undefined?undefined:null;
   const credential=/^Bearer (.+)$/.exec(String(req.headers.authorization||''))?.[1];
-  return {requireWriterSchema:true,writerSchemaVersion:version,...(proof?proof.writeOptions(require('./write-proof.cjs').readTicket(req),{credential}):{requireNegotiatedWriter:true})};
+  return {compactAck:req.headers['x-tvs-write-response']==='compact-v1',requireWriterSchema:true,writerSchemaVersion:version,...(proof?proof.writeOptions(require('./write-proof.cjs').readTicket(req),{credential}):{requireNegotiatedWriter:true})};
 }
 function storageProfile(dataDir) {
   const format=require('./storage-format.cjs'),descriptor=storage.descriptor(dataDir);
-  return {descriptor,readOnly:!format.isCurrent(descriptor.schemaVersion),compatibility:compatibility().describe().serverProfile};
+  return {compactAck:1,descriptor,readOnly:!format.isCurrent(descriptor.schemaVersion),compatibility:compatibility().describe().serverProfile};
 }
 function configureKey(key) { _clientKey = String(key || ''); }
 function configureAccess(settings) { _accessSettings = settings || {}; }
@@ -166,7 +166,7 @@ function start({port,dataDir,backupFn,backup,serverName,key,settings,users,tls,r
     }
     if (req.method === 'GET' && req.url === '/api/ping') {
       try { respond(res,200,{ok:true,name:serverName || os.hostname(),version:require('../package.json').version,sections:true,databaseToken:storage.databaseToken(dataDir),protocol:tls ? 'https:' : 'http:',platform:storageProfile(dataDir),access:publicAccess(principal)}); }
-      catch (e) { respond(res,500,{ok:false,error:e.message}); } return;
+      catch (e) { respond(res,e.code==='DB_BUSY'?503:500,{ok:false,error:e.message,...(e.code==='DB_BUSY'?{code:'DB_BUSY',access:publicAccess(principal)}:{})}); } return;
     }
     if (req.method === 'POST' && ['/api/sections','/api/data'].includes(req.url)) {
       void writeRequest(req,res,req.url === '/api/data',authenticateRequest,session); return;
@@ -192,6 +192,14 @@ function start({port,dataDir,backupFn,backup,serverName,key,settings,users,tls,r
       void(async()=>{try{const payload=await readBody(req,32*1024),activePrincipal=currentPrincipal();const result=require('./asset-inventory-export.js').prepare(dataDir,payload,activePrincipal);respond(res,200,result);}catch(error){const safe=access.publicError(error,principal);respond(res,safe.status||400,{ok:false,code:safe.code||'INVENTORY_EXPORT_FAILED',error:safe.message});}})();return;
     }
     if (req.method !== 'GET') { respond(res,404,{ok:false,error:'Неизвестный запрос'}); return; }
+    if(req.url==='/api/data'||req.url==='/api/snapshot'){
+      void(async()=>{try{
+        const captured=currentPrincipal(),assertCurrent=()=>currentWritePrincipal(session,authenticateRequest,captured);
+        session.executor??=require('./storage-executor.cjs').createStorageExecutor({onEvent:require('./diagnostic-boundary.cjs').record});
+        const snapshot=await session.executor.run('readSnapshot',dataDir,{}, {principal:captured},{assertCurrent});
+        assertCurrent();respond(res,200,req.url==='/api/data'?snapshot.data:{...snapshot,access:publicAccess(captured)});
+      }catch(error){respond(res,error.status||500,{ok:false,code:error.code||'SNAPSHOT_FAILED',error:error.message});}})();return;
+    }
     try {
       if(req.url.startsWith('/api/history?')){
         if(req.url.length>12000){respond(res,400,{ok:false,code:'HISTORY_QUERY',error:'Слишком длинный запрос истории'});return;}
@@ -294,6 +302,7 @@ async function request(host,port,apiPath,body,timeout=15000,transportOptions={})
     if (typeof body !== 'string' || Buffer.byteLength(body) > (['/api/import-source','/api/inventory-database'].includes(apiPath)?MAX_IMPORT_BODY:MAX_BODY)) throw new Error('Слишком большой или неверный запрос');
     options.headers = {...options.headers,'X-TVS-Writer-Schema':String(require('./storage-format.cjs').SCHEMA_VERSION),'Content-Type':'application/json; charset=utf-8','Content-Length':Buffer.byteLength(body)};
     if(transportOptions.ticket!==undefined){if(typeof transportOptions.ticket!=='string'||Buffer.byteLength(transportOptions.ticket)>4096)throw Object.assign(Error('Требуется повторная проверка совместимости'),{code:'PROTOCOL_RENEGOTIATE',status:428});options.headers['X-TVS-Write-Ticket']=transportOptions.ticket;}
+    if(transportOptions.compactAck===true)options.headers['X-TVS-Write-Response']='compact-v1';
   }
   return await new Promise((resolve,reject) => {
     let req, settled = false;
@@ -321,6 +330,7 @@ function parseResponse(response,allowConflict) {
   if (response.status >= 200 && response.status < 300 || allowConflict && response.status === 409) return value;
   const error=new Error('HTTP ' + response.status + (value?.error ? ': ' + value.error : ''));
   error.status=response.status;error.code=value?.code||'HTTP_RESPONSE';error.definitive=response.status>=400&&response.status<500&&response.status!==408;
+  if(error.code==='DB_BUSY'&&response.status===503)error.publicAccess=value.access;
   if(value?.unknown===true||value?.definitive===false){error.unknown=true;error.definitive=false;}
   throw error;
 }

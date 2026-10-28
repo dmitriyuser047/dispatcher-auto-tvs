@@ -81,7 +81,7 @@
     for (const name of names) {
       const before = own(prior, name) ? prior[name] : [], after = own(target, name) ? target[name] : [];
       if (!Array.isArray(before) || !Array.isArray(after) || [...before,...after].some(row => !plain(row))) fail('INVALID_SECTION', 'Раздел должен содержать массив записей: ' + name, { section:name });
-      if (stableSerialize(before) === stableSerialize(after)) continue;
+      if (before === after || stableSerialize(before) === stableSerialize(after)) continue;
       if (ctx.readable && !ctx.readable.includes(name) || ctx.writable && !ctx.writable.includes(name)) fail('ACCESS_DENIED', 'Недостаточно прав на изменение раздела: ' + name, { section:name });
       const revision = ctx.revisions?.[name] == null ? 0 : ctx.revisions[name];
       if (!Number.isSafeInteger(revision) || revision < 0) fail('INVALID_REVISION', 'Некорректная версия раздела: ' + name, { section:name });

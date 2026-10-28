@@ -89,7 +89,7 @@ test('storage validation issues and proof refusals survive the worker boundary',
 test('unknown methods, functions, accessors and asynchronous guards are rejected without target IO',async t=>{
  const {root,dir,executor}=fixture(t),run=executor(),other=path.join(root,'no-input-io'),snapshot=storage.readSnapshot(dir);
  for(const options of [{principal,beforeCommit:()=>{}},{principal,getPrincipal:()=>principal},{principal,unsupported:true},{principal:{...principal,nested:()=>{}}}])await assert.rejects(run.run('writeAll',other,snapshot.data,options,{assertCurrent:guard}),{code:'STORAGE_EXECUTOR_INPUT'});
- await assert.rejects(run.run('readSnapshot',other,{}, {principal},{assertCurrent:guard}),{code:'STORAGE_EXECUTOR_INPUT'});
+ await assert.rejects(run.run('deleteDatabase',other,{}, {principal},{assertCurrent:guard}),{code:'STORAGE_EXECUTOR_INPUT'});
  await assert.rejects(run.run('writeAll',other,snapshot.data,{principal},{assertCurrent:async()=>true}),{code:'STORAGE_EXECUTOR_ASYNC_GUARD'});
  const options={principal};Object.defineProperty(options,'now',{enumerable:true,get(){throw Error('Accessor was evaluated');}});await assert.rejects(run.run('writeAll',other,snapshot.data,options,{assertCurrent:guard}),{code:'STORAGE_EXECUTOR_INPUT'});assert.equal(fs.existsSync(other),false);
 });

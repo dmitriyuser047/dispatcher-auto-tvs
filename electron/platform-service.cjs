@@ -11,6 +11,7 @@ const accessContext = () => require('./access-context.cjs');
 // Kept outside serializable database rows. Object spreads retain the raw hot
 // array, while a renderer clone cannot manufacture this trusted capability.
 const historyBindings = new WeakMap();
+const committedAuditViews = new WeakMap();
 function bindHistory(database,dataDir){
   if(!Array.isArray(database?.auditLog))return database;
   const store=require('./operation-store.cjs');
@@ -99,7 +100,22 @@ function assertScopeViews(previous,sections,options={}) {
       fail('SCOPE_VIEW_REQUIRED','Загрузите полный доступный раздел перед сохранением: данные или права изменились.',428);
   }
 }
-function filteredResult(result,principal,database){
+function filteredResult(result,principal,database,options={}){
+  if(options.compactAck===true&&result.ok===true&&result.canonicalSections){
+    const canonicalSections={...result.canonicalSections};delete canonicalSections.auditLog;
+    const current=principal||{id:'local-profile',name:'Локальный пользователь',role:'admin'},revision=result.revisions?.auditLog;
+    result={...result,canonicalSections};
+    if(Number.isSafeInteger(revision)&&require('./document-access.cjs').permitted(current,'read','auditLog')){
+      const pending=committedAuditViews.get(database?.auditLog);
+      const delta={version:1,revision,invalidated:true};
+      if(pending?.retainsPrefix&&pending.revision===revision){
+        const projector=require('./operation-evidence.cjs').createEventProjector(current);
+        delete delta.invalidated;delta.baseRevision=pending.baseRevision;
+        delta.appended=pending.events.map(event=>publicAuditRow(projector.projectEvent(event,pending.proof))).filter(Boolean);
+      }
+      result.auditDelta=delta;
+    }
+  }
   if(!principal)return result;
   const out={...result},db=database||out.canonicalSections||{};
   if(out.revisions)out.revisions=Object.fromEntries(Object.entries(out.revisions).filter(([name])=>require('./document-access.cjs').permitted(principal,'read',name)));
@@ -317,6 +333,8 @@ function prepareHistoryCommit(dataDir,previous,sections,revisions,options={}){
   const prepared=store.prepareCommit(dataDir,{expectedOperationState:store.readState(dataDir),previousHotRows:before,newEvents:events,receipt,evidence:proof});
   // Keep the array capability and the artifact caller's canonical reference.
   after.splice(0,after.length,...prepared.hotRows);
+  committedAuditViews.set(after,{proof,events,revision:revisions.auditLog,baseRevision:revisions.auditLog-1,
+    retainsPrefix:prepared.nextOperationState.head.hot.length===prepared.expectedOperationState.head.hot.length+events.length});
   return {sections,...prepared};
 }
 function readReceipt(dataDir,query,principal){

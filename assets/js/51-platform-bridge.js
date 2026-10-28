@@ -293,7 +293,7 @@ function platformExecuteCommand(value,options={}){
         if(response.databaseToken!==envelope.databaseToken||receipt?.id!==id||receipt.digest!==envelope.operation.digest||!['committed','replayed'].includes(receipt.status))
           return platformCommandFailure('ACK_REQUIRED','Ответ не подтвердил именно эту команду. Проверьте её в очереди операций.',{unknown:true,queued:true});
         acknowledged=true;guard();
-        let canonical=response.canonicalSections,revisions=response.revisions,scopeResponse=response;
+        let canonical=typeof syncAuditDelta==='function'?syncAuditDelta(response,response.canonicalSections||{}):response.canonicalSections,revisions=response.revisions,scopeResponse=response;
         const archiveExtra=response.archiveHeadChanged===true&&_sync.platform?.documentPrint===1?['appMeta']:[];
         const requiredWrites=[...new Set([...writes,...archiveExtra])];
         const expected=[...new Set([...writes,...archiveExtra,'auditLog'])];
@@ -313,6 +313,7 @@ function platformExecuteCommand(value,options={}){
           const copy=JSON.parse(JSON.stringify(rows));source[name]=copy;persisted[name]=JSON.parse(JSON.stringify(rows));
           _sync.synced[name]=JSON.stringify(rows);_sync.revs[name]=revisions[name];
         }
+        if(response.auditDelta&&!canonical.auditLog){source.auditLog=JSON.parse(_sync.synced.auditLog||'[]');persisted.auditLog=JSON.parse(_sync.synced.auditLog||'[]');}
         if(typeof syncInstallScopeViews==='function')syncInstallScopeViews(scopeResponse,Object.keys(canonical));
         _lastPersisted=JSON.stringify(persisted);scheduleLocalBackup(_lastPersisted);_sync.lastResult=response;
         rebuildIndex();dispatcherInvalidate();_platformLastError=null;

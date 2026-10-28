@@ -3,8 +3,8 @@
 // The coordinator never chooses a database or principal. Main supplies a freshly
 // verified context, transport and receipt lookup; the durable store is local to
 // this application's profile and contains the exact request sent to the backend.
-function createOperationRecovery({outbox,send,lookup,onWarning=()=>{},onEvent}){
-  if(!outbox||typeof send!=='function'||typeof lookup!=='function')throw Error('Нужны очередь, транспорт и проверка результата операции');
+function createOperationRecovery({outbox,send,lookup,onWarning=()=>{},onEvent,recoverTransport=()=>false}){
+  if(!outbox||typeof send!=='function'||typeof lookup!=='function'||typeof recoverTransport!=='function')throw Error('Нужны очередь, транспорт и проверка результата операции');
   function observed(context,operationId,phase,code){
     if(typeof onEvent!=='function'||typeof operationId!=='string'||!/^[a-zA-Z0-9._:-]{1,200}$/.test(operationId)||typeof context.databaseToken!=='string'||!context.databaseToken)return;
     try{const result=onEvent(Object.freeze({phase,code,operationId,databaseToken:context.databaseToken,backend:['json','sqlite','remote','local'].includes(context.backend)?context.backend:context.client?'remote':'local'}));if(result&&typeof result.catch==='function')result.catch(()=>{});}catch{}
@@ -44,6 +44,17 @@ function createOperationRecovery({outbox,send,lookup,onWarning=()=>{},onEvent}){
     try{return settle(context,payload,await send(context,json),requestDigest);}
     catch(error){
       const definitive=error.unknown!==true&&error.definitive!==false&&(error.definitive===true||error.status>=400&&error.status<500&&error.status!==408||Array.isArray(error.issues)||Array.isArray(error.details?.issues));
+      // A lost reply is not a failed write. Recover only after an exact,
+      // authorized receipt lookup, and replay the very same saved request once
+      // to obtain its canonical rows. A miss never authorizes a second write.
+      let recover=false;if(!definitive)try{recover=recoverTransport(context)===true;}catch{}
+      if(recover)try{
+        const checked=await lookup(context,payload.operation.id,requestDigest);
+        if(checked?.ok===true&&checked.databaseToken===context.databaseToken&&matchesReceipt(checked.operationReceipt,payload.operation.id,requestDigest)){
+          observed(context,payload.operation.id,'recovery-looked-up','committed');
+          return settle(context,payload,await send(context,json),requestDigest);
+        }
+      }catch{}
       outcome(context,payload.operation.id,{status:definitive?'rejected':'unknown',code:error.code||'TRANSPORT_FAILED'});
       observed(context,payload.operation.id,'ack-received',definitive?'denied':'unknown');
       return errorResult(error,!definitive);

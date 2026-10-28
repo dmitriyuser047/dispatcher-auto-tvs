@@ -176,15 +176,15 @@ function readRevisions(dataDir){return transaction(dataDir,()=>{
 function schemaVersion(dataDir){return transaction(dataDir,()=>validateFormat(connection(dataDir)),{readOnly:true});}
 function readDescriptor(dataDir){return transaction(dataDir,()=>{const db=connection(dataDir),version=validateFormat(db);return version>=3?storageFormat.validateDescriptor(JSON.parse(db.prepare("SELECT value FROM metadata WHERE key='compatibility'").get().value),version):storageFormat.describe(version);},{readOnly:true});}
 function readOperationState(dataDir){return transaction(dataDir,()=>{const db=connection(dataDir);if(validateFormat(db)<4)fail('SQLITE_OPERATION_STATE','История операций доступна начиная со схемы4');return storageFormat.validateOperationState(JSON.parse(db.prepare("SELECT value FROM metadata WHERE key='operation_state'").get().value));},{readOnly:true});}
-function readOperationObject(dataDir,id){if(typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id))fail('SQLITE_OPERATION_HASH','Некорректный ключ истории');return transaction(dataDir,()=>{
- // The physical SQLite transaction owns a consistent snapshot. Ledger objects
- // are append-only; misses are not cached, and every caller gets separate bytes.
+function readOperationText(dataDir,id){if(typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id))fail('SQLITE_OPERATION_HASH','Некорректный ключ истории');return transaction(dataDir,()=>{
  const db=connection(dataDir);let cache=operationReads.get(db);if(!cache){cache={entries:new Map(),bytes:0};operationReads.set(db,cache);}
- if(cache.entries.has(id)){const bytes=cache.entries.get(id);cache.entries.delete(id);cache.entries.set(id,bytes);return Buffer.from(bytes);}
- const row=db.prepare('SELECT json FROM operation_ledger_objects WHERE hash=?').get(id);if(!row)return null;const bytes=Buffer.from(row.json);
- if(bytes.length<=8*1024*1024){while(cache.entries.size>=OPERATION_READ_ENTRIES||cache.bytes+bytes.length>OPERATION_READ_BYTES){const first=cache.entries.keys().next().value;cache.bytes-=cache.entries.get(first).length;cache.entries.delete(first);}cache.entries.set(id,bytes);cache.bytes+=bytes.length;return Buffer.from(bytes);}
- return bytes;
+ if(cache.entries.has(id)){const entry=cache.entries.get(id);cache.entries.delete(id);cache.entries.set(id,entry);return entry.json;}
+ const row=db.prepare('SELECT json FROM operation_ledger_objects WHERE hash=?').get(id);if(!row)return null;const json=row.json,bytes=Buffer.byteLength(json);
+ if(bytes<=8*1024*1024){while(cache.entries.size>=OPERATION_READ_ENTRIES||cache.bytes+bytes>OPERATION_READ_BYTES){const first=cache.entries.keys().next().value;cache.bytes-=cache.entries.get(first).bytes;cache.entries.delete(first);}cache.entries.set(id,{json,bytes});cache.bytes+=bytes;}
+ return json;
  },{readOnly:true});}
+function readOperationObject(dataDir,id){const json=readOperationText(dataDir,id);return json===null?null:Buffer.from(json);}
+
 function operationWriter(dataDir){const session=held.get(location(dataDir).key);if(!session||session.scopes.some(Boolean))fail('SQLITE_OPERATION_TRANSACTION','История записывается только внутри текущей физической транзакции');return session.db;}
 function putOperationObjects(dataDir,objects){const db=operationWriter(dataDir);if(!Array.isArray(objects))fail('SQLITE_OPERATION_HASH','Некорректный набор объектов истории');const put=db.prepare('INSERT OR IGNORE INTO operation_ledger_objects VALUES(?,?)');for(const object of objects){if(!plain(object)||typeof object.id!=='string'||!/^[a-f0-9]{64}$/.test(object.id)||typeof object.json!=='string'||Buffer.byteLength(object.json)>8*1024*1024||crypto.createHash('sha256').update(object.json).digest('hex')!==object.id)fail('SQLITE_OPERATION_HASH','Повреждён объект истории');put.run(object.id,object.json);if(db.prepare('SELECT json FROM operation_ledger_objects WHERE hash=?').get(object.id).json!==object.json)fail('SQLITE_OPERATION_HASH','Объект истории изменился');}}
 function writeOperationState(dataDir,value){operationWriter(dataDir).prepare("UPDATE metadata SET value=? WHERE key='operation_state'").run(JSON.stringify(storageFormat.validateOperationState(value)));}
@@ -333,4 +333,4 @@ function inspect(dataDir){return transaction(dataDir,()=>{
     sections,rowCount:sections.reduce((total,row)=>total+row.count,0),linkCount:db.prepare('SELECT count(*) AS count FROM row_links').get().count,
     legacyIssues:db.prepare('SELECT issue_json FROM reference_issues ORDER BY id').all().map(row=>JSON.parse(row.issue_json)),integrity:integrityCheck,foreignKeyErrors};
 },{readOnly:true});}
-module.exports={inTransaction:dataDir=>held.has(location(dataDir).key),exists,filename,readAll,readRows,queryRows,countLegacyAssetReferences,readRevisions,readIdentity,schemaVersion,readDescriptor,readOperationState,readOperationObject,putOperationObjects,writeOperationState,commitSections,create,inspect,transaction};
+module.exports={inTransaction:dataDir=>held.has(location(dataDir).key),exists,filename,readAll,readRows,queryRows,countLegacyAssetReferences,readRevisions,readIdentity,schemaVersion,readDescriptor,readOperationState,readOperationObject,readOperationText,putOperationObjects,writeOperationState,commitSections,create,inspect,transaction};

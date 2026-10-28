@@ -95,3 +95,13 @@ test('a replaced frame, navigated URL or destroyed sender during snapshot or neg
 test('actual recovery send refuses the old frame after awaiting renewal before commands or sections leave main',async()=>{
  for(const command of [false,true])for(const mutate of [h=>{h.event.sender.mainFrame={synthetic:true,replaced:true};},h=>{h.state.url='http://127.0.0.1:3377/replaced.html';},h=>{h.state.destroyed=true;}]){const h=harness();await h.context.read(h.event);const captured=h.context.capturedOperationContext(h.event),response={ok:true,databaseToken:'db',access:access('a'),platform:h.state.snapshot.platform,writeTicket:'synthetic-renewed-proof',writeTicketExpiresAt:Date.now()+60000};h.context.mainWriteSessions().bind(captured,compatibility.describe().hello,{...response,writeTicketExpiresAt:0});let release,started;const waiting=new Promise(resolve=>{started=resolve;});h.state.negotiateHook=()=>new Promise(resolve=>{release=resolve;started();});const raw=JSON.stringify({databaseToken:'db',operation:{id:'synthetic-original'},...(command?{command:{type:'synthetic'}}:{sections:{vehicles:[]}})}),pending=h.context.sendRecovered(captured,raw);await waiting;mutate(h);release(response);await assert.rejects(pending,{code:'SESSION_CHANGED'});assert.equal(h.state.posts.length,0);}
 });
+
+test('an authenticated busy ping retains the exact existing binding and write ticket only with unchanged current grants',async()=>{
+ const h=harness();await h.context.read(h.event);const before=h.bindings.get(7);
+ h.state.pingError=Object.assign(Error('Synthetic busy writer'),{code:'DB_BUSY',status:503,publicAccess:structuredClone(h.state.ping.access)});
+ assert.deepEqual(JSON.parse(JSON.stringify(await h.context.fresh(h.event))),{version:1,unavailable:'DB_BUSY'});assert.equal(h.bindings.get(7),before);
+ for(const patch of [{publicAccess:access('b')},{publicAccess:undefined},{status:500}]){
+  const other=harness();await other.context.read(other.event);other.state.pingError=Object.assign(Error('Synthetic busy writer'),{code:'DB_BUSY',status:503,publicAccess:structuredClone(other.state.ping.access)},patch);
+  await assert.rejects(other.context.fresh(other.event));assert.equal(other.bindings.has(7),false);
+ }
+});

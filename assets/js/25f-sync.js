@@ -55,6 +55,22 @@ function syncInstallScopeViews(response,names) {
   }
 }
 
+// A compact ACK carries only freshly committed visible events. Apply it to the
+// acknowledged baseline, never to client-generated audit hints or another rev.
+function syncAuditDelta(response,canonical) {
+  const delta=response?.auditDelta;
+  if(delta===undefined)return canonical;
+  const bad=()=>{throw Object.assign(Error('Некорректное подтверждение истории. Обновите данные.'),{code:'AUDIT_ACK_INVALID'});};
+  if(!delta||delta.version!==1||!Number.isSafeInteger(delta.revision)||delta.revision<0||response.revisions?.auditLog!==delta.revision||Object.hasOwn(canonical,'auditLog'))bad();
+  if(delta.invalidated===true){if(Object.keys(delta).some(key=>!['version','revision','invalidated'].includes(key)))bad();return canonical;}
+  if(Object.keys(delta).some(key=>!['version','revision','baseRevision','appended'].includes(key))||!Number.isSafeInteger(delta.baseRevision)||delta.baseRevision<0||delta.revision!==delta.baseRevision+1||!Array.isArray(delta.appended)||delta.appended.length>2000)bad();
+  if(delta.baseRevision!==(_sync.revs.auditLog||0))return canonical;
+  const baseline=JSON.parse(_sync.synced.auditLog||'[]');if(!Array.isArray(baseline))bad();
+  const rows=baseline.concat(JSON.parse(JSON.stringify(delta.appended)));
+  if(typeof PlatformContracts!=='undefined')PlatformContracts.validateSections({auditLog:rows},SYNC_SECTIONS);
+  return {...canonical,auditLog:rows};
+}
+
 function syncEnsureSession(stamp) {
   if (stamp !== syncSessionStamp()) throw Object.assign(new Error('База или права пользователя изменились во время операции. Обновите данные перед повтором.'),{code:'SESSION_CHANGED'});
 }
@@ -205,18 +221,18 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
     throw new Error('Некорректный список разделов атомарной проверки.');
   let cur = {};
   const changedNow = () => {
-    const actual=SYNC_SECTIONS.filter(n=>{cur[n]=JSON.stringify(d[n]||[]);return cur[n]!==_sync.synced[n];});
+    const actual=SYNC_SECTIONS.filter(n=>{if(n==='auditLog'&&_sync.platform?.compactAck===1)return false;cur[n]=JSON.stringify(d[n]||[]);return cur[n]!==_sync.synced[n];});
     // Send reviewed read dependencies with their baseline versions as well.
     // An unchanged directory must still invalidate links reviewed before a concurrent edit.
-    return actual.length?SYNC_SECTIONS.filter(name=>actual.includes(name)||atomicSections.includes(name)):[];
+    return actual.length?SYNC_SECTIONS.filter(name=>(name!=='auditLog'||_sync.platform?.compactAck!==1)&&(actual.includes(name)||atomicSections.includes(name))):[];
   };
   let changed = changedNow();
-  if (!changed.length) return true;
+  if (!changed.length) {if(_sync.platform?.compactAck===1)d.auditLog=JSON.parse(_sync.synced.auditLog||'[]');return true;}
   const mergedNames = new Set();
   for (let attempt = 0; attempt < 4; attempt++) {
     syncEnsureSession(stamp);
     const payload = { base: {}, sections: {}, ...(options?.operation ? {operation:options.operation} : {}), ...(_sync.databaseToken ? {databaseToken:_sync.databaseToken} : {}) };
-    changed.forEach(n => { payload.base[n] = _sync.revs[n] || 0; payload.sections[n] = d[n] || []; });
+    changed.filter(n=>n!=='auditLog'||_sync.platform?.compactAck!==1).forEach(n => { payload.base[n] = _sync.revs[n] || 0; payload.sections[n] = d[n] || []; });
     if (_sync.access?.accessPolicy) {
       if (_sync.platform?.scopedAccess !== 1) throw Error('Сервер не поддерживает безопасное сохранение ограниченного представления');
       payload.scopeViews = Object.fromEntries(changed.map(name => {
@@ -241,7 +257,8 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
       if (options?.operation && (options.requireOperationReceipt || res.operationReceipt) &&
           (!res.operationReceipt || res.operationReceipt.id !== options.operation.id || !['committed','replayed'].includes(res.operationReceipt.status)))
         throw Object.assign(new Error('Хранилище не подтвердило именно эту операцию. Обновите данные и проверьте историю.'),{code:'OPERATION_ACK_REQUIRED'});
-      if (requiredCanonical.some(name => !Array.isArray(res.canonicalSections?.[name]) ||
+      const acknowledged=syncAuditDelta(res,res.canonicalSections||{});
+      if (requiredCanonical.some(name => name==='auditLog'&&res.auditDelta?false:!Array.isArray(acknowledged[name]) ||
         !Number.isSafeInteger(res.revisions?.[name]) || res.revisions[name] < 0))
         throw new Error('Сервер не подтвердил сохранённый акт. Обновите данные и проверьте журнал актов; повторное проведение пока не подтверждено.');
       changed.forEach(n => {
@@ -251,8 +268,9 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
       // IPC structured cloning can retain shared objects between a source row
       // and audit.after. Each live section must own its JSON tree: editing the
       // next document must never mutate its earlier historical snapshot.
-      const canonical=Object.fromEntries(Object.entries(res.canonicalSections||{}).map(([name,rows])=>[name,JSON.parse(JSON.stringify(rows))]));
+      const canonical=Object.fromEntries(Object.entries(acknowledged).map(([name,rows])=>[name,JSON.parse(JSON.stringify(rows))]));
       Object.entries(canonical).forEach(([name,rows])=>{d[name]=rows;_sync.synced[name]=JSON.stringify(rows);if(res.revisions&&name in res.revisions)_sync.revs[name]=res.revisions[name];});
+      if(res.auditDelta&&!canonical.auditLog)d.auditLog=JSON.parse(_sync.synced.auditLog||'[]');
       syncInstallScopeViews(res, Object.keys(canonical));
       _sync.lastResult=res;
       if (mergedNames.size) {
@@ -282,7 +300,7 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
     }
     if (mergedNames.has('reestrRows') && typeof reestrRows !== 'undefined') reestrRows = d.reestrRows;
     changed = changedNow();
-    if (!changed.length) { rebuildIndex(); syncRefreshView([...mergedNames]); return true; }
+    if (!changed.length) {if(_sync.platform?.compactAck===1)d.auditLog=JSON.parse(_sync.synced.auditLog||'[]');rebuildIndex(); syncRefreshView([...mergedNames]); return true; }
   }
   return false;
 }
@@ -313,7 +331,7 @@ async function syncPoll() {
       }
     }catch(error){
       if(accessStamp!==syncSessionStamp())return;
-      if(error.code==='DB_BUSY'&&typeof _dataCacheContext!=='undefined'&&_dataCacheContext?.mode==='local'){console.warn('[sync access] '+error.message);return;}
+      if(error.code==='DB_BUSY'){console.warn('[sync access] '+error.message);return;}
       _loadWriteBlocked=true;localCacheKey=null;_sync.enabled=false;_sync.scopeViews={};
       if(error.code==='ACCESS_REVOKED'||[401,403].includes(error.status))syncClearAccessView('Доступ к серверу отозван. Данные скрыты.');
       console.warn('[sync access] '+error.message);return;

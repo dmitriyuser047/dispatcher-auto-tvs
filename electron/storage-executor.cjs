@@ -1,8 +1,8 @@
 'use strict';
 // Trusted process boundary. No caller can choose worker code or a storage method.
 const path=require('node:path');
-const kinds=new Set(['writeSections','executeCommand','writeAll']);
-const optionNames=new Set(['principal','now','requireNegotiatedWriter','requireWriterSchema','writerSchemaVersion','databaseToken','base','scopeViews','requireBase','replace','operation','history']);
+const kinds=new Set(['writeSections','executeCommand','writeAll','readSnapshot']);
+const optionNames=new Set(['principal','now','requireNegotiatedWriter','requireWriterSchema','writerSchemaVersion','databaseToken','base','scopeViews','requireBase','replace','operation','history','compactAck']);
 const RPC_BYTES=32768;
 function failure(code,message,extra={}){return Object.assign(Error(message),{code,...extra});}
 function copy(value,depth=0,parents=new Set()){
@@ -34,21 +34,23 @@ function diagnostic(value,observer){
 }
 function createStorageExecutor({maxPending=16,maxPayloadBytes=64*1024*1024,maxPendingBytes=128*1024*1024,onEvent=require('./diagnostic-boundary.cjs').record}={}){
  if(!Number.isSafeInteger(maxPending)||maxPending<1||maxPending>128||!Number.isSafeInteger(maxPayloadBytes)||maxPayloadBytes<1||maxPayloadBytes>256*1024*1024||!Number.isSafeInteger(maxPendingBytes)||maxPendingBytes<maxPayloadBytes||maxPendingBytes>512*1024*1024||typeof onEvent!=='function')throw TypeError('Некорректные настройки исполнителя хранилища.');
- const queue=[],waiters=[];let active=null,closing=false,pendingBytes=0;
- function drained(){if(active||queue.length)return;for(const resolve of waiters.splice(0))resolve();}
+ const queue=[],waiters=[];let active=null,closing=false,pendingBytes=0,processSlot=null,sequence=0;const workers=new Set();
+ function drained(){if(active||queue.length)return;if(closing&&processSlot){const record=processSlot;processSlot=null;record.unusable=true;void record.worker.terminate();}if(closing&&workers.size)return;for(const resolve of waiters.splice(0))resolve();}
  function finish(job,error,value){if(active!==job)return;active=null;pendingBytes-=job.bytes;job.input=null;job.options=null;job.backup=null;try{if(error)job.reject(error);else job.resolve(value);}finally{drain();drained();}}
  function drain(){
   if(active||!queue.length){drained();return;}
   const job=queue.shift();active=job;
   try{synchronous(job.assertCurrent,{phase:'dispatch'});}catch(error){finish(job,error);return;}
   const {Worker,MessageChannel}=require('node:worker_threads'),{port1,port2}=new MessageChannel();
-  let worker,reply=null,workerError=null,exited=false,exitCode=null,portClosed=false;
-  // A transferred MessagePort has its own event ordering. Its close event
-  // drains its messages; Worker.exit alone does not prove the reply arrived.
+  let record,reply=null,workerError=null,exited=false,ready=false,portClosed=false,finished=false;
+  // Both the drained data port and the worker's per-job ready signal are
+  // required. Closing the executor only terminates a worker proven idle.
   const completed=()=>{
-   if(!exited||!portClosed)return;
-   if(workerError||exitCode!==0||!reply||typeof reply.ok!=='boolean'){
-    finish(job,failure('STORAGE_WORKER_EXIT','Результат записи не подтверждён. Перезапустите программу и проверьте операцию в очереди перед повтором.',{definitive:false,unknown:true}));return;
+   if(finished||!portClosed||!ready&&!exited)return;finished=true;
+   if(record){record.onReady=null;record.onExit=null;record.worker.unref();}
+   if(record?.error||workerError||exited||!reply||typeof reply.ok!=='boolean'){
+    if(record&&processSlot===record){processSlot=null;record.unusable=true;if(ready)void record.worker.terminate();}
+    finish(job,failure('STORAGE_WORKER_EXIT','Результат записи не подтверждён. Проверьте операцию в очереди перед повтором.',{definitive:false,unknown:true}));return;
    }
    if(!reply.ok){finish(job,unpackedError(reply.error));return;}
    try{synchronous(job.assertCurrent,{phase:'ack'});}
@@ -79,10 +81,19 @@ function createStorageExecutor({maxPending=16,maxPayloadBytes=64*1024*1024,maxPe
    }catch(error){answer(message,{ok:false,error:packedError(error)});}
   });
   port1.once('close',()=>{portClosed=true;completed();});
-  try{worker=new Worker(path.join(__dirname,'storage-executor-worker.cjs'),{workerData:{kind:job.kind,dataDir:job.dataDir,input:job.input,options:job.options,backup:job.backup,hasCompatibility:!!job.assertWriteCompatibility,port:port2},transferList:[port2]});}
-  catch(error){port1.close();port2.close();finish(job,error);return;}
-  worker.once('error',error=>{workerError=error;});
-  worker.once('exit',code=>{exited=true;exitCode=code;completed();});
+  const request={sequence:++sequence,kind:job.kind,dataDir:job.dataDir,input:job.input,options:job.options,backup:job.backup,hasCompatibility:!!job.assertWriteCompatibility,port:port2};
+  try{
+   if(!processSlot||processSlot.unusable){
+    const worker=new Worker(path.join(__dirname,'storage-executor-worker.cjs'),{workerData:request,transferList:[port2]});
+    record={worker,unusable:false,onReady:null,onExit:null,error:null};processSlot=record;workers.add(record);
+    worker.on('message',message=>{if(message?.type==='ready')record.onReady?.(message);});
+    worker.once('error',error=>{record.error=error;record.unusable=true;});
+    worker.once('exit',()=>{record.unusable=true;workers.delete(record);if(processSlot===record)processSlot=null;record.onExit?.();drained();});
+   }else{record=processSlot;record.worker.ref();record.worker.postMessage(request,[port2]);}
+   record.onReady=message=>{if(message.sequence!==request.sequence)workerError=failure('STORAGE_WORKER_PROTOCOL','Неоднозначный ответ хранилища.');ready=true;completed();};
+   record.onExit=()=>{exited=true;workerError=record.error;completed();};
+  }catch(error){port1.close();port2.close();finish(job,error);}
+
  }
  function run(kind,dataDir,input,options={},controls={}){
   return new Promise((resolve,reject)=>{
@@ -106,7 +117,7 @@ function createStorageExecutor({maxPending=16,maxPayloadBytes=64*1024*1024,maxPe
    }catch(error){reject(error);}
   });
  }
- function close(){closing=true;return active||queue.length?new Promise(resolve=>waiters.push(resolve)):Promise.resolve();}
+ function close(){closing=true;const result=new Promise(resolve=>waiters.push(resolve));drained();return result;}
  return Object.freeze({run,close,status:()=>Object.freeze({active:active?1:0,queued:queue.length,maxPending,closing,pendingBytes,maxPayloadBytes,maxPendingBytes})});
 }
 module.exports=Object.freeze({createStorageExecutor});

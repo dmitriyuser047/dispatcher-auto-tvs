@@ -148,7 +148,7 @@
   }
   function validateChanges(previous,next,context={}){
     if(!plain(previous)||!plain(next))throw makeError('INVALID_DATABASE',[{code:'invalid-database',severity:'error',section:'',recordId:'',field:'',message:'Для проверки нужны предыдущий и новый снимки базы'}]);
-    const writable=allowed(context.writable,'записи'),readable=allowed(context.readable,'чтения'),changed=schema.sections.filter(section=>stable(previous[section]||[])!==stable(next[section]||[]));
+    const writable=allowed(context.writable,'записи'),readable=allowed(context.readable,'чтения'),changed=schema.sections.filter(section=>previous[section]!==next[section]&&stable(previous[section]||[])!==stable(next[section]||[]));
     const errors=[];
     const add=issue=>errors.push({severity:'error',...issue});
     for(const section of changed)if(writable&&!writable.has(section)||readable&&!readable.has(section))add({code:'section-write-denied',section,recordId:'',field:'',message:'Недостаточно прав на изменение раздела «'+schema.descriptors[section].label+'»'});
@@ -159,9 +159,9 @@
       const before=rowsOf(previous,section),after=rowsOf(next,section),used=new Set();
       const identities=new Map();before.forEach((row,index)=>{const key=rowIdentity(section,row,index);if(!identities.has(key))identities.set(key,[]);identities.get(key).push(index);});
       after.forEach((row,index)=>{
-        const candidates=identities.get(rowIdentity(section,row,index))||[];let match=candidates.find(position=>!used.has(position)&&stable(before[position])===stable(row));
+        const candidates=identities.get(rowIdentity(section,row,index))||[];let match=candidates.find(position=>!used.has(position)&&(before[position]===row||stable(before[position])===stable(row)));
         if(match===undefined)match=candidates.find(position=>!used.has(position));
-        if(match===undefined&&plain(row)&&!scalarId(row[schema.descriptors[section].identity.field]))match=before.findIndex((candidate,position)=>!used.has(position)&&stable(candidate)===stable(row));
+        if(match===undefined&&plain(row)&&!scalarId(row[schema.descriptors[section].identity.field]))match=before.findIndex((candidate,position)=>!used.has(position)&&(candidate===row||stable(candidate)===stable(row)));
         if(match!==undefined&&match>=0){used.add(match);mapping.set(section+':'+index,match);oldRows.set(section+':'+index,before[match]);}
       });
     }

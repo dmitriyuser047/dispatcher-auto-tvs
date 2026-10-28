@@ -161,7 +161,14 @@ async function freshDataCacheContext(event){
     if(!ping?.ok||typeof ping.databaseToken!=='string'||!ping.databaseToken||!validPublicAccess(ping.access))throw Object.assign(Error('Актуальные права сервера не подтверждены'),{code:'ACCESS_UNVERIFIED'});
     if(!previous||previous.identity!==identity||previous.databaseToken!==ping.databaseToken||JSON.stringify(previous.notificationAccess)!==JSON.stringify(ping.access))bindData(event,ping.databaseToken,ping.access,null,previous?.platform||{apiVersion:1,scopedAccess:1});
     return {version:1,mode:'client',identity:identity+':'+ping.databaseToken,databaseToken:ping.databaseToken,access:ping.access,policyStamp:ping.access.policyStamp};
-  }catch(error){assertCache();invalidateDataBinding(event);if([401,403].includes(error.status)||error.code==='ACCESS_REVOKED')return {version:1,unavailable:'ACCESS_REVOKED'};throw Object.assign(new Error('Не удалось подтвердить текущие права сервера'),{code:error.code||'ACCESS_UNVERIFIED',status:error.status||0});}
+  }catch(error){
+    assertCache();
+    const previous=dataBindings.get(event.sender.id);
+    // A freshly authenticated busy reply may retain the existing view only
+    // when its current grants exactly match. Changed/revoked access still clears it.
+    if(error.code==='DB_BUSY'&&error.status===503&&previous?.identity===identity&&validPublicAccess(error.publicAccess)&&JSON.stringify(previous.notificationAccess)===JSON.stringify(error.publicAccess))return {version:1,unavailable:'DB_BUSY'};
+    invalidateDataBinding(event);if([401,403].includes(error.status)||error.code==='ACCESS_REVOKED')return {version:1,unavailable:'ACCESS_REVOKED'};throw Object.assign(new Error('Не удалось подтвердить текущие права сервера'),{code:error.code||'ACCESS_UNVERIFIED',status:error.status||0});
+  }
 }
 let recoveryService=null;
 let storageExecutor=null;
@@ -252,7 +259,7 @@ function capturedOperationContext(event,binding=assertDataBinding(event)){
   return {scope,identity,senderId:event.sender.id,sender:binding.sender,frame:binding.frame,url:binding.url,databaseToken:binding.databaseToken,principal,client,access:binding.notificationAccess,
     directory:getDataDir(),host:settings.remoteHost,port:settings.remotePort||3377,
     supportsOperations:binding.platform?.apiVersion===1&&binding.platform?.operations===1&&binding.platform?.outbox===1&&!!principal,
-    supportsCommands:binding.platform?.apiVersion===1&&binding.platform?.commands===1&&!!principal};
+    compactAck:binding.platform?.compactAck===1,supportsCommands:binding.platform?.apiVersion===1&&binding.platform?.commands===1&&!!principal};
 }
 function assertOperationContext(context){
   const binding=dataBindings.get(context.senderId);
@@ -278,14 +285,14 @@ async function verifiedOperationContext(event){
 function operationRecovery(){
   if(!recoveryService){
     const outbox=require('./command-outbox.cjs').createCommandOutbox({rootDir:path.join(app.getPath('userData'),'pending-operations'),maxEntries:128,maxPayloadBytes:64*1024*1024,maxTotalBytes:256*1024*1024});
-    recoveryService=require('./operation-recovery.cjs').createOperationRecovery({outbox,
+    recoveryService=require('./operation-recovery.cjs').createOperationRecovery({outbox,recoverTransport:context=>context.client===true,
       onEvent:diagnosticBoundary.record,
       send:async(context,json)=>{
         assertOperationContext(context);
         const payload=JSON.parse(json),command=Object.hasOwn(payload,'command');
         if(command&&!context.supportsCommands)throw Object.assign(Error('Подключение не поддерживает атомарные команды'),{code:'UNSUPPORTED_COMMANDS',definitive:true});
-        if(context.client){if(networkConfigError)throw Error(networkConfigError);const proof=await mainWriteSessions().remoteOptions(context);assertOperationContext(context);return command?server.postCommands(context.host,context.port,json,proof):server.postSections(context.host,context.port,json,proof);}
-        const proof=mainWriteSessions().localOptions(context);
+        if(context.client){if(networkConfigError)throw Error(networkConfigError);const proof={...await mainWriteSessions().remoteOptions(context),compactAck:context.compactAck};assertOperationContext(context);return command?server.postCommands(context.host,context.port,json,proof):server.postSections(context.host,context.port,json,proof);}
+        const proof={...mainWriteSessions().localOptions(context),compactAck:context.compactAck};
         diagnosticBoundary.record({phase:'host-received',code:'pending',operationId:payload.operation?.id,databaseToken:context.databaseToken,backend:'local'});
         return localStorageWrite(command?'executeCommand':'writeSections',context,payload,proof);
       },
@@ -602,7 +609,9 @@ app.whenReady().then(() => {
     }
     try {
       const dir = getDataDir();
-      const snapshot = storage.readSnapshot(dir);
+      const generation=beginDataRead(event),assertCurrent=()=>assertDataRead(event,generation,identity);
+      const snapshot = await localStorageExecutor().run('readSnapshot',dir,{}, {},{assertCurrent});
+      assertCurrent();
       bindSnapshotCompatibility(event,snapshot,hello);
       return JSON.stringify(snapshot);
     } catch (e) {
