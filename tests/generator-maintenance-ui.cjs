@@ -327,6 +327,7 @@ test('DES setup: regulations persist on the exact numeric-zero card, retain type
  const saved=await page.evaluate(()=>({rules:data.generators[0].maintenanceRules,id:data.generators[0].id,other:JSON.stringify({parts:data.parts,movements:data.partMovements,journal:data.genRecords,other:data.generators[1]}),disk:JSON.parse(__disk).generators[0].maintenanceRules,writes:__writes}));
  assert.equal(saved.id,0);assert.equal(saved.rules[0].id,0);assert.equal(saved.rules[0].hours,350.5);assert.equal(saved.rules[0].work,'Reviewed synthetic work list');assert.deepEqual(saved.disk,saved.rules);assert.equal(saved.other,before);assert.equal(saved.writes,1);
  assert.match(await page.locator('[data-gm-setup-list]').innerText(),/350[,.]5/);
+ const reopened=await openGeneratorRules();await reopened.locator('.to-rule-meter').first().fill('360');await saveGeneratorRules(reopened);assert.equal(await page.locator('#genericModal.open').count(),0);assert.equal(await page.evaluate(()=>data.generators[0].maintenanceRules[0].hours),360);
 });
 
 test('DES setup: switching equipment preserves numeric and text identifiers and refuses to drop unsaved changes',async()=>{
