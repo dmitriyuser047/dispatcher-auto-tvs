@@ -310,8 +310,8 @@ function platformExecuteCommand(value,options={}){
         // Only acknowledged sections become persisted. Other unsaved local
         // editors keep their values and are absent from the backup baseline.
         for(const [name,rows]of Object.entries(canonical)){
-          const copy=JSON.parse(JSON.stringify(rows));source[name]=copy;persisted[name]=JSON.parse(JSON.stringify(rows));
-          _sync.synced[name]=JSON.stringify(rows);_sync.revs[name]=revisions[name];
+          const json=JSON.stringify(rows);source[name]=JSON.parse(json);persisted[name]=JSON.parse(json);
+          _sync.synced[name]=json;_sync.revs[name]=revisions[name];
         }
         if(response.auditDelta&&!canonical.auditLog){source.auditLog=JSON.parse(_sync.synced.auditLog||'[]');persisted.auditLog=JSON.parse(_sync.synced.auditLog||'[]');}
         if(typeof syncInstallScopeViews==='function')syncInstallScopeViews(scopeResponse,Object.keys(canonical));

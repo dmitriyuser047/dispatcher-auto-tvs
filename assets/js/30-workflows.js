@@ -16,6 +16,9 @@ function wfInitData(d) {
 }
 function wfAppendAudit(d, previous) {
   wfInitData(d); if(!previous) return;
+  // Compact ACKs carry the storage's canonical history. syncSave never sends
+  // client audit rows in this mode, so do not construct a discarded local copy.
+  if(typeof window!=='undefined'&&window.electronAPI&&typeof _sync!=='undefined'&&_sync.enabled&&_sync.platform?.compactAck===1)return;
   let old; try {old=JSON.parse(previous);} catch{return;}
   const entries=[];
   Object.keys(d).filter(n=>n!=='auditLog' && Array.isArray(d[n])).forEach(section=>{

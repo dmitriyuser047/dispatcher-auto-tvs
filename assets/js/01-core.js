@@ -281,7 +281,8 @@ async function persistData(d = data, options) {
   try {
     if (_loadWriteBlocked) throw new Error('Основная база не прочитана. Сначала восстановите подключение или базу.');
     if (typeof wfAppendAudit === 'function') wfAppendAudit(d, _lastPersisted);
-    const json = JSON.stringify(d);
+    // Validate the complete snapshot before any write, including extra fields.
+    JSON.stringify(d);
     if (window.electronAPI) {
       // A whole snapshot without its original section versions cannot be saved.
       const ok = typeof _sync !== 'undefined' && _sync.enabled

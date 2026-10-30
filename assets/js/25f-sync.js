@@ -268,8 +268,11 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
       // IPC structured cloning can retain shared objects between a source row
       // and audit.after. Each live section must own its JSON tree: editing the
       // next document must never mutate its earlier historical snapshot.
-      const canonical=Object.fromEntries(Object.entries(acknowledged).map(([name,rows])=>[name,JSON.parse(JSON.stringify(rows))]));
-      Object.entries(canonical).forEach(([name,rows])=>{d[name]=rows;_sync.synced[name]=JSON.stringify(rows);if(res.revisions&&name in res.revisions)_sync.revs[name]=res.revisions[name];});
+      // Prepare every section before installing any of them; a malformed later
+      // section must not leave an earlier section partially applied in the form.
+      const encoded=Object.entries(acknowledged).map(([name,rows])=>{const json=JSON.stringify(rows);return [name,JSON.parse(json),json];});
+      const canonical=Object.fromEntries(encoded.map(([name,rows])=>[name,rows]));
+      encoded.forEach(([name,rows,json])=>{d[name]=rows;_sync.synced[name]=json;if(res.revisions&&name in res.revisions)_sync.revs[name]=res.revisions[name];});
       if(res.auditDelta&&!canonical.auditLog)d.auditLog=JSON.parse(_sync.synced.auditLog||'[]');
       syncInstallScopeViews(res, Object.keys(canonical));
       _sync.lastResult=res;
