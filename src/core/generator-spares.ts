@@ -1,6 +1,6 @@
 import type {Identifier,JsonRow,JsonValue,SectionRows,createPlatformContracts} from './platform-contracts';
 import type {EntityIdentityAPI} from './entity-identity';
-import type {InventoryStockAPI,InventoryRow} from './inventory-stock';
+import type {InventoryStockAPI,InventoryRow,InventoryProjection} from './inventory-stock';
 
 type Contracts=ReturnType<typeof createPlatformContracts>;
 const sections=['parts','partMovements','generators','workOrders','generatorMaintenancePlans'] as const;
@@ -51,10 +51,10 @@ export function createGeneratorSpares(contracts:Contracts,identity:EntityIdentit
   if(section==='dispatchJobs')return row.status!=='confirmed';
   return false;
  }
- function lifecycleReferences(db:SectionRows,id:Identifier):GeneratorSpareLifecycleReference[]{
-  const found:GeneratorSpareLifecycleReference[]=[],seen=new Set<string>();
+ function lifecycleReferenceIndex(db:SectionRows,ids:readonly Identifier[]):Map<Identifier,GeneratorSpareLifecycleReference[]>{
+  const found=new Map<Identifier,GeneratorSpareLifecycleReference[]>(ids.map(id=>[id,[]])),seen=new Map<Identifier,Set<string>>(ids.map(id=>[id,new Set<string>()]));
   for(const section of lifecycleSections)for(const [rowIndex,row]of (db[section]||[]).entries()){
-   const add=(path:string):void=>{const token=JSON.stringify([section,rowIndex,path]);if(!seen.has(token)){seen.add(token);found.push({section,id:contracts.identifier(row.id)?row.id:null,rowIndex,path,active:activeReference(section,row)});}};
+   const add=(id:Identifier,path:string):void=>{const tokens=seen.get(id)!,token=JSON.stringify([section,rowIndex,path]);if(!tokens.has(token)){tokens.add(token);found.get(id)!.push({section,id:contracts.identifier(row.id)?row.id:null,rowIndex,path,active:activeReference(section,row)});}};
    function visit(value:JsonValue|undefined,path:string,container:string,kind:JsonValue|undefined,depth:number):void{
     if(depth>100)fail('SPARES_SOURCE','Слишком глубокие связи номенклатуры');
     if(Array.isArray(value)){for(const [index,child]of value.entries())visit(child,path+'['+index+']',container,kind,depth+1);return;}
@@ -62,7 +62,7 @@ export function createGeneratorSpares(contracts:Contracts,identity:EntityIdentit
     const currentKind=value.kind??kind;
     for(const [field,child]of Object.entries(value)){
      const current=path?path+'.'+field:field;
-     if(child===id&&(/partId$/i.test(field)||field==='itemId'&&currentKind==='part'||field==='id'&&path!==''&&(value.section==='parts'||container==='part'||container==='parts')))add(current);
+     if(found.has(child as Identifier)&&(/partId$/i.test(field)||field==='itemId'&&currentKind==='part'||field==='id'&&path!==''&&(value.section==='parts'||container==='part'||container==='parts')))add(child as Identifier,current);
      if(child!==null&&typeof child==='object')visit(child,current,field,currentKind,depth+1);
     }
    }
@@ -70,6 +70,7 @@ export function createGeneratorSpares(contracts:Contracts,identity:EntityIdentit
   }
   return found;
  }
+ function lifecycleReferences(db:SectionRows,id:Identifier):GeneratorSpareLifecycleReference[]{return lifecycleReferenceIndex(db,[id]).get(id)!;}
  function legacyOpening(part:JsonRow):boolean{
   for(const name of ['qty','quantity','balance','balanceInit','stockInit','openingQty','stockQty','stock'])if(own(part,name)&&part[name]!==0&&part[name]!=='0')return true;
   if(own(part,'opening')){const opening=part.opening;if(!object(opening)||opening.qty!==0)return true;}
@@ -84,10 +85,13 @@ export function createGeneratorSpares(contracts:Contracts,identity:EntityIdentit
   const context=lifecycleContext(contextValue);
   if(context.readable&&!context.readable.includes('*')&&lifecycleSections.some(name=>!context.readable!.includes(name)))fail('ACCESS_DENIED','Для удаления или архива позиции нужны все источники её связей и запаса');
   const db=lifecycleDatabase(databaseValue);
+  return preparedLifecycleState(db,targetValue,context);
+ }
+ function preparedLifecycleState(db:SectionRows,targetValue:unknown,context:ReturnType<typeof lifecycleContext>,batch?:{references:Map<Identifier,GeneratorSpareLifecycleReference[]>;inventory:InventoryStockAPI;projection:InventoryProjection}):GeneratorSpareLifecycleState{
   if(!object(targetValue)||!contracts.identifier(targetValue.generatorId)||!contracts.identifier(targetValue.partId))fail('SPARES_TARGET','Укажите типизированные ДЭС и позицию склада');
   const {generatorId,partId}=targetValue,part=find(db,'parts',partId);
   if(!part||!owned(part)||part.generatorId!==generatorId)fail('SPARES_TARGET','Позиция не найдена однозначно на складе выбранной ДЭС');
-  const references=lifecycleReferences(db,partId),deleteBlockers:string[]=[],archiveBlockers:string[]=[],restoreBlockers:string[]=[];
+  const references=(batch?.references||lifecycleReferenceIndex(db,[partId])).get(partId)!.map(reference=>({...reference})),deleteBlockers:string[]=[],archiveBlockers:string[]=[],restoreBlockers:string[]=[];
   const archived=!!part.archived,alias=own(part,'mergedInto');
   if(part.deleted){const text='Позиция помечена удалённой; сначала исправьте её состояние';deleteBlockers.push(text);archiveBlockers.push(text);restoreBlockers.push(text);}
   if(alias){const text='Позиция участвует в объединении справочника; исходную идентичность нужно сохранить';deleteBlockers.push(text);archiveBlockers.push(text);restoreBlockers.push(text);}
@@ -99,9 +103,9 @@ export function createGeneratorSpares(contracts:Contracts,identity:EntityIdentit
   const active=references.some(reference=>reference.active);if(active)archiveBlockers.push('Позиция используется в незавершённом заказе, черновике ТО, документе или правиле закупок. Сначала завершите либо исправьте эти ссылки.');
   let balance:number|null=null,balanceDecimal:string|null=null,zero=false;
   try{
-   const inventory=getInventory?.();if(inventory?.apiVersion!==1)throw Error('module');
-   const projection=inventory.project(db,{partIds:[partId]}),all=projection.rows.filter(row=>row.target.id===partId);
-   if(all.length!==1)throw Error('ambiguous');const full=all[0]!,current=inventory.at(projection,{section:'parts',id:partId},context.today);
+   const inventory=batch?.inventory||getInventory?.();if(inventory?.apiVersion!==1)throw Error('module');
+   const projection=batch?.projection||inventory.project(db,{partIds:[partId]}),positions=projection.index[identity.typedKey('parts',partId)]||[];
+   if(positions.length!==1)throw Error('ambiguous');const full=projection.rows[positions[0]!]!,current=inventory.at(projection,{section:'parts',id:partId},context.today);
    balance=current.balance;balanceDecimal=current.balanceDecimal;
    const empty=(value:InventoryRow):boolean=>value.status==='known'&&value.balanceDecimal==='0';
    zero=empty(full)&&empty(current)&&full.events.every(event=>event.balanceDecimal!==null&&!event.balanceDecimal.startsWith('-'));
@@ -110,6 +114,21 @@ export function createGeneratorSpares(contracts:Contracts,identity:EntityIdentit
   if(legacyOpening(part)){const text='В карточке есть ненулевой или неизвестный начальный запас. Сначала проверьте его фактические источники';deleteBlockers.push(text);archiveBlockers.push(text);}
   if(archived)archiveBlockers.push('Позиция уже находится в архиве');else restoreBlockers.push('Позиция уже находится в действующем списке');
   return {partId,generatorId,archived,canDelete:deleteBlockers.length===0,canArchive:archiveBlockers.length===0,canRestore:restoreBlockers.length===0,balance,balanceDecimal,deleteBlockers,archiveBlockers,restoreBlockers,references};
+ }
+ /** One isolated read snapshot for a screen; never retained or accepted by a write. */
+ function lifecycleStates(databaseValue:unknown,targetsValue:unknown,contextValue:unknown={}):GeneratorSpareLifecycleState[]{
+  const context=lifecycleContext(contextValue);
+  if(context.readable&&!context.readable.includes('*')&&lifecycleSections.some(name=>!context.readable!.includes(name)))fail('ACCESS_DENIED','Для удаления или архива позиции нужны все источники её связей и запаса');
+  const db=lifecycleDatabase(databaseValue);
+  if(!Array.isArray(targetsValue)||targetsValue.length>10000)fail('SPARES_TARGET','Нужен список не более 10 000 позиций склада');
+  const targets=contracts.validateSections({targets:targetsValue},['targets']).targets!;
+  for(const target of targets)if(!contracts.identifier(target.generatorId)||!contracts.identifier(target.partId))fail('SPARES_TARGET','Укажите типизированные ДЭС и позицию склада');
+  if(!targets.length)return [];
+  const ids=[...new Set(targets.map(target=>target.partId as Identifier))],references=lifecycleReferenceIndex(db,ids);
+  let prepared:{references:typeof references;inventory:InventoryStockAPI;projection:InventoryProjection}|undefined;
+  try{const inventory=getInventory?.();if(inventory?.apiVersion===1)prepared={references,inventory,projection:inventory.project(db,{partIds:ids})};}catch{}
+  // On a damaged projection, preserve each position's original fail-closed result.
+  return targets.map(target=>preparedLifecycleState(db,target,context,prepared));
  }
  function previewLifecycle(databaseValue:unknown,inputValue:unknown,contextValue:unknown={}):{canApply:boolean;state:GeneratorSpareLifecycleState;parts:JsonRow[]}{
   if(!object(inputValue)||!['delete','archive','restore'].includes(inputValue.action as string))fail('SPARES_ACTION','Выберите удаление, архив или восстановление позиции');
@@ -198,5 +217,5 @@ export function createGeneratorSpares(contracts:Contracts,identity:EntityIdentit
   for(const movement of after.partMovements||[]){const old=oldMovements.get(key(movement.id));if(stable(old)===stable(movement))continue;const part=find(after,'parts',movement.partId);if(part&&owned(part)){if(part.archived||part.deleted)fail('SPARES_ARCHIVED','Для нового или изменённого движения сначала восстановите позицию собственного склада','partId');target(after,movement,part.generatorId as Identifier);}}
   return true;
  }
- return Object.freeze({apiVersion:1 as const,dependencies:()=>sections.slice(),lifecycleDependencies:()=>lifecycleSections.slice(),lifecycleState,previewLifecycle,validateChanges});
+ return Object.freeze({apiVersion:1 as const,dependencies:()=>sections.slice(),lifecycleDependencies:()=>lifecycleSections.slice(),lifecycleState,lifecycleStates,previewLifecycle,validateChanges});
 }

@@ -382,3 +382,22 @@ test('DES setup: the shared vehicle editor retains kilometer rules and allows a 
  await page.evaluate(()=>{_sync.access={user:{id:'synthetic-mechanic',name:'Synthetic mechanic',role:'mechanic'},readable:PlatformSchema.sections.slice(),writable:['vehicles'],fieldPermissions:{vehicles:['toSevereConditions']}};toOpenRules('vehicle',0);});form=page.locator('#toRulesEditor');assert.equal(await form.locator('.to-rule-meter').isDisabled(),true);assert.equal(await form.locator('#to_rules_severe').isEnabled(),true);assert.equal(await form.locator('[data-to-rules-save]').isEnabled(),true);
  await form.locator('#to_rules_severe').check();await saveGeneratorRules(form);assert.equal(await page.locator('#genericModal.open').count(),0);assert.equal(await page.evaluate(()=>data.vehicles[0].toSevereConditions),true);assert.equal(await page.evaluate(()=>data.vehicles[0].maintenanceRules[0].km),15000);assert.equal(await page.evaluate(()=>data.vehicles[0].maintenanceRules[0].id),0);
 });
+
+test('stock render optimization: one snapshot stamp and one batch serve all positions with identical legacy HTML',async()=>{
+ const result=await page.evaluate(()=>{
+  for(let index=0;index<24;index++)data.parts.push({id:'synthetic-batch-'+index,generatorId:0,name:'SYNTHETIC BATCH PART '+index,unit:'шт',minStock:0});
+  const facts=JSON.stringify(data),api=GeneratorSpares,analysis=dispatcherAnalysisStamp,counts={stamps:0,batches:0,single:0};dispatcherAnalysisStamp=()=>{counts.stamps++;return analysis();};
+  window.GeneratorSpares={...api,lifecycleStates(...args){counts.batches++;return api.lifecycleStates(...args);},lifecycleState(...args){counts.single++;return api.lifecycleState(...args);}};
+  const optimized=generatorSparesSectionHtml(0),measured={...counts};delete GeneratorSpares.lifecycleStates;const legacy=generatorSparesSectionHtml(0);window.GeneratorSpares=api;dispatcherAnalysisStamp=analysis;
+  return {same:optimized===legacy,measured,factsUnchanged:facts===JSON.stringify(data),writes:__writes+__commands.length};
+ });assert.equal(result.same,true);assert.deepEqual(result.measured,{stamps:1,batches:1,single:0});assert.equal(result.factsUnchanged,true);assert.equal(result.writes,0);
+});
+
+test('stock render optimization: actions still reject in-place data or rights changes and failed rendering releases the batch',async()=>{
+ const result=await page.evaluate(()=>{
+  generatorSparesSectionHtml(0);const ref=gmUiRef('history',[0,0,'2026-10-30']);data.partMovements[0].qty=6;let stale=false;try{gmUiGetRef(ref);}catch{stale=true;}
+  generatorSparesSectionHtml(0);const current=gmUiRef('history',[0,0,'2026-10-30']);_sync.access={..._sync.access,user:{id:'synthetic-viewer',name:'Synthetic viewer',role:'viewer'},writable:[]};let denied=false;try{gmUiGetRef(current);}catch{denied=true;}
+  try{gmUiWithRenderRefs(()=>{throw Error('Synthetic failed render');});}catch{}const released=gmUiRefBatch===null,analysis=dispatcherAnalysisStamp;let scans=0;dispatcherAnalysisStamp=()=>{scans++;return analysis();};gmUiRef('synthetic-separate-render',[]);dispatcherAnalysisStamp=analysis;
+  return {stale,denied,released,scans,writes:__writes+__commands.length};
+ });assert.deepEqual(result,{stale:true,denied:true,released:true,scans:1,writes:0});
+});
