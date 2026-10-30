@@ -310,3 +310,74 @@ test('journal forecast does not skip a hidden later reading and fall back to an 
 test('journal forecast form review clears cached reading and preview after a global read permission change',async()=>{
  const form=await filledForecastPlan();await form.locator('[name=year]').fill('2027');const row=form.locator('[data-gm-row="0"]');let panel=await forecastInputs(row);await panel.locator('[data-gm-forecast-preview]').click();assert.equal(await panel.locator('[data-gm-forecast-add]').isEnabled(),true);await page.evaluate(()=>{_sync.access={user:{id:'local',name:'Локальный пользователь',role:'admin'},readable:PlatformSchema.sections.filter(section=>section!=='genRecords'),writable:PlatformSchema.sections};});await form.locator('[data-gm-review]').click();panel=row.locator('[data-gm-forecast]');assert.equal(await panel.locator('[data-gm-forecast-field=currentHoursText]').inputValue(),'');assert.equal(await panel.locator('[data-gm-forecast-effective-start]').inputValue(),'');assert.equal(await panel.locator('[data-gm-forecast-add]').isDisabled(),true);assert.equal(await page.evaluate(()=>gmUiSession.rows[0].forecast.preview),null);assert.doesNotMatch(await panel.locator('[data-gm-forecast-counter-source]').innerText(),/1.?000|31.12.2026/);assert.doesNotMatch(await panel.locator('[data-gm-forecast-review]').innerText(),/1.?000|2026-12-31/);assert.equal(await page.evaluate(()=>__commands.length+__writes),0);
 });
+
+async function maintenanceSetupFixture(){
+ await page.evaluate(()=>{
+  data.generators[0].maintenanceRules=[{id:0,label:'ТО-1',work:'Change engine oil and filter',hours:300,months:null,enabled:true},{id:'long-service',label:'ТО-2',work:'Extended maintenance',hours:600,months:null,enabled:true}];
+  data.generators[1].maintenanceRules=[{id:'0',label:'String DES service',work:'String unit only',hours:900,months:null,enabled:true}];
+ });await syncStockFixture();await page.evaluate(()=>generatorMaintenanceSetupOpen());await page.locator('#generatorMaintenanceSetup').waitFor();
+}
+async function openGeneratorRules(index=0){await page.locator('[data-gm-setup-edit="'+index+'"]').click();const form=page.locator('#toRulesEditor');await form.waitFor();return form;}
+async function saveGeneratorRules(form){await form.locator('[data-to-rules-save]').click();await page.waitForFunction(()=>!toRulesSession?.pending);}
+
+test('DES setup: regulations persist on the exact numeric-zero card, retain typed rule IDs and include reusable work text',async()=>{
+ await maintenanceSetupFixture();const before=await page.evaluate(()=>JSON.stringify({parts:data.parts,movements:data.partMovements,journal:data.genRecords,other:data.generators[1]})),form=await openGeneratorRules();
+ await form.locator('.to-rule-row').first().locator('.to-rule-meter').fill('350,5');await form.locator('.to-rule-row').first().locator('.to-rule-work').fill('Reviewed synthetic work list');await saveGeneratorRules(form);
+ assert.equal(await page.locator('#genericModal.open').count(),0);assert.equal(await page.locator('#generatorMaintenanceSetup').count(),1);
+ const saved=await page.evaluate(()=>({rules:data.generators[0].maintenanceRules,id:data.generators[0].id,other:JSON.stringify({parts:data.parts,movements:data.partMovements,journal:data.genRecords,other:data.generators[1]}),disk:JSON.parse(__disk).generators[0].maintenanceRules,writes:__writes}));
+ assert.equal(saved.id,0);assert.equal(saved.rules[0].id,0);assert.equal(saved.rules[0].hours,350.5);assert.equal(saved.rules[0].work,'Reviewed synthetic work list');assert.deepEqual(saved.disk,saved.rules);assert.equal(saved.other,before);assert.equal(saved.writes,1);
+ assert.match(await page.locator('[data-gm-setup-list]').innerText(),/350[,.]5/);
+});
+
+test('DES setup: switching equipment preserves numeric and text identifiers and refuses to drop unsaved changes',async()=>{
+ await maintenanceSetupFixture();let form=await openGeneratorRules();await form.locator('[data-to-asset]').selectOption('1');assert.equal(await page.evaluate(()=>typeof toRulesAssetId),'string');assert.equal(await page.evaluate(()=>toRulesAssetId),'0');
+ form=page.locator('#toRulesEditor');assert.equal(await form.locator('.to-rule-meter').inputValue(),'900');await form.locator('[data-to-asset]').selectOption('0');assert.equal(await page.evaluate(()=>typeof toRulesAssetId),'number');
+ form=page.locator('#toRulesEditor');await form.locator('.to-rule-label').first().fill('Unsaved numeric unit');await form.locator('[data-to-asset]').selectOption('1');assert.equal(await form.locator('[data-to-asset]').inputValue(),'0');assert.equal(await page.evaluate(()=>toRulesAssetId),0);assert.equal(await form.locator('.to-rule-label').first().inputValue(),'Unsaved numeric unit');assert.equal(await page.evaluate(()=>generatorMaintenanceFlush()),false);assert.equal(await page.evaluate(()=>__writes),0);
+});
+
+test('DES setup: refused persistence retains fields and the original card, then permits a deliberate retry',async()=>{
+ await maintenanceSetupFixture();const form=await openGeneratorRules();await form.locator('.to-rule-meter').first().fill('450');await page.evaluate(()=>{__mode='reject';});await saveGeneratorRules(form);
+ assert.equal(await page.locator('#genericModal.open').count(),1);assert.match(await form.locator('[data-to-rules-error]').innerText(),/не подтверждено/);assert.equal(await form.locator('.to-rule-meter').first().inputValue(),'450');assert.equal(await page.evaluate(()=>data.generators[0].maintenanceRules[0].hours),300);assert.equal(await form.locator('[data-to-rules-save]').isEnabled(),true);
+ await page.evaluate(()=>{__mode='ok';});await saveGeneratorRules(form);assert.equal(await page.locator('#genericModal.open').count(),0);assert.equal(await page.evaluate(()=>data.generators[0].maintenanceRules[0].hours),450);
+});
+
+test('DES setup: an incomplete annual draft reuses each selected unit regulations without changing facts and reopens with its interval',async()=>{
+ await maintenanceSetupFixture();const facts=await page.evaluate(()=>JSON.stringify([data.generators,data.genRecords,data.parts,data.partMovements]));await page.locator('[data-gm-setup-org]').selectOption('0');await page.locator('[data-gm-setup-all]').check();await page.locator('[data-gm-setup-year]').fill('2027');await page.locator('[data-gm-setup-create]').click();
+ const form=page.locator('#generatorMaintenanceForm');await form.waitFor();assert.equal(await form.locator('[data-gm-row]').count(),3);const rows=await page.evaluate(()=>gmUiSession.rows.map(row=>({id:row.generatorId,type:row.type,interval:row.forecast.intervalText,work:row.work})));assert.deepEqual(rows.map(row=>row.id),[0,0,'0']);assert.deepEqual(rows.map(row=>row.interval),['300','600','900']);assert.equal(rows[0].work,'Change engine oil and filter');
+ assert.equal(await form.locator('[name=year]').inputValue(),'2027');await form.locator('[name=reason]').fill('Save explicitly incomplete prepared regulations');await commit(form);
+ const id=await page.evaluate(()=>gmUiSession.id);assert.equal(await page.evaluate(()=>JSON.stringify([data.generators,data.genRecords,data.parts,data.partMovements])),facts);assert.equal(await page.evaluate(()=>data.generatorMaintenancePlans.length),1);
+ await page.evaluate(id=>generatorMaintenanceEdit(id),id);assert.equal(await page.evaluate(()=>gmUiSession.rows[0].forecast.intervalText),'300');assert.equal(await page.evaluate(()=>generatorMaintenanceHasPendingEdits()),false);
+});
+
+test('DES setup: monthly workloads copy only to service types of the same typed DES while journal counters and intervals remain independent',async()=>{
+ await maintenanceSetupFixture();await seedForecastJournal();await page.evaluate(()=>generatorMaintenanceSetupOpen({org:'ORG-A',year:2027}));await page.locator('[data-gm-setup-all]').check();await page.locator('[data-gm-setup-create]').click();const first=page.locator('[data-gm-row="0"]');
+ await first.locator('[data-gm-forecast-field=startDate]').fill('2026-12-31');await first.locator('[data-gm-forecast-month="1"]').fill('300');await first.locator('[data-gm-forecast-month="2"]').fill('0');await first.locator('[data-gm-forecast-month="3"]').fill('600');const journal=await page.evaluate(()=>JSON.stringify(data.genRecords));await first.locator('[data-gm-share-hours]').click();
+ const values=await page.evaluate(()=>gmUiSession.rows.map(row=>({id:row.generatorId,interval:row.forecast.intervalText,months:row.forecast.monthlyTexts.slice(0,3)})));assert.deepEqual(values[1].months,['300','0','600']);assert.deepEqual(values[2].months,['','','']);assert.equal(values[1].interval,'600');assert.equal(values[2].interval,'900');assert.equal(await page.evaluate(()=>JSON.stringify(data.genRecords)),journal);
+ await first.locator('[data-gm-forecast-preview]').click();await first.locator('[data-gm-forecast-add]').click();assert.equal(await page.evaluate(()=>gmUiSession.rows[0].occurrences.length),3);assert.equal(await first.locator('[data-gm-calendar-panel]').getAttribute('open'),'');assert.equal(await page.evaluate(()=>__writes+__commands.length),0);
+});
+
+test('DES setup: missing settings, multi-organization selection and stale actions give actionable errors before any write',async()=>{
+ await maintenanceSetupFixture();assert.match(await page.locator('[data-gm-setup-list]').innerText(),/ещё не настроены/);await page.locator('[data-gm-setup-all]').check();await page.locator('[data-gm-setup-create]').click();assert.match(await page.locator('[data-gm-setup-error]').innerText(),/одной организации/);assert.equal(await page.locator('#generatorMaintenanceForm').count(),0);
+ await page.evaluate(()=>{data.generators[0].note='A concurrent card change';});await page.locator('[data-gm-setup-edit="0"]').click();assert.equal(await page.locator('#toRulesEditor').count(),0);assert.equal(await page.evaluate(()=>__writes+__commands.length),0);
+});
+
+test('DES setup: viewer can inspect regulations but cannot enable writes through the form',async()=>{
+ await maintenanceSetupFixture();await page.evaluate(()=>{_sync.access={..._sync.access,user:{id:'synthetic-viewer',name:'Synthetic viewer',role:'viewer'},writable:[]};generatorMaintenanceSetupOpen();});const form=await openGeneratorRules();assert.equal(await form.locator('[data-to-rules-save]').isDisabled(),true);assert.equal(await form.locator('.to-rule-meter').first().isDisabled(),true);await page.evaluate(()=>toSaveRules());assert.equal(await page.evaluate(()=>__writes+__commands.length),0);
+});
+
+test('DES setup: save stays open until ACK, locks repeated submits and drains the close barrier',async()=>{
+ await maintenanceSetupFixture();const form=await openGeneratorRules();await form.locator('.to-rule-meter').first().fill('400');await page.evaluate(()=>{__hold=true;});await form.locator('[data-to-rules-save]').click();await page.waitForFunction(()=>typeof __release==='function');assert.equal(await form.locator('[data-to-rules-save]').isDisabled(),true);await page.evaluate(()=>{closeModal('genericModal');window.__rulesFlushed=false;generatorMaintenanceFlush().then(value=>__rulesFlushed=value);});assert.equal(await page.locator('#genericModal.open').count(),1);assert.equal(await page.evaluate(()=>__rulesFlushed),false);
+ await page.evaluate(()=>{__hold=false;__release();});await page.waitForFunction(()=>__rulesFlushed===true);assert.equal(await page.locator('#genericModal.open').count(),0);assert.equal(await page.evaluate(()=>data.generators[0].maintenanceRules[0].hours),400);assert.equal(await page.evaluate(()=>__writes),1);
+});
+
+test('DES setup: primary save and equipment controls remain reachable in a small window',async()=>{
+ await page.setViewportSize({width:1000,height:720});await maintenanceSetupFixture();const form=await openGeneratorRules();
+ for(const locator of [form.locator('[data-to-rules-save]'),form.locator('[data-to-asset]')]){const box=await locator.boundingBox();assert.ok(box&&box.x>=0&&box.y>=0&&box.x+box.width<=1000&&box.y+box.height<=720,JSON.stringify(box));assert.equal(await locator.isVisible(),true);}
+});
+
+test('DES setup: the shared vehicle editor retains kilometer rules and allows a separate severe-condition permission',async()=>{
+ await page.evaluate(()=>{data.vehicles=[{id:0,plate:'SYNTHETIC-NUMBER',maintenanceRules:[{id:0,label:'Vehicle service',km:10000,months:null,enabled:true}]},{id:'0',plate:'SYNTHETIC-TEXT',maintenanceRules:[{id:'0',label:'Other vehicle service',km:20000,months:null,enabled:true}]}];});await syncStockFixture();await page.evaluate(()=>toOpenRules('vehicle',0));
+ let form=page.locator('#toRulesEditor');await form.locator('.to-rule-meter').fill('15000');await saveGeneratorRules(form);assert.equal(await page.locator('#genericModal.open').count(),0);assert.deepEqual(await page.evaluate(()=>data.vehicles.map(asset=>[asset.id,asset.maintenanceRules[0].km])),[[0,15000],['0',20000]]);
+ await page.evaluate(()=>{_sync.access={user:{id:'synthetic-mechanic',name:'Synthetic mechanic',role:'mechanic'},readable:PlatformSchema.sections.slice(),writable:['vehicles'],fieldPermissions:{vehicles:['toSevereConditions']}};toOpenRules('vehicle',0);});form=page.locator('#toRulesEditor');assert.equal(await form.locator('.to-rule-meter').isDisabled(),true);assert.equal(await form.locator('#to_rules_severe').isEnabled(),true);assert.equal(await form.locator('[data-to-rules-save]').isEnabled(),true);
+ await form.locator('#to_rules_severe').check();await saveGeneratorRules(form);assert.equal(await page.locator('#genericModal.open').count(),0);assert.equal(await page.evaluate(()=>data.vehicles[0].toSevereConditions),true);assert.equal(await page.evaluate(()=>data.vehicles[0].maintenanceRules[0].km),15000);assert.equal(await page.evaluate(()=>data.vehicles[0].maintenanceRules[0].id),0);
+});

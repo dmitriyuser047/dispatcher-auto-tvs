@@ -111,59 +111,61 @@ function toGeneratorRulePlan(g, rule, horizonMonths) {
 
 let toRulesAssetKind = 'vehicle';
 let toRulesAssetId = null;
-
-function toOpenRules(kind = 'vehicle', id) {
-  toRulesAssetKind = kind === 'generator' ? 'generator' : 'vehicle';
-  const assets = (toRulesAssetKind === 'vehicle' ? data.vehicles : data.generators || []).filter(x => !x.archived);
-  const asset = assets.find(x => x.id === id) || assets[0];
-  toRulesAssetId = asset?.id || null;
-  const name = x => toRulesAssetKind === 'vehicle' ? [x.plate,x.make].filter(Boolean).join(' · ') : [x.name,x.location].filter(Boolean).join(' · ');
-  openGenericModal('Виды и интервалы ТО', `<div class="form-row"><div class="form-group"><label>Тип техники</label><select onchange="toOpenRules(this.value)"><option value="vehicle"${toRulesAssetKind === 'vehicle' ? ' selected' : ''}>Транспорт</option><option value="generator"${toRulesAssetKind === 'generator' ? ' selected' : ''}>ДЭС</option></select></div>
-    <div class="form-group"><label>Техника</label><select onchange="toOpenRules(toRulesAssetKind,this.value)">${assets.map(x => `<option value="${htmlEsc(x.id)}"${x.id === asset?.id ? ' selected' : ''}>${htmlEsc(name(x))}</option>`).join('')}</select></div></div>
-    <p style="font-size:13px;color:var(--text3)">Каждый вид обслуживания имеет свой интервал. Срок наступает по первому условию: пробег или моточасы, либо дата. Пустое условие не применяется. Сохраните настройки выбранной техники перед переключением.</p>
-    ${toRulesAssetKind === 'vehicle' ? `<label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:10px 0"><input id="to_rules_severe" type="checkbox" style="width:auto"${asset?.toSevereConditions ? ' checked' : ''}>Тяжёлые условия для базового регламента марки (если собственный интервал не задан)</label>` : ''}
-    <div id="toRulesRows"></div><button class="btn btn-ghost btn-sm" onclick="toAddRuleRow()">+ Вид обслуживания</button>
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px"><button class="btn btn-ghost" onclick="closeModal('genericModal')">Закрыть</button><button class="btn btn-primary" onclick="toSaveRules()"${asset ? '' : ' disabled'}>Сохранить регламенты</button></div>`,850);
-  const rules = asset?.maintenanceRules || [];
-  rules.forEach(toAddRuleRow);
-  if (!rules.length) toAddRuleRow(toRulesAssetKind === 'vehicle' && asset ? { label:'ТО', km:toIntervalKm(asset), months:toIntervalMonths(asset) } : {});
+let toRulesSession = null;
+function toRulesStamp(){return gmUiStamp();}
+function toRulesRaw(){const form=document.getElementById('toRulesEditor');return form?JSON.stringify([...form.querySelectorAll('input,textarea')].map(input=>[input.className,input.type==='checkbox'?input.checked:input.value])):'';}
+function toRulesHasPendingEdits(){const s=toRulesSession;return !!s&&s.stamp===toRulesStamp()&&s.form?.isConnected&&document.getElementById('genericModal')?.classList.contains('open')&&(s.pending||toRulesRaw()!==s.initial);}
+function toRulesAssetLabel(asset,kind=toRulesAssetKind){return (kind==='vehicle'?[asset.plate,asset.make]:[asset.name,asset.serial,asset.site||asset.location]).filter(Boolean).join(' · ');}
+function toRulesPick(kind,token){
+ const s=toRulesSession;if(!s||s.pending)return;
+ if(toRulesHasPendingEdits()){showToast('Сначала сохраните настройки или отмените изменения.');s.form.querySelector('[data-to-kind]').value=toRulesAssetKind;s.form.querySelector('[data-to-asset]').value=String(s.selected);return;}
+ const id=kind===toRulesAssetKind?s.choices[Number(token)]:undefined;toOpenRules(kind,id,s.afterSave);
 }
-
-function toAddRuleRow(rule = {}) {
-  const host = document.getElementById('toRulesRows');
-  if (!host) return;
-  const row = document.createElement('div');
-  row.className = 'form-row to-rule-row';
-  row.dataset.ruleId = rule.id || 'rule_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,7);
-  row.style.cssText = 'padding:10px 0;border-bottom:1px solid var(--border);align-items:flex-end';
-  const meter = toRulesAssetKind === 'vehicle' ? rule.km : rule.hours;
-  row.innerHTML = `<div class="form-group" style="flex:2"><label>Вид работ</label><input class="to-rule-label" value="${htmlEsc(rule.label || '')}" placeholder="Замена масла"></div>
-    <div class="form-group"><label>${toRulesAssetKind === 'vehicle' ? 'Каждые, км' : 'Каждые, мтч'}</label><input class="to-rule-meter" type="number" min="0" step="0.1" value="${htmlEsc(meter ?? '')}"></div>
-    <div class="form-group"><label>Каждые, мес.</label><input class="to-rule-months" type="number" min="1" step="1" value="${htmlEsc(rule.months ?? '')}"></div>
-    <label style="font-size:12px;padding-bottom:16px"><input class="to-rule-enabled" type="checkbox" style="width:auto"${rule.enabled !== false ? ' checked' : ''}> Включено</label>
-    <button class="btn btn-ghost btn-sm" style="margin-bottom:14px" onclick="this.closest('.to-rule-row').remove()">Убрать</button>`;
-  host.appendChild(row);
+function toOpenRules(kind='vehicle',id,afterSave){
+ try{
+  kind=kind==='generator'?'generator':'vehicle';const section=kind==='generator'?'generators':'vehicles',assets=(data[section]||[]).filter(asset=>!asset.archived&&!asset.deleted);
+  if(!gmUiRead([section]))throw Error('Нет доступа к карточкам выбранной техники.');const asset=id===undefined?assets[0]:assets.find(asset=>asset.id===id);if(!asset){showToast(kind==='generator'?'Нет выбранной доступной ДЭС.':'Техника не найдена.');return;}
+  if(assets.filter(item=>item.id===asset.id).length!==1)throw Error('Карточка техники найдена неоднозначно.');toRulesAssetKind=kind;toRulesAssetId=asset.id;
+  const s={kind,section,id:asset.id,choices:assets.map(asset=>asset.id),selected:assets.indexOf(asset),stamp:toRulesStamp(),source:PlatformKernel.stableSerialize(asset),rules:gmUiClone(asset.maintenanceRules||[]),afterSave,pending:false};toRulesSession=s;
+  s.canNorm=gmUiWrite(section,['maintenanceRules']);s.canSevere=kind==='vehicle'&&gmUiWrite(section,['toSevereConditions']);const readonly=s.readonly=!s.canNorm&&!s.canSevere;
+  openGenericModal(kind==='generator'?'Настройка ТО ДЭС':'Настройка ТО транспорта',
+   '<div id="toRulesEditor" class="gm-ui-form to-rules-editor"><div class="gm-rules-fields"><div class="gm-ui-grid"><label>Тип техники<select data-to-kind onchange="toRulesPick(this.value,0)"><option value="vehicle"'+(kind==='vehicle'?' selected':'')+'>Транспорт</option><option value="generator"'+(kind==='generator'?' selected':'')+'>ДЭС</option></select></label><label>'+(kind==='generator'?'Выбранная ДЭС':'Выбранный транспорт')+'<select data-to-asset onchange="toRulesPick(toRulesAssetKind,this.value)">'+assets.map((item,index)=>'<option value="'+index+'"'+(item.id===asset.id?' selected':'')+'>'+htmlEsc(toRulesAssetLabel(item,kind))+'</option>').join('')+'</select></label></div>'+
+   '<div class="gm-setup-explanation"><strong>1. Какие работы и как часто</strong><p>Каждый вид ТО задаётся отдельной строкой: например, «Замена масла и фильтра» — каждые 300 '+(kind==='generator'?'моточасов':'км')+'. Интервал возьмите из регламента вашей техники.</p><p>Поле «Либо через месяцев» необязательно. Если заданы оба интервала, ТО наступает по более раннему условию.</p></div>'+
+   (readonly?'<p class="gm-ui-warning">Настройки доступны для просмотра. Для изменения нужно право на регламенты техники.</p>':'')+
+   (kind==='vehicle'?'<label class="gm-ui-confirm"><input id="to_rules_severe" type="checkbox"'+(asset.toSevereConditions?' checked':'')+'>Тяжёлые условия для базового регламента марки</label>':'')+
+   '<div id="toRulesRows"></div><button type="button" class="btn btn-ghost" data-to-rule-add onclick="toAddRuleRow()">+ Ещё один вид ТО</button>'+
+   '<p class="gm-setup-next">'+(kind==='generator'?'2. После сохранения выберите ДЭС в списке настройки и перейдите к графику. Виды ТО и интервалы подставятся; останется задать плановые часы по месяцам.':'После сохранения эти виды ТО используются при планировании обслуживания выбранного транспорта.')+'</p>'+
+   '</div><div data-to-rules-error role="status"></div><div class="gm-ui-actions"><button type="button" class="btn btn-ghost" onclick="closeModal(&quot;genericModal&quot;)">Отменить</button><button type="button" class="btn btn-primary" data-to-rules-save onclick="toSaveRules()">Сохранить настройки этой '+(kind==='generator'?'ДЭС':'техники')+'</button></div></div>',850);
+  s.form=document.getElementById('toRulesEditor');(asset.maintenanceRules||[]).forEach(rule=>toAddRuleRow(rule));if(!s.rules.length)toAddRuleRow(kind==='vehicle'?{label:'ТО',km:toIntervalKm(asset),months:toIntervalMonths(asset)}:{});
+  toRulesUnlock(s);s.initial=toRulesRaw();
+ }catch(error){showToast(error.message);}
 }
-
-async function toSaveRules() {
-  const asset = (toRulesAssetKind === 'vehicle' ? data.vehicles : data.generators || []).find(x => x.id === toRulesAssetId);
-  if (!asset) return;
-  const rules = [];
-  for (const row of document.querySelectorAll('#toRulesRows .to-rule-row')) {
-    const label = row.querySelector('.to-rule-label').value.trim();
-    const rawMeter = row.querySelector('.to-rule-meter').value.trim(), rawMonths = row.querySelector('.to-rule-months').value.trim();
-    const meter = rawMeter ? Number(rawMeter) : null, months = rawMonths ? Number(rawMonths) : null;
-    if (!label || meter != null && (!Number.isFinite(meter) || meter <= 0) || months != null && (!Number.isInteger(months) || months <= 0) || !(meter > 0 || months > 0)) {
-      showToast('Укажите вид работ и положительный интервал: км/моточасы или целое число месяцев'); return;
-    }
-    if (rules.some(r => r.label.toLowerCase() === label.toLowerCase())) { showToast('Названия видов ТО должны различаться'); return; }
-    rules.push({ id:row.dataset.ruleId, label, [toRulesAssetKind === 'vehicle' ? 'km' : 'hours']:meter, months, enabled:row.querySelector('.to-rule-enabled').checked });
+function toRulesUnlock(s){
+ s.form.querySelectorAll('input,select,textarea,button').forEach(control=>control.disabled=false);
+ if(!s.canNorm)s.form.querySelectorAll('.to-rule-row input,.to-rule-row textarea,.to-rule-row button,[data-to-rule-add]').forEach(control=>control.disabled=true);
+ const severe=s.form.querySelector('#to_rules_severe');if(severe)severe.disabled=!s.canSevere;s.form.querySelector('[data-to-rules-save]').disabled=s.readonly;
+}
+function toAddRuleRow(rule={}){
+ const host=document.getElementById('toRulesRows');if(!host||toRulesSession?.pending)return;const row=document.createElement('div');row.className='to-rule-row gm-rule-card';
+ row._toRuleId=rule.id??wfId('maintenance-rule');row.dataset.ruleId=String(row._toRuleId);const meter=toRulesAssetKind==='vehicle'?rule.km:rule.hours;
+ row.innerHTML='<div class="gm-ui-grid"><label>Название вида ТО<input class="to-rule-label" value="'+htmlEsc(rule.label||'')+'" placeholder="Например: ТО-1"></label><label>Каждые, '+(toRulesAssetKind==='vehicle'?'км':'моточасов')+'<input class="to-rule-meter" inputmode="decimal" value="'+htmlEsc(meter==null?'':precisionFormat(meter))+'" placeholder="Например: 300"></label><label>Либо через месяцев · необязательно<input class="to-rule-months" inputmode="numeric" value="'+htmlEsc(rule.months??'')+'" placeholder="Без календарного интервала"></label><label class="gm-ui-confirm"><input class="to-rule-enabled" type="checkbox"'+(rule.enabled!==false?' checked':'')+'>Использовать в графике</label><label class="gm-ui-wide">Какие работы входят в ТО · необязательно<textarea class="to-rule-work" rows="2" placeholder="Например: замена масла, масляного и топливного фильтра">'+htmlEsc(rule.work||'')+'</textarea><small>Этот перечень подставится в новый график.</small></label></div><button type="button" class="btn btn-ghost btn-sm" onclick="this.closest(&quot;.to-rule-row&quot;).remove()">Убрать вид ТО</button>';host.appendChild(row);
+}
+async function toSaveRules(){
+ const s=toRulesSession;if(!s||s.pending)return;const errorNode=s.form.querySelector('[data-to-rules-error]');
+ try{
+  if(s.stamp!==toRulesStamp()||!(gmUiWrite(s.section,['maintenanceRules'])||s.kind==='vehicle'&&gmUiWrite(s.section,['toSevereConditions'])))throw Error('База или права изменились. Откройте настройки заново.');
+  const matches=(data[s.section]||[]).filter(asset=>asset.id===s.id);if(matches.length!==1||PlatformKernel.stableSerialize(matches[0])!==s.source)throw Error('Карточка техники изменилась. Откройте настройки заново.');const asset=matches[0],rules=[];
+  for(const row of s.canNorm?s.form.querySelectorAll('.to-rule-row'):[]){
+   const label=row.querySelector('.to-rule-label').value.trim(),meter=precisionInput(row.querySelector('.to-rule-meter'),{scale:3,blank:'null'}),months=precisionInput(row.querySelector('.to-rule-months'),{scale:0,blank:'null'});
+   if(!label||meter!==null&&meter<=0||months!==null&&months<=0||!(meter>0||months>0))throw Error('Для каждого вида ТО укажите название и положительный интервал в '+(s.kind==='generator'?'моточасах':'км')+' или месяцах.');
+   if(rules.some(rule=>rule.label.toLocaleLowerCase('ru')===label.toLocaleLowerCase('ru')))throw Error('Названия видов ТО должны различаться.');
+   if(!PlatformContracts.identifier(row._toRuleId))throw Error('Не подтверждён код вида ТО. Откройте настройки заново.');const original=s.rules.find(rule=>rule.id===row._toRuleId)||{},work=row.querySelector('.to-rule-work').value.trim();if(work.length>20000)throw Error('Перечень работ не должен превышать 20 000 символов.');rules.push({...original,...(work||Object.hasOwn(original,'work')?{work}:{}),id:row._toRuleId,label,[s.kind==='vehicle'?'km':'hours']:meter,months,enabled:row.querySelector('.to-rule-enabled').checked});
   }
-  asset.maintenanceRules = rules;
-  if (toRulesAssetKind === 'vehicle') asset.toSevereConditions = !!document.getElementById('to_rules_severe')?.checked;
-  if (!await saveData(data)) return;
-  closeModal('genericModal');
-  showToast('Регламенты сохранены. Постройте план, чтобы обновить график.');
+  if(s.canNorm)asset.maintenanceRules=rules;if(s.canSevere)asset.toSevereConditions=!!s.form.querySelector('#to_rules_severe')?.checked;
+  s.pending=true;errorNode.textContent='Сохраняем настройки…';s.form.querySelectorAll('input,select,textarea,button').forEach(control=>control.disabled=true);
+  if(!await saveData(data)){errorNode.textContent='Сохранение не подтверждено. Введённые настройки остаются в форме; проверьте подключение и повторите сохранение.';return;}
+  s.initial=toRulesRaw();s.pending=false;closeModal('genericModal');toRulesSession=null;showToast('Настройки ТО сохранены для '+toRulesAssetLabel(asset,s.kind)+'.');if(typeof s.afterSave==='function')s.afterSave();
+ }catch(error){errorNode.textContent=error.message;errorNode.className='gm-ui-error';showToast(error.message);}finally{s.pending=false;if(toRulesSession===s&&s.stamp===toRulesStamp())toRulesUnlock(s);}
 }
 
 // План ТО машины на horizon месяцев вперёд
@@ -279,7 +281,7 @@ function toPlanOverview() {
 
 // ─── Окно «Регламенты ТО» ─────────────────────────────────
 
-function toGeneratorMaintenanceEntryHtml(){return typeof generatorMaintenanceOpen==='function'?gmUiButton('plans',[''],'График ТО ДЭС по организации'):'';}
+function toGeneratorMaintenanceEntryHtml(){return typeof generatorMaintenanceSetupOpen==='function'?gmUiButton('setup',[],'1. Настроить ТО ДЭС')+gmUiButton('plans',[''],'Сохранённые графики'):'';}
 
 function toShowRegs() {
   const list = toPlanOverview();
@@ -313,7 +315,7 @@ function toShowRegs() {
       <button class="btn btn-ghost" onclick="toOpenRules()">Настроить виды ТО</button>
       ${toGeneratorMaintenanceEntryHtml()}
       <span>
-        <button class="btn btn-ghost" onclick="closeModal('genericModal')">Закрыть</button>
+        <button class="btn btn-ghost" onclick="closeModal(&quot;genericModal&quot;)">Закрыть</button>
         <button class="btn btn-primary" onclick="closeModal('genericModal');toRebuildPlanClick()">Построить план</button>
       </span>
     </div>`, 1100);

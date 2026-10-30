@@ -179,17 +179,18 @@ function renderToScheduleSection() {
       <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">
         <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
         <div>
-          <h2 style="margin:0;font-size:20px;font-weight:700">График ТО</h2>
-          <p style="margin:2px 0 0;color:var(--text3);font-size:13px">Техническое обслуживание транспорта и ДЭС</p>
+          <h2 style="margin:0;font-size:20px;font-weight:700">Обслуживание и графики ТО</h2>
+          <p style="margin:2px 0 0;color:var(--text3);font-size:13px">Журнал обслуживания и планирование работ для транспорта и ДЭС</p>
         </div>
       </div>
 
+      <section class="gm-setup-entry"><div><strong>График ТО ДЭС · начните с настройки техники</strong><p>Задайте виды работ и интервалы для каждой ДЭС. Затем введите плановые часы и получите общий график организации.</p></div><div class="gm-ui-actions">${typeof toGeneratorMaintenanceEntryHtml==='function'?toGeneratorMaintenanceEntryHtml():''}</div></section>
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
         <button class="btn btn-ghost btn-sm ${tssFilter==='all'?'active':''}" onclick="tssSetFilter('all')" style="${tssFilter==='all'?'background:var(--accent);color:#fff':''}">Все</button>
         <button class="btn btn-ghost btn-sm ${tssFilter==='vehicle'?'active':''}" onclick="tssSetFilter('vehicle')" style="${tssFilter==='vehicle'?'background:var(--accent);color:#fff':''}">Транспорт</button>
         <button class="btn btn-ghost btn-sm ${tssFilter==='generator'?'active':''}" onclick="tssSetFilter('generator')" style="${tssFilter==='generator'?'background:var(--accent);color:#fff':''}">ДЭС</button>
         <div style="flex:1"></div>
-        ${typeof toGeneratorMaintenanceEntryHtml==='function'?toGeneratorMaintenanceEntryHtml():''}
+
         <button class="btn btn-ghost btn-sm" onclick="toShowRegs()" title="Регламенты ТО по маркам и ближайшие сроки">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
           Регламенты
