@@ -13,6 +13,7 @@ function openAddGenerator() {
   ['gm_norm','gm_norm100','gm_norm50','gm_norm_idle','gm_power','gm_hours_init','gm_fuel_balance','gm_cost'].forEach(id => document.getElementById(id).value = '');
   populateGenTankSelect('');
   if(typeof effectiveParametersLegacyForm==='function')effectiveParametersLegacyForm('generators',editingGeneratorId==null?null:(data.generators||[]).find(row=>row.id===editingGeneratorId),'generatorModal');
+  if(!platformCaptureCardForm('generators',editingGeneratorId,'generatorModal'))return;
   openModal('generatorModal');
 }
 
@@ -41,6 +42,7 @@ function openEditGenerator(id) {
   populateGenTankSelect(g.tankId ?? '');
   document.getElementById('generatorModal')._generatorEditState={id,fields:genCardSourceFields()};
   if(typeof effectiveParametersLegacyForm==='function')effectiveParametersLegacyForm('generators',editingGeneratorId==null?null:(data.generators||[]).find(row=>row.id===editingGeneratorId),'generatorModal');
+  if(!platformCaptureCardForm('generators',editingGeneratorId,'generatorModal'))return;
   openModal('generatorModal');
 }
 
@@ -67,19 +69,26 @@ async function saveGenerator() {
     note:        document.getElementById('gm_note').value.trim(),
     tankId,
   };
-  if (editingGeneratorId!=null&&editingGeneratorId!=='') {
-    const g = data.generators.find(x => x.id === editingGeneratorId);
-    if (!g) return;
-    const editState=document.getElementById('generatorModal')._generatorEditState;
-    if(editState?.id===editingGeneratorId&&editState.fields===genCardSourceFields())obj={...g,name,note:document.getElementById('gm_note').value.trim()};
-    if (g.tankId !== obj.tankId) genPreserveTankHistory(g);
-    Object.assign(g, obj);
-  } else {
-    obj.id = 'g_' + Date.now();
-    data.generators.push(obj);
-    selectedGeneratorId = obj.id;
+  const existingCard=data.generators.find(row=>row.id===editingGeneratorId),editState=document.getElementById('generatorModal')._generatorEditState;
+  if(existingCard&&editState?.id===editingGeneratorId&&editState.fields===genCardSourceFields())obj={...existingCard,name,note:document.getElementById('gm_note').value.trim()};
+  if(existingCard&&existingCard.tankId!==obj.tankId){
+    // A tank change keeps journal-history updates in the same existing transaction.
+    if (editingGeneratorId!=null&&editingGeneratorId!=='') {
+      const g = data.generators.find(x => x.id === editingGeneratorId);
+      if (!g) return;
+      const editState=document.getElementById('generatorModal')._generatorEditState;
+      if(editState?.id===editingGeneratorId&&editState.fields===genCardSourceFields())obj={...g,name,note:document.getElementById('gm_note').value.trim()};
+      if (g.tankId !== obj.tankId) genPreserveTankHistory(g);
+      Object.assign(g, obj);
+    } else {
+      obj.id = 'g_' + Date.now();
+      data.generators.push(obj);
+      selectedGeneratorId = obj.id;
+    }
+    if (!await saveData(data)) return;
+  }else{
+    const result=await platformSaveCardForm('generators',editingGeneratorId,obj,'generatorModal');if(!result.ok){showToast(result.message||'Сохранение не подтверждено');return;}if(!existingCard)selectedGeneratorId=result.id;
   }
-  if (!await saveData(data)) return;
   closeModal('generatorModal');
   renderGeneratorList();
   const g = data.generators.find(x => x.id === selectedGeneratorId);

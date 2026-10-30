@@ -20,7 +20,7 @@ function fixture(t,format='json'){
   const calls=[];let sendHook=null,readHook=null,service;
   function freshService(outbox=box){return createOperationRecovery({outbox,send:async(ctx,json)=>{calls.push(json);if(sendHook)return sendHook(ctx,json);return storage.executeCommand(dir,JSON.parse(json),{principal,now:'2026-10-22T12:00:00.000Z'});},lookup:async(ctx,id,digest)=>storage.readOperation(dir,{id,digest},principal)});}
   service=freshService();
-  const sandbox={console,PlatformKernel:kernel,PlatformCommands:commands,PlatformContracts:contracts,PlatformSchema:schema,
+  const sandbox={console,DispatcherApplication:require('../assets/core/application.js'),PlatformKernel:kernel,PlatformCommands:commands,PlatformContracts:contracts,PlatformSchema:schema,
     data:copy(snapshot.data),_lastPersisted:JSON.stringify(snapshot.data),_pendingSaveOperations:new Set(),
     crypto:{randomUUID:()=>crypto.randomUUID()},structuredClone,setTimeout,clearTimeout,setInterval,clearInterval,
     document:{querySelector:()=>null,activeElement:null},showToast:()=>{},rebuildIndex:()=>{},dispatcherInvalidate:()=>{},
@@ -30,7 +30,7 @@ function fixture(t,format='json'){
   };
   sandbox.dispatcherContext=()=>({identity:sandbox.__identity,readable:schema.sections.slice()});
   const realm=vm.createContext(sandbox);
-  vm.runInContext('let _loadWriteBlocked=false;\n'+fs.readFileSync(path.join(__dirname,'../assets/js/25f-sync.js'),'utf8')+'\n'+fs.readFileSync(path.join(__dirname,'../assets/js/51-platform-bridge.js'),'utf8')+
+  vm.runInContext('let _loadWriteBlocked=false;\n'+fs.readFileSync(path.join(__dirname,'../assets/js/25f-sync.js'),'utf8')+'\n'+fs.readFileSync(path.join(__dirname,'../assets/js/51-platform-bridge.js'),'utf8')+'\n'+fs.readFileSync(path.join(__dirname,'../assets/js/51a-application-host.js'),'utf8')+
     '\nglobalThis.state=_sync;globalThis.entries=_platformCommandIntents;globalThis.runCommand=platformExecuteCommand;globalThis.getBaseline=()=>JSON.parse(_lastPersisted);'+
     'globalThis.replaceData=(database,baseline)=>{data=database;_lastPersisted=JSON.stringify(baseline);};',realm);
   const state=realm.state;state.enabled=true;state.databaseToken=snapshot.databaseToken;state.platform={...snapshot.platform};state.revs={...snapshot.revisions};

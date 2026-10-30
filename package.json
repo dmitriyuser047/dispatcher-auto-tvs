@@ -5,7 +5,7 @@
   "description": "Диспетчеризация авто группы компаний ООО Технрайз Велл Сервис",
   "main": "electron/main.js",
   "scripts": {
-    "pretest": "node scripts/build-typed-core.cjs --check && node scripts/build-inventory-ui.cjs --check && node scripts/build-inventory-server.cjs --check && node scripts/build-gsm-ui.cjs --check",
+    "pretest": "node scripts/build-application.cjs --check && node scripts/build-typed-core.cjs --check && node scripts/build-inventory-ui.cjs --check && node scripts/build-inventory-server.cjs --check && node scripts/build-gsm-ui.cjs --check",
     "test": "node --test --test-concurrency=4 tests/*.test.cjs",
     "build:typed-core": "node scripts/build-typed-core.cjs",
     "check:typed-core": "node scripts/build-typed-core.cjs --check",
@@ -23,7 +23,10 @@
     "test:electron": "node --test --test-concurrency=1 tests/unified-electron.cjs tests/semantic-command-electron.cjs tests/document-lifecycle-electron.cjs tests/period-control-electron.cjs tests/tank-stock-electron.cjs tests/procurement-electron.cjs tests/cost-electron.cjs tests/repair-electron.cjs tests/personnel-planning-electron.cjs tests/document-print-electron.cjs tests/controlled-import-electron.cjs tests/access-policy-electron.cjs tests/safe-html-pdf-electron.cjs tests/archive-decoder-electron.cjs tests/database-maintenance-electron.cjs tests/platform-compatibility-electron.cjs tests/storage-executor-electron.cjs tests/seasonal-fuel-electron.cjs tests/generator-maintenance-electron.cjs tests/asset-inventory-electron.cjs tests/asset-inventory-bulk-electron.cjs tests/personnel-timesheet-electron.cjs tests/transport-export-card-electron.cjs tests/inventory-section-electron.cjs tests/inventory-any-source-electron.cjs tests/inventory-count-photos-electron.cjs",
     "start": "electron .",
     "build": "node scripts/build-installer.cjs",
-    "test:generator-maintenance": "node --test tests/generator-maintenance.test.cjs tests/generator-maintenance-calendar.test.cjs tests/generator-maintenance-forecast.test.cjs tests/generator-maintenance-journal-counter.test.cjs tests/generator-spares.test.cjs tests/generator-maintenance-print.test.cjs tests/generator-maintenance-storage.test.cjs tests/schema5-compatibility.test.cjs tests/schema5-copy.test.cjs tests/generator-maintenance-spares.test.cjs"
+    "test:generator-maintenance": "node --test tests/generator-maintenance.test.cjs tests/generator-maintenance-calendar.test.cjs tests/generator-maintenance-forecast.test.cjs tests/generator-maintenance-journal-counter.test.cjs tests/generator-spares.test.cjs tests/generator-maintenance-print.test.cjs tests/generator-maintenance-storage.test.cjs tests/schema5-compatibility.test.cjs tests/schema5-copy.test.cjs tests/generator-maintenance-spares.test.cjs",
+    "build:application": "node scripts/build-application.cjs",
+    "check:application": "node scripts/build-application.cjs --check",
+    "check:architecture": "node scripts/check-application-architecture.cjs"
   },
   "devDependencies": {
     "electron": "44.9.0",

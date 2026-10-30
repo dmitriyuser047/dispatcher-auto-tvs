@@ -98,50 +98,9 @@ function platformRuntimeStatus() {
   const status = platformRuntime().status();
   return { ...status, lastError:_platformLastError ? { ..._platformLastError } : null };
 }
-function platformSaveBaseline() {
-  let previous = {};
-  try { previous = _lastPersisted ? JSON.parse(_lastPersisted) : {}; } catch { throw Error('Не удалось прочитать исходный снимок. Загрузите базу заново.'); }
-  if (typeof _sync !== 'undefined' && _sync.enabled) {
-    Object.entries(_sync.synced).forEach(([section,json]) => { previous[section]=JSON.parse(json); });
-  }
-  return previous;
-}
+function platformSaveBaseline(){return platformApplication().repository.baseline();}
 function platformSameSession(context) { return context.identity === platformSessionContext().identity; }
-async function platformExecuteSave(database, options, persist) {
-  const context = platformSessionContext();
-  let submitted;
-  try {
-    if (context.blocked) throw Error('Основная база не прочитана. Сначала восстановите подключение или базу.');
-    if(typeof _sync!=='undefined'&&_sync.platform?.needsSchemaUpgrade)throw Object.assign(Error('База открыта только для чтения. В разделе «Состояние программы» создайте отдельную обновлённую копию; исходная база останется прежней.'),{code:'SCHEMA_UPGRADE_REQUIRED'});
-    submitted = JSON.stringify(database);
-    const previous = platformSaveBaseline();
-    if(['dispatchJobs','workOrders'].some(name=>JSON.stringify(previous[name]||[])!==JSON.stringify(database[name]||[]))&&_sync.platform?.calendar!==1)
-      throw platformPrepareError('UNSUPPORTED_CALENDAR','Подключение не поддерживает проверку учётного календаря. Загрузите данные из совместимой версии программы.');
-    const result = await platformRuntime().run({ id:options?.operation?.id, previous, next:database, identity:context.identity,
-      options:{ allowLegacy:true, ...(options || {}), requireOperationReceipt:!!_sync.platform?.operations } }, async plan => {
-      if (!platformSameSession(context)) throw Object.assign(Error('База или пользователь изменились. Откройте форму заново.'),{code:'SESSION_CHANGED'});
-      if(platformPrepareAccessStamp(platformSessionContext())!==platformPrepareAccessStamp(context))throw platformPrepareError('STALE_ACCESS','Права или учётный календарь изменились. Проверьте форму заново.');
-      if (JSON.stringify(database) !== submitted) throw Object.assign(Error('Данные изменились в ожидании сохранения. Повторите проверку формы.'),{code:'STALE_DRAFT'});
-      if (typeof _sync !== 'undefined') _sync.lastResult=null;
-      const saved = await persist({ ...(options || {}), _platformManaged:true, requireOperationReceipt:!!_sync.platform?.operations, operation:{ id:plan.id } });
-      if (saved !== true) throw Error('Сохранение не подтверждено. Проверьте подключение и состояние базы.');
-      if (!platformSameSession(context)) throw Object.assign(Error('База изменилась во время сохранения. Проверьте результат в исходной базе.'),{code:'SESSION_CHANGED'});
-      const ack = typeof _sync === 'undefined' ? null : _sync.lastResult;
-      return ack?.ok ? { ...ack, identity:context.identity, operationId:ack.operationReceipt?.id } : true;
-    });
-    _platformLastError=null;
-    return !!result;
-  } catch (error) {
-    // Domain editors often stage values in data before calling saveData. The
-    // shared failure path restores only this session, never a newly opened DB.
-    if (platformSameSession(context) && database === data && typeof restoreSaveBaseline === 'function') restoreSaveBaseline(database);
-    const detail = (error.issues || []).slice(0,3).map(issue => issue.message).filter(Boolean).join('; ');
-    const message = error.message + (detail && !error.message.includes(detail) ? ': '+detail : '');
-    if (platformSameSession(context)) _platformLastError={ code:error.code || 'SAVE_FAILED', message, at:new Date().toISOString() };
-    showToast('Сохранение остановлено: '+message);
-    return false;
-  }
-}
+function platformExecuteSave(database,options,persist){return platformApplication().commands.saveSnapshot(database,options,persist);}
 const _platformCommandIntents=new Map(),PLATFORM_COMMAND_HISTORY=64;
 function platformCapturePrintArchiveContext(){
   return {database:data,stamp:syncSessionStamp(),access:platformPrepareAccessStamp(platformSessionContext()),databaseToken:_sync.databaseToken,
@@ -219,7 +178,8 @@ function platformCommandNeedsPersonnelPlanning(command,source){
   const scope=platformCommandDocumentScope(command,source);
   return !!scope&&(scope.section==='shiftReports'||scope.section==='dispatchJobs'&&scope.candidates.some(row=>row.driverId!==undefined&&row.driverId!==null&&row.driverId!==''||Object.hasOwn(row,'personnelRequirements')));
 }
-function platformExecuteCommand(value,options={}){
+function platformExecuteCommand(command,options={}){return platformApplication().commands.semantic(command,options);}
+function platformExecuteDomainCommand(value,options={}){
   let command,id,stamp,signature,entry;
   try{
     command=PlatformCommands.parseCommand(value);

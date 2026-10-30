@@ -161,9 +161,9 @@ async function toSaveRules(){
    if(rules.some(rule=>rule.label.toLocaleLowerCase('ru')===label.toLocaleLowerCase('ru')))throw Error('Названия видов ТО должны различаться.');
    if(!PlatformContracts.identifier(row._toRuleId))throw Error('Не подтверждён код вида ТО. Откройте настройки заново.');const original=s.rules.find(rule=>rule.id===row._toRuleId)||{},work=row.querySelector('.to-rule-work').value.trim();if(work.length>20000)throw Error('Перечень работ не должен превышать 20 000 символов.');rules.push({...original,...(work||Object.hasOwn(original,'work')?{work}:{}),id:row._toRuleId,label,[s.kind==='vehicle'?'km':'hours']:meter,months,enabled:row.querySelector('.to-rule-enabled').checked});
   }
-  if(s.canNorm)asset.maintenanceRules=rules;if(s.canSevere)asset.toSevereConditions=!!s.form.querySelector('#to_rules_severe')?.checked;
+  const changes={...(s.canNorm?{maintenanceRules:rules}:{}),...(s.canSevere?{toSevereConditions:!!s.form.querySelector('#to_rules_severe')?.checked}:{})},operationText=JSON.stringify(changes);if(s.operationText!==operationText){s.operationText=operationText;s.operationId=wfId('maintenance-settings');}
   s.pending=true;errorNode.textContent='Сохраняем настройки…';s.form.querySelectorAll('input,select,textarea,button').forEach(control=>control.disabled=true);
-  if(!await saveData(data)){errorNode.textContent='Сохранение не подтверждено. Введённые настройки остаются в форме; проверьте подключение и повторите сохранение.';return;}
+  const result=await platformApplication().commands.changeRows({type:'ChangeRows',version:1,section:s.section,edits:[{id:s.id,expected:JSON.parse(JSON.stringify(asset)),changes}],reason:'Настройка регламентов ТО',operationId:s.operationId});if(!result.ok){errorNode.textContent='Сохранение не подтверждено. Введённые настройки остаются в форме; проверьте подключение и повторите сохранение.';return;}
   s.initial=toRulesRaw();s.pending=false;closeModal('genericModal');toRulesSession=null;showToast('Настройки ТО сохранены для '+toRulesAssetLabel(asset,s.kind)+'.');if(typeof s.afterSave==='function')s.afterSave();
  }catch(error){errorNode.textContent=error.message;errorNode.className='gm-ui-error';showToast(error.message);}finally{s.pending=false;if(toRulesSession===s&&s.stamp===toRulesStamp())toRulesUnlock(s);}
 }

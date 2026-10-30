@@ -19,6 +19,7 @@ function openAddVehicle() {
   document.getElementById('vm_to_km').value = '';
   document.getElementById('vm_to_months').value = '';
   if(typeof effectiveParametersLegacyForm==='function')effectiveParametersLegacyForm('vehicles',editingVehicleId==null?null:data.vehicles.find(row=>row.id===editingVehicleId),'vehicleModal');
+  if(!platformCaptureCardForm('vehicles',editingVehicleId,'vehicleModal'))return;
   openModal('vehicleModal');
 }
 
@@ -50,6 +51,7 @@ function openEditVehicle(id) {
   document.getElementById('vm_justification').value = v.justification || '';
   document.getElementById('vm_note').value = v.note || '';
   if(typeof effectiveParametersLegacyForm==='function')effectiveParametersLegacyForm('vehicles',editingVehicleId==null?null:data.vehicles.find(row=>row.id===editingVehicleId),'vehicleModal');
+  if(!platformCaptureCardForm('vehicles',editingVehicleId,'vehicleModal'))return;
   openModal('vehicleModal');
 }
 
@@ -83,16 +85,22 @@ async function saveVehicle() {
   const twin = data.vehicles.find(x => x.id !== editingVehicleId && plateKey(x.plate) === plateKey(plate));
   if (twin && !confirm('Госномер «' + plate + '» уже есть у машины ' + (twin.make || '') + (twin.org ? ' (' + twin.org + ')' : '') +
       '.\nОдинаковые номера путают загрузку заправок. Всё равно сохранить?')) return;
-  if (editingVehicleId!=null&&editingVehicleId!=='') {
-    const v = data.vehicles.find(x => x.id === editingVehicleId);
-    if (typeof gsmPreserveVehicleHistory === 'function' && v.org !== obj.org) gsmPreserveVehicleHistory(data, v);
-    Object.assign(v, obj);
-  } else {
-    obj.id = 'v_' + Date.now();
-    data.vehicles.push(obj);
-    selectedVehicleId = obj.id;
+  const existingCard=data.vehicles.find(row=>row.id===editingVehicleId);
+  if(existingCard&&existingCard.org!==obj.org&&typeof gsmPreserveVehicleHistory==='function'){
+    // Organization changes retain the existing atomic multi-section history path.
+    if (editingVehicleId!=null&&editingVehicleId!=='') {
+      const v = data.vehicles.find(x => x.id === editingVehicleId);
+      if (typeof gsmPreserveVehicleHistory === 'function' && v.org !== obj.org) gsmPreserveVehicleHistory(data, v);
+      Object.assign(v, obj);
+    } else {
+      obj.id = 'v_' + Date.now();
+      data.vehicles.push(obj);
+      selectedVehicleId = obj.id;
+    }
+    if (!await saveData(data)) return;
+  }else{
+    const result=await platformSaveCardForm('vehicles',editingVehicleId,obj,'vehicleModal');if(!result.ok){showToast(result.message||'Сохранение не подтверждено');return;}if(!existingCard)selectedVehicleId=result.id;
   }
-  if (!await saveData(data)) return;
   closeModal('vehicleModal');
   populateOrgSelect();
   renderVehicleList();
