@@ -165,6 +165,13 @@ function start({port,dataDir,backupFn,backup,serverName,key,settings,users,tls,r
     const currentPrincipal=()=>currentWritePrincipal(session,authenticateRequest);
     const principal = authenticateRequest();
     if (!principal) { respond(res,401,{ok:false,error:'Неверный или отозванный ключ доступа'}); return; }
+    if(req.url==='/api/des-object'){
+      void(async()=>{try{
+        const captured=currentPrincipal();
+        session.desObjectHttp??=require('./des-object-http.cjs').createDesObjectHttp({dataDir});
+        await session.desObjectHttp.handle(req,res,{principal:captured,assertCurrent:()=>currentWritePrincipal(session,authenticateRequest,captured)});
+      }catch(error){writeFailure(res,error);}})();return;
+    }
     if(req.method==='POST'&&req.url==='/api/negotiate'){
       void(async()=>{try{const hello=await readBody(req,32*1024);storage.withDatabaseLock(dataDir,()=>{const current=currentPrincipal(),databaseToken=storage.databaseToken(dataDir),platform=storageProfile(dataDir),credential=/^Bearer (.+)$/.exec(String(req.headers.authorization||''))?.[1],issued=session.proof.negotiate(hello,{databaseToken,principal:current,descriptor:platform.descriptor,credential});respond(res,200,{ok:true,databaseToken,access:publicAccess(current),platform,...issued});});}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'NEGOTIATION_INVALID',error:error.message});}})();return;
     }
@@ -259,7 +266,7 @@ function start({port,dataDir,backupFn,backup,serverName,key,settings,users,tls,r
 
 function stop() {
   const instance = _server,session=_session; _server = null;_session=null;_writeProof=null;
-  if(session)session.active=false;
+  if(session){session.active=false;session.desObjectHttp?.close();}
   const drained=session?.executor?session.executor.close():Promise.resolve();
   if (!instance) return Promise.all([..._pendingStops,drained]).then(()=>undefined);
   const closed=new Promise(resolve=>{
@@ -361,4 +368,4 @@ async function negotiate(host,port,hello){const json=JSON.stringify(hello);if(ty
 async function postInventoryDatabase(host,port,payload){const response=await request(host,port,'/api/inventory-database',JSON.stringify(payload),90000);if(response.status===404)return {ok:false,unsupported:true,code:'UNSUPPORTED_INVENTORY_DATABASE',error:'Обновите сервер: отдельная база инвентаризации пока не поддерживается.'};return parseResponse(response,true);}
 async function ping(host,port) { try { return parseResponse(await request(host,port,'/api/ping',null,5000)); } catch { return null; } }
 
-module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,postCommands,postDocumentPrint,postInventoryReport,postImportSource,postInventoryDatabase,negotiate,localWriteOptions,configureKey,configureTransport,configureAccess};
+module.exports = {start,stop,isRunning,fetchData,postData,ping,getLocalIPs,getJson,postSections,postCommands,postDocumentPrint,postInventoryReport,postImportSource,postInventoryDatabase,negotiate,localWriteOptions,publicAccess,configureKey,configureTransport,configureAccess};

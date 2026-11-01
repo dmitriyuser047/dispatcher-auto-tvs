@@ -12,10 +12,11 @@ const { trustedPage, canInvoke, staticFile } = require('./security');
 const { pathToFileURL } = require('node:url');
 const { createNotificationService, bindingKey } = require('./notifications');
 const hiddenTest = app.commandLine.hasSwitch('tvs-test-hidden');
-app.setAppUserModelId('com.tvs.dispetcherizaciya-avto');
+const productProfiles=require('./product-profile.cjs'),product=productProfiles.describeProduct(require('../package.json'));
+app.setAppUserModelId(product.appId);
 const requestedProfile = app.commandLine.getSwitchValue('user-data-dir');
-if (requestedProfile) app.setPath('userData', path.resolve(requestedProfile));
-else app.setPath('userData', path.join(app.getPath('appData'), 'dispetcherizaciya-avto'));
+const productPaths=productProfiles.profilePaths(product,{appData:app.getPath('appData'),override:requestedProfile});
+app.setPath('userData',productPaths.userData);
 
 const diagnosticBoundary=require('./diagnostic-boundary.cjs');
 let operationalDiagnostics=null,diagnosticScheduled=false;
@@ -31,7 +32,7 @@ app.on('second-instance', () => {
   if (win && !hiddenTest) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
 });
 
-const DEFAULT_DATA_DIR = path.join(os.homedir(), 'Documents', 'ДиспетчеризацияАвто_ТВС');
+const DEFAULT_DATA_DIR = product.kind==='des-object'?path.join(productPaths.dataRoot,'unconfigured'):path.join(os.homedir(), 'Documents', 'ДиспетчеризацияАвто_ТВС');
 const SETTINGS_FILE   = path.join(app.getPath('userData'), 'settings.json');
 
 function loadSettings() {
@@ -43,6 +44,7 @@ function loadSettings() {
     if (fs.existsSync(SETTINGS_FILE)) {
       const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
       const checked = validateSettings({ ...defaults, ...saved, networkKey:saved.networkKey || require('crypto').randomBytes(24).toString('hex') });
+      assertProductSettings(checked);
       if (!saved.networkKey) saveSettings(checked);
       return checked;
     }
@@ -66,6 +68,23 @@ if (!settings.networkKey) {
   saveSettings(settings);
 }
 server.configureKey(settings.networkKey);
+const desObjectServices=new Map();
+function desObjectService(){const directory=product.kind==='des-object'?path.join(app.getPath('userData'),'des-object-state'):fs.realpathSync.native(getDataDir())+'-des-object-exchange';if(!desObjectServices.has(directory))desObjectServices.set(directory,require('./des-object-service.cjs').createDesObjectService({directory,credentialCodec:{encode:value=>{const safe=require('electron').safeStorage;if(!safe.isEncryptionAvailable())throw Error('Защищённое хранение ключа сервера недоступно');return safe.encryptString(value).toString('base64');},decode:value=>require('electron').safeStorage.decryptString(Buffer.from(value,'base64'))}}));return desObjectServices.get(directory);}
+function assertProductSettings(value){if(product.kind!=='des-object')return;if(value.networkMode!=='local'||value.activeUser!==0||value.users.length!==1)throw Error('Программа объекта использует собственную локальную SQLite. Подключение задаётся в разделе обмена');productProfiles.assertOwnedData(product,productPaths,value.users[0].dataDir);}
+function localPrincipal(){
+  if(product.kind!=='des-object')return{id:'local-profile',name:getActiveUser().name||'Локальный пользователь',role:'admin'};
+  // Rights come from pinned service state, never a business-DB read: during a
+  // write the worker owns that DB lock. Snapshot identity is checked separately.
+  const status=desObjectService().status(),scope=status.configuredScope||status.scope;
+  const sections=[...require('../assets/core/des-object-exchange.js').sections,'documentDrafts'];
+  return{id:'des-object-'+status.installation.installationId,name:'Оператор объекта',role:'admin',
+    // Shared document validators also read empty reference tables (e.g. cars).
+    // Bootstrap imports only this object's DES projection; writes remain narrow.
+    readable:storage.SECTIONS.slice(),
+    writable:status.localDataDir&&path.resolve(status.localDataDir)===getDataDir()?sections:[],
+    accessPolicy:{version:1,grants:scope?[scope]:[]}};
+}
+function assertObjectSnapshot(snapshot){if(product.kind!=='des-object')return;const status=desObjectService().status();if(status.localDataDir&&(path.resolve(status.localDataDir)!==getDataDir()||snapshot.databaseToken!==status.localDatabaseToken))throw Object.assign(Error('База объекта заменена. Загрузите подтверждённый пакет центра в отдельную базу.'),{code:'DES_OBJECT_DATABASE_CHANGED'});}
 let networkConfigError='';
 function configureNetwork(s){
   const ca=s.networkMode==='client'&&s.remoteCaFile?require('./safe-file.cjs').readRegularFileSync(s.remoteCaFile,{maxBytes:2*1024*1024,minBytes:1}):null;
@@ -149,7 +168,7 @@ async function freshDataCacheContext(event){
   // IPC and contextBridge retain plain values, but discard Error.code/status.
   // These fixed results carry no identity, grant, token or underlying exception.
   if(!(settings.networkMode==='client'&&settings.remoteHost)){
-    try{const token=storage.databaseToken(getDataDir());return {version:1,mode:'local',identity:identity+':'+token,databaseToken:token,access:null,policyStamp:null};}
+    try{const token=storage.databaseToken(getDataDir()),access=product.kind==='des-object'?server.publicAccess(localPrincipal()):null;return {version:1,mode:'local',identity:identity+':'+token,databaseToken:token,access,policyStamp:access?.policyStamp||null,...(access?{readOnly:!access.writable.length}:{})};}
     catch(error){if(error?.code!=='DB_BUSY')throw error;assertCache();return {version:1,unavailable:'DB_BUSY'};}
   }
   try{
@@ -264,9 +283,10 @@ function selectedFileName(value,extension,fallback){
   return name;
 }
 function capturedOperationContext(event,binding=assertDataBinding(event)){
-  const client=settings.networkMode==='client',principal=client?(binding.notificationAccess?.user?{...binding.notificationAccess.user,...(binding.notificationAccess?.accessPolicy?{accessPolicy:binding.notificationAccess.accessPolicy}:{}),...(binding.notificationAccess?.readable?{readable:binding.notificationAccess.readable}:{}),...(binding.notificationAccess?.writable?{writable:binding.notificationAccess.writable}:{}),...(binding.notificationAccess?.policyStamp?{policyStamp:binding.notificationAccess.policyStamp}:{})}:null):{id:'local-profile',name:getActiveUser().name||'Локальный пользователь',role:'admin'};
+  const client=settings.networkMode==='client',principal=client?(binding.notificationAccess?.user?{...binding.notificationAccess.user,...(binding.notificationAccess?.accessPolicy?{accessPolicy:binding.notificationAccess.accessPolicy}:{}),...(binding.notificationAccess?.readable?{readable:binding.notificationAccess.readable}:{}),...(binding.notificationAccess?.writable?{writable:binding.notificationAccess.writable}:{}),...(binding.notificationAccess?.policyStamp?{policyStamp:binding.notificationAccess.policyStamp}:{})}:null):localPrincipal();
   const identity=settingsIdentity(),scope=require('node:crypto').createHash('sha256').update(JSON.stringify([
-    identity,binding.databaseToken,client?null:settings.activeUser,principal?.id,principal?.role,binding.notificationAccess||'local-admin'
+    identity,binding.databaseToken,client?null:settings.activeUser,principal?.id,principal?.role,binding.notificationAccess||'local-admin',
+    ...(product.kind==='des-object'?[principal?.accessPolicy,principal?.readable,principal?.writable]:[])
   ])).digest('hex');
   return {scope,identity,senderId:event.sender.id,sender:binding.sender,frame:binding.frame,url:binding.url,databaseToken:binding.databaseToken,principal,client,access:binding.notificationAccess,
     directory:getDataDir(),host:settings.remoteHost,port:settings.remotePort||3377,
@@ -302,6 +322,7 @@ function operationRecovery(){
       send:async(context,json)=>{
         assertOperationContext(context);
         const payload=JSON.parse(json),command=Object.hasOwn(payload,'command');
+        if(command)productProfiles.assertCommandAllowed(product,payload);
         if(command&&!context.supportsCommands)throw Object.assign(Error('Подключение не поддерживает атомарные команды'),{code:'UNSUPPORTED_COMMANDS',definitive:true});
         if(context.client){if(networkConfigError)throw Error(networkConfigError);const proof={...await mainWriteSessions().remoteOptions(context),compactAck:context.compactAck};assertOperationContext(context);return command?server.postCommands(context.host,context.port,json,proof):server.postSections(context.host,context.port,json,proof);}
         const proof={...mainWriteSessions().localOptions(context),compactAck:context.compactAck};
@@ -321,7 +342,7 @@ function operationRecovery(){
 let settingsChain = Promise.resolve(), restartConfiguredServer = null;
 function queueSettings(next) {
   const operation = settingsChain.then(async () => {
-    const checked = validateSettings(typeof next === 'function' ? next(settings) : next);
+   const checked = validateSettings(typeof next === 'function' ? next(settings) : next);assertProductSettings(checked);
     // Validate the CA before mutating the active transport or settings.
     if (checked.networkMode === 'client' && checked.remoteCaFile) require('./safe-file.cjs').readRegularFileSync(checked.remoteCaFile,{maxBytes:2*1024*1024,minBytes:1});
     const changed = settingsIdentity() !== databaseIdentity(checked) || settings.networkMode !== checked.networkMode ||
@@ -347,7 +368,7 @@ function queueSettings(next) {
 const handle = ipcMain.handle.bind(ipcMain);
 ipcMain.handle = (channel, listener) => handle(channel, (event, ...args) => {
   const page = trustedPage(event.senderFrame?.url, path.join(__dirname, '..'), app._localServerPort);
-  if (event.senderFrame !== event.sender.mainFrame || !canInvoke(page, channel)) throw new Error('Недоверенный источник запроса');
+  if (event.senderFrame !== event.sender.mainFrame || !canInvoke(page, channel)||!productProfiles.permitsChannel(product,channel)) throw new Error('Недоверенный источник запроса или действие недоступно в программе объекта');
   return listener(event, ...args);
 });
 app.on('web-contents-created', (_event, contents) => {
@@ -362,7 +383,7 @@ function getActiveUser() {
   return settings.users[idx] || settings.users[0] || { name: 'Пользователь', dataDir: DEFAULT_DATA_DIR };
 }
 
-function getDataDir()   { return getActiveUser().dataDir || DEFAULT_DATA_DIR; }
+function getDataDir()   { const dir=getActiveUser().dataDir||DEFAULT_DATA_DIR;return productProfiles.assertOwnedData(product,productPaths,dir); }
 function getDataFile()  { return path.join(getDataDir(), 'data.json'); }
 function getBackupDir() { return path.join(getDataDir(), 'backups'); }
 
@@ -371,6 +392,9 @@ function ensureDirs() {
   const bd = getBackupDir();
   if (!fs.existsSync(dd)) fs.mkdirSync(dd, { recursive: true });
   if (storage.schemaVersion(dd) < storageFormat.SCHEMA_VERSION) return;
+  // Initialize a genuinely empty profile before auxiliary folders make it
+  // nonempty. Storage still refuses unknown files or an incomplete database.
+  storage.databaseToken(dd);
   if (!fs.existsSync(bd)) fs.mkdirSync(bd, { recursive: true });
 }
 
@@ -389,7 +413,7 @@ function createWindow() {
     height: 800,
     minWidth: 960,
     minHeight: 620,
-    title: 'Диспетчеризация авто группы компаний ООО "Технрайз Велл Сервис"',
+    title: product.title,
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -448,7 +472,7 @@ function createWindow() {
 
   // Проверка обновлений через 5 сек после запуска
   win.webContents.once('did-finish-load', () => {
-    if (hiddenTest) return;
+    if (hiddenTest||!product.standardUpdates) return;
     setTimeout(async () => {
       const info = await updater.checkForUpdate();
       if (info && !win.isDestroyed()) win.webContents.send('update-available', info);
@@ -457,7 +481,7 @@ function createWindow() {
 
   // Периодическая проверка каждые 3 минуты
   const updateTimer = setInterval(async () => {
-    if (hiddenTest) return;
+    if (hiddenTest||!product.standardUpdates) return;
     const info = await updater.checkForUpdate();
     if (info && !win.isDestroyed()) win.webContents.send('update-available', info);
   }, 3 * 60 * 1000);
@@ -465,7 +489,7 @@ function createWindow() {
 
   // Проверка при показе/разворачивании окна
   win.on('show', async () => {
-    if (hiddenTest) return;
+    if (hiddenTest||!product.standardUpdates) return;
     const info = await updater.checkForUpdate();
     if (info && !win.isDestroyed()) win.webContents.send('update-available', info);
   });
@@ -474,6 +498,8 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  require('./des-object-ipc.cjs').registerDesObjectIpc({ipcMain,app,BrowserWindow,dialog,product,paths:productPaths,getService:desObjectService,getDataDir,getContext:readableOperationContext,assertContext:assertOperationContext,queueSettings});
+  app.once('will-quit',()=>{for(const service of desObjectServices.values())service.close();});
   ipcMain.handle('finish-close',(event,payload)=>{
     const pending=saveBarriers.get(event.sender.id);
     if(!pending||payload?.nonce!==pending.nonce||typeof payload.ready!=='boolean')return false;
@@ -507,8 +533,9 @@ app.whenReady().then(() => {
       }
       assertDataBinding(event);
     }
-    const readable=isClientMode()?access.readable:storage.SECTIONS;
-    const user=isClientMode()?access.user:{id:'local',role:'admin',name:getActiveUser().name};
+    const local=product.kind==='des-object'?server.publicAccess(localPrincipal()):null;
+    const readable=isClientMode()?access.readable:local?.readable||storage.SECTIONS;
+    const user=isClientMode()?access.user:local?.user||{id:'local',role:'admin',name:getActiveUser().name};
     const key=bindingKey([identity,binding.databaseToken,settings.activeUser,getActiveUser().name,user.id,user.role,readable]);
     return {key,readable,databaseToken:binding.databaseToken,user,senderId:event.sender.id,event};
   }
@@ -557,7 +584,9 @@ app.whenReady().then(() => {
       }
     }
     try {
-      const snapshot = storage.readSnapshot(getDataDir());
+      const snapshot = storage.readSnapshot(getDataDir(),product.kind==='des-object'?{principal:localPrincipal()}:{});
+      assertObjectSnapshot(snapshot);
+      if(product.kind==='des-object')snapshot.access=server.publicAccess(localPrincipal());
       bindSnapshotCompatibility(event,snapshot,null);
       return JSON.stringify(snapshot.data);
     } catch (e) {
@@ -622,7 +651,9 @@ app.whenReady().then(() => {
     try {
       const dir = getDataDir();
       const generation=beginDataRead(event),assertCurrent=()=>assertDataRead(event,generation,identity);
-      const snapshot = await localStorageExecutor().run('readSnapshot',dir,{}, {},{assertCurrent});
+      const snapshot = await localStorageExecutor().run('readSnapshot',dir,{},product.kind==='des-object'?{principal:localPrincipal()}:{},{assertCurrent});
+      assertObjectSnapshot(snapshot);
+      if(product.kind==='des-object')snapshot.access=server.publicAccess(localPrincipal());
       assertCurrent();
       bindSnapshotCompatibility(event,snapshot,hello);
       return JSON.stringify(snapshot);
@@ -656,7 +687,7 @@ app.whenReady().then(() => {
         assertOperationContext(context);
         return identity === settingsIdentity() ? result : null;
       }
-      return storage.readSection(getDataDir(), name);
+      return storage.readSection(getDataDir(), name,product.kind==='des-object'?{principal:context.principal}:{});
     } catch (e) { return null; }
   });
 
@@ -668,7 +699,7 @@ app.whenReady().then(() => {
         if(networkConfigError)throw Error(networkConfigError);
         result=await server.getJson(settings.remoteHost,settings.remotePort||3377,'/api/query?query='+encodeURIComponent(JSON.stringify(query)),15000);
       } else {
-        result=require('./data-query.cjs').queryRows(getDataDir(),query,{id:'local-profile',role:'admin'});
+        result=require('./data-query.cjs').queryRows(getDataDir(),query,context.principal);
       }
       assertOperationContext(context);
       if(identity!==settingsIdentity()||dataBindings.get(event.sender.id)!==binding||result.databaseToken!==token)
@@ -832,6 +863,7 @@ app.whenReady().then(() => {
     try{
       const contracts=require('../assets/core/platform-contracts.js');
       const payload=contracts.parseCommandEnvelope(typeof json==='string'?JSON.parse(json):json,storage.SECTIONS);
+      productProfiles.assertCommandAllowed(product,payload);
       const binding=assertDataBinding(event,payload.databaseToken),context=capturedOperationContext(event,binding);
       if(!context.supportsOperations||!context.supportsCommands)
         return {ok:false,unsupported:true,code:'UNSUPPORTED_COMMANDS',error:'Подключение не поддерживает атомарные команды. Загрузите данные из совместимой версии программы.'};
@@ -927,7 +959,7 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('get-settings', () => settings);
+  ipcMain.handle('get-settings', () => product.kind==='des-object'?{...settings,networkKey:undefined,serverUsers:[]}:settings);
   ipcMain.handle('get-access-catalog',()=>({actions:require('./access-control').POLICY_ACTIONS.slice(),sections:storage.SECTIONS.slice()}));
   ipcMain.handle('get-theme', () => settings.uiTheme || null);
   ipcMain.handle('set-theme', async (_event, theme) => {
@@ -1122,7 +1154,7 @@ app.whenReady().then(() => {
   ipcMain.handle('get-app-version', () => app.getVersion());
   // Список изменений — assets/CHANGELOG.md внутри программы
   ipcMain.handle('get-changelog', () => {
-    try { return fs.readFileSync(path.join(__dirname, '..', 'assets', 'CHANGELOG.md'), 'utf8'); }
+    try { return fs.readFileSync(path.join(__dirname, '..', 'assets', product.kind==='des-object'?'DES-OBJECT-CHANGELOG.md':'CHANGELOG.md'), 'utf8'); }
     catch (e) { return ''; }
   });
 

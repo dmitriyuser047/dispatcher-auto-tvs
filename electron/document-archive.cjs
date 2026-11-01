@@ -48,6 +48,10 @@ function archiveScope(database,snapshot){
  const rows=[],seen=new Set(),add=(section,row)=>{if(!row)return;const key=section+'|'+stable(row);if(!seen.has(key)){seen.add(key);rows.push({section,row:clone(row)});}};
  if(snapshot.source?.revision&&snapshot.sourceRecord)add(snapshot.source.revision.section,snapshot.sourceRecord);
  for(const ref of snapshot.evidence||[])if(storage().SECTIONS.includes(ref.section)&&ref.id!==undefined){const matches=(database[ref.section]||[]).filter(row=>row.id===ref.id);if(matches.length===1)add(ref.section,matches[0]);}
+ // An individual DES stock item inherits its owner from its exact typed
+ // generator. Keep that source in the immutable capsule as well; an archive
+ // proof must be reproducible without consulting a later mutable database.
+ for(const item of [...rows])if(item.section==='parts'&&Object.hasOwn(item.row,'generatorId')){const matches=(database.generators||[]).filter(row=>row.id===item.row.generatorId);if(matches.length===1)add('generators',matches[0]);}
  return {version:1,rows};
 }
 function allowed(principal,snapshot,proof,action='print:capture'){

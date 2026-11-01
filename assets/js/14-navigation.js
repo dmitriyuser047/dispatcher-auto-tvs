@@ -4,6 +4,7 @@
 // Navigation and incoming changes use the same screen registry. Refreshing a
 // screen retains its selection; opening a section starts its normal list view.
 const WORKSPACE_RENDERERS = Object.freeze({
+  desObjects:()=>renderDesObjectWorkspace(),
   home: () => renderMainMenu(),
   system: () => renderPlatformSystem(),
   assetInventory: () => renderAssetInventorySection(),
@@ -52,6 +53,7 @@ const WORKSPACE_RENDERERS = Object.freeze({
   }
 });
 function renderWorkspaceSection(section, { opening = false } = {}) {
+  if(typeof desObjectAllowsSection==='function'&&!desObjectAllowsSection(section))return false;
   const render = Object.hasOwn(WORKSPACE_RENDERERS, section) && WORKSPACE_RENDERERS[section];
   if (!render) return false;
   render(opening);
@@ -60,6 +62,8 @@ function renderWorkspaceSection(section, { opening = false } = {}) {
 
 // ─── SECTION SWITCHER ────────────────────────────────────
 function switchSection(section, options = {}) {
+  if(typeof desObjectAllowsSection==='function'&&!desObjectAllowsSection(section)){showToast('Раздел недоступен в программе этого объекта. Настройте объект в разделе обмена.');return;}
+  if(typeof activeSection!=='undefined'&&activeSection==='desObjects'&&section!==activeSection&&typeof desObjectWorkspaceHasPendingEdits==='function'&&desObjectWorkspaceHasPendingEdits()){showToast('Завершите проверку пакета или сохраните либо отмените настройки объекта.');return;}
   if(typeof activeSection!=='undefined'&&['assetInventory','objectQuantity'].includes(activeSection)&&section!==activeSection&&typeof assetInventoryWorkspaceLeave==='function'&&!assetInventoryWorkspaceLeave())return;
   showProgress();
   if(typeof wfSwitchWorkspace==='function')wfSwitchWorkspace(activeSection,section,options);
@@ -68,7 +72,7 @@ function switchSection(section, options = {}) {
   const isHome = section === 'home';
   const hasSidebar = section === 'tanks';
   const sectionTitles = {
-    vehicles: 'Транспорт', generators: 'ДЭС', tanks: 'Ёмкости', drivers:'Водители', operators:'Операторы ДЭС', driverTimesheets:'Загрузка водителей', operatorTimesheets:'Загрузка машинистов ДЭС', workflows:'Рабочие процессы', dispatch:'Диспетчерская',
+    desObjects:'Объекты ДЭС',vehicles: 'Транспорт', generators: 'ДЭС', tanks: 'Ёмкости', drivers:'Водители', operators:'Операторы ДЭС', driverTimesheets:'Загрузка водителей', operatorTimesheets:'Загрузка машинистов ДЭС', workflows:'Рабочие процессы', dispatch:'Диспетчерская',
     reestr: 'Реестр', registries:'Реестры и распределение счетов', logistics:'Логистика', toSchedule: 'График ТО', repairs: 'Журнал ремонта', assetInventory:'Инвентаризация ОС', objectQuantity:'Количественный учёт', generatorSpares:'ЗИП ДЭС',
     finances: 'Финансы', contragents: 'Контрагенты', reports: 'Отчёты',
     costs: 'Стоимость работы', procurement: 'Планирование закупок', system:'Состояние программы',
@@ -128,4 +132,4 @@ function switchSection(section, options = {}) {
   setTimeout(() => animateCounters(), 50);
 }
 
-function renderMainMenu(){renderLaunchpad();}
+function renderMainMenu(){if(typeof desObjectProfile!=='undefined'&&desObjectProfile.kind==='des-object')return renderDesObjectWorkspace();renderLaunchpad();}

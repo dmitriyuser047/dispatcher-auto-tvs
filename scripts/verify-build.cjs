@@ -3,9 +3,9 @@
 // sized NUL-filled assets, which comparing application sources alone misses.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const asar=require('@electron/asar');
-const root=path.resolve(__dirname,'..'),metadata=require('../package.json');
+const root=path.resolve(__dirname,'..'),isDesObject=process.argv.includes('--des-object'),sourceMetadata=require('../package.json'),metadata=isDesObject?require('./des-object-build-profile.cjs').metadata(sourceMetadata):sourceMetadata;
 const archive=path.resolve(process.env.TVS_PACKAGED_ASAR||path.join(root,'dist/win-unpacked/resources/app.asar'));
-const reportPath=path.join(root,'audit','package-source.json');
+const reportPath=path.join(root,'audit',isDesObject?'des-object-package-source.json':'package-source.json');
 const digest=value=>crypto.createHash('sha256').update(value).digest('hex');
 const report={version:metadata.version,name:metadata.name,appId:metadata.build.appId,status:'FAIL',at:new Date().toISOString(),archive,files:[],published:false};
 function check(condition,message){if(!condition)throw Error(message);}
@@ -47,7 +47,7 @@ function verifyArchiveIntegrity(){
 }
 
 function verifyStagingDependencies(entries){
-  const ledger=JSON.parse(fs.readFileSync(path.join(root,'audit','installer-stage-'+metadata.version+'.json'),'utf8'));
+  const ledger=JSON.parse(fs.readFileSync(path.join(root,'audit',isDesObject?'des-object-stage-'+metadata.version+'.json':'installer-stage-'+metadata.version+'.json'),'utf8'));
   check(ledger.version===metadata.version,'Staging ledger version differs');
   const stage=path.resolve(ledger.stagePath);
   check(inside(root,stage)&&path.basename(stage).startsWith('.builder-stage-'),'Unsafe staging directory');
@@ -97,6 +97,7 @@ try{
   const packaged=JSON.parse(archiveFile('package.json').toString('utf8'));
   check(!metadata.prototype&&!packaged.prototype&&/^\d+\.\d+\.\d+$/.test(metadata.version),'Only stable production packages may be verified');
   check(packaged.name===metadata.name&&packaged.version===metadata.version,'Wrong packaged application identity');
+  if(isDesObject){const profile=require('../electron/product-profile.cjs').describeProduct(packaged);check(profile.kind==='des-object'&&profile.standardUpdates===false&&packaged.coreVersion===sourceMetadata.version,'Wrong DES product profile or update channel');}
   check(!/prototype|прототип/i.test([packaged.name,metadata.build.appId,metadata.build.productName].join(' ')),'Prototype application identity cannot be released');
   const paths=['index.html','reestr-window.html','pdf-editor.html','ReestrBuilder/lib.mjs'];
   function walk(directory){for(const name of fs.readdirSync(path.join(root,directory))){const file=path.join(directory,name);if(fs.statSync(path.join(root,file)).isDirectory())walk(file);else if(/\.(?:js|mjs|cjs|css)$/.test(file))paths.push(file.replaceAll('\\','/'));}}

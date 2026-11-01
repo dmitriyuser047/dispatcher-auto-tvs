@@ -1,0 +1,14 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{execFileSync}=require('node:child_process');
+const root=path.resolve(__dirname,'..'),source=require('../package.json'),profile=require('./des-object-build-profile.cjs'),metadata=profile.metadata(source);
+execFileSync(process.execPath,[path.join(__dirname,'prepare-installer-stage.cjs')],{cwd:root,env:process.env,stdio:'inherit',windowsHide:true});
+const ledger=JSON.parse(fs.readFileSync(path.join(root,'audit','installer-stage-'+source.version+'.json'),'utf8'));
+const stage=ledger.stagePath,config=JSON.parse(fs.readFileSync(ledger.configPath,'utf8'));
+const staged={...metadata};delete staged.build;delete staged.scripts;delete staged.devDependencies;
+fs.writeFileSync(path.join(stage,'package.json'),JSON.stringify(staged,null,2));
+Object.assign(config,{appId:metadata.build.appId,productName:metadata.build.productName,executableName:metadata.build.executableName,artifactName:metadata.build.artifactName,nsis:metadata.build.nsis});
+config.directories.output=path.join(root,'dist','des-object');
+const configPath=path.join(stage,'.des-object-builder.json');fs.writeFileSync(configPath,JSON.stringify(config,null,2));
+const report={...ledger,version:profile.VERSION,coreVersion:source.version,name:metadata.name,appId:metadata.build.appId,configPath,stagePackageSha256:crypto.createHash('sha256').update(fs.readFileSync(path.join(stage,'package.json'))).digest('hex')};
+const reportPath=path.join(root,'audit','des-object-stage-'+profile.VERSION+'.json');fs.writeFileSync(reportPath,JSON.stringify(report,null,2));
+console.log(JSON.stringify({stagePath:stage,configPath,reportPath,product:metadata.name,version:profile.VERSION,coreVersion:source.version}));

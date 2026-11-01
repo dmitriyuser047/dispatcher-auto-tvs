@@ -19,6 +19,7 @@ const ENTRIES=Object.freeze([
     {path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./platform-schema.js',global:'PlatformSchema'},
     {path:'./entity-identity.js',global:'EntityIdentity'},
   ]}),
+  Object.freeze({source:'src/core/des-object-exchange.ts',output:'assets/core/des-object-exchange.js',global:'DesObjectExchange',factory:'createDesObjectExchange',additional:true,dependencies:[{path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./platform-schema.js',global:'PlatformSchema'},{path:'./access-scope.js',global:'AccessScope'},{path:'./access-policy.js',global:'AccessPolicy'},{path:'./request-fingerprint.js',global:'RequestFingerprint'},{path:'./personnel-kinds.js',global:'PersonnelKinds'},{path:'./generator-maintenance.js',global:'GeneratorMaintenance',lazy:true}]}),
   Object.freeze({source:'src/core/entity-identity.ts',output:'assets/core/entity-identity.js',global:'EntityIdentity',factory:'createEntityIdentity'}),
   Object.freeze({source:'src/core/personnel-kinds.ts',output:'assets/core/personnel-kinds.js',global:'PersonnelKinds',factory:'createPersonnelKinds'}),
   Object.freeze({source:'src/core/personnel-timesheet-roster.ts',output:'assets/core/personnel-timesheet-roster.js',global:'PersonnelTimesheetRoster',factory:'createPersonnelTimesheetRoster',dependencies:[{path:'./platform-contracts.js',global:'PlatformContracts'},{path:'./personnel-kinds.js',global:'PersonnelKinds'},{path:'./personnel-timesheet.js',global:'PersonnelTimesheet',lazy:true},{path:'./request-fingerprint.js',global:'RequestFingerprint'}]}),
@@ -189,10 +190,12 @@ function compileTypedCore(){
   if(loaded.error)throw Error(format([loaded.error]));
   const config=ts.parseJsonConfigFileContent(loaded.config,ts.sys,ROOT,undefined,configFile);
   if(config.errors.length)throw Error(format(config.errors));
-  const expectedSources=new Set(ENTRIES.map(entry=>path.join(ROOT,entry.source)));
-  if(config.fileNames.length!==ENTRIES.length||config.fileNames.some(file=>!expectedSources.has(path.resolve(file))))
+  const configured=ENTRIES.filter(entry=>!entry.additional),additional=ENTRIES.filter(entry=>entry.additional);
+  const expectedSources=new Set(configured.map(entry=>path.join(ROOT,entry.source)));
+  if(new Set(ENTRIES.map(entry=>entry.source)).size!==ENTRIES.length||new Set(ENTRIES.map(entry=>entry.output)).size!==ENTRIES.length)throw Error('Typed core entries must have unique explicit sources and outputs.');
+  if(config.fileNames.length!==configured.length||config.fileNames.some(file=>!expectedSources.has(path.resolve(file))))
     throw Error('Typed core config must compile exactly the explicit entries declared in the builder.');
-  const program=ts.createProgram(config.fileNames,config.options),emitted=[];
+  const program=ts.createProgram([...config.fileNames,...additional.map(entry=>path.join(ROOT,entry.source))],config.options),emitted=[];
   const diagnostics=ts.getPreEmitDiagnostics(program);
   if(diagnostics.length)throw Error(format(diagnostics));
   const result=program.emit(undefined,(filename,text)=>emitted.push({filename,text}));

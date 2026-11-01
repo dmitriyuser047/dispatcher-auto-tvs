@@ -9,9 +9,10 @@
  const readable=name=>{const values=typeof _sync==='undefined'?null:_sync.access?.readable;return !values||values.includes('*')||values.includes(name);};
  function load(src){return new Promise((resolve,reject)=>{if(loaded.has(src)){resolve();return;}const node=document.createElement('script');node.src=src;node.onload=()=>{loaded.add(src);resolve();};node.onerror=()=>{node.remove();reject(Error('Не удалось загрузить модуль '+src));};document.head.append(node);});}
  function ensure(){if(loading)return loading;loading=(async()=>{
+  const objectProfile=typeof window.electronAPI?.getProductProfile==='function'&&(await window.electronAPI.getProductProfile()).kind==='des-object';
   for(const href of styles)if(!document.querySelector('link[data-shared-feature="'+href+'"]')){const link=document.createElement('link');link.rel='stylesheet';link.href=href;link.dataset.sharedFeature=href;document.head.append(link);}
   for(const src of scripts)await load(src);
-  if(window.reestrAPI?.loadStatyi){const articles=await window.reestrAPI.loadStatyi();if(!document.getElementById('tvs-bdds-articles')&&Array.isArray(articles)){const node=document.createElement('script');node.type='application/json';node.id='tvs-bdds-articles';node.textContent=JSON.stringify(articles);document.head.append(node);}}
+  if(window.reestrAPI?.loadStatyi&&!objectProfile){const articles=await window.reestrAPI.loadStatyi();if(!document.getElementById('tvs-bdds-articles')&&Array.isArray(articles)){const node=document.createElement('script');node.type='application/json';node.id='tvs-bdds-articles';node.textContent=JSON.stringify(articles);document.head.append(node);}}
  })().catch(error=>{loading=null;throw error;});return loading;}
  const main=()=>document.getElementById('mainContent');
  function failure(error){const host=main();if(!host)return;host.innerHTML='<div class="welcome"><h2>Не удалось открыть раздел</h2><p role="alert"></p><button type="button" class="btn btn-primary">Повторить</button></div>';host.querySelector('[role="alert"]').textContent=error.message;host.querySelector('button').onclick=()=>render(activeSection);}

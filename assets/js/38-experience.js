@@ -20,6 +20,7 @@ function xpIcon(name,size=20){
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]||paths.grid}</svg>`;
 }
 const XP_MODULES={
+  desObjects:{title:'Объекты ДЭС',note:'Отдельные программы объектов и обмен данными',icon:'power'},
   dispatch:{title:'Диспетчерская',note:'Смена, заявки и назначения',icon:'grid'},
   drivers:{title:'Водители',note:'Карточки, категории, документы и назначения',icon:'people'},
   operators:{title:'Операторы ДЭС',note:'Состав смен, допуски и работа на генераторах',icon:'people'},
@@ -52,11 +53,11 @@ function xpRememberSection(section){
 }
 function renderLaunchpad(){
   const today=new Date();let recent=[];
-  const visible=id=>!['drivers','operators'].includes(id)||typeof _sync==='undefined'||!_sync.access||(_sync.access.readable||[]).includes('drivers');
+  const visible=id=>(typeof desObjectAllowsSection!=='function'||desObjectAllowsSection(id))&&(!['drivers','operators'].includes(id)||typeof _sync==='undefined'||!_sync.access||(_sync.access.readable||[]).includes('drivers'));
   try{recent=JSON.parse(localStorage.getItem('tvs-recent-sections')||'[]').filter(s=>XP_MODULES[s]&&visible(s));}catch{}
-  for(const id of ['vehicles','fuelPurchases','reestr'])if(!recent.includes(id))recent.push(id);
+  for(const id of ['vehicles','fuelPurchases','reestr'])if(visible(id)&&!recent.includes(id))recent.push(id);
   const groups=[
-    ['Техника и эксплуатация',['vehicles','generators','tanks','toSchedule','generatorSpares','repairs']],
+    ['Техника и эксплуатация',['vehicles','generators','desObjects','tanks','toSchedule','generatorSpares','repairs']],
     ['Сотрудники',['drivers','operators']],
     ['Топливо и финансы',['fuelPurchases','fuelReport','finances','costs','contragents','reports']],
     ['Документы и процессы',['objectQuantity','registries','reestr','logistics','workflows','procurement','printForms','pdf']],

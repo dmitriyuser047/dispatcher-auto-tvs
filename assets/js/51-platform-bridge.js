@@ -295,6 +295,7 @@ async function platformFlushForClose(){
   if(typeof personnelPlanningFlush==='function'&&!await personnelPlanningFlush())ready=false;
   if(typeof documentPrintFlush==='function'&&!await documentPrintFlush())ready=false;
   if(typeof generatorMaintenanceFlush==='function'&&!await generatorMaintenanceFlush())ready=false;
+  if(typeof desObjectFlush==='function'&&!await desObjectFlush())ready=false;
   if(typeof generatorMaintenancePrintFlush==='function'&&!await generatorMaintenancePrintFlush())ready=false;
   if(typeof assetInventoryWorkspaceFlush==='function'&&!await assetInventoryWorkspaceFlush())ready=false;
   if(typeof accessPolicyFlush==='function'&&!await accessPolicyFlush())ready=false;
@@ -310,6 +311,7 @@ async function platformFlushForClose(){
   if(typeof personnelPlanningHasPendingEdits==='function'&&personnelPlanningHasPendingEdits())ready=false;
   if(typeof documentPrintHasPendingEdits==='function'&&documentPrintHasPendingEdits())ready=false;
   if(typeof generatorMaintenanceHasPendingEdits==='function'&&generatorMaintenanceHasPendingEdits())ready=false;
+  if(typeof desObjectWorkspaceHasPendingEdits==='function'&&desObjectWorkspaceHasPendingEdits())ready=false;
   if(typeof generatorMaintenancePrintHasPendingEdits==='function'&&generatorMaintenancePrintHasPendingEdits())ready=false;
   if(typeof assetInventoryWorkspaceHasPendingEdits==='function'&&assetInventoryWorkspaceHasPendingEdits())ready=false;
   if(typeof reviewedImportHasPendingEdits==='function'&&reviewedImportHasPendingEdits())ready=false;

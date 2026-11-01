@@ -3,6 +3,7 @@
 
 // ─── INIT ────────────────────────────────────────────────
 (async () => {
+  if(typeof desObjectInitialize==='function')await desObjectInitialize();
   if (window.electronAPI?.getTheme) {
     try {
       const theme = await window.electronAPI.getTheme();
@@ -22,7 +23,7 @@
   populateOrgSelect();
   updateFilterUI();
   if (window.tvsWeb?.startRoute) await window.tvsWeb.startRoute();
-  else switchSection('home');
+  else switchSection(typeof desObjectProfile!=='undefined'&&desObjectProfile.kind==='des-object'?'desObjects':'home');
   if (typeof syncStartPolling === 'function') syncStartPolling();
   if(typeof platformNotifyPendingOperations==='function')void platformNotifyPendingOperations();
   // «Что нового» после обновления — чуть позже, чтобы не мешать отрисовке

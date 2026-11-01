@@ -1,5 +1,6 @@
 // Быстрый поиск по разделам и объектам приложения (Ctrl+K).
 const CC_SECTIONS = [
+  ['Объекты ДЭС · Обмен с объектами · Программы ДЭС', 'desObjects'],
   ['Диспетчерская · Обзор · Заявки · Назначения', 'dispatch'],
   ['Рабочие процессы · Задачи · Ремонт · Документы', 'workflows'],
   ['Транспорт', 'vehicles'], ['ДЭС', 'generators'], ['Ёмкости', 'tanks'],
@@ -20,8 +21,8 @@ function ccNorm(value) {
 function ccBuildItems(query) {
   const q = ccNorm(query), items = [];
   CC_SECTIONS.forEach(([label, section]) => {if(['drivers','operators'].includes(section)&&typeof _sync!=='undefined'&&_sync.access&&!(_sync.access.readable||[]).includes('drivers'))return;items.push({ label, detail: 'Раздел', section, score: q && ccNorm(label).includes(q) ? 0 : 3 });});
-  items.push({ label: 'Журнал ремонта', detail: 'Раздел', action: () => openRepairsJournal(), score: q && ccNorm('Журнал ремонта').includes(q) ? 0 : 3 });
-  items.push({ label: 'Редактор PDF', detail: 'Документы', action: () => openPdfEditor(), score: q && ccNorm('Редактор PDF').includes(q) ? 0 : 3 });
+  items.push({ label: 'Журнал ремонта', detail: 'Раздел',section:'repairs', action: () => openRepairsJournal(), score: q && ccNorm('Журнал ремонта').includes(q) ? 0 : 3 });
+  items.push({ label: 'Редактор PDF', detail: 'Документы',section:'pdf', action: () => openPdfEditor(), score: q && ccNorm('Редактор PDF').includes(q) ? 0 : 3 });
   items.push({ label: 'Уведомления Windows', detail: 'Настройки напоминаний', action: () => openNotificationSettings(), score: q && ccNorm('Уведомления Windows напоминания').includes(q) ? 0 : 3 });
   const addRows = (rows, kind, section, fields, open) => (rows || []).forEach(row => {
     const label = fields.map(k => row[k]).filter(Boolean).join(' · ');
@@ -45,7 +46,7 @@ function ccBuildItems(query) {
     fpView = 'fcards'; fcSearch = row.number || row.provider || ''; switchSection('fuelPurchases');
   });
   if(typeof _sync==='undefined'||!_sync.access||(_sync.access.readable||[]).includes('drivers')){
-    addRows(data.drivers,row=>[wfPersonnelMatches(row,'driver')?'Водитель':'',wfPersonnelMatches(row,'operator')?'Оператор ДЭС':''].filter(Boolean).join(' · ')||'Сотрудник','drivers',['name','phone','site'],row=>{if(typeof personnelOpenPerson==='function')personnelOpenPerson(row.id);else wfOpenTab('drivers');});
+    addRows(data.drivers,row=>[wfPersonnelMatches(row,'driver')?'Водитель':'',wfPersonnelMatches(row,'operator')?'Оператор ДЭС':''].filter(Boolean).join(' · ')||'Сотрудник',typeof desObjectProfile!=='undefined'&&desObjectProfile.kind==='des-object'?'operators':'drivers',['name','phone','site'],row=>{if(typeof personnelOpenPerson==='function')personnelOpenPerson(row.id);else wfOpenTab('drivers');});
   }
   ['dispatchJobs','opsTasks','workOrders','assetDocuments','shiftReports'].forEach(section=>{
     const rows=typeof DocumentEngine!=='undefined'&&DocumentEngine.sections.includes(section)?DocumentEngine.activeRows(data,section):data[section];
@@ -53,7 +54,7 @@ function ccBuildItems(query) {
   });
   addRows(typeof finPayments==='function'?finPayments():data.payments,'Платёж','finances',['contragent','purpose','description'],()=>switchSection('finances'));
   addRows(data.reestrRows,'Счёт / реестр','reestr',['supplier','number','invoice','contract'],()=>switchSection('reestr'));
-  return items.filter(item => !q || item.score < 3).sort((a, b) => a.score - b.score || a.label.localeCompare(b.label, 'ru')).slice(0, 40);
+  return items.filter(item => (typeof desObjectAllowsSection!=='function'||desObjectAllowsSection(item.section||'system'))&&(!q || item.score < 3)).sort((a, b) => a.score - b.score || a.label.localeCompare(b.label, 'ru')).slice(0, 40);
 }
 
 function ccEnsurePalette() {

@@ -11,6 +11,8 @@ async function invokeOperation(channel,json){
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getProductProfile:()=>ipcRenderer.invoke('get-product-profile'),
+  desObject:(action,payload={})=>ipcRenderer.invoke('des-object',{...payload,action}),
   readData:       ()        => ipcRenderer.invoke('read-data'),
   writeData:      (json)    => ipcRenderer.invoke('write-data', json),
   readSnapshot:   payload   => ipcRenderer.invoke('read-snapshot',payload),
