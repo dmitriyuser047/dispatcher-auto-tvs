@@ -43,7 +43,22 @@ closeModal=function(id,...args){
   toRulesSession=null;
  }
  const s=gmUiSession;if(id==='wfModal'&&gmUiActive(s)&&!s.committed){if(s.pending){showToast('Дождитесь подтверждения сохранения. Введённые значения остаются в форме.');return;}if(!s.readonly&&gmUiFields(s)!==s.initialFields){if(s.discardPrompt)return;s.discardPrompt=true;const fields=gmUiFields(s),answer=confirmAction('Закрыть форму без сохранения введённых изменений?'),yes=document.getElementById('confirmYes'),label=yes?.textContent;if(yes)yes.textContent='Закрыть без сохранения';void answer.then(confirmed=>{s.discardPrompt=false;if(yes)yes.textContent=label;if(confirmed&&gmUiActive(s)&&!s.pending&&gmUiFields(s)===fields)gmUiOriginalClose.call(this,id,...args);});return;}}return gmUiOriginalClose.call(this,id,...args);};
-function gmUiError(s,error){if(s.kind==='plan'&&s.form?.isConnected&&Array.isArray(s.rows))for(const row of s.rows)gmPlanForecastRefreshCounter(s,row,s.form.querySelector('[data-gm-row="'+s.rows.indexOf(row)+'"]'));wfShowCommandError(s.form?.querySelector('[data-gm-error]'),error);}
+function gmUiError(s,error){if(s.kind==='plan'&&s.form?.isConnected&&Array.isArray(s.rows))for(const row of s.rows)gmPlanForecastRefreshCounter(s,row,s.form.querySelector('[data-gm-row="'+s.rows.indexOf(row)+'"]'));wfShowCommandError(s.form?.querySelector('[data-gm-error]'),error);gmPlanForecastHelp(s,error);}
+function gmPlanForecastHelp(s,error){
+ if(s.kind!=='plan'||error?.code!=='MAINTENANCE_FORECAST_UNAPPLIED'||!s.form?.isConnected||s.rows?.[error.templateIndex]!==error.forecastRow)return;
+ const row=error.forecastRow,box=s.form.querySelector('[data-gm-error]');if(!box)return;
+ const help=document.createElement('span');help.className='gm-ui-forecast-help';help.dataset.gmForecastHelp='';
+ const name=s.generators.find(item=>item.id===row.generatorId)?.label||'ДЭС недоступна',label=document.createElement('strong');label.textContent='Шаблон '+(error.templateIndex+1)+' · '+name+(row.type?' · '+row.type:'');
+ const hint=document.createElement('span');hint.textContent='Нажмите «Рассчитать и показать», проверьте даты и счётчики, затем «Добавить рассчитанные ТО в график». Если даты заполняете вручную, «Очистить параметры» сбросит только расчёт — даты календаря останутся.';
+ const button=document.createElement('button');button.type='button';button.className='btn btn-ghost btn-sm';button.dataset.gmErrorForecast='';button.textContent='Перейти к расчёту шаблона '+(error.templateIndex+1);
+ button.onclick=()=>{if(s.pending)return;try{
+  gmUiCurrent(s);if(!s.rows.includes(row))throw Error('Шаблон изменился. Повторите проверку графика.');
+  gmPlanSyncRows(s);row.open=true;row.forecast.open=true;gmPlanRenderRows(s,[row]);
+  const node=s.form.querySelector('[data-gm-row="'+s.rows.indexOf(row)+'"]'),panel=node?.querySelector('[data-gm-forecast]');
+  panel?.scrollIntoView({block:'center'});const add=panel?.querySelector('[data-gm-forecast-add]'),focus=add&&!add.disabled?add:panel?.querySelector('[data-gm-forecast-preview]');focus?.focus({preventScroll:true});
+ }catch(cause){gmUiInvalidate(s);gmUiError(s,cause);}};
+ help.append(label,hint,button);box.append(help);
+}
 function gmUiLock(s){const unlock=wfLockCommandForm(s.form),buttons=[...s.form.querySelectorAll('button:not([data-gm-close])')].map(button=>[button,button.disabled]);for(const [button]of buttons)button.disabled=true;return()=>{unlock();for(const [button,disabled]of buttons)button.disabled=disabled;};}
 function gmUiFooter(label='Подтвердить действие'){return '<div data-gm-preview hidden></div><label class="gm-ui-confirm" data-gm-confirm hidden><input type="checkbox" name="confirm"> Проверил содержание и подтверждаю выбранное действие</label><p role="alert" class="gm-ui-error" data-gm-error></p><p role="status" data-gm-status></p><div class="gm-ui-actions"><button type="button" class="btn btn-ghost" data-gm-close>Закрыть</button><button type="button" class="btn btn-ghost" data-gm-review>Проверить</button><button type="button" class="btn btn-primary" data-gm-save disabled>'+gmUiEsc(label)+'</button></div>';}
 function gmUiInvalidate(s){s.review=null;const form=s.form;form.elements.confirm.checked=false;form.querySelector('[data-gm-save]').disabled=true;form.querySelector('[data-gm-preview]').hidden=true;form.querySelector('[data-gm-confirm]').hidden=true;}
@@ -286,7 +301,7 @@ function gmPlanPayloadContent(s){
  gmPlanSyncRows(s);gmPlanSyncMembers(s);const e=s.form.elements,year=precisionInput(e.year,{scale:0,max:9999,blank:'null'});
  const groups=s.rows.map((row,index)=>{
   if(row.generatorId===null||row.generatorId===undefined)throw Error('Выберите ДЭС в шаблоне '+(index+1));
-  if(gmPlanForecastHasInput(row)&&row.forecast.appliedSignature!==gmPlanForecastSignature(s,row))throw Error('В шаблоне '+(index+1)+' добавьте рассчитанные ТО либо очистите параметры расчёта.');
+  if(gmPlanForecastHasInput(row)&&row.forecast.appliedSignature!==gmPlanForecastSignature(s,row))throw Object.assign(Error('В шаблоне '+(index+1)+' добавьте рассчитанные ТО в календарь: «Рассчитать и показать» → «Добавить рассчитанные ТО в график». Для ручного графика нажмите «Очистить параметры».'),{code:'MAINTENANCE_FORECAST_UNAPPLIED',templateIndex:index,forecastRow:row});
   if((row.batchMonths.length||row.batchDayText.trim())&&row.batchAppliedSignature!==gmPlanBatchSignature(s,row))throw Error('В шаблоне '+(index+1)+' нажмите «Заполнить месяцы» либо очистите выбранные месяцы.');
   return {template:{generatorId:row.generatorId,site:row.site.trim(),type:row.type.trim(),work:row.work.trim(),note:row.note.trim(),components:row.components.map(item=>{if(item.partId===null||item.partId===undefined)throw Error('Выберите позицию комплекта или уберите пустую строку');return {partId:item.partId,qty:precisionParse(item.qtyText,{scale:3,blank:'null'})};})},occurrences:row.occurrences.map(occurrence=>({id:occurrence.id,plannedDate:occurrence.plannedDate,plannedHours:precisionParse(occurrence.hoursText,{scale:3,blank:'null'}),...(Object.hasOwn(occurrence,'sourceIndex')?{sourceIndex:occurrence.sourceIndex}:{})}))};
  });
