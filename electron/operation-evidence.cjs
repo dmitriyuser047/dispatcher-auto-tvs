@@ -14,6 +14,7 @@ const frozen=value=>{if(value&&typeof value==='object'&&!Object.isFrozen(value))
 // Only this validator's owned, deeply frozen results can reuse validation.
 // Caller inputs, including frozen objects, never acquire this capability.
 const validatedProofs=new WeakSet();
+const validatedLedgerProofs=new WeakMap();
 const subjectIndexes=new WeakMap();
 const fail=()=>{throw Object.assign(Error('Invalid frozen operation evidence'),{code:'OPERATION_EVIDENCE_INVALID'});};
 function safe(value){
@@ -150,18 +151,20 @@ function validateProof(input){
  // Only the ledger's own decoded, deeply frozen JSON can avoid the defensive
  // copy. Its decoder enforces the same node/depth/key/type limits. Proof shape
  // and every access fact are still validated below before acquiring this mark.
- const proof=load('electron/operation-ledger.cjs').isOwnedStrictJSON(input)?input:safe(input);if(!object(proof)||proof.version!==1||!['verified','legacy-unverified'].includes(proof.status)||!Array.isArray(proof.subjects)||proof.subjects.length>5000||!object(proof.request)||proof.request.version!==1)fail();list(proof.requiredSections);
+ const ledger=load('electron/operation-ledger.cjs'),owned=ledger.isOwnedParsedProof(input);
+ if(owned&&validatedLedgerProofs.has(input))return validatedLedgerProofs.get(input);
+ const proof=ledger.isOwnedStrictJSON(input)?input:safe(input);if(!object(proof)||proof.version!==1||!['verified','legacy-unverified'].includes(proof.status)||!Array.isArray(proof.subjects)||proof.subjects.length>5000||!object(proof.request)||proof.request.version!==1)fail();list(proof.requiredSections);
  const request=proof.request,bound=operation(request.operation),ownedChecks=new Set();if(own(request,'globalReadRequired')&&typeof request.globalReadRequired!=='boolean')fail();if(!object(request.actor)||request.actor.id!==bound.actorId||request.actor.role!==bound.actorRole||!(/^sha256:[a-f0-9]{64}$/.test(request.actor.policyStamp)||proof.status==='legacy-unverified'&&request.actor.policyStamp===null)||!Array.isArray(request.dependencies)||!Array.isArray(request.selectedTargets)||!Array.isArray(request.eventHashes)||request.eventHashes.some(value=>!/^sha256:[a-f0-9]{64}$/.test(value))||!Array.isArray(request.eventGuards)||request.eventGuards.length!==request.eventHashes.length)fail();
  for(const [index,event]of request.eventGuards.entries()){if(!object(event)||event.hash!==request.eventHashes[index]||!Array.isArray(event.fieldGuards))fail();validateFacts({...unknown(),fieldGuards:event.fieldGuards},ownedChecks);}
  for(const dependency of request.dependencies)if(!object(dependency)||!names.has(dependency.section)||dependency.action!=='read')fail();
  for(const subject of [...proof.subjects,...request.selectedTargets])validateSubject(subject,ownedChecks);
  if(proof.status==='verified'&&(request.mode!=='transaction'||!proof.requiredSections.length||request.dependencies.some(row=>!proof.requiredSections.includes(row.section))||[...proof.subjects,...request.selectedTargets].some(row=>!proof.requiredSections.includes(row.section))))fail();
- const checked=frozen(proof);validatedProofs.add(checked);return checked;
+ const checked=frozen(proof);validatedProofs.add(checked);if(owned)validatedLedgerProofs.set(input,checked);return checked;
 }
 function environment(principal){if(!object(principal)||typeof principal.id!=='string'||!principal.id||typeof principal.role!=='string'||!principal.role)fail();const empty=Object.fromEntries(schema.sections.map(name=>[name,[]])),base=access.create(empty,empty,principal);return {...base,current:base.principal,reader:policy.createReader(base.policy,base.context)};}
 function subjectContext(env,subject,phase=null){return {...env.context,resolve:(name,row,requested='before')=>{const selected=phase||requested;if(name!==subject.section||subject[selected]===null||!same(row,subject[selected]))return unknown();return subject[selected+'Facts'];}};}
 function projectSubject(env,subject,phase){if(subject[phase]===null)return null;const row=env.reader.projectRows(subject.section,[subject[phase]],subjectContext(env,subject,phase).resolve)[0]||null;return row&&subject.section==='fuelPeriods'?load('electron/period-access.cjs').visibleRow(row,env.current):row;}
-function subjectAllowed(env,subject,{changedFields=false}={}){if(!load('electron/document-access.cjs').auditAccess(env.current,subject)||!load('electron/period-access.cjs').auditAccess(env.current,subject))return false;if(subject.section!=='fuelPeriods'&&legacyEnvironmentAllowed(env))return true;for(const phase of ['before','after'])if(subject[phase]!==null){const row=projectSubject(env,subject,phase);if(!row)return false;if(changedFields)for(const field of subject.changedFields)if(own(subject[phase],field)&&(!own(row,field)||!(subject.section==='fuelPeriods'&&field==='closureEvents')&&!same(row[field],subject[phase][field])))return false;}return true;}
+function subjectAllowed(env,subject,{changedFields=false}={}){if(!load('electron/document-access.cjs').auditAccess(env.current,subject)||!load('electron/period-access.cjs').auditAccess(env.current,subject))return false;if(subject.section!=='fuelPeriods'&&legacyEnvironmentAllowed(env))return true;for(const phase of ['before','after'])if(subject[phase]!==null){if(subject.section!=='fuelPeriods'&&(!changedFields||!subject.changedFields.length)){if(!env.reader.permits(subject.section,'read',subject[phase],subjectContext(env,subject,phase).resolve))return false;continue;}const row=projectSubject(env,subject,phase);if(!row)return false;if(changedFields)for(const field of subject.changedFields)if(own(subject[phase],field)&&(!own(row,field)||!(subject.section==='fuelPeriods'&&field==='closureEvents')&&!same(row[field],subject[phase][field])))return false;}return true;}
 const legacyReadEnvironments=new WeakMap();
 function legacyEnvironmentAllowed(env){
  if(legacyReadEnvironments.has(env))return legacyReadEnvironments.get(env);
@@ -173,7 +176,7 @@ function legacyEnvironmentCheck(env){
  const actions=[...Object.values(env.context.actions||{}),...Object.values(env.policy?.sections||{}).map(rule=>rule.actions).filter(Boolean),...(env.policy?.grants||[]).map(grant=>grant.actions).filter(Boolean)];if(actions.some(value=>!value.includes('*')))return false;
  return schema.sections.every(name=>env.reader.permits(name,'read',{id:'unverified-history'},unknown));
 }
-function canReadSection(env,name){return legacyEnvironmentAllowed(env)?names.has(name):access.sectionAllowed(env.current,'read',name);}
+function canReadSection(env,name){if(legacyEnvironmentAllowed(env))return names.has(name);const checked=env.readableSections??=new Map();if(!checked.has(name))checked.set(name,access.sectionAllowed(env.current,'read',name));return checked.get(name);}
 function legacyAllowed(env,proof){return legacyEnvironmentAllowed(env)&&proof.requiredSections.every(name=>names.has(name));}
 function isGloballyUnrestricted(principal){try{return legacyAllowed(environment(principal),{requiredSections:schema.sections});}catch{return false;}}
 function permitted(env,proof,bindActor){
@@ -215,4 +218,5 @@ function projectLegacyEventInEnvironment(eventValue,env){try{
 // One owned permission snapshot per synchronous response; never shared across
 // requests or keyed by a mutable caller principal.
 function createEventProjector(principal){try{const env=environment(principal);return Object.freeze({projectEvent:(event,proof)=>projectEventInEnvironment(event,proof,env),projectLegacyEvent:event=>projectLegacyEventInEnvironment(event,env)});}catch{return Object.freeze({projectEvent:()=>null,projectLegacyEvent:()=>null});}}
-module.exports=Object.freeze({apiVersion:1,createProof,createLegacyProof,authorizeProof,projectEvent,projectLegacyEvent,createEventProjector,validateProof,isGloballyUnrestricted});
+function createProjector(principal){return createEventProjector(principal);}
+module.exports=Object.freeze({apiVersion:1,createProof,createLegacyProof,authorizeProof,projectEvent,projectLegacyEvent,createEventProjector,createProjector,validateProof,isGloballyUnrestricted});

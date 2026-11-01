@@ -17,6 +17,8 @@ const WORKSPACE_RENDERERS = Object.freeze({
   dispatch: () => renderWorkflows(),
   toSchedule: () => renderToScheduleSection(),
   reestr: () => renderReestrSection(),
+  registries: () => window.tvsWeb?.active?window.tvsWeb.registries.render():desktopWebFeatures.render('registries'),
+  logistics: () => window.tvsWeb?.active?window.tvsWeb.logistics.render():desktopWebFeatures.render('logistics'),
   vehicles: opening => {
     const vehicle = !opening && data.vehicles.find(row => row.id === selectedVehicleId);
     if (vehicle) renderDetail(vehicle); else renderVehicleCards();
@@ -67,7 +69,7 @@ function switchSection(section, options = {}) {
   const hasSidebar = section === 'tanks';
   const sectionTitles = {
     vehicles: 'Транспорт', generators: 'ДЭС', tanks: 'Ёмкости', drivers:'Водители', operators:'Операторы ДЭС', driverTimesheets:'Загрузка водителей', operatorTimesheets:'Загрузка машинистов ДЭС', workflows:'Рабочие процессы', dispatch:'Диспетчерская',
-    reestr: 'Реестр', toSchedule: 'График ТО', repairs: 'Журнал ремонта', assetInventory:'Инвентаризация ОС', objectQuantity:'Количественный учёт', generatorSpares:'ЗИП ДЭС',
+    reestr: 'Реестр', registries:'Реестры и распределение счетов', logistics:'Логистика', toSchedule: 'График ТО', repairs: 'Журнал ремонта', assetInventory:'Инвентаризация ОС', objectQuantity:'Количественный учёт', generatorSpares:'ЗИП ДЭС',
     finances: 'Финансы', contragents: 'Контрагенты', reports: 'Отчёты',
     costs: 'Стоимость работы', procurement: 'Планирование закупок', system:'Состояние программы',
     printForms: 'Печатные формы', fuelReport: 'Отчёт по топливу', fuelPurchases: 'ГСМ'

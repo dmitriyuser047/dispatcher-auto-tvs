@@ -256,6 +256,7 @@ function prepareTransaction(previous, supplied, options = {}) {
   }
   assertScopeSnapshots(previous,sections,options.commandIntent);
   const at = options.now || new Date().toISOString();
+  if(['savedReestrs','repairs','vehicleTo','vehicles','contragents'].some(name=>Object.hasOwn(sections,name)))require('./registry-import.cjs').validateChanges(previous,{...previous,...sections},{dataDir:options.dataDir,principal});
   if (!Number.isFinite(Date.parse(at))) fail('INVALID_CLOCK', 'Некорректное время операции');
   const id = info?.id || 'backend:' + crypto.randomUUID();
   const calendar=require('../assets/core/business-calendar.js'),clock=calendar.resolve(previous,at);
@@ -352,11 +353,11 @@ function queryHistoryInternal(dataDir,input,principal){
   // These keys are private ledger-owned segment proofs. Reuse only the fully
   // validated immutable result within this query; current ACL projection runs
   // separately for every event and no caller-supplied proof enters this map.
-  const checkedProofs=new WeakMap();
+  const checkedProofs=new WeakMap(),projector=evidence.createProjector(normalized);
   return {ok:true,databaseToken:token,...store.engine(dataDir).page(state.head,{databaseToken:token,principalStamp,query:value.query||{},limit:value.limit??25,...(value.cursor===undefined?{}:{cursor:value.cursor})},(event,context)=>{
-    const source=context.proof;if(source.status==='legacy-unverified'&&source.request?.status==='unknown')return publicAuditRow(evidence.projectLegacyEvent(event,normalized));
+    const source=context.proof;if(source.status==='legacy-unverified'&&source.request?.status==='unknown')return publicAuditRow(projector.projectLegacyEvent(event));
     if(!checkedProofs.has(source))checkedProofs.set(source,evidence.validateProof(source));
-    return publicAuditRow(evidence.projectEvent(event,checkedProofs.get(source),normalized));
+    return publicAuditRow(projector.projectEvent(event,checkedProofs.get(source)));
   })};
 }
 function queryHistory(dataDir,input,principal){return require('./storage').withDatabaseLock(dataDir,()=>{const sqlite=require('./sqlite-storage.cjs'),action=()=>queryHistoryInternal(dataDir,input,principal);return sqlite.exists(dataDir)?sqlite.transaction(dataDir,action,{readOnly:true}):action();});}

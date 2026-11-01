@@ -64,7 +64,7 @@ function configure(db,readOnly){
   if(readOnly)db.exec('PRAGMA query_only=ON;');
   else db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
 }
-function validateFormat(db){
+function validateFormat(db,capture){
   const applicationId=db.prepare('PRAGMA application_id').get().application_id,fileVersion=db.prepare('PRAGMA user_version').get().user_version;
   if(fileVersion>SCHEMA_VERSION)fail('SQLITE_FUTURE_FORMAT','Файл SQLite создан более новой версией программы');
   if(applicationId!==0x54565331||!storageFormat.SUPPORTED_READ_SCHEMAS.includes(fileVersion))fail('SQLITE_FORMAT','Не совпадает служебная версия или идентификатор файла SQLite');
@@ -73,12 +73,18 @@ function validateFormat(db){
   const version=Number(metadata.format_version),schemaVersion=Number(metadata.schema_version);
   if(version>VERSION||schemaVersion>SCHEMA_VERSION)fail('SQLITE_FUTURE_FORMAT','Эта база SQLite создана более новой версией программы');
   if(version!==VERSION||!storageFormat.SUPPORTED_READ_SCHEMAS.includes(schemaVersion)||metadata.format_version!==String(VERSION)||metadata.schema_version!==String(schemaVersion)||fileVersion!==schemaVersion)fail('SQLITE_FORMAT','Не поддерживается версия формата SQLite');
-  if(schemaVersion>=3){let descriptor;try{descriptor=JSON.parse(metadata.compatibility);}catch{fail('SQLITE_FORMAT','Отсутствует подтверждение совместимости SQLite');}storageFormat.validateDescriptor(descriptor,schemaVersion);}
+  let descriptor;
+  if(schemaVersion>=3){let input;try{input=JSON.parse(metadata.compatibility);}catch{fail('SQLITE_FORMAT','Отсутствует подтверждение совместимости SQLite');}descriptor=storageFormat.validateDescriptor(input,schemaVersion);}
   else if(own(metadata,'compatibility'))fail('SQLITE_FORMAT','Подтверждение совместимости не соответствует версии SQLite');
   if(schemaVersion>=4){let operationState;try{operationState=JSON.parse(metadata.operation_state);}catch{fail('SQLITE_OPERATION_STATE','Отсутствует состояние истории операций');}storageFormat.validateOperationState(operationState);if(db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name IN('operation_ledger_objects','operation_ledger_receipts')").get().n!==2)fail('SQLITE_OPERATION_STATE','Отсутствуют служебные таблицы истории');}
   const sections=db.prepare('SELECT name,revision FROM sections').all();
   const names=storageFormat.sectionsFor(schemaVersion);
   if(sections.length!==names.length||sections.some(row=>!names.includes(row.name)||!Number.isSafeInteger(row.revision)||row.revision<0))fail('SQLITE_REVISIONS','Каталог или версии разделов SQLite не соответствуют формату программы');
+  if(capture){
+    capture.schemaVersion=schemaVersion;capture.descriptor=descriptor||storageFormat.describe(schemaVersion);
+    capture.revisions=Object.freeze(revisionsOf(Object.fromEntries(sections.map(row=>[row.name,row.revision]))));
+    capture.metadata=Object.freeze(metadata);
+  }
   return schemaVersion;
 }
 function resultSync(action){
@@ -119,16 +125,39 @@ function transaction(dataDir,action,options={}){
     // Validate an old schema before WAL configuration or a write transaction.
     // Legacy databases are readable, but upgrading is an explicit COPY action.
     const version=validateFormat(db);if(!readOnly&&version<SCHEMA_VERSION)storageFormat.upgradeRequired();
-    configure(db,readOnly);db.exec(readOnly?'BEGIN;':'BEGIN IMMEDIATE;');began=true;validateFormat(db);held.set(target.key,session);
+    configure(db,readOnly);db.exec(readOnly?'BEGIN;':'BEGIN IMMEDIATE;');began=true;
+    // The format, revision catalogue and metadata are freshly read after BEGIN.
+    // A query_only outer transaction cannot change them, and its SQLite view
+    // remains stable across concurrent commits. Never reuse this in a writer or
+    // retain it after the connection closes.
+    if(readOnly){session.readMetadata={};validateFormat(db,session.readMetadata);}else validateFormat(db);
+    held.set(target.key,session);
     const result=resultSync(action);if(session.failure)throw session.failure;if(options.beforeCommit)resultSync(()=>options.beforeCommit());
     db.exec('COMMIT;');began=false;return result;
   }catch(error){if(began)try{db.exec('ROLLBACK;');}catch{}throw error;}
   finally{held.delete(target.key);operationReads.delete(db);db.close();cleanRead();}
 }
 function connection(dataDir){const session=held.get(location(dataDir).key);if(!session)fail('SQLITE_TRANSACTION','Нет активного соединения SQLite');return session.db;}
+function readMetadata(dataDir){const session=held.get(location(dataDir).key);return session?.scopes[0]===true?session.readMetadata:null;}
 function readRows(dataDir,name){
   if(!schema.sections.includes(name))fail('SQLITE_SECTION','Неизвестный раздел SQLite: '+name);
   return transaction(dataDir,()=>connection(dataDir).prepare('SELECT row_json FROM section_rows WHERE section=? ORDER BY position').all(name).map(row=>JSON.parse(row.row_json)),{readOnly:true});
+}
+function readRawSections(dataDir,names){
+  if(!Array.isArray(names)||!names.length||names.length>schema.sections.length||new Set(names).size!==names.length||names.some(name=>!schema.sections.includes(name)))fail('SQLITE_SECTION','Некорректный список разделов SQLite');
+  const selected=schema.sections.filter(name=>names.includes(name));
+  return transaction(dataDir,()=>{
+    // Read the current stored text every time. The fingerprint includes the
+    // section and position as well as length-framed UTF-8 row bytes, so neither
+    // a same-revision edit nor moving a row can reuse an earlier projection.
+    const rows=connection(dataDir).prepare('SELECT section,position,row_json FROM section_rows WHERE section IN ('+selected.map(()=>'?').join(',')+') ORDER BY section,position').all(...selected);
+    const frames=[JSON.stringify(selected),':'];
+    for(const row of rows){
+      if(typeof row.row_json!=='string'||!Number.isSafeInteger(row.position)||row.position<0)fail('SQLITE_FORMAT','Повреждена исходная строка раздела SQLite');
+      frames.push(row.section,':',String(row.position),':',String(Buffer.byteLength(row.row_json,'utf8')),':',row.row_json);
+    }
+    return {sections:selected,rows,fingerprint:crypto.createHash('sha256').update(frames.join(''),'utf8').digest('hex')};
+  },{readOnly:true});
 }
 function countLegacyAssetReferences(dataDir,section,text){
   if(!['vehicles','generators','tanks'].includes(section)||typeof text!=='string')fail('QUERY_INVALID','Неверная проверка ссылки на технику');
@@ -170,11 +199,12 @@ function readAll(dataDir){return transaction(dataDir,()=>{
   return result;
 },{readOnly:true});}
 function readRevisions(dataDir){return transaction(dataDir,()=>{
+  const captured=readMetadata(dataDir);if(captured)return {...captured.revisions};
   const revisions=Object.fromEntries(connection(dataDir).prepare('SELECT name,revision FROM sections').all().map(row=>[row.name,row.revision]));
   return revisionsOf(revisions);
 },{readOnly:true});}
-function schemaVersion(dataDir){return transaction(dataDir,()=>validateFormat(connection(dataDir)),{readOnly:true});}
-function readDescriptor(dataDir){return transaction(dataDir,()=>{const db=connection(dataDir),version=validateFormat(db);return version>=3?storageFormat.validateDescriptor(JSON.parse(db.prepare("SELECT value FROM metadata WHERE key='compatibility'").get().value),version):storageFormat.describe(version);},{readOnly:true});}
+function schemaVersion(dataDir){return transaction(dataDir,()=>readMetadata(dataDir)?.schemaVersion??validateFormat(connection(dataDir)),{readOnly:true});}
+function readDescriptor(dataDir){return transaction(dataDir,()=>{const captured=readMetadata(dataDir);if(captured)return captured.descriptor;const db=connection(dataDir),version=validateFormat(db);return version>=3?storageFormat.validateDescriptor(JSON.parse(db.prepare("SELECT value FROM metadata WHERE key='compatibility'").get().value),version):storageFormat.describe(version);},{readOnly:true});}
 function readOperationState(dataDir){return transaction(dataDir,()=>{const db=connection(dataDir);if(validateFormat(db)<4)fail('SQLITE_OPERATION_STATE','История операций доступна начиная со схемы4');return storageFormat.validateOperationState(JSON.parse(db.prepare("SELECT value FROM metadata WHERE key='operation_state'").get().value));},{readOnly:true});}
 function readOperationText(dataDir,id){if(typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id))fail('SQLITE_OPERATION_HASH','Некорректный ключ истории');return transaction(dataDir,()=>{
  const db=connection(dataDir);let cache=operationReads.get(db);if(!cache){cache={entries:new Map(),bytes:0};operationReads.set(db,cache);}
@@ -191,8 +221,8 @@ function writeOperationState(dataDir,value){operationWriter(dataDir).prepare("UP
 const operationDDL=`CREATE TABLE operation_ledger_objects(hash TEXT PRIMARY KEY,json TEXT NOT NULL) STRICT; CREATE TABLE operation_ledger_receipts(operation_id TEXT PRIMARY KEY,receipt_hash TEXT,proof_hash TEXT,status TEXT NOT NULL CHECK(status IN('receipt','reserved-unknown')),CHECK((status='receipt' AND receipt_hash IS NOT NULL AND proof_hash IS NOT NULL) OR (status='reserved-unknown' AND receipt_hash IS NULL AND proof_hash IS NULL))) STRICT;`;
 function indexOperationObjects(db,objects,{replace=false}={}){const map=new Map(objects.map(object=>[object.id,JSON.parse(object.json)])),put=db.prepare('INSERT INTO operation_ledger_receipts VALUES(?,?,?,?)'+(replace?' ON CONFLICT(operation_id) DO UPDATE SET receipt_hash=excluded.receipt_hash,proof_hash=excluded.proof_hash,status=excluded.status':''));for(const object of map.values()){if(object.kind==='reserved-unknown')put.run(object.operationId,null,null,'reserved-unknown');else if(object.kind==='leaf'){const receipt=map.get(object.receiptHash)||JSON.parse(db.prepare('SELECT json FROM operation_ledger_objects WHERE hash=?').get(object.receiptHash).json);put.run(object.operationId,object.receiptHash,receipt.proofHash,'receipt');}}}
 function readIdentity(dataDir){return transaction(dataDir,()=>{
-  const metadata=Object.fromEntries(connection(dataDir).prepare("SELECT key,value FROM metadata WHERE key IN('database_uuid','generation')").all().map(row=>[row.key,row.value]));
-  if(!metadata.database_uuid&&!metadata.generation&&validateFormat(connection(dataDir))<SCHEMA_VERSION)return null;
+  const captured=readMetadata(dataDir),metadata=captured?captured.metadata:Object.fromEntries(connection(dataDir).prepare("SELECT key,value FROM metadata WHERE key IN('database_uuid','generation')").all().map(row=>[row.key,row.value]));
+  if(!metadata.database_uuid&&!metadata.generation&&(captured?.schemaVersion??validateFormat(connection(dataDir)))<SCHEMA_VERSION)return null;
   return require('./database-identity.cjs').validate({format:'tvs-database-identity',version:1,uuid:metadata.database_uuid,generation:Number(metadata.generation)});
 },{readOnly:true});}
 function rowEntries(data){
@@ -333,4 +363,4 @@ function inspect(dataDir){return transaction(dataDir,()=>{
     sections,rowCount:sections.reduce((total,row)=>total+row.count,0),linkCount:db.prepare('SELECT count(*) AS count FROM row_links').get().count,
     legacyIssues:db.prepare('SELECT issue_json FROM reference_issues ORDER BY id').all().map(row=>JSON.parse(row.issue_json)),integrity:integrityCheck,foreignKeyErrors};
 },{readOnly:true});}
-module.exports={inTransaction:dataDir=>held.has(location(dataDir).key),exists,filename,readAll,readRows,queryRows,countLegacyAssetReferences,readRevisions,readIdentity,schemaVersion,readDescriptor,readOperationState,readOperationObject,readOperationText,putOperationObjects,writeOperationState,commitSections,create,inspect,transaction};
+module.exports={inTransaction:dataDir=>held.has(location(dataDir).key),exists,filename,readAll,readRows,readRawSections,queryRows,countLegacyAssetReferences,readRevisions,readIdentity,schemaVersion,readDescriptor,readOperationState,readOperationObject,readOperationText,putOperationObjects,writeOperationState,commitSections,create,inspect,transaction};

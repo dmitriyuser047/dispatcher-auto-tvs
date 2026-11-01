@@ -22,3 +22,5 @@ audit/gsm-cross-*.html
 !rus.traineddata
 !eng.traineddata
 !assets/ocr/models/**/*.traineddata
+# Isolated local web demo databases and durable operation state.
+/web/.local/

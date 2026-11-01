@@ -4,7 +4,7 @@ const backup = require('./backup-service.cjs');
 const safeFile=require('./safe-file.cjs');
 const SAFE_EXT = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.txt', '.csv', '.xlsx', '.xls', '.docx', '.odt', '.ods']);
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
-function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir, getPrincipal, getContext, assertContext, getWriteOptions }) {
+function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir, getPrincipal, getContext, assertContext, getWriteOptions, archiveRemoteSource }) {
     const capture=event=>({sender:event.sender,url:event.sender.getURL(),frame:event.sender.mainFrame,context:getContext?.(event),directory:path.resolve(getDataDir())});
     const current=job=>{if(job.sender.isDestroyed()||job.sender.getURL()!==job.url||job.sender.mainFrame!==job.frame)throw Error('Окно закрыто или изменилось');local();if(job.context)assertContext(job.context);if(path.resolve(getDataDir())!==job.directory)throw Error('Профиль базы изменился');};
     const local = () => { if (isClientMode())
@@ -45,6 +45,7 @@ function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir
         return { ok: false, error: e.message };
     } });
     ipcMain.handle('archive-import-source', async (_event, payload) => { try {
+        if(isClientMode()&&typeof archiveRemoteSource==='function')return await archiveRemoteSource(_event,payload);
         local();
         const job=capture(_event);
         const authority={principal:getPrincipal?.(_event),...getWriteOptions?.(_event)};

@@ -13,6 +13,10 @@ function frNumber(value) {
   return frDecimal().toNumberExact(frDecimal().parse(value));
 }
 function frPlus(a,b) {return frDecimal().toNumberExact(frDecimal().add(a??0,b??0));}
+// Distributed mileage and norms can have an exact residual that does not fit a
+// JS Number. Preserve its decimal through totals, display and spreadsheet export.
+function frExactValue(value){const exact=frDecimal().parse(value);try{return frDecimal().toNumberExact(exact);}catch(error){if(error.code!=='RANGE'||!Number.isFinite(Number(exact)))throw error;return exact;}}
+function frExactAdd(a,b){return frExactValue(frDecimal().add(a??0,b??0));}
 function frMinus(a,b) {return frDecimal().toNumberExact(frDecimal().sub(a,b));}
 function frRatio(a,b,scale=6) {return frDecimal().compare(b,0)===0?null:frDecimal().toNumberExact(frDecimal().div(a,b,{scale,rounding:'half-away-from-zero'}));}
 function frFormat(value,metric={dec:3}) {
@@ -85,7 +89,7 @@ const FR_METRICS = {
     { id:'norm',   label:'По норме, л',    get:v => v.norm,                           dec:3 },
     { id:'act',    label:'Введённый факт / замер, л', get:v => v.actN?v.act:null, dec:3 },
     { id:'estimate',label:'Оценка для баланса, л',get:v=>v.estimated,dec:3},
-    { id:'dev',    label:'Отклонение по факту, л', get:v => v.actN && v.actNormN === v.actN ? frMinus(v.act,v.actNorm) : null, dec:3, sign:true },
+    { id:'dev',    label:'Отклонение по факту, л', get:v => v.actN && v.actNormN === v.actN ? frExactValue(frDecimal().sub(v.act,v.actNorm)) : null, dec:3, sign:true },
     { id:'devpct', label:'Отклонение по факту, %', get:v => v.actN && v.actNormN === v.actN && v.actNorm ? frRatio(frDecimal().mul(frDecimal().sub(v.act,v.actNorm),100),v.actNorm) : null, dec:2, derived:true, sign:true },
     { id:'sum',    label:'Сумма, ₽',       get:v => v.moneyMissing ? null : v.sum, dec:2, short:'₽' },
     { id:'price',  label:'Цена за литр',   get:v => !v.moneyMissing && v.sumL ? frRatio(v.sum,v.sumL) : null, dec:6, derived:true },
@@ -96,7 +100,7 @@ const FR_METRICS = {
     { id:'norm',   label:'По норме, л',    get:v => v.norm,                           dec:3 },
     { id:'act',    label:'Введённый факт, л', get:v => v.actN?v.act:null, dec:3 },
     { id:'estimate',label:'Оценка для баланса, л',get:v=>v.estimated,dec:3},
-    { id:'dev',    label:'Отклонение по факту, л',get:v=>v.actN&&v.actNormN===v.actN?frMinus(v.act,v.actNorm):null,dec:3,sign:true},
+    { id:'dev',    label:'Отклонение по факту, л',get:v=>v.actN&&v.actNormN===v.actN?frExactValue(frDecimal().sub(v.act,v.actNorm)):null,dec:3,sign:true},
     { id:'devpct', label:'Отклонение по факту, %',get:v=>v.actN&&v.actNormN===v.actN&&v.actNorm?frRatio(frDecimal().mul(frDecimal().sub(v.act,v.actNorm),100),v.actNorm):null,dec:2,derived:true,sign:true},
     { id:'hours',  label:'Моточасы',       get:v => v.h,                              dec:3 },
   ],
@@ -146,7 +150,7 @@ function frEmptyCell(tab) {
 
 function frAddCell(a, b) {
   const r = {};
-  Object.keys(a).forEach(k => { r[k] = frPlus(a[k],b[k]??0); });
+  Object.keys(a).forEach(k => { r[k] = ['km','norm','actNorm'].includes(k)?frExactAdd(a[k],b[k]??0):frPlus(a[k],b[k]??0); });
   return r;
 }
 
@@ -197,11 +201,11 @@ function frRows(tab, year) {
     });
     ledger.movements.filter(m => m.kind === 'consumption' && (m.qty || m.norm || m.km || ['actual','measurement'].includes(m.source))).forEach(m => {
       const c = cellFor(m.vehicleId, m.grade, m.date); if (!c) return;
-      const totalNorm=fqValue(m.totalNorm);
-      c.norm = frPlus(c.norm,totalNorm??0);
-      if(['actual','measurement'].includes(m.source)) { c.act=frPlus(c.act,m.qty);c.actN++;if(totalNorm != null){c.actNorm=frPlus(c.actNorm,totalNorm);c.actNormN++;} }
+      const totalNorm=m.allocation?.totalNorm??m.totalNorm;
+      c.norm = frDecimal().add(c.norm,totalNorm??0);
+      if(['actual','measurement'].includes(m.source)) { c.act=frPlus(c.act,m.qty);c.actN++;if(totalNorm != null){c.actNorm=frDecimal().add(c.actNorm,totalNorm);c.actNormN++;} }
       else c.estimated=frPlus(c.estimated,m.qty);
-      c.km=frPlus(c.km,m.km);c.n++;
+      c.km=frDecimal().add(c.km,m.allocation?.km??m.km??0);c.n++;
     });
   } else {
     const byId = {};
@@ -213,15 +217,16 @@ function frRows(tab, year) {
       const label = (place ? place + ' · ' : '') + g.name;
       const c = row('g:' + g.id, label, frFuelLabel(g.fuel, '')).cells[+r.date.slice(5, 7) - 1];
       c.iss  = frPlus(c.iss,frNumber(r.fuelIssued));
-      c.norm = frPlus(c.norm,genNormSpent(g, r));
+      c.norm = frExactAdd(c.norm,genNormSpent(g, r));
       if(r.fuelActualSource!=='estimate'&&fqValue(r.fuelActual)!=null) {
         c.act=frPlus(c.act,frNumber(r.fuelActual));c.actN++;
-        if(genNormKnown(g,r)){c.actNorm=frPlus(c.actNorm,genNormSpent(g,r));c.actNormN++;}
+        if(genNormKnown(g,r)){c.actNorm=frExactAdd(c.actNorm,genNormSpent(g,r));c.actNormN++;}
       } else c.estimated=frPlus(c.estimated,genActualSpent(g,r));
       c.h    = frPlus(c.h,frNumber(r.hours));
       c.n++;
     });
   }
+  if(tab==='veh')Object.values(rows).forEach(r=>r.cells.forEach(c=>{for(const key of ['km','norm','actNorm'])c[key]=frExactValue(c[key]);}));
   return Object.values(rows).filter(r => r.cells.some(c => !frCellEmpty(c)));
 }
 
@@ -460,7 +465,7 @@ function exportFuelReportXlsx() {
     const list = FR_METRICS[fuelRepTab];
     const PAIR = M.pair ? M.pair.map(id => list.find(x => x.id === id)) : null;
     const span = PAIR ? 2 : 1;
-    const cellVal = (mm, c) => { const v = mm.get(c); return v == null ? '—' : mm.derived?frDecimal().toNumberExact(frDecimal().quantize(v,{scale:mm.dec,rounding:'half-away-from-zero'})):frNumber(v); };
+    const cellVal = (mm, c) => { const v = mm.get(c); return v == null ? '—' : mm.derived?frDecimal().toNumberExact(frDecimal().quantize(v,{scale:mm.dec,rounding:'half-away-from-zero'})):['km','norm','dev'].includes(mm.id)?frExactValue(v):frNumber(v); };
     const tint = (mm, v) => (mm.sign && typeof v === 'number' && v) ? (v > 0 ? P.red : P.green) : null;
     const writeLine = (label, cells, tot, kind, bg) => {
       const bold = kind !== 'row';

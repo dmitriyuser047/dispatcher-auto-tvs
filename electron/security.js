@@ -1,5 +1,6 @@
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
+const SHARED_PUBLIC = new Set(['bdds.js','registries.js','finance-registry.js','registry-counterparties.js','driver-invoices.js','vehicle-invoices.js','logistics.js','registries.css','finance-registry.css','vehicle-invoices.css'].map(name=>'web/public/'+name));
 
 function trustedPage(url, rootDir, localPort) {
   try {
@@ -25,11 +26,11 @@ function staticFile(rootDir, requestPath) {
   let name;
   try { name = decodeURIComponent(requestPath.split('?')[0]); } catch { return null; }
   if (name === '/') name = '/index.html';
-  if (name !== '/index.html' && !/^\/(assets|vendor)\//.test(name) && name !== '/build/icon.ico') return null;
+  if (name !== '/index.html' && !/^\/(assets|vendor)\//.test(name) && name !== '/build/icon.ico' && !SHARED_PUBLIC.has(name.slice(1))) return null;
   const resolved = path.resolve(rootDir, '.' + name);
   const relative = path.relative(rootDir, resolved);
   if (relative.startsWith('..') || path.isAbsolute(relative) || relative.includes('\0')) return null;
-  if (relative !== 'index.html' && relative !== path.join('build', 'icon.ico') && !['assets', 'vendor'].some(dir => relative.startsWith(dir + path.sep))) return null;
+  if (relative !== 'index.html' && relative !== path.join('build', 'icon.ico') && !['assets', 'vendor'].some(dir => relative.startsWith(dir + path.sep)) && !SHARED_PUBLIC.has(relative.split(path.sep).join('/'))) return null;
   return resolved;
 }
 

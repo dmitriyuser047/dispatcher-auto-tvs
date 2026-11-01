@@ -1,9 +1,9 @@
 /* Shared personnel directory and assignment rules. No storage, DOM or clock writes. */
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./personnel-kinds.js'),() => require('./personnel-planning.js'));
-  else root.TvsPersonnelEngine = factory(root.PersonnelKinds,() => root.PersonnelPlanning);
-})(typeof globalThis === 'object' ? globalThis : this, function (roleFacts,getPlanning) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./personnel-kinds.js'),() => require('./personnel-planning.js'),() => require('./driver-per-diem.js'));
+  else root.TvsPersonnelEngine = factory(root.PersonnelKinds,() => root.PersonnelPlanning,() => root.DriverPerDiem);
+})(typeof globalThis === 'object' ? globalThis : this, function (roleFacts,getPlanning,getPerDiem) {
   'use strict';
   const own = (row, field) => !!row && Object.prototype.hasOwnProperty.call(row, field);
   const object = row => row !== null && typeof row === 'object' && !Array.isArray(row);
@@ -47,6 +47,7 @@
       add('PERSONNEL_ROLES', 'personnelRoles', 'Выберите водителя, оператора ДЭС или обе роли без повторений');
     if (own(row, 'employmentStatus') && !statuses.includes(row.employmentStatus)) add('PERSONNEL_STATUS', 'employmentStatus', 'Выберите допустимый статус сотрудника');
     for (const field of credentialFields) if (present(row[field]) && !dateValid(row[field])) add('PERSONNEL_DATE', field, 'Проверьте дату допуска сотрудника');
+    if(own(row,'perDiem')){try{const api=getPerDiem();if(api?.apiVersion!==1)throw Error('Не загружены правила суточных водителей');api.validateBook(row.perDiem);if(!matchesRole(row,'driver')&&row.perDiem.trips.length)throw Error('Расчёт суточных относится к роли «Водитель»');}catch(error){add(error.code||'PER_DIEM_INVALID','perDiem',error.message);}}
     return issues;
   }
   function linkRelevant(section, row, today) {

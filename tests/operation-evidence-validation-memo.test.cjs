@@ -41,6 +41,43 @@ test('a memoized proof still checks current actor, scope, field access and recei
  assert.equal(evidence.validateProof(checked),checked);
 });
 
+test('one projection owns its nested grants and fields while a new projection observes revocation',()=>{
+ const {proof,events}=fixture(),checked=evidence.validateProof(proof),current=principal(['A'],{readFields:{vehicles:['id','org','site','note']}}),projector=evidence.createProjector(current);
+ const first=projector.projectEvent(events[0],checked);assert.equal(first.after.note,'Changed');
+ assert.deepEqual(first,evidence.projectEvent(events[0],checked,current));
+ current.accessPolicy.grants=[];current.readFields.vehicles.splice(0,current.readFields.vehicles.length,'id','org','site');
+ assert.equal(projector.projectEvent(events[0],checked).after.note,'Changed');
+ assert.equal(evidence.createProjector(current).projectEvent(events[0],checked),null);
+ assert.equal(evidence.projectEvent(events[0],checked,current),null);
+ current.accessPolicy.grants=[{org:'A',site:{any:true}}];
+ assert.equal(Object.hasOwn(evidence.createProjector(current).projectEvent(events[0],checked).after,'note'),false);
+ assert.equal(Object.isFrozen(current.accessPolicy),false);assert.equal(Object.isFrozen(current.readFields.vehicles),false);
+});
+
+test('legacy broad-read decisions stay inside their projection and never survive new section grants',()=>{
+ const schema=require('../assets/core/platform-schema.js'),current={...actor,readable:schema.sections.slice()},event=fixture().events[0],projector=evidence.createProjector(current);
+ assert.deepEqual(projector.projectLegacyEvent(event),evidence.projectLegacyEvent(event,current));
+ assert.ok(projector.projectLegacyEvent(event));current.readable.length=0;
+ assert.ok(projector.projectLegacyEvent(event));assert.equal(evidence.createProjector(current).projectLegacyEvent(event),null);
+ assert.equal(evidence.projectLegacyEvent(event,current),null);
+});
+
+test('proof-local repeated facts never hide a malformed distinct scope',()=>{
+ const source=structuredClone(fixture().proof),duplicate=structuredClone(source.subjects[0]);source.subjects.push(duplicate);
+ assert.ok(evidence.validateProof(source));duplicate.beforeFacts.readRequirements={sections:['not-a-section'],owners:[],complete:true};
+ assert.throws(()=>evidence.validateProof(source));
+});
+
+test('only a privately owned decoded ledger proof can reuse a fully checked proof across reads',t=>{
+ const host=require('./helpers/operation-history25-host.cjs'),store=require('../electron/operation-store.cjs'),ledger=require('../electron/operation-ledger.cjs'),{dir}=host.fixture(t,'sqlite');
+ const value=host.commit(dir,host.actor,'decoded-proof-cache'),head=store.readState(dir).head,first=store.engine(dir).inspectReceipt(head,value.query.id).proof;
+ assert.equal(ledger.isOwnedParsedProof(first),true);const checked=evidence.validateProof(first);assert.equal(checked,first,'The strict ledger decoder already owns the fully frozen JSON; validation can retain that tree');
+ const again=store.engine(dir).inspectReceipt(head,value.query.id).proof;assert.equal(again,first);assert.equal(evidence.validateProof(again),checked);
+ const external=freeze(structuredClone(first));assert.equal(ledger.isOwnedParsedProof(external),false);assert.notEqual(evidence.validateProof(external),checked);assert.notEqual(evidence.validateProof(external),evidence.validateProof(external));
+ const current=host.principal(['A']),event=host.storage.readSnapshot(dir).data.auditLog.find(row=>row.before?.org==='A'||row.after?.org==='A'),projector=evidence.createProjector(current);assert.ok(projector.projectEvent(event,checked));
+ current.accessPolicy.grants=[];assert.equal(evidence.createProjector(current).projectEvent(event,evidence.validateProof(again)),null);assert.ok(projector.projectEvent(event,checked));
+});
+
 test('reconstructed or tampered proofs retain full validation and the existing resource ceilings',()=>{
  const checked=evidence.validateProof(fixture().proof),reconstructed=JSON.parse(JSON.stringify(checked));
  assert.notEqual(evidence.validateProof(reconstructed),checked);
@@ -53,7 +90,8 @@ test('reconstructed or tampered proofs retain full validation and the existing r
 function observeAdapterProofs(callback){
  const entry=require.cache[require.resolve('../electron/operation-evidence.cjs')],original=entry.exports,observed={validations:0,proofs:[]};
  const observe=proof=>{observed.proofs.push(proof);assert.equal(original.validateProof(proof),proof,'Adapter must retain the owned validated result');};
- entry.exports={...original,validateProof(value){observed.validations++;return original.validateProof(value);},projectEvent(event,proof,current){observe(proof);return original.projectEvent(event,proof,current);},createEventProjector(current){const projector=original.createEventProjector(current);return {...projector,projectEvent(event,proof){observe(proof);return projector.projectEvent(event,proof);}};}};
+ const observingProjector=current=>{const projector=original.createEventProjector(current);return {...projector,projectEvent(event,proof){observe(proof);return projector.projectEvent(event,proof);}};};
+ entry.exports={...original,validateProof(value){observed.validations++;return original.validateProof(value);},projectEvent(event,proof,current){observe(proof);return original.projectEvent(event,proof,current);},createEventProjector:observingProjector,createProjector:observingProjector};
  try{return callback(observed);}finally{entry.exports=original;}
 }
 

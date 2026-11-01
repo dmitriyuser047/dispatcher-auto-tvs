@@ -16,10 +16,10 @@ function renderRepairSection(vid) {
     recs.forEach(r => {
       rows += `<tr>
         <td class="td-day">${fmtDate(r.invoiceDate)}</td>
-        <td style="padding:10px 14px;font-size:13px;font-weight:600">${r.invoiceNo ? '<span class="invoice-badge"><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' + r.invoiceNo + '</span>' : '—'}</td>
+        ${window.tvsWeb?.vehicleInvoices?.cellHtml('repairs',r)||`<td style="padding:10px 14px;font-size:13px;font-weight:600">${r.invoiceNo ? '<span class="invoice-badge"><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' + htmlEsc(r.invoiceNo) + '</span>' : '—'}</td>`}
         <td class="td-num">${r.mileage != null ? r.mileage.toLocaleString('ru') + ' км' : '—'}</td>
         <td class="td-num" style="font-weight:600">${r.cost != null ? r.cost.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ₽' : '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${htmlEsc(r.description || '—')}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + r.category.split(',')[0].trim() + '</span></div>' : ''}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${htmlEsc(r.description || '—')}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + htmlEsc(r.category.split(',')[0].trim()) + '</span></div>' : ''}</td>
         <td class="td-num">
           <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:700;color:${r.paid ? 'var(--green)' : 'var(--red)'}">
             <input type="checkbox" ${r.paid ? 'checked' : ''} onchange="toggleRepairPaid(${htmlJs(r.id)})" style="width:auto;accent-color:var(--accent)">
@@ -53,7 +53,7 @@ function renderRepairSection(vid) {
     <div class="table-scroll">
       <table>
         <thead><tr>
-          <th>Дата счёта</th><th>№ счёта</th><th>Пробег</th><th>Сумма</th>
+          <th>Дата счёта</th>${window.tvsWeb?.vehicleInvoices?.headingHtml()||'<th>№ счёта</th>'}<th>Пробег</th><th>Сумма</th>
           <th>Описание</th><th>Статус оплаты</th><th></th>
         </tr></thead>
         <tbody>${rows}</tbody>
@@ -197,10 +197,10 @@ function renderRepairsJournal() {
       rows += `<tr>
         <td style="padding:10px 14px;font-size:13px;font-weight:600">${v ? v.plate : '—'}<div style="font-weight:400;color:var(--text3);font-size:11px">${v ? v.make : ''}</div></td>
         <td class="td-day">${fmtDate(r.invoiceDate)}</td>
-        <td style="padding:10px 14px;font-size:13px">${r.invoiceNo ? '<span class="invoice-badge"><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' + r.invoiceNo + '</span>' : '—'}</td>
+        ${window.tvsWeb?.vehicleInvoices?.cellHtml('repairs',r)||`<td style="padding:10px 14px;font-size:13px">${r.invoiceNo ? '<span class="invoice-badge"><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' + htmlEsc(r.invoiceNo) + '</span>' : '—'}</td>`}
         <td class="td-num">${r.mileage != null ? r.mileage.toLocaleString('ru') + ' км' : '—'}</td>
         <td class="td-num" style="font-weight:600">${r.cost != null ? r.cost.toLocaleString('ru-RU', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ₽' : '—'}</td>
-        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${htmlEsc(r.description || '—')}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + r.category.split(',')[0].trim() + '</span></div>' : ''}</td>
+        <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:320px">${htmlEsc(r.description || '—')}${r.category ? '<div style="margin-top:3px"><span class="category-tag">' + htmlEsc(r.category.split(',')[0].trim()) + '</span></div>' : ''}</td>
         <td class="td-num">
           <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:700;color:${r.paid ? 'var(--green)' : 'var(--red)'}">
             <input type="checkbox" ${r.paid ? 'checked' : ''} onchange="toggleRepairPaid(${htmlJs(r.id)})" style="width:auto;accent-color:var(--accent)">
@@ -229,7 +229,7 @@ function renderRepairsJournal() {
       <div class="table-scroll" style="max-height:52vh">
         <table>
           <thead><tr>
-            <th>ТС</th><th>Дата счёта</th><th>№ счёта</th><th>Пробег</th>
+            <th>ТС</th><th>Дата счёта</th>${window.tvsWeb?.vehicleInvoices?.headingHtml()||'<th>№ счёта</th>'}<th>Пробег</th>
             <th>Сумма</th><th>Описание</th><th>Статус оплаты</th><th></th>
           </tr></thead>
           <tbody>${rows}</tbody>

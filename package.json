@@ -26,7 +26,12 @@
     "test:generator-maintenance": "node --test tests/generator-maintenance.test.cjs tests/generator-maintenance-calendar.test.cjs tests/generator-maintenance-forecast.test.cjs tests/generator-maintenance-journal-counter.test.cjs tests/generator-spares.test.cjs tests/generator-maintenance-print.test.cjs tests/generator-maintenance-storage.test.cjs tests/schema5-compatibility.test.cjs tests/schema5-copy.test.cjs tests/generator-maintenance-spares.test.cjs",
     "build:application": "node scripts/build-application.cjs",
     "check:application": "node scripts/build-application.cjs --check",
-    "check:architecture": "node scripts/check-application-architecture.cjs"
+    "check:architecture": "node scripts/check-application-architecture.cjs",
+    "start:web": "node web/cli.cjs",
+    "web:demo": "node web/cli.cjs --demo",
+    "test:web": "node --test tests/web-*.test.cjs",
+    "web:load-check": "node scripts/web-load-check.cjs",
+    "test:driver-per-diem": "node --test tests/driver-per-diem.test.cjs tests/driver-per-diem-ui.cjs"
   },
   "devDependencies": {
     "electron": "44.9.0",
@@ -54,7 +59,9 @@
       "reestr-window.html",
       "pdf-editor.html",
       "ReestrBuilder/contracts.json",
-      "package.json"
+      "package.json",
+      "web/public/**",
+      "web/registry-import-worker.cjs"
     ],
     "asarUnpack": [
       "node_modules/node-unrar-js/**",

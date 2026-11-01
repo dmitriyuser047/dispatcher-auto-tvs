@@ -19,7 +19,7 @@ function errorValue(error){const value={name:error?.name||'Error',message:String
 boundary.configure(event=>port.postMessage({type:'diagnostic',event}));
 try{
  if(!['writeSections','executeCommand','writeAll','readSnapshot'].includes(kind))throw Object.assign(Error('Неизвестная операция хранилища.'),{code:'STORAGE_EXECUTOR_INPUT',definitive:true});
- const value=readSession.run(()=>storage.withDatabaseLock(dataDir,physical=>{
+ const value=readSession.run(()=>require('./storage-dispatch-lock.cjs').acquireForDispatch(dataDir,physical=>{
   rpc('locked');
   if(kind==='readSnapshot')return storage.readSnapshot(physical,{principal:options.principal});
   const trusted={...options,...(hasCompatibility?{assertWriteCompatibility:context=>rpc('compatibility',context)}:{}),beforeCommit:()=>{

@@ -179,12 +179,18 @@ async function loadData() {
   if (d && !validDatabase(d)) d = null;
   if (!d && window.electronAPI) {
     _loadWriteBlocked = true;
-    showToast('Основная база недоступна. Открыта резервная копия только для просмотра. Проверьте подключение и файлы базы.');
+    showToast(window.tvsWeb?.active ? 'Общая база недоступна. Проверьте подключение к серверу.' : 'Основная база недоступна. Открыта резервная копия только для просмотра. Проверьте подключение и файлы базы.');
   }
-  if (!d) {
+  if (window.tvsWeb?.active) localCacheKey = null;
+  if (!d && !window.tvsWeb?.active) {
     try { if(localCacheKey)d = JSON.parse(localStorage.getItem(localCacheKey)); } catch {}
   }
   if (d && !validDatabase(d)) d = null;
+  if (!d && window.tvsWeb?.active) {
+    const error = new Error('Общая база не загружена. Проверьте подключение и войдите повторно.');
+    window.tvsWeb.connectionError(error);
+    throw error;
+  }
   if (!d) d = { vehicles: [], records: [] };
   if (!d.generators)  d.generators  = [];
   if (!d.genRecords)  d.genRecords   = [];
@@ -228,6 +234,7 @@ async function loadData() {
 // Повторные вызовы схлопываются — пишется только последнее состояние.
 let _lsPending = null, _lsTimer = null;
 function scheduleLocalBackup(json) {
+  if(window.tvsWeb?.active)return;
   if(!localCacheKey||_loadWriteBlocked)return;
   _lsPending = {key:localCacheKey,json};
   if (_lsTimer) return;
@@ -261,7 +268,10 @@ function restoreSaveRollback(owner) {
   rebuildIndex();return true;
 }
 async function saveData(d = data, options) {
-  const operation=typeof platformExecuteSave === 'function' ? platformExecuteSave(d,options,nextOptions=>persistData(d,nextOptions)) : persistData(d,options);
+  const operation=(async()=>{
+    if(window.tvsWeb?.active&&typeof syncEnsureLoaded==='function'){try{await syncEnsureLoaded(SYNC_SECTIONS,d);}catch(error){showToast(error.message);return false;}}
+    return typeof platformExecuteSave === 'function' ? platformExecuteSave(d,options,nextOptions=>persistData(d,nextOptions)) : persistData(d,options);
+  })();
   _pendingSaveOperations.add(operation);
   try{return await operation;}finally{_pendingSaveOperations.delete(operation);}
 }

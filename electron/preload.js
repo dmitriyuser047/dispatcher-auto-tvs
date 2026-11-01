@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   addAttachment:  origin    => ipcRenderer.invoke('add-attachment',origin),
   openAttachment: origin    => ipcRenderer.invoke('open-attachment',origin),
   archiveImportSource:(payload) => ipcRenderer.invoke('archive-import-source',payload),
+  decodeRegistry:payload=>ipcRenderer.invoke('decode-registry',payload),
   createBackupPackage:()=>ipcRenderer.invoke('create-backup-package'),
   verifyBackupPackage:()=>ipcRenderer.invoke('verify-backup-package'),
   openDataFolder: ()        => ipcRenderer.invoke('open-data-folder'),

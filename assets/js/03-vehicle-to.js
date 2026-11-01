@@ -56,7 +56,7 @@ function renderVehicleToSection(vid, currentOdometer) {
 
   let rows = '';
   if (!recs.length) {
-    rows = `<tr><td colspan="8" class="empty-table">Нет записей ТО. Нажмите «+ ТО» чтобы добавить.</td></tr>`;
+    rows = `<tr><td colspan="${9+(window.tvsWeb?.vehicleInvoices?.headingHtml()?1:0)}" class="empty-table">Нет записей ТО. Нажмите «+ ТО» чтобы добавить.</td></tr>`;
   } else {
     [...recs].reverse().forEach(r => {
       rows += `<tr${r.planned ? ' style="background:var(--bg2)"' : ''}>
@@ -68,6 +68,7 @@ function renderVehicleToSection(vid, currentOdometer) {
         <td class="td-num">${r.cost != null ? r.cost.toLocaleString('ru-RU') + ' ₽' : '—'}</td>
         <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.performer || '—')}</td>
         <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.note || '—')}</td>
+        ${window.tvsWeb?.vehicleInvoices?.cellHtml('vehicleTo',r)||''}
         <td class="td-actions">
           ${r.planned ? `<button class="btn btn-primary btn-sm" onclick="tssCompletePlan(${htmlJs(r.id)},'vehicleTo')">Выполнено</button>` : ''}
           <button class="icon-btn" onclick="openEditVehicleTo(${htmlJs(r.id)})">
@@ -99,7 +100,7 @@ function renderVehicleToSection(vid, currentOdometer) {
       <table>
         <thead><tr>
           <th>Дата</th><th>Вид ТО</th><th>Пробег, км</th><th>След. ТО (км)</th>
-          <th>Дата след. ТО</th><th>Стоимость</th><th>Исполнитель</th><th>Примечание</th><th></th>
+          <th>Дата след. ТО</th><th>Стоимость</th><th>Исполнитель</th><th>Примечание</th>${window.tvsWeb?.vehicleInvoices?.headingHtml()||''}<th></th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>

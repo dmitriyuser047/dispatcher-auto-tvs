@@ -35,7 +35,48 @@ const SYNC_NAMES = {
 };
 const SYNC_POLL_MS = 20000;
 
-const _sync = { enabled: false, revs: {}, synced: {}, scopeViews: {}, databaseToken:null, access:null, platform:null, lastResult:null, chain: Promise.resolve(), polling: null, needRefresh: [] };
+const _sync = { enabled: false, revs: {}, synced: {}, loadedSections: [], scopeViews: {}, databaseToken:null, access:null, platform:null, lastResult:null, chain: Promise.resolve(), polling: null, needRefresh: [] };
+
+// A missing baseline is a deferred section, not an authoritative empty array.
+// Some retained editors initialize optional arrays for display; that does not
+// grant permission to replace the corresponding server section.
+function syncSectionLoaded(name) { return Object.hasOwn(_sync.synced, name); }
+function syncMarkLoaded(names) { _sync.loadedSections = SYNC_SECTIONS.filter(name => syncSectionLoaded(name) || names.includes(name)); }
+async function syncEnsureLoaded(names = SYNC_SECTIONS, draft = data) {
+  if (!Array.isArray(names) || names.some(name => !SYNC_SECTIONS.includes(name))) throw Error('Некорректный список загружаемых разделов.');
+  const missing = [...new Set(names)].filter(name => !syncSectionLoaded(name));
+  if (!missing.length) return true;
+  if (!_sync.enabled || !window.electronAPI) throw Object.assign(Error('Не подтверждены исходные данные для сохранения.'), { code: 'SECTION_NOT_LOADED' });
+  const source = data, stamp = syncSessionStamp();
+  const captured = Object.fromEntries(missing.map(name => [name, [JSON.stringify(source[name] || []), JSON.stringify(draft[name] || [])]]));
+  if (missing.some(name => captured[name].some(value => value !== '[]')))
+    throw Object.assign(Error('Раздел изменён до загрузки исходных данных. Сохранение остановлено; откройте форму после загрузки раздела.'), { code: 'SECTION_NOT_LOADED' });
+  const raw = window.electronAPI.ensureSections
+    ? await window.electronAPI.ensureSections(missing)
+    : await window.electronAPI.readSnapshot({ hello: typeof PlatformCompatibility === 'undefined' ? null : PlatformCompatibility.describe().hello });
+  syncEnsureSession(stamp);
+  const response = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  syncAssertDatabase(response);
+  if (!response?.access || response.access.policyStamp !== _sync.access?.policyStamp || response.access.user?.id !== _sync.access?.user?.id || response.access.user?.role !== _sync.access?.user?.role)
+    throw Object.assign(Error('Права изменились во время загрузки. Загрузите данные заново.'), { code: 'SESSION_CHANGED' });
+  const loaded = response.loadedSections === undefined ? SYNC_SECTIONS : response.loadedSections;
+  if (!Array.isArray(loaded) || missing.some(name => !loaded.includes(name) || !Array.isArray(response.data?.[name]) || !Number.isSafeInteger(response.revisions?.[name]) || response.revisions[name] < 0))
+    throw Object.assign(Error('Сервер не подтвердил полные исходные разделы.'), { code: 'SECTION_NOT_LOADED' });
+  if (source !== data || missing.some(name => JSON.stringify(source[name] || []) !== captured[name][0] || JSON.stringify(draft[name] || []) !== captured[name][1]))
+    throw Object.assign(Error('Данные изменились во время загрузки разделов. Проверьте форму заново.'), { code: 'STALE_DRAFT' });
+  let persisted = {};
+  if (typeof _lastPersisted !== 'undefined' && _lastPersisted) persisted = JSON.parse(_lastPersisted);
+  for (const name of missing) {
+    const json = JSON.stringify(response.data[name]);
+    source[name] = JSON.parse(json);
+    if (draft !== source) draft[name] = JSON.parse(json);
+    _sync.synced[name] = json; _sync.revs[name] = response.revisions[name]; persisted[name] = JSON.parse(json);
+  }
+  syncMarkLoaded(missing); syncInstallScopeViews(response, missing);
+  if (typeof _lastPersisted !== 'undefined') _lastPersisted = JSON.stringify(persisted);
+  if (missing.includes('reestrRows') && typeof reestrRows !== 'undefined') reestrRows = source.reestrRows;
+  return true;
+}
 
 function syncSessionStamp() {
   return JSON.stringify([typeof dispatcherContext === 'function' ? dispatcherContext().identity : _sync.databaseToken,
@@ -45,6 +86,7 @@ function syncSessionStamp() {
 // Only a full canonical projection supplies a write witness. Query pages never
 // become the baseline of a replacement save.
 function syncInstallScopeViews(response,names) {
+  syncMarkLoaded(names.filter(name => syncSectionLoaded(name)));
   if(!response?.scopeViews)return;
   _sync.scopeViews ||= {};
   for(const name of names){
@@ -64,7 +106,9 @@ function syncAuditDelta(response,canonical) {
   if(!delta||delta.version!==1||!Number.isSafeInteger(delta.revision)||delta.revision<0||response.revisions?.auditLog!==delta.revision||Object.hasOwn(canonical,'auditLog'))bad();
   if(delta.invalidated===true){if(Object.keys(delta).some(key=>!['version','revision','invalidated'].includes(key)))bad();return canonical;}
   if(Object.keys(delta).some(key=>!['version','revision','baseRevision','appended'].includes(key))||!Number.isSafeInteger(delta.baseRevision)||delta.baseRevision<0||delta.revision!==delta.baseRevision+1||!Array.isArray(delta.appended)||delta.appended.length>2000)bad();
-  if(delta.baseRevision!==(_sync.revs.auditLog||0))return canonical;
+  // A deferred history has no known prefix to append to, even when its
+  // revision metadata is current. Keep it deferred until a full section read.
+  if(!syncSectionLoaded('auditLog')||delta.baseRevision!==(_sync.revs.auditLog||0))return canonical;
   const baseline=JSON.parse(_sync.synced.auditLog||'[]');if(!Array.isArray(baseline))bad();
   const rows=baseline.concat(JSON.parse(JSON.stringify(delta.appended)));
   if(typeof PlatformContracts!=='undefined')PlatformContracts.validateSections({auditLog:rows},SYNC_SECTIONS);
@@ -169,13 +213,18 @@ async function syncResolveMerge(section,base,local,remote){
 
 async function syncLoad() {
   if (!window.electronAPI || !window.electronAPI.readSnapshot) return null;
-  const raw = await window.electronAPI.readSnapshot({hello:typeof PlatformCompatibility==='undefined'?null:PlatformCompatibility.describe().hello});
+  const reader = window.electronAPI.readWorkspace || window.electronAPI.readSnapshot;
+  const raw = await reader({hello:typeof PlatformCompatibility==='undefined'?null:PlatformCompatibility.describe().hello});
   if (!raw) return null;
   const snap = JSON.parse(raw);
   if (!snap || !snap.data) return null;
+  const loaded = snap.loadedSections === undefined ? SYNC_SECTIONS : snap.loadedSections;
+  if (!Array.isArray(loaded) || loaded.some(name => !SYNC_SECTIONS.includes(name)) || new Set(loaded).size !== loaded.length || snap.loadedSections !== undefined && loaded.some(name => !Array.isArray(snap.data[name])))
+    throw Object.assign(Error('Сервер не подтвердил состав загруженных разделов.'), { code: 'WORKSPACE_INVALID' });
   _sync.enabled = false;
   _sync.revs = {};
   _sync.synced = {};
+  _sync.loadedSections = [];
   _sync.scopeViews = JSON.parse(JSON.stringify(snap.scopeViews || {}));
   _sync.databaseToken = typeof snap.databaseToken === 'string' ? snap.databaseToken : null;
   _sync.access=snap.access||null;
@@ -187,7 +236,8 @@ async function syncLoad() {
     _sync.enabled = true;
     _sync.revs = Object.assign({}, snap.revisions);
   }
-  SYNC_SECTIONS.forEach(n => { _sync.synced[n] = JSON.stringify(snap.data[n] || []); });
+  loaded.forEach(n => { _sync.synced[n] = JSON.stringify(snap.data[n] || []); });
+  syncMarkLoaded(loaded);
   return snap.data;
 }
 
@@ -219,9 +269,16 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
   const atomicSections=options?.atomicSections||[];
   if(!Array.isArray(atomicSections)||atomicSections.some(name=>!SYNC_SECTIONS.includes(name)))
     throw new Error('Некорректный список разделов атомарной проверки.');
+  if (SYNC_SECTIONS.some(name => !syncSectionLoaded(name) && JSON.stringify(d[name] || []) !== '[]') || [...atomicSections, ...requiredCanonical].some(name => !syncSectionLoaded(name)))
+    throw Object.assign(Error('Перед сохранением загрузите полные исходные разделы. Неполные данные не отправлены.'), { code: 'SECTION_NOT_LOADED' });
+  // Reviewed editors can submit a private draft. Hydrating deferred history
+  // changes the live audit prefix before those editors receive their ACK, so
+  // install that canonical ACK here when the live prefix remained clean.
+  const liveAudit = typeof data !== 'undefined' && d !== data && syncSectionLoaded('auditLog') && JSON.stringify(data.auditLog || []) === _sync.synced.auditLog
+    ? { database: data, json: _sync.synced.auditLog } : null;
   let cur = {};
   const changedNow = () => {
-    const actual=SYNC_SECTIONS.filter(n=>{if(n==='auditLog'&&_sync.platform?.compactAck===1)return false;cur[n]=JSON.stringify(d[n]||[]);return cur[n]!==_sync.synced[n];});
+    const actual=SYNC_SECTIONS.filter(n=>{if(!syncSectionLoaded(n)||n==='auditLog'&&_sync.platform?.compactAck===1)return false;cur[n]=JSON.stringify(d[n]||[]);return cur[n]!==_sync.synced[n];});
     // Send reviewed read dependencies with their baseline versions as well.
     // An unchanged directory must still invalidate links reviewed before a concurrent edit.
     return actual.length?SYNC_SECTIONS.filter(name=>(name!=='auditLog'||_sync.platform?.compactAck!==1)&&(actual.includes(name)||atomicSections.includes(name))):[];
@@ -243,7 +300,10 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
     }
     // A concurrently changed business calendar must invalidate a reviewed wall
     // time even when the caller is not writing the calendar section itself.
-    if(changed.some(name=>name==='dispatchJobs'||name==='workOrders'))payload.base.appMeta=_sync.revs.appMeta||0;
+    if(changed.some(name=>name==='dispatchJobs'||name==='workOrders')){
+      if(!syncSectionLoaded('appMeta'))throw Object.assign(Error('Загрузите учётный календарь перед сохранением.'),{code:'SECTION_NOT_LOADED'});
+      payload.base.appMeta=_sync.revs.appMeta||0;
+    }
     const res = await window.electronAPI.writeSections(JSON.stringify(payload));
     syncEnsureSession(stamp);
     if (res && (res.databaseToken != null || res.ok || res.conflicts || res.databaseChanged)) syncAssertDatabase(res);
@@ -274,6 +334,10 @@ async function syncSaveNow(d, options, stamp = syncSessionStamp()) {
       const canonical=Object.fromEntries(encoded.map(([name,rows])=>[name,rows]));
       encoded.forEach(([name,rows,json])=>{d[name]=rows;_sync.synced[name]=json;if(res.revisions&&name in res.revisions)_sync.revs[name]=res.revisions[name];});
       if(res.auditDelta&&!canonical.auditLog)d.auditLog=JSON.parse(_sync.synced.auditLog||'[]');
+      if (liveAudit && liveAudit.database === data && JSON.stringify(data.auditLog || []) === liveAudit.json) {
+        if (Array.isArray(canonical.auditLog)) data.auditLog = JSON.parse(JSON.stringify(canonical.auditLog));
+        else if (res.auditDelta) data.auditLog = JSON.parse(_sync.synced.auditLog || '[]');
+      }
       syncInstallScopeViews(res, Object.keys(canonical));
       _sync.lastResult=res;
       if (mergedNames.size) {
@@ -348,7 +412,7 @@ async function syncPoll() {
   try { revs = await window.electronAPI.getRevisions(); if (stamp !== syncSessionStamp()) return; if (revs) syncAssertDatabase(revs); }
   catch (error) { if (stamp !== syncSessionStamp()) return; console.warn('[sync] ' + error.message); if (error.databaseChanged) showToast(error.message); return; }
   if (!revs) return;
-  const stale = SYNC_SECTIONS.filter(n => (revs[n] || 0) !== (_sync.revs[n] || 0));
+  const stale = SYNC_SECTIONS.filter(n => syncSectionLoaded(n) && (revs[n] || 0) !== (_sync.revs[n] || 0));
   if (!stale.length) return;
   // В очередь с сохранениями, чтобы не подтягивать посреди записи
   _sync.chain = _sync.chain.then(async () => {
@@ -384,7 +448,7 @@ async function syncPoll() {
 
 function syncClearAccessView(message){
   if(typeof assetInventoryWorkspaceRevoke==='function')assetInventoryWorkspaceRevoke();
-  _loadWriteBlocked=true;_sync.enabled=false;_sync.revs={};_sync.synced={};_sync.scopeViews={};_sync.lastResult=null;_sync.needRefresh=[];
+  _loadWriteBlocked=true;_sync.enabled=false;_sync.revs={};_sync.synced={};_sync.loadedSections=[];_sync.scopeViews={};_sync.lastResult=null;_sync.needRefresh=[];
   _sync.access=null;_sync.databaseToken=null;_lastPersisted=null;localCacheKey=null;
   if(typeof _lsTimer!=='undefined'&&_lsTimer){clearTimeout(_lsTimer);_lsTimer=null;_lsPending=null;}
   data=Object.fromEntries(SYNC_SECTIONS.map(name=>[name,[]]));

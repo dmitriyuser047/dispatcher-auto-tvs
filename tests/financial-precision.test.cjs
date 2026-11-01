@@ -35,6 +35,9 @@ test('report exact additions preserve source millilitres and reject non-finite o
  const h=app([income('a',0.1,{amount:923.537,vatAmount:0}),income('b',0.2,{amount:0.001,vatAmount:0})]);assert.equal(h.build().grand.l,923.538);assert.equal(h.build().grand.s,0.3);
  assert.throws(()=>h.context.frTax(income('bad',Infinity)),{code:'INVALID_DECIMAL'});assert.throws(()=>h.context.frPlus(1e308,1e308),{code:'RANGE'});assert.throws(()=>h.context.frNumber(NaN),{code:'INVALID_DECIMAL'});
 });
+test('fuel analysis and Excel retain exact distributed mileage and norms without a Number conversion failure',()=>{
+  const h=app(),values=['13201.082955147074','2843.223263673469'];h.data.vehicles=[{id:'a',plate:'Synthetic A'},{id:'b',plate:'Synthetic B'}];h.context.gsmBuildLedger=()=>({receipts:[],movements:values.map((value,index)=>({vehicleId:index?'b':'a',recordId:'r'+index,date:'2026-09-10',grade:'ДТ',kind:'consumption',source:'actual',qty:1,km:Number(value),totalNorm:Number(value),allocation:{km:value,totalNorm:value}}))});vm.runInContext("fuelRepTab='veh';fuelRepMetric='km';",h.context);const before=JSON.stringify(h.data),report=h.build();assert.equal(report.count,2);assert.equal(DecimalCore.parse(report.grand.km),'16044.306218820543');assert.equal(DecimalCore.parse(report.grand.norm),'16044.306218820543');h.context.renderFuelReport();assert.match(h.content.innerHTML,/16 044,306218820543/);const sheet=h.sheet(),rows=sheetRows(sheet),mileage=rows.findIndex(row=>row?.[0]?.v==='Пробег, км'),total=rows.slice(mileage+1).find(row=>row?.[0]?.v==='ИТОГО');assert.equal(total[1].v,'16044.306218820543');assert.equal(total[1].t,'s');assert.equal(JSON.stringify(h.data),before);
+});
 
 const period={from:'2026-09-01',to:'2026-09-30'},entry=(id,amount)=>({id,date:'2026-09-10',assetRef:'v:v',kind:'expense',amount,title:'Synthetic cost '+id,independent:true});
 test('cost totals use decimal source amounts with legacy diagnostics and explicit range failures',()=>{

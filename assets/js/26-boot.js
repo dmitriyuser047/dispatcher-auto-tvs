@@ -12,11 +12,17 @@
     } catch (e) { console.warn('[theme] ' + e.message); }
   }
   data = await loadData();
+  // Direct web addresses render a card immediately. Its guarded actions must
+  // capture the final connection identity, including the settings projection.
+  if (window.tvsWeb?.active && window.electronAPI?.getSettings) {
+    _appSettings = await window.electronAPI.getSettings();
+  }
   if (data.reestrRows && data.reestrRows.length) reestrRows = data.reestrRows;
   rebuildIndex();
   populateOrgSelect();
   updateFilterUI();
-  switchSection('home');
+  if (window.tvsWeb?.startRoute) await window.tvsWeb.startRoute();
+  else switchSection('home');
   if (typeof syncStartPolling === 'function') syncStartPolling();
   if(typeof platformNotifyPendingOperations==='function')void platformNotifyPendingOperations();
   // «Что нового» после обновления — чуть позже, чтобы не мешать отрисовке
@@ -25,7 +31,7 @@
   // Регламенты и планы утверждаются из графика ТО. Запуск приложения не
   // назначает интервалы по предположению о марке и не создаёт работы в базе.
   if (window.electronAPI && window.electronAPI.getSettings) {
-    _appSettings = await window.electronAPI.getSettings();
+    if (!window.tvsWeb?.active) _appSettings = await window.electronAPI.getSettings();
     updateSidebarDataPath();
   }
   if (window.electronAPI && window.electronAPI.onReestrRowsSaved) {

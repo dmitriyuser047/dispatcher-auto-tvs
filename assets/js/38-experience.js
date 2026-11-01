@@ -36,6 +36,8 @@ const XP_MODULES={
   costs:{title:'Стоимость работы',note:'Учтённые расходы на километр и моточас',icon:'chart'},
   procurement:{title:'Планирование закупок',note:'Потребность, сроки и заказы поставщикам',icon:'tank'},
   reestr:{title:'Распознавание счетов',note:'Документы → проверка → реестр',icon:'document'},
+  registries:{title:'Реестры',note:'Загрузка и распределение счетов по технике и водителям',icon:'document'},
+  logistics:{title:'Логистика',note:'Рабочая область логистики',icon:'grid'},
   contragents:{title:'Контрагенты',note:'Реквизиты и история расчётов',icon:'people'},
   reports:{title:'Отчёты',note:'Итоги и план–факт',icon:'chart'},
   printForms:{title:'Печатные формы',note:'Путевые листы, акты и заявки',icon:'print'},
@@ -57,7 +59,7 @@ function renderLaunchpad(){
     ['Техника и эксплуатация',['vehicles','generators','tanks','toSchedule','generatorSpares','repairs']],
     ['Сотрудники',['drivers','operators']],
     ['Топливо и финансы',['fuelPurchases','fuelReport','finances','costs','contragents','reports']],
-    ['Документы и процессы',['objectQuantity','reestr','workflows','procurement','printForms','pdf']],
+    ['Документы и процессы',['objectQuantity','registries','reestr','logistics','workflows','procurement','printForms','pdf']],
   ];
   const module=id=>{const item=XP_MODULES[id];return `<button type="button" class="xp-module" onclick="${xpModuleAction(id)}"><span class="xp-icon">${xpIcon(item.icon)}</span><span class="xp-module-copy"><b>${item.title}</b><small>${item.note}</small></span>${item.count?`<span class="xp-module-count">${htmlEsc(item.count())}</span>`:''}<span class="xp-module-arrow">›</span></button>`;};
   document.getElementById('mainContent').innerHTML=`<div class="xp-launchpad">

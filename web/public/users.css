@@ -1,0 +1,25 @@
+.tvs-users { grid-column:2; grid-row:1 / -1; width:100%; box-sizing:border-box; overflow:auto; max-width:1440px; margin:0 auto; padding:28px; }
+.tvs-users .tvs-page-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:24px; margin-bottom:24px; }
+.tvs-users h1 { margin:0 0 8px; font-size:26px; }
+.tvs-users .tvs-page-heading p,.tvs-users-note { color:var(--text-secondary,#a8b8cb); line-height:1.55; }
+.tvs-users-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.tvs-users-status { min-height:24px; color:var(--text-secondary,#a8b8cb); }
+.tvs-users-error { color:var(--danger,#ffb4b4); line-height:1.55; }
+.tvs-users-error:empty { display:none; }
+.tvs-users .tvs-data-table { width:100%; }
+.tvs-users .tvs-data-table small { display:block; margin-top:6px; color:var(--text-secondary,#a8b8cb); }
+.tvs-users-row-actions { min-width:230px; white-space:nowrap; }
+.tvs-users-row-actions button + button { margin-left:8px; }
+.tvs-users-dialog { box-sizing:border-box; width:min(560px,calc(100vw - 32px)); max-height:calc(100vh - 40px); overflow:auto; padding:28px; border:1px solid #30455b; border-radius:18px; background:var(--bg-card,#122238); color:var(--text-primary,#e7f4ff); box-shadow:0 24px 80px #0008; }
+.tvs-users-dialog::backdrop { background:#071222b8; backdrop-filter:blur(4px); }
+.tvs-users-dialog h2 { margin:0 0 20px; font-size:22px; overflow-wrap:anywhere; }
+.tvs-users-dialog p { line-height:1.55; }
+.tvs-users-dialog .tvs-field { display:flex; flex-direction:column; gap:8px; margin-bottom:18px; }
+.tvs-users-dialog input:not([type=checkbox]),.tvs-users-dialog select { box-sizing:border-box; width:100%; min-height:34px; border:1px solid #42556b; border-radius:8px; padding:7px 10px; background:var(--bg-input,#0a1a2c); color:inherit; font:inherit; }
+.tvs-users-dialog input[readonly] { font:14px ui-monospace,Consolas,monospace; }
+.tvs-users-dialog .tvs-users-check { flex-direction:row-reverse; align-items:center; justify-content:flex-end; }
+.tvs-users-check input { width:18px; height:18px; }
+.tvs-users-dialog .tvs-users-actions { justify-content:flex-end; margin-top:24px; }
+.tvs-users .tvs-button:disabled,.tvs-users-dialog .tvs-button:disabled { cursor:wait; opacity:.55; }
+@media(max-width:900px) { .tvs-users { grid-column:1; grid-row:auto; } }
+@media(max-width:720px) { .tvs-users { padding:16px; }.tvs-users .tvs-page-heading { flex-direction:column; gap:12px; }.tvs-users-dialog { padding:20px; }.tvs-users-dialog .tvs-users-actions { justify-content:stretch; }.tvs-users-dialog .tvs-users-actions button { flex:1; } }

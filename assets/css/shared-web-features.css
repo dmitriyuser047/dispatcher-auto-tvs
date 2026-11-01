@@ -1,0 +1,11 @@
+/* Shared views inherit the desktop palette. */
+body:not(.tvs-web) .registry-page,body:not(.tvs-web) .finance-registry-page{--tvs-card:var(--card);--tvs-inset:var(--bg2);height:100%;overflow:auto;box-sizing:border-box;width:100%}
+body:not(.tvs-web) .tvs-table-wrap{max-width:100%;overflow:auto}
+body:not(.tvs-web) .tvs-data-table{border-collapse:collapse;width:100%;font-size:13px}
+body:not(.tvs-web) .tvs-data-table th,body:not(.tvs-web) .tvs-data-table td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top}
+body:not(.tvs-web) .tvs-data-table .tvs-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+body:not(.tvs-web) .tvs-page-tabs,body:not(.tvs-web) .tvs-service-links{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+body:not(.tvs-web) .tvs-page-tabs a{padding:8px 12px;border:1px solid var(--border);border-radius:8px;text-decoration:none;color:var(--text2)}
+body:not(.tvs-web) .tvs-page-tabs a[aria-current]{background:var(--accent);color:white}
+body:not(.tvs-web) .tvs-vehicle-invoices{margin:16px 0;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--card);min-width:0}
+body:not(.tvs-web) .registry-page input,body:not(.tvs-web) .registry-page select,body:not(.tvs-web) .finance-registry-page input,body:not(.tvs-web) .finance-registry-page select{box-sizing:border-box;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text)}

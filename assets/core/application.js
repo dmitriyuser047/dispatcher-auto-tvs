@@ -1,5 +1,5 @@
 /* Generated from strict TypeScript by scripts/build-application.cjs.
- * Source/config sha256:8dd6723e45f95bcc8d9916710f2819283e39ea5cb163e326cb7b7424b397dca5. Do not edit directly. */
+ * Source/config sha256:edd01aa247bf4f454792beccc3d5ba320a1a347224ccbfb8d3121626218944c7. Do not edit directly. */
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.DispatcherApplication=factory();})(typeof globalThis==='object'?globalThis:this,function(){
 'use strict';
 const modules=Object.create(null),instances=Object.create(null);function define(name,deps,factory){if(Object.hasOwn(modules,name))throw Error('Duplicate application module '+name);modules[name]={deps,factory};}function resolve(name,owner){if(!name.startsWith('.'))return name;const parts=owner.split('/');parts.pop();for(const part of name.split('/')){if(part==='..')parts.pop();else if(part!=='.')parts.push(part);}return parts.join('/');}function load(name){if(Object.hasOwn(instances,name))return instances[name];const module=modules[name];if(!module)throw Error('Missing application module '+name);const exports={};instances[name]=exports;const result=module.factory(...module.deps.map(dep=>dep==='exports'?exports:dep==='require'?(request=>load(resolve(request,name))):load(resolve(dep,name))));if(result!==undefined)instances[name]=result;return instances[name];}
@@ -333,7 +333,7 @@ define("features/maintenance-setup/controller", ["require", "exports", "applicat
         return Object.freeze({ open });
     }
 });
-define("application/index", ["require", "exports", "application/repository", "application/save-service", "application/row-commands", "application/card-controller", "features/maintenance-setup/controller", "features/maintenance-setup/view"], function (require, exports, repository_1, save_service_1, row_commands_1, card_controller_1, controller_1, view_1) {
+define("application/index", ["require", "exports", "application/contracts", "application/repository", "application/save-service", "application/row-commands", "application/card-controller", "features/maintenance-setup/controller", "features/maintenance-setup/view"], function (require, exports, contracts_7, repository_1, save_service_1, row_commands_1, card_controller_1, controller_1, view_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.createSetupController = exports.createCardController = exports.createRowCommands = exports.createSaveService = exports.createRepository = exports.apiVersion = void 0;
@@ -347,7 +347,7 @@ define("application/index", ["require", "exports", "application/repository", "ap
     /** Composition root. Features depend on ports, never on a window or storage adapter. */
     function createApplication(ports) {
         const repository = (0, repository_1.createRepository)(ports.repository), saves = (0, save_service_1.createSaveService)(repository, ports.save), rows = (0, row_commands_1.createRowCommands)(repository, saves, ports.persist);
-        const commands = Object.freeze({ saveSnapshot: (database, options, persist) => saves.save(database, options, persist), semantic: (command, options = {}) => ports.semantic(command, options), changeRows: (command) => ports.trackRows(rows.execute(command)) });
+        const commands = Object.freeze({ saveSnapshot: (database, options, persist) => saves.save(database, options, persist), semantic: (command, options = {}) => ports.semantic(command, options), changeRows: (command) => ports.trackRows(ports.prepareRows ? ports.prepareRows().then(() => rows.execute(command)).catch((error) => ({ ok: false, ...(0, contracts_7.errorOf)(error) })) : rows.execute(command)) });
         const cards = (0, card_controller_1.createCardController)(repository, commands.changeRows, ports.allocateId), maintenanceSetup = (0, controller_1.createSetupController)(repository, (0, view_1.createSetupView)(ports.dialog), ports.setup);
         return Object.freeze({ repository, commands, cards, maintenanceSetup });
     }

@@ -43,7 +43,7 @@ function issueToken() {
 }
 
 function normalizeServerUsers(users) {
-  if (!Array.isArray(users) || users.length > 100) throw new Error('Некорректный список сетевых учётных записей');
+  if (!Array.isArray(users) || users.length > 2000) throw new Error('Некорректный список сетевых учётных записей');
   const ids = new Set(), hashes = new Set();
   const normalized = users.map(user => {
     if (!user || typeof user !== 'object' || Array.isArray(user)) throw new Error('Некорректная сетевая учётная запись');

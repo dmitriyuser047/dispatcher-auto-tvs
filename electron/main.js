@@ -242,6 +242,18 @@ async function assertFileContext(context){
     if(!ping?.ok||ping.databaseToken!==context.operation.databaseToken||JSON.stringify(ping.access)!==context.accessJSON)throw Object.assign(Error('База или права изменились. Повторите действие после загрузки данных.'),{code:'SESSION_CHANGED'});
   }else if(storage.databaseToken(context.operation.directory)!==context.operation.databaseToken)throw Object.assign(Error('База изменилась'),{code:'SESSION_CHANGED'});
 }
+async function archiveRemoteImportSource(event,payload){
+ const file=await captureFileContext(event),context=file.operation;
+ if(!context.client||dataBindings.get(context.senderId)?.platform?.controlledImports!==1)throw Object.assign(Error('Подключение не поддерживает сохранение оригиналов реестров.'),{code:'UNSUPPORTED_CONTROLLED_IMPORTS'});
+ const raw=payload?.bytes;
+ if(typeof payload?.name!=='string'||!(raw instanceof Uint8Array||Array.isArray(raw)&&raw.every(value=>Number.isInteger(value)&&value>=0&&value<=255))||!raw.length||raw.length>25*1024*1024)throw Object.assign(Error('Нужны имя и исходные байты реестра размером до 25 МБ.'),{code:'IMPORT_FILE'});
+ const request={action:'archiveRaw',profile:'registry',databaseToken:context.databaseToken,source:{name:payload.name,base64:Buffer.from(raw).toString('base64')}};
+ const proof=await mainWriteSessions().remoteOptions(context);await assertFileContext(file);
+ const result=await server.postImportSource(context.host,context.port,JSON.stringify(request),proof);
+ await assertFileContext(file);
+ if(result?.ok===true&&result.databaseToken!==context.databaseToken)throw Object.assign(Error('Ответ сохранения оригинала относится к другой базе.'),{code:'DATABASE_CHANGED'});
+ return result;
+}
 function sendFileProgress(context,channel,payload){
   if(context.failure)return;
   context.progress=context.progress.then(async()=>{await assertFileContext(context);context.sender.send(channel,payload);}).catch(error=>{context.failure=error;});
@@ -467,7 +479,7 @@ app.whenReady().then(() => {
     if(!pending||payload?.nonce!==pending.nonce||typeof payload.ready!=='boolean')return false;
     finishSaveBarrier(event.sender.id,payload.ready);return true;
   });
-  require('./artifacts').register({ipcMain,getDataDir,isClientMode,getSettings:()=>settings,knowledgeDir:()=>path.join(getDataDir(),'reestr-knowledge'),getPrincipal:event=>capturedOperationContext(event).principal,getContext:capturedOperationContext,assertContext:assertOperationContext,getWriteOptions:event=>mainWriteSessions().localOptions(capturedOperationContext(event))});
+  require('./artifacts').register({ipcMain,getDataDir,isClientMode,getSettings:()=>settings,knowledgeDir:()=>path.join(getDataDir(),'reestr-knowledge'),getPrincipal:event=>capturedOperationContext(event).principal,getContext:capturedOperationContext,assertContext:assertOperationContext,getWriteOptions:event=>mainWriteSessions().localOptions(capturedOperationContext(event)),archiveRemoteSource:archiveRemoteImportSource});
   if (settings.networkMode !== 'client') ensureDirs();
 
   // Экспорт сводок/актов (XLSX) идёт через обычную загрузку браузера —
@@ -989,6 +1001,19 @@ app.whenReady().then(() => {
   }
 
   // Импорт данных из RAR-архива (data.json + backups) для пополнения базы
+  ipcMain.handle('decode-registry',async(event,payload)=>{
+    try{
+      const context=await captureFileContext(event);
+      const check=()=>{
+        assertFileContextSync(context);
+        if(!require('./import-source.cjs').actions(context.operation.principal).includes('registry'))throw Object.assign(Error('Нет права загружать реестры.'),{code:'ACCESS_DENIED'});
+      };
+      check();await assertFileContext(context);
+      const result=await require('./registry-decoder.cjs').decodeRegistry(payload,{assertCurrent:check});
+      await assertFileContext(context);return result;
+    }catch(error){return {ok:false,code:error.code||'REGISTRY_DECODE',error:error.message};}
+  });
+
   ipcMain.handle('import-rar', async (event) => {
     const context=await captureFileContext(event);
     const senderWin = BrowserWindow.fromWebContents(event.sender);

@@ -147,7 +147,7 @@ function renderToScheduleSection() {
 
   let rows = '';
   if (!monthRecs.length) {
-    rows = `<tr><td colspan="8" class="empty-table">Нет записей ТО за этот месяц. Нажмите «+ Запись ТО» чтобы добавить.</td></tr>`;
+    rows = `<tr><td colspan="${8+(window.tvsWeb?.vehicleInvoices?.headingHtml()?1:0)}" class="empty-table">Нет записей ТО за этот месяц. Нажмите «+ Запись ТО» чтобы добавить.</td></tr>`;
   } else {
     monthRecs.forEach(r => {
       const icon = r.objType === 'vehicle'
@@ -161,6 +161,7 @@ function renderToScheduleSection() {
         <td class="td-num">${r.cost != null ? r.cost.toLocaleString('ru-RU')+' ₽' : '—'}</td>
         <td style="padding:10px 14px;font-size:13px;color:var(--text2)">${htmlEsc(r.performer || '—')}</td>
         <td style="padding:10px 14px;font-size:13px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${htmlEsc(r.note || '—')}</td>
+        ${window.tvsWeb?.vehicleInvoices?.headingHtml()?(r.source==='vehicleTo'?window.tvsWeb.vehicleInvoices.cellHtml('vehicleTo',r):'<td class="tvs-service-invoices">—</td>'):''}
         <td class="td-actions">
           ${r.planned ? `<button class="btn btn-primary btn-sm" onclick="tssCompletePlan(${htmlJs(r.id)},${htmlJs(r.source)})">Выполнено</button>` : ''}
           <button class="icon-btn" onclick="tssEditRecord(${htmlJs(r.id)},${htmlJs(r.source)})">
@@ -222,7 +223,7 @@ function renderToScheduleSection() {
           <table>
             <thead><tr>
               <th>Дата</th><th>Объект</th><th>Вид ТО</th><th>Пробег / мтч</th>
-              <th>Стоимость</th><th>Исполнитель</th><th>Примечание</th><th></th>
+              <th>Стоимость</th><th>Исполнитель</th><th>Примечание</th>${window.tvsWeb?.vehicleInvoices?.headingHtml()||''}<th></th>
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
@@ -996,7 +997,7 @@ function reestrRenderSavedList() {
   const empty = document.getElementById('reestrSavedEmpty');
   const countEl = document.getElementById('reestrSavedCount');
   if (!list) return;
-  const saved = data.savedReestrs || [];
+  const saved = (data.savedReestrs || []).map((row,index)=>({row,index})).filter(({row})=>!(row.kind==='payment-registry'&&row.registryVersion===1));
   if (!saved.length) {
     list.innerHTML = '';
     empty.style.display = '';
@@ -1014,11 +1015,11 @@ function reestrRenderSavedList() {
         <th style="padding:7px 10px;text-align:right;font-weight:600">Сумма</th>
         <th style="padding:7px 10px;text-align:center;font-weight:600;width:36px"></th>
       </tr></thead>
-      <tbody>${saved.map((r, i) => {
+      <tbody>${saved.map(({row:r,index:i}) => {
         const bg = i % 2 ? 'var(--bg3)' : 'transparent';
-        return `<tr style="background:${bg};cursor:pointer" onclick="reestrOpenSaved(${i})" title="Открыть реестр №${r.number}">
-          <td style="padding:7px 10px;text-align:center;font-weight:700;color:var(--accent);border-bottom:1px solid var(--border)">${r.number}</td>
-          <td style="padding:7px 10px;border-bottom:1px solid var(--border)">${r.date}</td>
+        return `<tr style="background:${bg};cursor:pointer" onclick="reestrOpenSaved(${i})" title="Открыть реестр №${htmlEsc(String(r.number??''))}">
+          <td style="padding:7px 10px;text-align:center;font-weight:700;color:var(--accent);border-bottom:1px solid var(--border)">${htmlEsc(String(r.number??''))}</td>
+          <td style="padding:7px 10px;border-bottom:1px solid var(--border)">${htmlEsc(String(r.date??''))}</td>
           <td style="padding:7px 10px;text-align:center;border-bottom:1px solid var(--border)">${r.rowCount}</td>
           <td style="padding:7px 10px;text-align:right;font-weight:600;border-bottom:1px solid var(--border)">${r.totalSum.toLocaleString('ru-RU', {minimumFractionDigits:2})} руб.</td>
           <td style="padding:7px 10px;text-align:center;border-bottom:1px solid var(--border)"><button class="reestr-action-btn delete" onclick="event.stopPropagation();reestrDeleteSaved(${i})" title="Удалить реестр">✕</button></td>
@@ -1033,7 +1034,7 @@ async function reestrSaveCurrent() {
   if (!reestrRows.length) return;
   if(reestrRows.some(row=>row.sum==null)){showToast('У части строк неизвестна сумма. Заполните её по исходным документам перед сохранением итогового реестра.');return false;}
   const saved = data.savedReestrs || [];
-  const nextNum = saved.length > 0 ? Math.max(...saved.map(r => r.number)) + 1 : 1;
+  const nextNum = saved.filter(row=>!(row.kind==='payment-registry'&&row.registryVersion===1)).reduce((highest,row)=>{const number=Number(row.number);return Number.isSafeInteger(number)&&number>highest?number:highest;},0)+1;
   const totalSum = DecimalCore.toNumberExact(DecimalCore.sum(reestrRows.map(r=>r.sum??0)));
   saved.push({
     number: nextNum,

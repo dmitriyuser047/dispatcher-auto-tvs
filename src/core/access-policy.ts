@@ -18,6 +18,10 @@ export interface AccessCeiling {
  writeFields?:Readonly<Record<string,readonly string[]>>;
 }
 export interface AccessContext extends AccessCeiling {resolve(section:string,row:Readonly<JsonRow>,phase:AccessPhase):AccessRowFacts}
+export interface AccessEvaluator {
+ permits(section:string,action:string,row:unknown,resolve?:AccessContext['resolve'],phase?:AccessPhase):boolean;
+ projectRows(section:string,rows:readonly Readonly<JsonRow>[],resolve?:AccessContext['resolve']):JsonRow[];
+}
 interface Contracts {apiVersion:number;identifier(value:unknown):boolean}
 interface Registry {apiVersion:number;sections:readonly string[]}
 interface Hash {sha256(value:string):string}
@@ -184,6 +188,8 @@ export function createAccessPolicy(contracts:Contracts,schema:Registry,identity:
    permits:(section:string,action:string,input:unknown,resolve?:AccessContext['resolve'],phase:AccessPhase='before'):boolean=>{if(phase!=='before'&&phase!=='after')fail('ACCESS_CONTEXT_INVALID','Некорректная фаза области');const selected=using(resolve),row=record(input,'ACCESS_ROW_INVALID');return sectionAllowed(selected,section,action)&&selected.policy?.grants.length!==0&&rowAllowed(selected,section,action,facts(selected,section,row,phase));}
   });
  }
+ // Both hosts share the same owned, response-scoped policy preparation.
+ function createEvaluator(value:unknown,context:AccessContext):AccessEvaluator {return createReader(value,context);}
  function rowKey(section:string,row:JsonRow,index:number):string {return contracts.identifier(row.id)?identity.typedKey(section,row.id):'legacy-position:'+index;}
  function groups(section:string,input:JsonRow[]):Map<string,{row:JsonRow;index:number}[]> {const result=new Map<string,{row:JsonRow;index:number}[]>();input.forEach((row,index)=>{const key=rowKey(section,row,index),members=result.get(key)||[];members.push({row,index});result.set(key,members);});return result;}
  function restore(prepared:Prepared,section:string,before:JsonRow,submitted:JsonRow,scope:AccessRowFacts):JsonRow {
@@ -256,6 +262,6 @@ export function createAccessPolicy(contracts:Contracts,schema:Registry,identity:
    for(const alias of aliases){const descriptor=Object.getOwnPropertyDescriptor(source,alias);if(!descriptor)continue;if(descriptor.get||descriptor.set||!descriptor.enumerable)fail('ACCESS_CONTEXT_INVALID','Исполняемые и скрытые факты запрещены');return frozen(typeof descriptor.value==='string'?{state:'known' as const,value:descriptor.value}:{state:'unknown' as const});}
   }return frozen({state:'unknown' as const});
  }
- return Object.freeze({apiVersion:1 as const,normalize,policyStamp,permits,projectRows,createReader,mergeVisibleChanges,validateChanges,fact});
+ return Object.freeze({apiVersion:1 as const,normalize,policyStamp,permits,projectRows,createReader,createEvaluator,mergeVisibleChanges,validateChanges,fact});
 }
 export type AccessPolicyAPI=ReturnType<typeof createAccessPolicy>;

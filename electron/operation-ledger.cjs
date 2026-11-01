@@ -5,6 +5,11 @@ const MAX_OBJECT=8*1024*1024,MAX_JOURNAL=32*1024*1024,MAX_JSON_NODES=1000000,MAX
 const own=(value,key)=>Object.prototype.hasOwnProperty.call(value,key),hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const ownedParsed=new WeakSet();
 const ownedStrictParsed=new WeakSet();
+// Reuse decoded proof trees across readers only after the current provider
+// bytes have passed their content hash. No ACL decision is retained here.
+const PARSED_PROOF_CACHE_BYTES=64*1024*1024,parsedProofCache=new Map();
+let parsedProofCacheBytes=0;
+function decodedProof(id,bytes){const cached=parsedProofCache.get(id);if(cached){parsedProofCache.delete(id);parsedProofCache.set(id,cached);return cached.value;}const value=parse(bytes);if(plain(value)&&ownedParsed.has(value)&&['verified','legacy-unverified'].includes(value.status)&&bytes.length<=PARSED_PROOF_CACHE_BYTES){while(parsedProofCacheBytes+bytes.length>PARSED_PROOF_CACHE_BYTES){const oldest=parsedProofCache.keys().next().value,entry=parsedProofCache.get(oldest);parsedProofCache.delete(oldest);parsedProofCacheBytes-=entry.bytes;}parsedProofCache.set(id,{value,bytes:bytes.length});parsedProofCacheBytes+=bytes.length;}return value;}
 const checkedSegments=new WeakMap();
 let readScope=null;
 let readSession=null;
@@ -50,7 +55,7 @@ function createOperationLedger({readObject,cursorKey}={}){
   if(Buffer.isBuffer(raw)&&entry?.encoded&&raw.equals(entry.encoded)){scope.objects.delete(id);scope.objects.set(id,entry);return entry.value;}
   const bytes=Buffer.from(raw);if(bytes.length>MAX_OBJECT||hash(bytes)!==id)fail('LEDGER_HASH');
   if(entry){if(typeof raw==='string')entry.json=raw;else entry.encoded=bytes;scope.objects.delete(id);scope.objects.set(id,entry);return entry.value;}
-  const value=parse(bytes);
+  const value=decodedProof(id,bytes);
   if(scope&&bytes.length<=READ_CACHE_BYTES){while(scope.objects.size>=READ_CACHE_ENTRIES||scope.bytes+bytes.length>READ_CACHE_BYTES){const key=scope.objects.keys().next().value,entry=scope.objects.get(key);scope.bytes-=entry.bytes;scope.objects.delete(key);}scope.objects.set(id,{value,bytes:bytes.length,...(typeof raw==='string'?{json:raw}:{encoded:bytes})});scope.bytes+=bytes.length;}
   return value;
  }
@@ -151,4 +156,4 @@ function createSqlAdapter(db,{cursorKey}={}){const readHead=()=>headOf(parse(Buf
  function applyInTransaction({expectedHead,transactionPlan,applyBusiness}){if(!db.isTransaction||typeof applyBusiness!=='function'||applyBusiness.constructor?.name==='AsyncFunction')fail('LEDGER_SQL_TRANSACTION');const plan=engine.validatePlan(transactionPlan),current=readHead();if(!same(headOf(expectedHead),current)||!same(plan.expectedHead,current))fail('LEDGER_CONFLICT');const name='ledger_'+crypto.randomBytes(8).toString('hex');db.exec('SAVEPOINT '+name);try{const result=applyBusiness(db);if(result&&typeof result.then==='function'||!db.isTransaction){if(result&&typeof result.catch==='function')result.catch(()=>{});fail('LEDGER_SQL_TRANSACTION');}const put=db.prepare('INSERT OR IGNORE INTO operation_ledger_objects VALUES(?,?)');for(const object of plan.objects){put.run(object.id,object.json);if(db.prepare('SELECT json FROM operation_ledger_objects WHERE hash=?').get(object.id).json!==object.json)fail('LEDGER_HASH');}if(plan.kind==='append'){const stored=plan.objects.map(object=>({id:object.id,value:JSON.parse(object.json)})).find(object=>object.value.kind==='operation-receipt');db.prepare("INSERT INTO operation_ledger_receipts VALUES(?,?,?,'receipt')").run(plan.operationId,stored.id,stored.value.proofHash);}else if(plan.kind==='legacy'){const write=db.prepare('INSERT INTO operation_ledger_receipts VALUES(?,?,?,?) ON CONFLICT(operation_id) DO UPDATE SET receipt_hash=excluded.receipt_hash,proof_hash=excluded.proof_hash,status=excluded.status');for(const id of [...plan.reservations,...plan.receipts.map(receipt=>receipt.operation.id)]){const stored=engine.inspectReceipt(plan.head,id);if(!stored)fail('LEDGER_RECEIPT');write.run(id,stored.receiptHash??null,stored.proofHash??null,stored.kind==='reserved-unknown'?'reserved-unknown':'receipt');}}db.prepare('UPDATE operation_ledger_state SET head_json=? WHERE id=1').run(JSON.stringify(plan.head));db.exec('RELEASE '+name);return freeze(headOf(plan.head));}catch(error){if(db.isTransaction){db.exec('ROLLBACK TO '+name);db.exec('RELEASE '+name);}throw error;}}
  return Object.freeze({engine,readHead,applyInTransaction});
 }
-module.exports=Object.freeze({createOperationLedger,createJsonAdapter,withReadScope,createReadSession,isOwnedStrictJSON:value=>ownedStrictParsed.has(value),installSqlTables,createSqlAdapter,createManagedFiles:managedFiles,validateHead:value=>{if(value===null||value===undefined)fail('LEDGER_HEAD');return freeze(headOf(value));}});
+module.exports=Object.freeze({createOperationLedger,createJsonAdapter,withReadScope,createReadSession,isOwnedStrictJSON:value=>ownedStrictParsed.has(value),isOwnedParsedProof:value=>ownedParsed.has(value)&&plain(value)&&['verified','legacy-unverified'].includes(value.status),installSqlTables,createSqlAdapter,createManagedFiles:managedFiles,validateHead:value=>{if(value===null||value===undefined)fail('LEDGER_HEAD');return freeze(headOf(value));}});

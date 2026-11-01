@@ -1,0 +1,9 @@
+{
+  "dataDir": "E:\\DispatcherData",
+  "usersFile": "E:\\DispatcherWeb\\config\\users.json",
+  "stateDir": "E:\\DispatcherWeb\\state",
+  "backupDir": "E:\\DispatcherBackups",
+  "port": 3381,
+  "host": "127.0.0.1",
+  "allowedHosts": ["127.0.0.1", "localhost"]
+}

@@ -585,7 +585,9 @@ function commitPrintArtifact(dataDir,input,options={}){
     dataDir=physical;
     const sql=sqliteBackend(dataDir),readOnly=schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||options.requireWriterSchema===true&&options.writerSchemaVersion!==storageFormat.SCHEMA_VERSION||!hasWriteCompatibility(dataDir,options,'documentPrint');
     const action=()=>require('./document-archive.cjs').commitArtifact(dataDir,input,options,(directory,sections,revisions)=>{
-      const previous=readAll(directory),history=require('./platform-service.cjs').prepareHistoryCommit(directory,previous,sections,revisions,options);commitSections(directory,history.sections,revisions,history);
+      const previous=readAll(directory),history=require('./platform-service.cjs').prepareHistoryCommit(directory,previous,sections,revisions,options);
+      if(options.beforeCommit!==undefined){if(typeof options.beforeCommit!=='function')throw Error('Ожидалась синхронная подготовка записи');if(options.beforeCommit()?.then)throw Error('Подготовка записи должна быть синхронной');}
+      commitSections(directory,history.sections,revisions,history);
     });
     const result=sql?sql.transaction(dataDir,action,{readOnly}):action();if(!readOnly&&!result?.replayed)require('./document-archive.cjs').recover(dataDir,undefined,options);return result;
   });

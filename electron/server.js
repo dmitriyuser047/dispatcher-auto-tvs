@@ -38,6 +38,10 @@ function respond(res, status, value) {
   res.writeHead(status, { 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff' });
   res.end(JSON.stringify(value));
 }
+function readFailure(res,error,principal){
+  if(error?.code==='DB_BUSY'){respond(res,503,{ok:false,code:'DB_BUSY',error:'База временно занята сохранением. Повторите чтение после его завершения.',...(principal?{access:publicAccess(principal)}:{})});return;}
+  respond(res,500,{ok:false,error:error.message});
+}
 function readable(principal, section) { return access.authorize(principal, 'read', section); }
 function observedWriteRequest(payload,dataDir,token){
   try{const id=payload?.operation?.id;require('./diagnostic-boundary.cjs').record({phase:'host-received',code:'pending',...(typeof id==='string'&&/^[a-zA-Z0-9._:-]{1,200}$/.test(id)?{operationId:id}:{}),databaseToken:token??storage.databaseToken(dataDir),backend:'remote'});}catch{}
@@ -99,8 +103,8 @@ function acknowledgeWrite(assertCurrent) {
   try{assertCurrent({phase:'ack'});}catch(error){throw Object.assign(Error('Сеанс изменился после выполнения записи. Проверьте исходную операцию перед повтором.'),{code:'STORAGE_ACK_STALE',status:503,unknown:true,definitive:false,...(typeof error.code==='string'?{causeCode:error.code}:{})});}
 }
 function writeFailure(res,error) {
-  const unknown=error.unknown===true||error.definitive===false;
-  respond(res,unknown?503:error.status||400,{ok:false,error:error.message,...(error.code?{code:error.code}:{}),...(unknown?{unknown:true,definitive:false}:{}),...(!unknown&&error.databaseChanged===true&&typeof error.databaseToken==='string'?{databaseChanged:true,databaseToken:error.databaseToken}:{}),...(unknown&&typeof error.causeCode==='string'?{causeCode:error.causeCode}:{})});
+  const unknown=error.unknown===true||error.definitive===false,busy=error.code==='DB_BUSY';
+  respond(res,unknown||busy?503:error.status||400,{ok:false,error:busy?'База временно занята другой операцией. Повторите сохранение после её завершения.':error.message,...(error.code?{code:error.code}:{}),...(unknown?{unknown:true,definitive:false}:busy&&error.definitive===true?{definitive:true}:{}),...(!unknown&&error.databaseChanged===true&&typeof error.databaseToken==='string'?{databaseChanged:true,databaseToken:error.databaseToken}:{}),...(unknown&&typeof error.causeCode==='string'?{causeCode:error.causeCode}:{})});
 }
 async function writeRequest(req,res,full,authenticateRequest,session) {
   const dataDir = session.dataDir;
@@ -142,7 +146,7 @@ function getLocalIPs() {
   return Object.values(os.networkInterfaces()).flat().filter(net => net && net.family === 'IPv4' && !net.internal).map(net => net.address);
 }
 
-function start({port,dataDir,backupFn,backup,serverName,key,settings,users,tls,renderPdf}) {
+function start({port,dataDir,backupFn,backup,serverName,key,settings,users,tls,renderPdf,host='0.0.0.0'}) {
   if (_server) return {ok:false,error:'Сервер уже запущен'};
   if (typeof settings !== 'function') configureAccess(settings || {networkKey:key,serverUsers:users || []});
   const settingsProvider = typeof settings === 'function' ? settings : () => _accessSettings;
@@ -166,7 +170,7 @@ function start({port,dataDir,backupFn,backup,serverName,key,settings,users,tls,r
     }
     if (req.method === 'GET' && req.url === '/api/ping') {
       try { respond(res,200,{ok:true,name:serverName || os.hostname(),version:require('../package.json').version,sections:true,databaseToken:storage.databaseToken(dataDir),protocol:tls ? 'https:' : 'http:',platform:storageProfile(dataDir),access:publicAccess(principal)}); }
-      catch (e) { respond(res,e.code==='DB_BUSY'?503:500,{ok:false,error:e.message,...(e.code==='DB_BUSY'?{code:'DB_BUSY',access:publicAccess(principal)}:{})}); } return;
+      catch (e) { readFailure(res,e,principal); } return;
     }
     if (req.method === 'POST' && ['/api/sections','/api/data'].includes(req.url)) {
       void writeRequest(req,res,req.url === '/api/data',authenticateRequest,session); return;
@@ -175,7 +179,10 @@ function start({port,dataDir,backupFn,backup,serverName,key,settings,users,tls,r
       void commandRequest(req,res,authenticateRequest,session);return;
     }
     if(req.method==='POST'&&req.url==='/api/import-source'){
-      void (async()=>{try{const payload=await readBody(req,MAX_IMPORT_BODY),principal=currentPrincipal();const result=await require('./import-source.cjs').handle(dataDir,payload,{principal,...writerContext(req,session.proof),getPrincipal:currentPrincipal});respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'IMPORT_SOURCE_FAILED',error:error.message});}})();return;
+      void (async()=>{try{const payload=await readBody(req,MAX_IMPORT_BODY),principal=currentPrincipal();
+      const assertCurrent=()=>currentWritePrincipal(session,authenticateRequest,principal);
+      const beforeCommit=()=>{assertCurrent();if(typeof session.backupFn==='function'){const value=session.backupFn();if(value&&typeof value.then==='function')throw Error('Подготовка записи должна быть синхронной');}else if(session.backup&&typeof session.backup.directory==='string'&&Number.isInteger(session.backup.keep)&&session.backup.keep>0)storage.makeDailyBackup(dataDir,session.backup.directory,session.backup.keep);else throw Object.assign(Error('Резервное копирование перед сохранением оригинала не настроено.'),{code:'IMPORT_BACKUP_REQUIRED',status:503});assertCurrent();};
+      const result=await require('./import-source.cjs').handle(dataDir,payload,{principal,...writerContext(req,session.proof),getPrincipal:assertCurrent,...(payload.action==='archiveRaw'?{beforeCommit}:{})});assertCurrent();respond(res,200,result);}catch(error){respond(res,error.status||400,{ok:false,code:error.code||'IMPORT_SOURCE_FAILED',error:error.message});}})();return;
     }
     if(req.method==='POST'&&req.url==='/api/inventory-database'){
       void(async()=>{try{
@@ -236,7 +243,7 @@ function start({port,dataDir,backupFn,backup,serverName,key,settings,users,tls,r
         respond(res,200,req.url === '/api/data' ? snapshot.data : {...snapshot,access:publicAccess(principal)}); return;
       }
       respond(res,404,{ok:false,error:'Неизвестный запрос'});
-    } catch (e) { respond(res,500,{ok:false,error:e.message}); }
+    } catch (e) { readFailure(res,e); }
   };
   try { _server = tls ? https.createServer({cert:tls.cert,key:tls.key,minVersion:'TLSv1.2'},handler) : http.createServer(handler); }
   catch (e) { _server = null;session.active=false;if(_session===session)_session=null;return {ok:false,error:'Не удалось настроить сервер: ' + e.message}; }
@@ -246,7 +253,7 @@ function start({port,dataDir,backupFn,backup,serverName,key,settings,users,tls,r
   instance.requestTimeout = 30000; instance.headersTimeout = 15000;
   return new Promise(resolve => {
     instance.once('error',e => { session.active=false;if (_server === instance) _server = null;if(_session===session)_session=null;resolve({ok:false,error:e.message}); });
-    instance.listen(port,'0.0.0.0',() => resolve({ok:true,port:instance.address().port,ips:getLocalIPs(),protocol:tls ? 'https:' : 'http:'}));
+    instance.listen(port,host,() => resolve({ok:true,port:instance.address().port,ips:getLocalIPs(),protocol:tls ? 'https:' : 'http:'}));
   });
 }
 
