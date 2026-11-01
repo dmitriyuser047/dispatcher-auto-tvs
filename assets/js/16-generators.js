@@ -157,6 +157,7 @@ function renderGenDetail(g) {
       </div>
     </div>
 
+    ${typeof generatorMaintenanceCardSummary==='function'?generatorMaintenanceCardSummary(g.id):''}
     ${typeof costValuationCardHtml==='function'?costValuationCardHtml({section:'generators',id:g.id}):''}
     <div>
       <div class="section-header"><div class="section-title">История по месяцам</div></div>
