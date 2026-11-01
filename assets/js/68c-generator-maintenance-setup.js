@@ -23,7 +23,7 @@ function gmPlanApplyRule(s,row,index){
 }
 function gmPlanShareHours(s,row){
  const targets=s.rows.filter(item=>item!==row&&item.generatorId===row.generatorId);if(!targets.length)throw Error('Для этой ДЭС пока нет других видов ТО.');
- const f=row.forecast;if(f.rateMode==='monthlyPlan'?!f.monthlyTexts.some(value=>value.trim()):!f.rateText.trim())throw Error('Сначала введите плановую наработку ДЭС.');
- for(const target of targets){Object.assign(target.forecast,{rateMode:f.rateMode,rateText:f.rateText,monthlyTexts:f.monthlyTexts.slice(),preview:null,previewSignature:null,appliedSignature:null});}
+ const f=row.forecast;if(f.rateMode==='calendar')precisionParse(f.calendarDailyText,{scale:3,max:24,blank:'error'});if(f.rateMode==='calendar'?!(f.calendarDailyText||'').trim():f.rateMode==='monthlyPlan'?!f.monthlyTexts.some(value=>value.trim()):!f.rateText.trim())throw Error('Сначала введите плановую наработку ДЭС.');
+ for(const target of targets){const workload=f.rateMode==='calendar'?{calendarDailyText:f.calendarDailyText}:f.rateMode==='monthlyPlan'?{monthlyTexts:f.monthlyTexts.slice()}:{rateText:f.rateText};Object.assign(target.forecast,{rateMode:f.rateMode,...workload,preview:null,previewSignature:null,appliedSignature:null});}
  f.message='Наработка подставлена в другие виды ТО этой ДЭС: '+targets.length+'. Для каждого вида проверьте основание первого ТО и рассчитайте даты.';
 }

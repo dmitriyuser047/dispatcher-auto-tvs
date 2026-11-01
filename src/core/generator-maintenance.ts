@@ -10,6 +10,7 @@ export type GeneratorMaintenanceCalendarTemplate=Pick<GeneratorMaintenanceRow,'g
 export interface GeneratorMaintenanceOccurrence {id:Identifier;plannedDate:string;plannedHours:number|null;sourceIndex?:number}
 export interface GeneratorMaintenanceCalendarGroup {template:GeneratorMaintenanceCalendarTemplate;occurrences:GeneratorMaintenanceOccurrence[]}
 export interface GeneratorMaintenanceMonthlyInput {year:number;months:number[];day:number;ids:Identifier[];plannedHours?:(number|null)[]}
+export interface GeneratorMaintenanceCalendarHoursInput {year:number;hoursPerDay:number}
 export type GeneratorMaintenanceUtilization={mode:'monthly';hours:number|number[]}|{mode:'daily';hours:number};
 export interface GeneratorMaintenanceForecastInput {startDate:string;endDate:string;currentHours:number;intervalHours:number;firstDueHours:number;utilization:GeneratorMaintenanceUtilization}
 export interface GeneratorMaintenanceForecastOccurrence {plannedDate:string;plannedHours:number}
@@ -102,6 +103,17 @@ export function createGeneratorMaintenance(contracts:Contracts,identity:EntityId
   // occurrences have no sourceIndex and append after the retained old rows.
   expanded.sort((left,right)=>left.sourceIndex===undefined?right.sourceIndex===undefined?left.sequence-right.sequence:1:right.sourceIndex===undefined?-1:left.sourceIndex-right.sourceIndex);
   return calendarRows(expanded.map(entry=>entry.row));
+ }
+ /** Full calendar-month workloads for display and explicit monthly planning.
+  * No journal, system clock or service facts are read or changed. A partial
+  * first month is prorated by forecastOccurrences, not by this annual table. */
+ function calendarMonthlyHours(value:unknown):number[] {
+  const input=row(value);fields(input,['year','hoursPerDay']);const year=input.year;
+  if(typeof year!=='number'||!Number.isInteger(year)||year<1900||year>9999)fail('MAINTENANCE_YEAR','Укажите целый год от 1900 до 9999');
+  const hours=quantity(input.hoursPerDay,'Часов работы в сутки');
+  if(hours===null||hours>24)fail('MAINTENANCE_CALENDAR_HOURS','Укажите известную суточную наработку от 0 до 24 мтч');
+  const [integer,fraction='']=String(hours).split('.'),daily=BigInt(integer!)*1000n+BigInt(fraction.padEnd(3,'0'));
+  return Array.from({length:12},(_,month)=>Number(daily*BigInt(new Date(Date.UTC(year,month+1,0)).getUTCDate()))/1000);
  }
  function monthlyOccurrences(value:unknown):GeneratorMaintenanceOccurrence[] {
   const input=row(value);fields(input,['year','months','day','ids','plannedHours']);
@@ -287,6 +299,6 @@ export function createGeneratorMaintenance(contracts:Contracts,identity:EntityId
   for(const value of before)if(!seen.has(value.id as Identifier)&&(value.status==='approved'||own(value,'previousId')))fail('MAINTENANCE_DELETE','Утверждённый график или историю редакций нельзя удалить');return true;
  }
  function describe():JsonRow {return {section:SECTION,readSections:dependencies(),writeSections:footprint(),actions:['saveDraft','approve','revise'],noStockWrites:true};}
- return Object.freeze({apiVersion:1 as const,describe,dependencies,footprint,groupCalendarRows,expandCalendarGroups,monthlyOccurrences,journalCounter,forecastOccurrences,preview,apply,plan:apply,snapshotDigest,validateChanges});
+ return Object.freeze({apiVersion:1 as const,describe,dependencies,footprint,groupCalendarRows,expandCalendarGroups,calendarMonthlyHours,monthlyOccurrences,journalCounter,forecastOccurrences,preview,apply,plan:apply,snapshotDigest,validateChanges});
 }
 export type GeneratorMaintenanceAPI=ReturnType<typeof createGeneratorMaintenance>;
