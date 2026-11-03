@@ -111,6 +111,55 @@ test('a local scope proof is not transported and an existing central proof survi
 
 test('a projected public business calendar preserves valid history for ordinary local writes',()=>{const packet=api.snapshot(db(),options()),calendar=require('../assets/core/business-calendar.js');assert.equal(packet.payload.sections.appMeta[0].history.length,1);const result=calendar.resolve(packet.payload.sections,'2026-11-01T12:00:00Z');assert.equal(result.timeZone,'Europe/Moscow');});
 
+test('an unavailable central tank link does not remove its own DES or orphan its parts in a portable snapshot',async t=>{
+ for(const [label,tankId,tanks]of [
+  ['unowned','central-private-tank',[{id:'central-private-tank',name:'CENTRAL-PRIVATE-POOL'}]],
+  ['foreign','central-private-tank',[{id:'central-private-tank',name:'CENTRAL-PRIVATE-POOL',...B}]],
+  ['dangling','central-private-tank',[]],
+  ['numeric zero',0,[{id:0,name:'CENTRAL-PRIVATE-POOL'}]],
+  ['numeric/string distinction',0,[{id:'0',name:'Own different typed tank',...A}]]
+ ])await t.test(label,()=>{
+  const database=db();database.generators[0].tankId=tankId;database.tanks=tanks;const before=JSON.stringify(database),projected=api.project(database,A);
+  assert.deepEqual(projected.sections.generators.map(row=>row.id),[0]);assert.deepEqual(projected.sections.parts.map(row=>row.id),[0]);assert.equal(Object.hasOwn(projected.sections.generators[0],'tankId'),false);
+  assert.ok(projected.omissions.some(issue=>issue.code==='DES_CENTRAL_TANK_LINK'));assert.equal(JSON.stringify(database),before,'Projection must not change the central link');
+  const ownIds=new Set(projected.sections.generators.map(row=>row.id));assert.ok(projected.sections.parts.every(part=>ownIds.has(part.generatorId)));
+  assert.deepEqual(api.project(projected.sections,A).sections,projected.sections,'A portable projection must be closed and idempotent');
+  const packet=api.snapshot(database,options({targetDatabaseToken:null}));assert.deepEqual(api.validateBundle(packet).payload.sections,projected.sections);assert.doesNotMatch(JSON.stringify(packet),/CENTRAL-PRIVATE-POOL|central-private-tank/);
+ });
+});
+
+test('empty or null generator tank references remain explicit absences without a central-link omission',()=>{
+ for(const tankId of ['',null]){const database=db();database.generators[0].tankId=tankId;const packet=api.snapshot(database,options());assert.equal(packet.payload.sections.generators[0].tankId,tankId);assert.equal(packet.payload.omissions.some(issue=>issue.code==='DES_CENTRAL_TANK_LINK'),false);assert.deepEqual(api.project(packet.payload.sections,A).sections,packet.payload.sections);}
+});
+
+test('portable closure removes unsupported dependency chains instead of exporting orphaned private stock',()=>{
+ const database=db();database.toRecords=[{id:'blocked-to',generatorId:0,vehicleId:'unavailable-car',...A,date:'2026-10-30'}];database.parts[0].toRecordId='blocked-to';database.partMovements=[{id:'orphan-receipt',partId:0,date:'2026-10-31',kind:'receipt',qty:2}];
+ const projected=api.project(database,A);assert.deepEqual(projected.sections.generators.map(row=>row.id),[0]);assert.deepEqual(projected.sections.toRecords,[]);assert.deepEqual(projected.sections.parts,[]);assert.deepEqual(projected.sections.partMovements,[]);assert.deepEqual(api.project(projected.sections,A).sections,projected.sections);
+ assert.doesNotThrow(()=>api.snapshot(database,options({targetDatabaseToken:null})));
+});
+
+test('an object note edit retains the current invisible central tank association without mutating the review source',()=>{
+ const central=db();central.generators[0].tankId='hidden-central-tank';central.tanks=[{id:'hidden-central-tank',name:'CENTRAL-PRIVATE-POOL'}];const baseline=api.project(central,A).sections,edited=clone(baseline);edited.generators[0].note='Object note with no access to the central tank';
+ const packet=api.changes(baseline,edited,options({changeEpoch:'central-link-note'}));assert.equal(packet.payload.operations.length,1);assert.equal(Object.hasOwn(packet.payload.operations[0].before,'tankId'),false);assert.equal(Object.hasOwn(packet.payload.operations[0].after,'tankId'),false);
+ const before=JSON.stringify(central),review=api.preview(central,packet,ctx());assert.equal(review.canApply,true,JSON.stringify(review.conflicts));assert.equal(review.sections.generators.find(row=>row.id===0).tankId,'hidden-central-tank');assert.equal(review.sections.generators.find(row=>row.id===0).note,edited.generators[0].note);assert.deepEqual(review.sections.generators.find(row=>row.id==='0'),central.generators[1]);assert.equal(JSON.stringify(central),before);
+ const concurrent=clone(central);concurrent.generators[0].tankId='later-central-tank';concurrent.tanks.push({id:'later-central-tank',name:'LATER-PRIVATE-POOL'});const latest=api.preview(concurrent,packet,ctx());assert.equal(latest.canApply,true,JSON.stringify(latest.conflicts));assert.equal(latest.sections.generators.find(row=>row.id===0).tankId,'later-central-tank','An invisible concurrent link change must not be restored from stale object data');
+});
+
+test('a forged object edit cannot clear or replace a hidden central tank link',()=>{
+ const central=db();central.generators[0].tankId='hidden-central-tank';central.tanks=[{id:'hidden-central-tank',name:'CENTRAL-PRIVATE-POOL'},{id:'own-tank',name:'Own allowed tank',...A}];const baseline=api.project(central,A).sections,edited=clone(baseline);edited.generators[0].note='Reviewed own note';const packet=api.changes(baseline,edited,options({changeEpoch:'central-link-protected'})),before=JSON.stringify(central);
+ for(const tankId of [null,'','own-tank','hidden-central-tank']){const bad=clone(packet),operation=bad.payload.operations.find(op=>op.section==='generators'&&op.id===0);operation.after.tankId=tankId;operation.afterDigest=api.digest(operation.after);operation.operationId=api.operationId(bad.source,operation.section,operation.id,operation.before,operation.after,bad.payload.changeEpoch);const result=api.preview(central,resign(bad),ctx());assert.equal(result.canApply,false);assert.ok(result.conflicts.some(issue=>issue.code==='DES_CENTRAL_TANK_LINK'),JSON.stringify(result.conflicts));assert.deepEqual(result.sections,{});assert.equal(JSON.stringify(central),before);}
+});
+
+test('known object-owned tank links remain portable and an explicit own-tank change or unlink is allowed',()=>{
+ const central=db();central.tanks=[{id:'own-tank-a',name:'Own tank A',...A},{id:'own-tank-b',name:'Own tank B',...A}];central.generators[0].tankId='own-tank-a';const baseline=api.project(central,A).sections;assert.equal(baseline.generators[0].tankId,'own-tank-a');assert.deepEqual(baseline.tanks.map(row=>row.id),['own-tank-a','own-tank-b']);
+ for(const tankId of ['own-tank-b',null]){const edited=clone(baseline);edited.generators[0].tankId=tankId;const result=api.preview(central,api.changes(baseline,edited,options()),ctx());assert.equal(result.canApply,true,JSON.stringify(result.conflicts));assert.equal(result.sections.generators.find(row=>row.id===0).tankId,tankId);}
+});
+
+test('a direct snapshot containing a foreign or unproved tank reference still fails scope validation',()=>{
+ const packet=api.snapshot(db(),options({targetDatabaseToken:null}));
+ for(const tank of [null,{id:'injected-tank',name:'CENTRAL-PRIVATE-POOL'},{id:'injected-tank',name:'FOREIGN-PRIVATE-POOL',...B}]){const bad=clone(packet);bad.payload.sections.generators[0].tankId='injected-tank';if(tank)bad.payload.sections.tanks.push(tank);assert.throws(()=>api.validateBundle(resign(bad)),{code:'DES_SCOPE'});}
+});
+
 test('browser UMD and CommonJS create the same isolated object snapshot',()=>{
  const context=vm.createContext({});for(const file of ['platform-contracts','platform-schema','personnel-kinds','entity-identity','request-fingerprint','access-policy','access-scope','generator-maintenance','des-object-exchange'])vm.runInContext(fs.readFileSync(require.resolve('../assets/core/'+file+'.js'),'utf8'),context,{filename:file+'.js'});
  assert.deepEqual(JSON.parse(JSON.stringify(context.DesObjectExchange.snapshot(db(),options()))),api.snapshot(db(),options()));
