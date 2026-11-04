@@ -6,7 +6,7 @@ const error=(code,message)=>Object.assign(Error(message),{code});
 function registerDesObjectIpc(options){
  const {ipcMain,app,BrowserWindow,dialog,product,paths,getService,getDataDir,getContext,assertContext,queueSettings}=options;
  const handles=new Map(),transport=options.transport||require('./des-object-transport.cjs'),files=require('./safe-file.cjs');
- const centralOnly=new Set(['register','exportSnapshot']),objectOnly=new Set(['configure','createRegistration','exportChanges','importSnapshot','importReceipt']);
+ const centralOnly=new Set(['register','exportSnapshot','removeRegistration']),objectOnly=new Set(['configure','createRegistration','exportChanges','importSnapshot','importReceipt']);
  const publicStatus=()=>getService().status({dataDir:getDataDir()});
  const connectionDigest=connection=>crypto.createHash('sha256').update(JSON.stringify(transport.normalizeConnection(connection??getService().getConnectionForTransport()))).digest('hex');
  function current(event){const context=getContext(event);if(context.client)throw error('DES_OBJECT_CENTRAL_HOST','Обмен объектами настраивается на компьютере с центральной базой');assertContext(context);return context;}
@@ -27,11 +27,18 @@ function registerDesObjectIpc(options){
   const secrets=new Set();const remember=connection=>{for(const key of ['token','networkKey'])if(typeof connection?.[key]==='string'&&connection[key])secrets.add(connection[key]);return connection;};
   try{
    if(!input||typeof input!=='object'||Array.isArray(input)||typeof input.action!=='string')throw error('DES_OBJECT_INPUT','Некорректное действие обмена');
-   const action=input.action,allowed=new Set(['status','listScopes','configure','createRegistration','register','exportSnapshot','importSnapshot','exportChanges','previewImport','applyImport','importReceipt']);if(!allowed.has(action))throw error('DES_OBJECT_ACTION','Неизвестное действие обмена');
+   const action=input.action,allowed=new Set(['status','listScopes','configure','createRegistration','register','removeRegistration','exportSnapshot','importSnapshot','exportChanges','previewImport','applyImport','importReceipt']);if(!allowed.has(action))throw error('DES_OBJECT_ACTION','Неизвестное действие обмена');
    if(centralOnly.has(action)&&product.kind==='des-object'||objectOnly.has(action)&&product.kind!=='des-object')throw error('DES_OBJECT_PRODUCT','Это действие выполняется в другой программе');
    const context=current(event),service=getService(),args={dataDir:context.directory,principal:context.principal,assertCurrent:()=>assertContext(context)};
    if(action==='status')return{ok:true,status:service.status({...args,includeDirty:product.kind==='des-object'})};
    if(action==='listScopes')return{ok:true,scopes:product.kind==='des-object'?(publicStatus().scope?[publicStatus().scope]:[]):service.listScopes(args)};
+   if(action==='removeRegistration'){
+    if(Object.keys(input).some(key=>!['action','installationId','scope','removalFingerprint','confirm'].includes(key)))throw error('DES_OBJECT_INPUT','Некорректные параметры удаления привязки');
+    if(input.confirm!==true)throw error('DES_OBJECT_CONFIRM','Подтвердите удаление выбранной привязки');
+    const result=service.removeRegistration({...args,installationId:input.installationId,scope:input.scope,removalFingerprint:input.removalFingerprint});
+    assertContext(context);for(const[handle,item]of handles)if(item.bundle.source.installationId===result.installationId&&['registration','changes'].includes(item.bundle.kind))handles.delete(handle);
+    return result;
+   }
    if(action==='configure'){
     let connection=input.connection;if(connection){remember(connection);const existing=remember(service.getConnectionForTransport())||{},normalized=transport.normalizeConnection({...connection,networkKey:connection.networkKey||existing.token||existing.networkKey});connection={host:normalized.remoteHost,port:normalized.remotePort,protocol:normalized.remoteProtocol,...(input.connection.networkKey?{networkKey:input.connection.networkKey}:{}),...(normalized.caPem?{caPem:normalized.caPem}:{})};}
     const result=service.configure({scope:input.scope,mode:input.mode,...(connection?{connection}:{})});return{...result,contextChanged:true,reloadData:true};
