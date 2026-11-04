@@ -149,7 +149,18 @@ export function createGeneratorMaintenance(contracts:Contracts,identity:EntityId
   const active=journal.filter(entry=>entry.generatorId===generatorId&&!inactive(entry)&&!issueOnly(entry));
   if(active.some(entry=>!day(entry.date)))return problem('MAINTENANCE_COUNTER_DATE','В действующем журнале этой ДЭС есть запись без действительной даты. Исправьте её перед расчётом графика');
   const included=active.filter(entry=>String(entry.date)<=throughDate),lastDate=included.reduce<string|null>((latest,entry)=>latest===null||String(entry.date)>latest?String(entry.date):latest,null);
-  if(lastDate===null)return problem('MAINTENANCE_COUNTER_EMPTY','В журнале этой ДЭС нет показания на выбранную дату. Заполните конечный счётчик в журнале; начальный остаток карточки и сумма часов не подставляются');
+  if(lastDate===null){
+   // A signed object handover retains the original central journal reading.
+   // Its source ID/date remain the journal's; the card's initial counter is
+   // never promoted to a measured value when the old journal is not copied.
+   const transfer=selected[0]!.desObjectGeneratorTransfer,meter=object(transfer)?transfer.meter:undefined;
+   if(object(transfer)&&transfer.version===1&&day(transfer.from)&&transfer.from<=throughDate&&typeof transfer.frameId==='string'&&/^destank:[a-f0-9]{64}$/.test(transfer.frameId)&&typeof transfer.sourceFingerprint==='string'&&/^sha256:[a-f0-9]{64}$/.test(transfer.sourceFingerprint)&&object(meter)&&meter.status==='unknown'&&meter.value===null&&typeof meter.reason==='string'&&meter.reason.trim())return problem('MAINTENANCE_COUNTER_HANDOVER_UNKNOWN','В переданных данных центра счётчик ДЭС не подтверждён: '+meter.reason);
+   if(object(transfer)&&transfer.version===1&&day(transfer.from)&&transfer.from<=throughDate&&typeof transfer.frameId==='string'&&/^destank:[a-f0-9]{64}$/.test(transfer.frameId)&&typeof transfer.sourceFingerprint==='string'&&/^sha256:[a-f0-9]{64}$/.test(transfer.sourceFingerprint)&&object(meter)&&meter.status==='known'&&contracts.identifier(meter.recordId)&&day(meter.date)&&meter.date<=transfer.from&&typeof meter.value==='number'&&Number.isFinite(meter.value)&&meter.value>=0&&meter.value<=1e12&&/^\d+(?:\.\d{1,3})?$/.test(String(meter.value))){
+    const next=new Date(meter.date+'T00:00:00Z');next.setUTCDate(next.getUTCDate()+1);const startDate=next.toISOString().slice(0,10),source:GeneratorMaintenanceJournalCounterSource={section:'genRecords',recordId:meter.recordId,date:meter.date,field:'meterEnd'};
+    return freeze({status:'known',throughDate,currentHours:meter.value,source,startDate,reason:'Счётчик из журнала центра за '+meter.date+', сохранённый в документе передачи ДЭС объекта',issues:[]});
+   }
+   return problem('MAINTENANCE_COUNTER_EMPTY','В журнале этой ДЭС нет показания на выбранную дату. Заполните конечный счётчик в журнале; начальный остаток карточки и сумма часов не подставляются');
+  }
   const latest=included.filter(entry=>entry.date===lastDate);
   if(latest.length!==1)return problem('MAINTENANCE_COUNTER_AMBIGUOUS','На последнюю дату '+lastDate+' есть несколько записей ДЭС. Уточните записи журнала: последнее показание не выбирается по порядку строк');
   const entry=latest[0]!;

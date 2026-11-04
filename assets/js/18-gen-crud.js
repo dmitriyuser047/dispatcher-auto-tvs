@@ -3,6 +3,14 @@
 
 // ─── GENERATOR CRUD ──────────────────────────────────────
 function genCardSourceFields(){return JSON.stringify(Object.fromEntries(['gm_org','gm_serial','gm_power','gm_location','gm_responsible','gm_fuel','gm_norm','gm_norm100','gm_norm50','gm_norm_idle','gm_hours_init','gm_fuel_balance','gm_cost','gm_status'].map(id=>[id,document.getElementById(id).value]).concat([['tankId',document.getElementById('gm_tank').selectedOptions[0]?.dataset.typedId??null]])));}
+function genTransferEditState(generator){
+  const transfer=generator?.desObjectGeneratorTransfer;
+  for(const id of ['gm_org','gm_location','gm_fuel','gm_tank','gm_hours_init','gm_fuel_balance'])document.getElementById(id).disabled=!!transfer;
+  let note=document.getElementById('gm_transfer_basis');if(!transfer){note?.remove();return;}
+  const input=document.getElementById('gm_fuel_balance');input.value=transfer.openingFuel;
+  if(!note){note=document.createElement('small');note.id='gm_transfer_basis';input.after(note);}
+  note.textContent='Входящие топливо и счётчик сохранены из расчёта центра при передаче. Новые показания вносите в журнал ДЭС.';
+}
 function openAddGenerator() {
   if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   editingGeneratorId = null;
@@ -13,6 +21,7 @@ function openAddGenerator() {
   ['gm_norm','gm_norm100','gm_norm50','gm_norm_idle','gm_power','gm_hours_init','gm_fuel_balance','gm_cost'].forEach(id => document.getElementById(id).value = '');
   populateGenTankSelect('');
   if(typeof effectiveParametersLegacyForm==='function')effectiveParametersLegacyForm('generators',editingGeneratorId==null?null:(data.generators||[]).find(row=>row.id===editingGeneratorId),'generatorModal');
+  genTransferEditState(null);
   if(!platformCaptureCardForm('generators',editingGeneratorId,'generatorModal'))return;
   openModal('generatorModal');
 }
@@ -42,6 +51,7 @@ function openEditGenerator(id) {
   populateGenTankSelect(g.tankId ?? '');
   document.getElementById('generatorModal')._generatorEditState={id,fields:genCardSourceFields()};
   if(typeof effectiveParametersLegacyForm==='function')effectiveParametersLegacyForm('generators',editingGeneratorId==null?null:(data.generators||[]).find(row=>row.id===editingGeneratorId),'generatorModal');
+  genTransferEditState(g);document.getElementById('generatorModal')._generatorEditState.fields=genCardSourceFields();
   if(!platformCaptureCardForm('generators',editingGeneratorId,'generatorModal'))return;
   openModal('generatorModal');
 }
@@ -69,6 +79,7 @@ async function saveGenerator() {
     note:        document.getElementById('gm_note').value.trim(),
     tankId,
   };
+  if(existingGenerator?.desObjectGeneratorTransfer)for(const field of ['hoursInit','fuelBalance','org','location','fuel','tankId']){if(Object.hasOwn(existingGenerator,field))obj[field]=existingGenerator[field];else delete obj[field];}
   const existingCard=data.generators.find(row=>row.id===editingGeneratorId),editState=document.getElementById('generatorModal')._generatorEditState;
   if(existingCard&&editState?.id===editingGeneratorId&&editState.fields===genCardSourceFields())obj={...existingCard,name,note:document.getElementById('gm_note').value.trim()};
   if(existingCard&&existingCard.tankId!==obj.tankId){
@@ -191,6 +202,7 @@ async function saveGenRecord() {
   if(!numeric)return;
   const {hours,meterStart,meterEnd}=numeric;
   if (!date)              { showFieldError('Укажите дату в формате ДД.ММ.ГГГГ', 'gen_rec_date'); return; }
+  if(generator.desObjectGeneratorTransfer&&date<generator.desObjectGeneratorTransfer.from){showFieldError('Учёт объекта начинается с '+fmtDate(generator.desObjectGeneratorTransfer.from)+'. Более ранние записи ведутся в центре.', 'gen_rec_date');return;}
   if (!Number.isFinite(hours) || hours < 0) { showFieldError('Укажите неотрицательную наработку', 'gen_rec_hours'); return; }
   if (+document.getElementById('gen_rec_fuel_issued').value > 0 && (data.tanks || []).find(t => t.id === generator.tankId)?.archived) {
     showFieldError('Выберите действующую ёмкость в карточке ДЭС или восстановите прежнюю', 'gen_rec_fuel_issued'); return;

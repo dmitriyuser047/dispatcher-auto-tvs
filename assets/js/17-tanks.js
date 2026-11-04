@@ -140,11 +140,12 @@ function renderTankDetailProjected(t) {
         <div style="color:var(--text3);font-size:13px;margin-top:2px">${t.serial ? 'Зав.№ '+ htmlEsc(t.serial) : ''}${t.object ? (t.serial?' · ':'')+'Объект: '+ htmlEsc(t.object) : ''}${t.owner ? ((t.serial||t.object)?' · ':'')+'Собственник: '+ htmlEsc(t.owner) : ''}</div>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" onclick="fuelAccountingOpen('tanks',${htmlEsc(JSON.stringify(t.id))})">Начало учёта ГСМ</button>
+        ${t.desObjectTankTransfer?'<button class="btn btn-ghost" disabled>Входящий остаток передан центром</button>':`<button class="btn btn-ghost" onclick="fuelAccountingOpen('tanks',${htmlEsc(JSON.stringify(t.id))})">Начало учёта ГСМ</button>`}
         ${t.archived ? `<button class="btn btn-primary" onclick="restoreTank(${htmlJs(t.id)})">Восстановить из архива</button>` : `<button class="btn btn-primary" onclick="openAddTankIncome()">Приход</button><button class="btn btn-ghost" onclick="tankMovementOpen('issue',${htmlJs(t.id)})">Выдать</button><button class="btn btn-ghost" onclick="openTankTransfer()">Перемещение</button><button class="btn btn-ghost" onclick="tankFuelActionOpen('measure',{tankId:${htmlJs(t.id)}})">Записать замер</button>`}
         <button class="btn btn-ghost" onclick="openEditTank(${htmlJs(t.id)})"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg> Изменить</button>
       </div>
     </div>
+    ${t.desObjectTankTransfer?'<div class="wf-note" data-tank-transfer-anchor><strong>Расчётный остаток при передаче: '+htmlEsc(fmtL(t.desObjectTankTransfer.opening))+' л</strong><br>Расчёт центра на '+htmlEsc(String(t.desObjectTankTransfer.asOf).replace('T',' ').replace('Z',' UTC'))+'. Локальный учёт ведётся с '+htmlEsc(fmtDate(t.desObjectTankTransfer.from))+'.<br>'+htmlEsc(t.desObjectTankTransfer.basis)+'</div>':''}
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin:16px 0">
       <div class="ss-card" style="flex:1;min-width:150px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px">
         <div style="font-size:12px;color:var(--text3)">Расчётный остаток на конец ${fmtDate(dispatcherLocalDate())}</div>
@@ -153,7 +154,7 @@ function renderTankDetailProjected(t) {
         ${b.capacity ? `<div style="height:8px;background:var(--border);border-radius:5px;margin-top:8px;overflow:hidden"><div style="height:100%;width:${b.fillPct}%;background:${balColor}"></div></div><div style="font-size:11px;color:var(--text3);margin-top:4px">${b.fillPct}% от ${b.capacity.toLocaleString('ru')} л</div>` : ''}
       </div>
       <div class="ss-card" style="flex:1;min-width:120px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px">
-        <div style="font-size:12px;color:var(--text3)">Начальный остаток</div>
+        <div style="font-size:12px;color:var(--text3)">${t.desObjectTankTransfer?'Остаток при передаче':'Начальный остаток'}</div>
         <div style="font-size:20px;font-weight:700">${fmtL(b.init)} л</div>
         <div style="font-size:12px;color:var(--text3);margin-top:10px">Поступило по всем операциям</div>
         <div style="font-size:18px;font-weight:700;color:var(--green)">+${fmtL(b.status==='known'?b.received:null)} л</div>
@@ -200,6 +201,15 @@ function populateGenTankSelect(selected) {
 }
 
 // ─── TANK CRUD ───────────────────────────────────────────
+function tankTransferEditState(tank){
+  const transfer=tank?.desObjectTankTransfer,opening=document.getElementById('tk_balance');
+  for(const id of ['tk_balance','tk_object','tk_location','tk_owner','tk_fuel'])document.getElementById(id).disabled=!!transfer;
+  let note=document.getElementById('tk_transfer_basis');
+  if(!transfer){note?.remove();return;}
+  opening.value=transfer.opening;
+  if(!note){note=document.createElement('small');note.id='tk_transfer_basis';opening.after(note);}
+  note.textContent='Расчётный остаток при передаче данных из центра. Основание: '+transfer.basis;
+}
 function openAddTank() {
   if(typeof syncEditingAllowed==='function'&&!syncEditingAllowed())return;
   editingTankId = null;
@@ -208,6 +218,7 @@ function openAddTank() {
   ['tk_name','tk_serial','tk_location','tk_object','tk_owner','tk_note'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('tk_fuel').value = 'diesel';
   ['tk_capacity','tk_balance','tk_reserve'].forEach(id => document.getElementById(id).value = '');
+  tankTransferEditState(null);
   populateTankObjectList();
   openModal('tankModal');
 }
@@ -231,6 +242,7 @@ function openEditTank(id) {
   document.getElementById('tk_object').value   = t.object || '';
   document.getElementById('tk_owner').value    = t.owner || '';
   document.getElementById('tk_note').value     = t.note || '';
+  tankTransferEditState(t);
   populateTankObjectList();
   openModal('tankModal');
 }
@@ -249,6 +261,8 @@ async function saveTank() {
     owner:       document.getElementById('tk_owner').value.trim(),
     note:        document.getElementById('tk_note').value.trim(),
   };
+  const existing=editingTankId==null?null:data.tanks.find(t=>t.id===editingTankId);
+  if(existing?.desObjectTankTransfer){if(Object.hasOwn(existing,'balanceInit'))obj.balanceInit=existing.balanceInit;else delete obj.balanceInit;for(const field of ['object','location','owner','fuel']){if(Object.hasOwn(existing,field))obj[field]=existing[field];else delete obj[field];}}
   if (editingTankId!=null&&editingTankId!=='') {
     Object.assign(data.tanks.find(x => x.id === editingTankId), obj);
   } else {

@@ -9,6 +9,18 @@ const resolve=(rows,extra)=>api.journalCounter(database(rows),request(extra));
 function freeze(value){if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value;}
 function unknown(result,code){assert.equal(result.status,'unknown');assert.equal(result.currentHours,null);assert.equal(result.startDate,null);assert.equal(result.issues[0].code,code);assert.equal(result.reason,result.issues[0].message);}
 
+test('object handover retains the central journal reading after its historical stock sources are folded into opening',()=>{
+ const db=database([]);db.generators[0].desObjectGeneratorTransfer={version:1,frameId:'destank:'+'1'.repeat(64),sourceFingerprint:'sha256:'+'2'.repeat(64),from:'2027-02-01',meter:{status:'known',value:1300,recordId:'central-reading',date:'2027-01-31'}};
+ const original=JSON.stringify(db),result=api.journalCounter(db,request({throughDate:'2027-02-01'}));assert.equal(result.status,'known');assert.equal(result.currentHours,1300);assert.deepEqual(result.source,{section:'genRecords',recordId:'central-reading',date:'2027-01-31',field:'meterEnd'});assert.match(result.reason,/журнала центра/);assert.equal(JSON.stringify(db),original);
+ unknown(api.journalCounter(db,request()),'MAINTENANCE_COUNTER_EMPTY');db.genRecords.push(record({id:'new-local-reading',date:'2027-02-02',meterStart:1300,meterEnd:1310,hours:10}));assert.equal(api.journalCounter(db,request({throughDate:'2027-02-03'})).source.recordId,'new-local-reading');
+});
+
+test('a card initial counter or malformed handover never becomes a proved journal reading',()=>{
+ const db=database([]),marker={version:1,frameId:'destank:'+'1'.repeat(64),sourceFingerprint:'sha256:'+'2'.repeat(64),from:'2027-02-01',meter:{status:'initial',value:1300}};db.generators[0].desObjectGeneratorTransfer=marker;
+ unknown(api.journalCounter(db,request({throughDate:'2027-02-01'})),'MAINTENANCE_COUNTER_EMPTY');marker.meter={status:'known',value:1300,recordId:'central',date:'2027-02-31'};unknown(api.journalCounter(db,request({throughDate:'2027-03-01'})),'MAINTENANCE_COUNTER_EMPTY');marker.meter.date='2027-01-31';marker.sourceFingerprint='forged';unknown(api.journalCounter(db,request({throughDate:'2027-03-01'})),'MAINTENANCE_COUNTER_EMPTY');
+ marker.sourceFingerprint='sha256:'+'2'.repeat(64);marker.meter={status:'unknown',value:null,reason:'Нет конечного показания в журнале центра'};unknown(api.journalCounter(db,request({throughDate:'2027-03-01'})),'MAINTENANCE_COUNTER_HANDOVER_UNKNOWN');assert.match(api.journalCounter(db,request({throughDate:'2027-03-01'})).reason,/Нет конечного показания/);
+});
+
 test('the inclusive journal cutoff selects an actual end reading and starts forecasting on the next source day',()=>{
  const result=resolve([record()]);assert.deepEqual(result,{status:'known',throughDate:'2027-01-31',currentHours:1300,source:{section:'genRecords',recordId:'reading',date:'2027-01-31',field:'meterEnd'},startDate:'2027-02-01',reason:'Конечный счётчик из журнала ДЭС за 2027-01-31. Плановый расчёт начинается со следующего дня: 2027-02-01',issues:[]});
  const cutoffLater=resolve([record()],{throughDate:'2027-03-31'});assert.equal(cutoffLater.startDate,'2027-02-01');assert.equal(cutoffLater.source.date,'2027-01-31');

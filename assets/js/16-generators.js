@@ -108,7 +108,7 @@ function renderGenDetail(g) {
         ${g.note?`<div style="margin-top:8px;font-size:12px;color:var(--text2);background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;max-width:600px">${htmlEsc(g.note)}</div>`:''}
       </div>
       <div class="vdh-actions">
-        <button class="btn btn-ghost btn-sm" onclick="fuelAccountingOpen('generators',${htmlEsc(JSON.stringify(g.id))})">Начало учёта ГСМ</button>
+        ${g.desObjectGeneratorTransfer?'<button class="btn btn-ghost btn-sm" disabled>Входящие показания переданы центром</button>':`<button class="btn btn-ghost btn-sm" onclick="fuelAccountingOpen('generators',${htmlEsc(JSON.stringify(g.id))})">Начало учёта ГСМ</button>`}
         <button class="btn btn-ghost btn-sm" onclick="fuelNormsOpen('generators',${htmlEsc(JSON.stringify(g.id))})">Нормы по датам</button>
         ${typeof seasonalFuelCardButton === 'function' ? seasonalFuelCardButton('generators',g.id) : ''}
         ${typeof generatorMaintenanceCardButtons === 'function' ? generatorMaintenanceCardButtons(g.id) : ''}
