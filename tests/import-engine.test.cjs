@@ -118,3 +118,24 @@ test('an explicitly selected telemetry journal becomes the sole canonical day wi
  const sidebar={dataset:{},innerHTML:''},uiContext=vm.createContext({data:result.next,TvsFuelEngine:fuel,document:{getElementById:()=>sidebar},window:{},recsFor:id=>result.next.records.filter(row=>row.vehicleId===id),fuelTypeFromGrade:()=> 'diesel',vehicleFuelGrade:()=> 'ДТ',fqValue:value=>typeof value==='number'&&Number.isFinite(value)?value:null,fuelAccountingCurrentIncludes:()=>true,fqRecord:()=>({total:0}),computeFuelBalances:()=>({}),fuelAccountingCurrentBalance:()=>0,computeObjectStatusBreakdown:()=>[]});vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/js/07-summary.js'),'utf8'),uiContext);uiContext.renderSidebarSummary();assert.match(sidebar.innerHTML,/Пробег по Глонасс<\/span>\s*<span[^>]*>300 км/);
  const forged=clone(result.next);forged.records[0].glonassCanonical=true;assert.throws(()=>core.validateChanges(result.next,forged,context),{code:'IMPORT_PROOF'});
 });
+
+
+test('fuel mapping cannot add a purchase to an explicitly different journal fuel grade',()=>{
+ for(const [purchaseGrade,journalGrade]of [['АИ-95','ДТ'],['АИ-95','АИ-92'],['ДТ','Газ'],['ДТ','Бензин'],['ДТ','AI-95']]){
+  const db=fixture({records:[{id:'manual',vehicleId:0,date:'2026-09-01',fuelGrade:journalGrade,fuelIssued:10,km:17}]}),before=clone(db),src=source('fuel-statement',[purchase(5,{product:purchaseGrade,fuel:purchaseGrade,grade:purchaseGrade})]),decision={...mapped('row-0',0),existing:{section:'records',id:'manual'}},prepared=prepare(db,src,[decision]);
+  assert.equal(prepared.review.canApply,false,purchaseGrade+' into '+journalGrade);assert.ok(prepared.review.blockers.some(issue=>issue.code==='IMPORT_JOURNAL_FUEL_MISMATCH'));assert.throws(()=>core.plan(db,prepared.action,prepared.ctx),{code:'IMPORT_BLOCKED'});assert.deepEqual(db,before);
+ }
+});
+
+test('historical purchase remapping rejects a different target fuel and preserves the old journal contribution',()=>{
+ const src=source('fuel-statement',[purchase(5,{supplierTransactionId:'GRADE-MAP'})]),first=apply(fixture(),src,[mapped('row-0',0)]),db=clone(first.next);db.records.push({id:'petrol',vehicleId:'0',date:'2026-09-01',fuelGrade:'АИ-95',fuelIssued:10,km:17});const before=clone(db),prepared=prepare(db,src,[{...mapped('row-0','0'),existing:{section:'records',id:'petrol'}}]);
+ assert.equal(prepared.review.canApply,false);assert.ok(prepared.review.blockers.some(issue=>issue.code==='IMPORT_JOURNAL_FUEL_MISMATCH'));assert.throws(()=>core.plan(db,prepared.action,prepared.ctx),{code:'IMPORT_BLOCKED'});assert.deepEqual(db,before);assert.equal(db.records.find(record=>record.id===first.next.records[0].id).fuelIssued,5);
+});
+
+test('explicit legacy journal mapping preserves unknown fuel grades without inventing a grade and accepts matching aliases',()=>{
+ for(const journalGrade of [undefined,'','Не определено','Дизельное топливо','DIESEL']){
+  const journal={id:'manual',vehicleId:0,date:'2026-09-01',fuelIssued:10,km:17,...(journalGrade!==undefined?{fuelGrade:journalGrade}:{})},db=fixture({records:[journal]}),src=source('fuel-statement',[purchase(5)]),result=apply(db,src,[{...mapped('row-0',0),existing:{section:'records',id:'manual'}}]);
+  assert.equal(result.next.records[0].fuelIssued,15);assert.equal(result.next.records[0].fuelGrade,journalGrade);assert.equal(Object.hasOwn(result.next.records[0],'fuelGrade'),journalGrade!==undefined);assert.equal(result.next.records[0].km,17);
+ }
+ const db=fixture({records:[{id:'petrol',vehicleId:0,date:'2026-09-01',fuelGrade:'Бензин',fuelIssued:10}]}),src=source('fuel-statement',[purchase(5,{product:'АИ-95',fuel:'АИ-95',grade:'АИ-95'})]),result=apply(db,src,[{...mapped('row-0',0),existing:{section:'records',id:'petrol'}}]);assert.equal(result.next.records[0].fuelGrade,'Бензин');assert.equal(result.next.records[0].fuelIssued,15);
+});
