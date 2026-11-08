@@ -329,7 +329,15 @@ function prepareHistoryCommit(dataDir,previous,sections,revisions,options={}){
   const selected=collector.selectedTargets.slice();
   if(options.importSource){const section=options.importSource.sourceScopes?.[0];if(!schema().sections.includes(section))fail('OPERATION_EVIDENCE_INVALID','Не подтверждены разделы исходного импорта',409);selected.push({section,kind:'source',value:options.importSource});}
   selected.push(...require('./document-archive.cjs').operationEvidenceModels(dataDir,literal,sections));
-  const proof=evidence.createProof({previous,next,principal,mode:'transaction',sections:{complete:collector.complete,readSections:collector.readSections,writeSections:writes,selectedTargets:selected},receipt,events,...(options.commandIntent?{commandIntent:options.commandIntent}:{})});
+  // A transaction's audit access facts depend on its own sibling events. Old
+  // history is already verified by the ledger and is not a read dependency of
+  // an ordinary edit. Recopying it into both proof snapshots makes small saves
+  // scale with imported history and can exhaust an individual proof's budget.
+  // Explicit history readers keep their complete original evidence context.
+  const readsHistory=collector.readSections.includes('auditLog')||selected.some(row=>row.section==='auditLog'||[row.value?.sourceScopes,row.value?.requiredReadSections,row.value?.snapshot?.requiredReadSections].some(names=>Array.isArray(names)&&names.includes('auditLog')));
+  const evidencePrevious=readsHistory?previous:{...previous,auditLog:before.filter(row=>row.operationId===receipt.operation.id)};
+  const evidenceNext=readsHistory?next:{...next,auditLog:after.filter(row=>row.operationId===receipt.operation.id)};
+  const proof=evidence.createProof({previous:evidencePrevious,next:evidenceNext,principal,mode:'transaction',sections:{complete:collector.complete,readSections:collector.readSections,writeSections:writes,selectedTargets:selected},receipt,events,...(options.commandIntent?{commandIntent:options.commandIntent}:{})});
   if(!evidence.authorizeProof(proof,principal,receipt))fail('OPERATION_EVIDENCE_ACCESS','Текущие права не подтверждают все источники и результат операции.',403);
   const prepared=store.prepareCommit(dataDir,{expectedOperationState:store.readState(dataDir),previousHotRows:before,newEvents:events,receipt,evidence:proof});
   // Keep the array capability and the artifact caller's canonical reference.

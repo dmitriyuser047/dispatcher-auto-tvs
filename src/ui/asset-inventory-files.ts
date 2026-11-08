@@ -84,7 +84,7 @@ namespace AssetInventoryFiles {
  }
  function mapping(s:State):Row {
   const format=field(s,'format').value as Format,date=field(s,'date').value;
-  if(date&&!/^\d{4}-\d{2}-\d{2}$/.test(date)||!date&&format!=='auto')throw Error('Укажите дату источника или выберите автоматический разбор документа.');
+  if(date&&!/^\d{4}-\d{2}-\d{2}$/.test(date))throw Error('Укажите действительную дату источника в формате ГГГГ-ММ-ДД.');
   const result:Row={format,...(date?{date}:{})};
   for(const name of ['defaultOrgName','defaultObjectName','title']){const value=field(s,name).value;if(value.trim())result[name]=value;}
   if(format==='osv')result.useOpeningIfNoClosing=(field(s,'useOpeningIfNoClosing') as HTMLInputElement).checked;

@@ -1,5 +1,5 @@
 /* Generated from src/ui/asset-inventory.ts, src/ui/asset-inventory-host.ts, src/ui/asset-inventory-files.ts, src/ui/inventory-documents.ts, src/ui/inventory-photos.ts by scripts/build-inventory-ui.cjs.
- * TypeScript 5.9.3; source/config sha256:58f7ec054df5bc27bf77d55c00d056a9a322a99d98b5f9b36364f7e48ac5b0ef. Do not edit directly. */
+ * TypeScript 5.9.3; source/config sha256:037707e56e2e5b0ac1ac648d1ea109ae4d60c91dbd0760819766938c0c56a40a. Do not edit directly. */
 "use strict";
 /** Standalone property inventory UI. This adapter never accesses application globals,
  * paths, localStorage or fleet/stock data. All writes require a canonical host ACK. */
@@ -978,8 +978,8 @@ var AssetInventoryFiles;
     }
     function mapping(s) {
         const format = field(s, 'format').value, date = field(s, 'date').value;
-        if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date) || !date && format !== 'auto')
-            throw Error('Укажите дату источника или выберите автоматический разбор документа.');
+        if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date))
+            throw Error('Укажите действительную дату источника в формате ГГГГ-ММ-ДД.');
         const result = { format, ...(date ? { date } : {}) };
         for (const name of ['defaultOrgName', 'defaultObjectName', 'title']) {
             const value = field(s, name).value;
