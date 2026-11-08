@@ -84,7 +84,7 @@ test('a confirmed retry reloads canonical data and removes the resolved row from
  const before=await page.evaluate(()=>{window.__responses.retry={ok:true,operationReceipt:{id:'recovery-unknown',status:'replayed'}};window.__disk.vehicles[0].note='Canonical recovered result';return window.__reads;});
  await page.locator('[data-operation-retry]').click();
  await page.waitForFunction(()=>data.vehicles[0].note==='Canonical recovered result');
- await page.waitForFunction(()=>document.getElementById('platformRecovery')?.textContent.includes('Ожидающих операций нет'));
+ await page.waitForFunction(()=>!window.__queue.some(row=>row.status!=='committed')&&!document.getElementById('platformRecovery'));
  assert.equal(await page.evaluate(()=>window.__reads),before+1);
  assert.deepEqual(await page.evaluate(()=>window.__calls.map(call=>[call.method,call.id])),[['retry','recovery-unknown']]);
  assert.equal(await page.evaluate(()=>window.__writes),0);
@@ -105,7 +105,7 @@ test('discard requires confirmation, cancellation preserves the queue, and confi
  await page.locator('[data-operation-discard]').click();await page.locator('#confirmYes').click();
  await page.waitForFunction(()=>window.__calls.length===1);
  assert.deepEqual(await page.evaluate(()=>window.__calls),[{method:'discard',id:'recovery-unknown',token:'synthetic-recovery-A'}]);
- await page.waitForFunction(()=>document.getElementById('platformRecovery')?.textContent.includes('Ожидающих операций нет'));
+ await page.waitForFunction(()=>!window.__queue.some(row=>row.status!=='committed')&&!document.getElementById('platformRecovery'));
  assert.equal(await page.evaluate(()=>window.__writes),0);
 });
 
@@ -130,7 +130,7 @@ test('late list results from another database cannot overwrite the current recov
  await page.evaluate(()=>{window.__deferList=true;window.__oldList=platformRenderRecoveryPanel();});
  await page.waitForFunction(()=>window.__heldLists.length===1);
  await page.evaluate(async()=>{_sync.databaseToken='synthetic-recovery-B';window.__token='synthetic-recovery-B';window.__deferList=false;window.__queue=[];await platformRenderRecoveryPanel();window.__heldLists[0]();await window.__oldList;});
- assert.match(await page.locator('#platformRecovery').innerText(),/Ожидающих операций нет/);assert.equal(await page.locator('[data-operation-check]').count(),0);
+ assert.equal(await page.locator('#platformRecovery').count(),0);assert.equal(await page.locator('[data-operation-check]').count(),0);
  assert.equal(await page.evaluate(()=>window.__writes),0);
 });
 
@@ -138,13 +138,13 @@ test('late successful action responses cannot reload data or show success in a n
  await page.evaluate(()=>{document.getElementById('globalToast').textContent='';window.__deferAction=true;});await page.locator('[data-operation-check]').click();
  await page.waitForFunction(()=>window.__heldActions.length===1);
  const result=await page.evaluate(async()=>{const reads=window.__reads;_sync.databaseToken='synthetic-recovery-B';window.__token='synthetic-recovery-B';data.vehicles[0].note='New database';window.__queue=[];await platformRenderRecoveryPanel();window.__heldActions[0].resolve({ok:true,committed:true,operationReceipt:{id:'recovery-unknown',status:'committed'}});await new Promise(resolve=>setTimeout(resolve,20));return{reads:window.__reads-reads,note:data.vehicles[0].note,toast:document.getElementById('globalToast')?.textContent||''};});
- assert.deepEqual(result,{reads:0,note:'New database',toast:''});assert.match(await page.locator('#platformRecovery').innerText(),/Ожидающих операций нет/);
+ assert.deepEqual(result,{reads:0,note:'New database',toast:''});assert.equal(await page.locator('#platformRecovery').count(),0);
 });
 
 test('late rejected action responses cannot show an old database error in the new session',async()=>{
  await page.evaluate(()=>{document.getElementById('globalToast').textContent='';window.__deferAction=true;});await page.locator('[data-operation-check]').click();await page.waitForFunction(()=>window.__heldActions.length===1);
  const toast=await page.evaluate(async()=>{_sync.databaseToken='synthetic-recovery-B';window.__token='synthetic-recovery-B';window.__queue=[];await platformRenderRecoveryPanel();window.__heldActions[0].reject(Error('STALE-OLD-DATABASE-ERROR'));await new Promise(resolve=>setTimeout(resolve,20));return document.getElementById('globalToast')?.textContent||'';});
- assert.equal(toast,'');assert.match(await page.locator('#platformRecovery').innerText(),/Ожидающих операций нет/);
+ assert.equal(toast,'');assert.equal(await page.locator('#platformRecovery').count(),0);
 });
 
 test('confirmation begun in an old session cannot discard an operation after the database changes',async()=>{

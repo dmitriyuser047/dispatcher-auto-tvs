@@ -149,7 +149,7 @@ test('switching away from an asynchronous workspace cannot replace the new scree
 });
 test('paged browser loads bounded pages, applies filters and escapes imported text',async()=>{
  await page.evaluate(()=>switchSection('system'));
- const panel=page.locator('#platformDataBrowser');await panel.locator('article').first().waitFor();
+ const panel=page.locator('#platformDataBrowser');await page.locator('#platformDataBrowser > summary').click();await panel.locator('article').first().waitFor();
  assert.equal(await panel.locator('article').count(),25);assert.equal(await panel.locator('img').count(),0);
  assert.equal(await panel.locator('input[name=from]').isDisabled(),true);
  await panel.locator('[data-page=next]').click();await page.waitForFunction(()=>document.querySelector('#platformDataBrowser [role=status]').textContent.startsWith('Страница 2'));
@@ -161,6 +161,7 @@ test('paged browser loads bounded pages, applies filters and escapes imported te
 });
 test('paged browser suppresses late data from another database session',async()=>{
  await page.evaluate(()=>{window.__holdPage=true;switchSection('system');});
+ await page.locator('#platformDataBrowser > summary').click();
  await page.waitForFunction(()=>typeof window.__resolvePage==='function');
  await page.evaluate(()=>{_sync.databaseToken='another-test-database';window.__resolvePage({ok:true,rows:[{id:'PRIVATE-OLD-SESSION'}],total:1,nextCursor:null});});
  assert.equal(await page.locator('#platformDataBrowser article').count(),0);assert.equal(await page.locator('body').innerText().then(text=>text.includes('PRIVATE-OLD-SESSION')),false);
