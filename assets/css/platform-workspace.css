@@ -3,7 +3,7 @@
 .platform-heading h2 { font-size:23px; margin:0 0 8px; }
 .platform-heading p,.platform-note { color:var(--text2); font-size:12px; line-height:1.7; }
 .platform-actions { display:flex; flex-wrap:wrap; gap:8px; }
-.platform-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin-bottom:28px; }
+.platform-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-bottom:28px; }
 .platform-summary article,.platform-modules article { padding:18px; border:1px solid var(--border); border-radius:8px; background:var(--bg2); }
 .platform-summary span,.platform-summary small { display:block; font-size:12px; color:var(--text2); line-height:1.7; }
 .platform-summary strong { display:block; font-size:24px; font-weight:600; margin:8px 0; }
@@ -25,4 +25,12 @@
 .platform-operation-list article { padding:13px 0; border-bottom:1px solid var(--border); }
 .platform-operation-list article div { display:flex; gap:15px; font-size:12px; line-height:1.7; }
 .platform-operation-list small { display:block; color:var(--text2); font-size:11px; margin-top:6px; }
-@media(max-width:1000px) { .platform-workspace { padding:20px; } .platform-heading { flex-wrap:wrap; } .platform-summary { grid-template-columns:repeat(3,minmax(0,1fr));gap:8px; } .platform-summary strong { font-size:20px; } }
+@media(max-width:1000px) { .platform-workspace { padding:20px; } .platform-heading { flex-wrap:wrap; } .platform-summary { grid-template-columns:repeat(2,minmax(0,1fr));gap:8px; } .platform-summary strong { font-size:20px; } }
+
+.platform-details { margin:14px 0; padding:16px; border:1px solid var(--border); border-radius:8px; }
+.platform-details > summary { cursor:pointer; font-size:14px; font-weight:600; line-height:1.6; }
+.platform-details[open] > summary { margin-bottom:18px; }
+.platform-details > summary:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
+.platform-save-error { margin:18px 0; padding:16px; border:1px solid var(--red); border-radius:8px; }
+.platform-save-error p { margin:8px 0 0; font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
+@media(max-width:600px) { .platform-summary { grid-template-columns:1fr; } .platform-details { padding:12px; } .platform-filters label { min-width:0; width:100%; } }

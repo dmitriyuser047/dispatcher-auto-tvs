@@ -47,7 +47,10 @@ function renderPersonnelTimesheets(kind) {
     const view=host.querySelector('[data-personnel-timesheet]');
     view.querySelector('[data-pt-cards]').onclick=()=>switchSection(kind==='operator'?'operators':'drivers');
     view.querySelector('[data-pt-saved]').onchange=async event=>{try{if(event.target.value==='')return;if(await ptMayReplace(s))ptOpen(s,saved[Number(event.target.value)]);}catch(error){ptFail(error);}};
-    if(write){view.querySelector('[data-pt-new]').onclick=()=>void ptNew(s);view.querySelector('[data-pt-import]').onclick=()=>view.querySelector('[data-pt-file]').click();view.querySelector('[data-pt-file]').onchange=event=>void ptImport(s,event.target.files[0]);}
+    if(write){
+      view.querySelector('[data-pt-new]').onclick=()=>void ptNew(s);view.querySelector('[data-pt-import]').onclick=()=>view.querySelector('[data-pt-file]').click();
+      view.querySelector('[data-pt-file]').onchange=event=>{const file=event.target.files[0];event.target.value='';if(file)void ptImport(s,file);};
+    }
     if(s.model)ptRenderEditor(s);else view.querySelector('[data-pt-editor]').innerHTML='<div class="pt-empty">'+xpIcon('calendar',36)+'<h3>Табель '+ptLabel(kind)+'</h3><p>Загрузите файл по вашему образцу или создайте табель из справочника сотрудников.</p><p>ФИО и объект слева, отметки по дням в центре, итоги и комментарии справа.</p></div>';
   } catch(error){host.innerHTML='<div class="personnel-workspace"><h2>Табели</h2><p role="alert">'+ptEsc(error.message)+'</p></div>';}
 }

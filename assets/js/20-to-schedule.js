@@ -697,6 +697,12 @@ async function reestrParse() {
   if (!reestrFiles.length) return;
   if(reestrImportDraft){showToast('Сначала проверьте или отмените текущий черновик импорта.');return;}
   const errorEl = document.getElementById('reestrError');
+  const api = window.reestrAPI;
+  if (!['parseInvoices','parsePdfs','onProgress','onOcrPage','offProgress'].every(name => typeof api?.[name] === 'function')) {
+    errorEl.textContent = 'Распознавание отдельных счетов доступно в установленной программе. Готовый реестр Excel или PDF загрузите в разделе «Реестры».';
+    errorEl.style.display = '';
+    return;
+  }
   errorEl.style.display = 'none';
   document.getElementById('reestrLogCard').style.display = 'none';
   document.getElementById('reestrReviewCard').style.display = 'none';
@@ -710,22 +716,22 @@ async function reestrParse() {
   const progressFile = document.getElementById('reestrProgressFile');
   const progressCount = document.getElementById('reestrProgressCount');
   progressWrap.style.display = 'none';
-  window.reestrAPI.onProgress(({ current, total, fileName }) => {
-    progressWrap.style.display = '';
-    progressBar.style.width = Math.round((current / total) * 100) + '%';
-    fileName = String(fileName || 'Документ');
-    const shortName = fileName.length > 40 ? fileName.slice(0, 37) + '…' : fileName;
-    progressFile.textContent = shortName;
-    progressCount.textContent = current + ' / ' + total;
-    document.getElementById('reestrParseBtnLabel').textContent = 'Распознаю ' + current + '/' + total + '…';
-  });
-  window.reestrAPI.onOcrPage(({ page, totalPages }) => {
-    progressWrap.style.display = '';
-    progressFile.textContent = 'OCR стр. ' + page + ' / ' + totalPages;
-    progressBar.style.width = Math.round((page / totalPages) * 100) + '%';
-    document.getElementById('reestrParseBtnLabel').textContent = 'OCR стр. ' + page + '/' + totalPages + '…';
-  });
   try {
+    api.onProgress(({ current, total, fileName }) => {
+      progressWrap.style.display = '';
+      progressBar.style.width = Math.round((current / total) * 100) + '%';
+      fileName = String(fileName || 'Документ');
+      const shortName = fileName.length > 40 ? fileName.slice(0, 37) + '…' : fileName;
+      progressFile.textContent = shortName;
+      progressCount.textContent = current + ' / ' + total;
+      document.getElementById('reestrParseBtnLabel').textContent = 'Распознаю ' + current + '/' + total + '…';
+    });
+    api.onOcrPage(({ page, totalPages }) => {
+      progressWrap.style.display = '';
+      progressFile.textContent = 'OCR стр. ' + page + ' / ' + totalPages;
+      progressBar.style.width = Math.round((page / totalPages) * 100) + '%';
+      document.getElementById('reestrParseBtnLabel').textContent = 'OCR стр. ' + page + '/' + totalPages + '…';
+    });
     const zipFiles = reestrFiles.filter(f => f.type === 'zip');
     const pdfFiles = reestrFiles.filter(f => f.type === 'pdf');
     const imgFiles = reestrFiles.filter(f => f.type === 'img');
@@ -735,21 +741,21 @@ async function reestrParse() {
       allLog.push({ type: 'info', text: 'Архив: ' + archive.file.name });
       const ab = await archive.file.arrayBuffer();
       originalFiles.push({name:archive.file.name,bytes:new Uint8Array(ab)});
-      const d = await window.reestrAPI.parseInvoices(ab);
+      const d = await api.parseInvoices(ab);
       allRows.push(...(d.rows || [])); allLog.push(...(d.log || []));
     }
     if (pdfFiles.length > 0 || imgFiles.length > 0) {
       const payload = [];
       for (const pf of pdfFiles) { const buffer=await pf.file.arrayBuffer();payload.push({name:pf.file.name,buffer});originalFiles.push({name:pf.file.name,bytes:new Uint8Array(buffer)}); }
       for (const im of imgFiles) { const buffer=await im.file.arrayBuffer();payload.push({name:im.file.name,buffer});originalFiles.push({name:im.file.name,bytes:new Uint8Array(buffer)}); }
-      const d = await window.reestrAPI.parsePdfs(payload);
+      const d = await api.parsePdfs(payload);
       allRows.push(...d.rows); allLog.push(...d.log);
     }
     const rawRows=structuredClone(allRows);
     // Предложения базы знаний остаются в редактируемом черновике.
-    if (window.reestrAPI.applyKnowledge) {
+    if (api.applyKnowledge) {
       try {
-        const kbResult = await window.reestrAPI.applyKnowledge(allRows);
+        const kbResult = await api.applyKnowledge(allRows);
         allRows = kbResult.rows;
         if (kbResult.duplicates && kbResult.duplicates.length) {
           reestrDuplicates = kbResult.duplicates;
@@ -779,7 +785,9 @@ async function reestrParse() {
     errorEl.textContent = '⚠ ' + e.message;
     errorEl.style.display = '';
   } finally {
-    window.reestrAPI.offProgress();
+    try { api.offProgress(); } catch (e) {
+      if (errorEl.style.display === 'none') { errorEl.textContent = '⚠ ' + e.message; errorEl.style.display = ''; }
+    }
     progressWrap.style.display = 'none';
     btn.disabled = false;
     btn.querySelector('.reestr-spinner').style.display = 'none';
