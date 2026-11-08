@@ -3,7 +3,10 @@
 // Neither browser facts nor surviving hot audit siblings are an authority.
 const path=require('node:path'),crypto=require('node:crypto');
 const ROOT=path.resolve(__dirname,'..');
-const load=name=>require(path.join(ROOT,name));
+// Dependencies are code modules, never a principal, source row or ACL decision.
+// Keep the same Node module instances without resolving their paths per row.
+const modules=new Map();
+const load=name=>{if(!modules.has(name))modules.set(name,require(path.join(ROOT,name)));return modules.get(name);};
 const schema=load('assets/core/platform-schema.js'),scope=load('assets/core/access-scope.js'),policy=load('assets/core/access-policy.js'),access=load('electron/access-context.cjs');
 const names=new Set(schema.sections),own=(value,key)=>Object.prototype.hasOwnProperty.call(value,key),object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const stable=value=>value===null||typeof value!=='object'?JSON.stringify(value):Array.isArray(value)?'['+value.map(stable).join(',')+']':'{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+stable(value[key])).join(',')+'}';

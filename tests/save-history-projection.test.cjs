@@ -59,22 +59,32 @@ test('immutable decoded evidence still checks fresh stored bytes on every later 
  store.objects.set(first.proofHash,before);assert.deepEqual(store.engine.inspectReceipt(store.head,value.receipt.operation.id),first);
 });
 test('one read scope reuses decoded immutable objects while rereading and hashing the provider bytes',()=>{
- const store=memory(),value=operation();store.append(value);let first;
+ const store=memory(),value=operation();store.append(value);let first,leafParses=0;
+ const leafJSON=store.objects.get(store.head.receiptRoot).toString('utf8'),parse=JSON.parse;JSON.parse=function(text,...args){if(text===leafJSON)leafParses++;return parse.call(this,text,...args);};
+ try{
  ledger.withReadScope(()=>{
   first=store.engine.inspectReceipt(store.head,value.receipt.operation.id);const reads=store.reads.length;
   const second=ledger.withReadScope(()=>store.engine.inspectReceipt(store.head,value.receipt.operation.id));
   assert.equal(second.proof,first.proof);assert.ok(store.reads.length>reads,'A cache hit still reads the provider');
+  assert.equal(leafParses,1,'Nested scopes share their checked non-proof decode');
   const bytes=store.objects.get(first.proofHash),original=Buffer.from(bytes);bytes[0]^=1;
   assert.throws(()=>store.engine.inspectReceipt(store.head,value.receipt.operation.id),{code:'LEDGER_HASH'});store.objects.set(first.proofHash,original);
  });
- assert.notEqual(store.engine.inspectReceipt(store.head,value.receipt.operation.id).proof,first.proof,'The next operation cannot inherit the decode scope');
+ const reads=store.reads.length;assert.deepEqual(store.engine.inspectReceipt(store.head,value.receipt.operation.id),first);
+ assert.equal(leafParses,2,'The next operation must decode its own non-proof index object');assert.ok(store.reads.length>reads,'The next operation rereads the current provider');
+ }finally{JSON.parse=parse;}
 });
 test('read scopes clear after exceptions and reject asynchronous work',()=>{
- const store=memory(),value=operation();store.append(value);let captured;
+ const store=memory(),value=operation();store.append(value);let captured,leafParses=0;
+ const leafJSON=store.objects.get(store.head.receiptRoot).toString('utf8'),parse=JSON.parse;JSON.parse=function(text,...args){if(text===leafJSON)leafParses++;return parse.call(this,text,...args);};
+ try{
  assert.throws(()=>ledger.withReadScope(()=>{captured=store.engine.inspectReceipt(store.head,value.receipt.operation.id);throw Error('Synthetic failure');}),/Synthetic failure/);
- assert.notEqual(ledger.withReadScope(()=>store.engine.inspectReceipt(store.head,value.receipt.operation.id)).proof,captured.proof);
+ const reads=store.reads.length;assert.deepEqual(ledger.withReadScope(()=>store.engine.inspectReceipt(store.head,value.receipt.operation.id)),captured);
+ assert.equal(leafParses,2,'A failed scope cannot retain the non-proof decode');assert.ok(store.reads.length>reads,'The new scope rereads the provider');
  assert.throws(()=>ledger.withReadScope(()=>Promise.resolve()),{code:'LEDGER_ASYNC_SCOPE'});
  assert.deepEqual(ledger.withReadScope(()=>store.engine.inspectReceipt(store.head,value.receipt.operation.id)),captured);
+ assert.equal(leafParses,3,'The asynchronous-work rejection also clears the decode scope');
+ }finally{JSON.parse=parse;}
 });
 test('a long scope evicts decoded entries rather than retaining an unbounded object set',()=>{
  const objects=new Map(),api=ledger.createOperationLedger({cursorKey:Buffer.alloc(32,22),readObject:id=>objects.get(id)}),entries=Array.from({length:258},(_,index)=>{

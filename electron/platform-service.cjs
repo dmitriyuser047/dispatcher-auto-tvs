@@ -329,7 +329,10 @@ function prepareHistoryCommit(dataDir,previous,sections,revisions,options={}){
   const selected=collector.selectedTargets.slice();
   if(options.importSource){const section=options.importSource.sourceScopes?.[0];if(!schema().sections.includes(section))fail('OPERATION_EVIDENCE_INVALID','Не подтверждены разделы исходного импорта',409);selected.push({section,kind:'source',value:options.importSource});}
   selected.push(...require('./document-archive.cjs').operationEvidenceModels(dataDir,literal,sections));
-  const proof=evidence.createProof({previous,next,principal,mode:'transaction',sections:{complete:collector.complete,readSections:collector.readSections,writeSections:writes,selectedTargets:selected},receipt,events,...(options.commandIntent?{commandIntent:options.commandIntent}:{})});
+  // Retain the validated immutable copy for every event in this response.
+  // authorizeProof still checks current access; projecting each sibling event
+  // must not defensively copy the same complete read closure again.
+  const proof=evidence.validateProof(evidence.createProof({previous,next,principal,mode:'transaction',sections:{complete:collector.complete,readSections:collector.readSections,writeSections:writes,selectedTargets:selected},receipt,events,...(options.commandIntent?{commandIntent:options.commandIntent}:{})}));
   if(!evidence.authorizeProof(proof,principal,receipt))fail('OPERATION_EVIDENCE_ACCESS','Текущие права не подтверждают все источники и результат операции.',403);
   const prepared=store.prepareCommit(dataDir,{expectedOperationState:store.readState(dataDir),previousHotRows:before,newEvents:events,receipt,evidence:proof});
   // Keep the array capability and the artifact caller's canonical reference.

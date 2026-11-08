@@ -190,11 +190,18 @@ function queryRows(dataDir,input){
     return {rows:page.map(entry=>JSON.parse(entry.row_json)),positions:page.map(entry=>entry.position),total,hasMore:entries.length>query.limit};
   },{readOnly:true});
 }
-function readAll(dataDir){return transaction(dataDir,()=>{
+// Commit validation below authenticates both hot views immediately after this
+// fresh row read. Keep the raw reader private so ordinary reads can never omit
+// their history validation, and never reuse rows captured before a hook.
+function readAllRows(dataDir){
   const version=validateFormat(connection(dataDir)),names=storageFormat.sectionsFor(version),result=Object.fromEntries(schema.sections.map(name=>[name,[]]));
   for(const row of connection(dataDir).prepare('SELECT section,row_json FROM section_rows ORDER BY section,position').all()){
     if(!names.includes(row.section))fail('SQLITE_SECTION','База содержит неизвестный раздел');result[row.section].push(JSON.parse(row.row_json));
   }
+  return {version,result};
+}
+function readAll(dataDir){return transaction(dataDir,()=>{
+  const {version,result}=readAllRows(dataDir);
   if(version>=4){require('./operation-store.cjs').validateHot(dataDir,result.auditLog);const platform=require('./platform-service.cjs');if(typeof platform.bindHistory==='function')platform.bindHistory(result,dataDir);}
   return result;
 },{readOnly:true});}
@@ -297,7 +304,7 @@ function commitSections(dataDir,sections,revisions,options={}){
   if(!plain(sections))fail('SQLITE_ROWS','Некорректный набор разделов SQLite');for(const [name,rows]of Object.entries(sections))validateRows(name,rows);
   if(!Object.keys(sections).length&&!options.nextOperationState)return;
   return transaction(dataDir,()=>{
-    const current=readAll(dataDir),next={...current,...sections},versions=revisionsOf(revisions,readRevisions(dataDir)),store=require('./operation-store.cjs'),expected=options.expectedOperationState||store.readState(dataDir),commit=store.validateCommit(dataDir,{expectedOperationState:expected,nextOperationState:options.nextOperationState||storageFormat.createOperationState(expected.head),operationPlans:options.operationPlans||[]},{previousHotRows:current.auditLog,nextHotRows:next.auditLog});
+    const current=readAllRows(dataDir).result,next={...current,...sections},versions=revisionsOf(revisions,readRevisions(dataDir)),store=require('./operation-store.cjs'),expected=options.expectedOperationState||store.readState(dataDir),commit=store.validateCommit(dataDir,{expectedOperationState:expected,nextOperationState:options.nextOperationState||storageFormat.createOperationState(expected.head),operationPlans:options.operationPlans||[]},{previousHotRows:current.auditLog,nextHotRows:next.auditLog});
     putOperationObjects(dataDir,commit.objects);indexOperationObjects(connection(dataDir),commit.objects);build(connection(dataDir),next,versions,Object.keys(sections));writeOperationState(dataDir,commit.nextOperationState);const platform=require('./platform-service.cjs');if(typeof platform.bindHistory==='function')platform.bindHistory(next,dataDir);
   },options);
 }

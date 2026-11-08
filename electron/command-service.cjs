@@ -28,8 +28,12 @@ function semanticAction(command){
   return command.type==='ImportAction'?'import:'+command.input.profile:command.type==='PrintAction'?'print:capture':command.type==='MergeCatalog'?'catalog:merge':command.type==='IssueFuel'?'fuel:issue':command.type==='AcceptShift'?'shift:accept':'assignment:save';
 }
 function collectCommandEvidence(database,command,dependencies,{strict=true}={}){
-  const selected=new Map(),keys=new Map(),assets=new Set(),unresolved=new Map(),idless=new Map();let complete=true;
-  const add=(name,id)=>{if(id===undefined||id===null||id==='')return;const key=stable([name,typeof id,id]);if(!keys.has(name))keys.set(name,new Set());keys.get(name).add(stable([typeof id,id]));const rows=(database[name]||[]).filter(row=>row.id===id);if(rows.length!==1){if(strict)fail('ACCESS_DENIED','Недостаточно прав или не подтверждён источник команды.',403);complete=false;unresolved.set(key,{section:name,id});return;}if(selected.has(key))return;selected.set(key,{name,row:rows[0]});if(['vehicles','generators','tanks'].includes(name))assets.add(({vehicles:'v',generators:'g',tanks:'t'})[name]+':'+String(id));};
+  const selected=new Map(),keys=new Map(),assets=new Set(),unresolved=new Map(),idless=new Map(),indexes=new Map();let complete=true;
+  // An import selects the complete read closure. Index each locked section once
+  // instead of filtering the whole journal again for every selected identity.
+  // The index is call-local, retains typed IDs and still exposes duplicates.
+  const rowsFor=(name,id)=>{let index=indexes.get(name);if(!index){index=new Map();for(const row of database[name]||[]){let group=index.get(row.id);if(!group){group=[];index.set(row.id,group);}group.push(row);}indexes.set(name,index);}return index.get(id)||[];};
+  const add=(name,id)=>{if(id===undefined||id===null||id==='')return;const key=stable([name,typeof id,id]);if(!keys.has(name))keys.set(name,new Set());keys.get(name).add(stable([typeof id,id]));const rows=rowsFor(name,id);if(rows.length!==1){if(strict)fail('ACCESS_DENIED','Недостаточно прав или не подтверждён источник команды.',403);complete=false;unresolved.set(key,{section:name,id});return;}if(selected.has(key))return;selected.set(key,{name,row:rows[0]});if(['vehicles','generators','tanks'].includes(name))assets.add(({vehicles:'v',generators:'g',tanks:'t'})[name]+':'+String(id));};
   const addIdless=(name,row)=>{idless.set(stable([name,row]),{name,row});};
   const fieldSections={vehicleId:'vehicles',generatorId:'generators',tankId:'tanks',fromTankId:'tanks',toTankId:'tanks',driverId:'drivers',jobId:'dispatchJobs',shiftId:'shiftReports',assignmentId:'assetAssignments',replacesAssignmentId:'assetAssignments',measurementId:'fuelMovements',outId:'tankIncomes',inId:'tankIncomes',partId:'parts',workOrderId:'workOrders',repairId:'repairs',vehicleToId:'vehicleTo',toRecordId:'toRecords',allocationId:'costEntries',planId:'generatorMaintenancePlans',draftId:'documentDrafts',contragentId:'contragents'};
   const scan=(value,skipReference=false)=>{if(Array.isArray(value)){value.forEach(item=>scan(item));return;}if(!value||typeof value!=='object')return;if(!skipReference&&typeof value.section==='string'&&schema.sections.includes(value.section)&&own(value,'id'))add(value.section,value.id);for(const [field,item]of Object.entries(value)){if(fieldSections[field])add(fieldSections[field],item);else if(field==='assetRef'&&typeof item==='string'&&item!==''){const result=require('../assets/core/entity-identity.js').resolveAsset(database,item);if(result.status!=='known'){if(strict)fail('ACCESS_DENIED','Не подтверждён источник команды.',403);complete=false;}else add(result.section,result.id);}else if(item&&typeof item==='object')scan(item);}};
@@ -107,7 +111,7 @@ function executeInternal(dataDir,input,options={}){
       storage.assertWriteCompatibility(dataDir,options,command.type==='ImportAction'?'controlledImports':command.type==='PrintAction'?'documentPrint':undefined);
       storage.assertWritable(dataDir,options);
       const inventoryImport=command.type==='AssetInventoryAction'&&['importLegacy','importRows'].includes(command.input.action);
-      const importSource=command.type==='ImportAction'||inventoryImport?require('./import-source.cjs').load(dataDir,command.input.sourceId,principal):null;
+      const importSource=command.type==='ImportAction'||inventoryImport?require('./import-source.cjs').load(dataDir,command.input.sourceId,principal,{database:snapshot.data}):null;
       const missing=dependencies.filter(name=>!own(envelope.base,name));
       if(missing.length)fail('COMMAND_BASE_REQUIRED','Для команды нужны версии всех её зависимостей: '+missing.join(', '),428);
       const conflicts=dependencies.filter(name=>envelope.base[name]!==snapshot.revisions[name]);
