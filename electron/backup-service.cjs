@@ -280,7 +280,7 @@ function readPackage(archivePath) {
     require('./document-archive.cjs').validateManaged(data,name=>files.find(entry=>entry.name===name)?.bytes);validateSources(data,name=>files.find(entry=>entry.name===name)?.bytes,files);
     return checked;
 }
-function verifyPackage({ archivePath }) { return report(readPackage(archivePath)); }
+function verifyPackage({ archivePath }) { return require('./multipart-backup.cjs').probe(archivePath)?require('./multipart-backup.cjs').verifyPackage({archivePath}):report(readPackage(archivePath)); }
 function cleanStage(stage, parent, identity) { if (!stage)
     return; const info = stat(stage); if (!info)
     return; if (fold(path.dirname(stage)) !== fold(parent) || !path.basename(stage).startsWith('.tvs-backup-stage-') || !info.isDirectory() || info.isSymbolicLink() || info.dev !== identity.dev || info.ino !== identity.ino)
@@ -504,9 +504,10 @@ function createBackupService({journal}={}){
     if(journal!==undefined&&typeof journal!=='function')throw new TypeError('Нужен доверенный журнал восстановления');
     function restorePackage(request,options={}){
         if(!plain(options)||Object.keys(options).some(key=>!['lifecyclePlan','assertLifecycleCurrent'].includes(key)))fail('BACKUP_LIFECYCLE','Некорректные доверенные параметры восстановления');
+        if(require('./multipart-backup.cjs').probe(request?.archivePath))return require('./multipart-backup.cjs').restorePackage(request,options,journal);
         if(options.lifecyclePlan===undefined){if(options.assertLifecycleCurrent!==undefined)fail('BACKUP_LIFECYCLE','Проверке актуальности нужен подтверждённый план');return restoreLegacyPackage(request);}
         return restoreReviewedPackage(request,options,journal??require('./migration-journal.cjs').runCopy);
     }
     return Object.freeze({packageNameSafe,createPackage,verifyPackage,restorePackage});
 }
-module.exports = Object.freeze({...createBackupService(),createBackupService});
+module.exports = Object.freeze({...createBackupService(),createBackupService,createMultipartPackage:input=>require('./multipart-backup.cjs').createPackage(input),multipartSupport:Object.freeze({MANAGED,safeName,packageNameSafe,database,revisions,references,validateSources,cleanStage})});

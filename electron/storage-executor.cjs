@@ -70,9 +70,14 @@ function createStorageExecutor({maxPending=16,maxPayloadBytes=64*1024*1024,maxPe
    }
    if(message?.type!=='rpc')return;
    try{
-    if(!['locked','compatibility','beforeCommit','afterBackup'].includes(message.action))throw failure('STORAGE_WORKER_PROTOCOL','Неизвестная проверка хранилища.',{definitive:true});
+    if(!['locked','compatibility','beforeCommit','afterBackup','backupQueued'].includes(message.action))throw failure('STORAGE_WORKER_PROTOCOL','Неизвестная проверка хранилища.',{definitive:true});
     synchronous(job.assertCurrent,{phase:message.action});
     let value=true;
+    if(message.action==='backupQueued'){
+     const fs=require('node:fs'),ctx=message.context,source=fs.realpathSync.native(job.dataDir),backupRoot=job.backup&&fs.realpathSync.native(job.backup.directory);
+     if(!job.backup?.background||!ctx||ctx.source!==source||typeof ctx.jobDir!=='string'||path.dirname(ctx.jobDir)!==backupRoot)throw failure('STORAGE_WORKER_PROTOCOL','Не подтверждена папка фонового задания.',{definitive:true});
+     require('./daily-backup.cjs').launchCapturedJob(ctx.jobDir,source);
+    }
     if(message.action==='compatibility'){
      if(typeof job.assertWriteCompatibility!=='function')throw failure('PROTOCOL_RENEGOTIATE','Совместимость записи не подтверждена.',{status:428,definitive:true});
      value=synchronous(()=>{const checked=job.assertWriteCompatibility(message.context);if(checked===false)throw failure('PROTOCOL_RENEGOTIATE','Совместимость записи не подтверждена.',{status:428,definitive:true});return checked;});
@@ -109,7 +114,7 @@ function createStorageExecutor({maxPending=16,maxPayloadBytes=64*1024*1024,maxPe
      if(!optionNames.has(key))throw failure('STORAGE_EXECUTOR_INPUT','Недопустимый параметр записи: '+key,{definitive:true});serialized[key]=copy(descriptor.value);
     }
     let backup=null;
-    if(controls.backup!==undefined&&controls.backup!==null){const value=copy(controls.backup);if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['directory','keep','optional'].includes(key))||typeof value.directory!=='string'||!path.isAbsolute(value.directory)||value.keep!==undefined&&(!Number.isSafeInteger(value.keep)||value.keep<1||value.keep>10000)||value.optional!==undefined&&typeof value.optional!=='boolean')throw failure('STORAGE_EXECUTOR_INPUT','Некорректные параметры резервной копии.',{definitive:true});backup={directory:path.resolve(value.directory),keep:value.keep??30,optional:value.optional===true};}
+    if(controls.backup!==undefined&&controls.backup!==null){const value=copy(controls.backup);if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['directory','keep','optional','background'].includes(key))||typeof value.directory!=='string'||!path.isAbsolute(value.directory)||value.keep!==undefined&&(!Number.isSafeInteger(value.keep)||value.keep<1||value.keep>10000)||value.optional!==undefined&&typeof value.optional!=='boolean')throw failure('STORAGE_EXECUTOR_INPUT','Некорректные параметры резервной копии.',{definitive:true});backup={directory:path.resolve(value.directory),keep:value.keep??30,optional:value.optional===true,background:value.background===true};}
     const ownedInput=copy(input),bytes=Buffer.byteLength(JSON.stringify({kind,dataDir,input:ownedInput,options:serialized,backup}));
     if(bytes>maxPayloadBytes)throw failure('STORAGE_EXECUTOR_PAYLOAD_LIMIT','Операция превышает допустимый объём данных.',{definitive:true});
     if(pendingBytes+bytes>maxPendingBytes)throw failure('STORAGE_EXECUTOR_BYTE_LIMIT','Дождитесь сохранения данных: очередь достигла ограничения объёма.',{definitive:true});

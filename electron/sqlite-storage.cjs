@@ -336,7 +336,13 @@ function create(dataDir,input,options={}){
   if(!plain(input)||!plain(input.data)||Object.keys(input.data).some(name=>!schema.sections.includes(name)))fail('SQLITE_CREATE','Для создания нужны разделы данных и их версии');
   const descriptor=storageFormat.validateDescriptor(input.descriptor===undefined?storageFormat.describe(SCHEMA_VERSION):input.descriptor,SCHEMA_VERSION),identity=require('./database-identity.cjs').validate(input.identity===undefined?{format:'tvs-database-identity',version:1,uuid:crypto.randomUUID(),generation:1}:input.identity);
   const data=Object.fromEntries(schema.sections.map(name=>[name,own(input.data,name)?input.data[name]:[]]));for(const [name,rows]of Object.entries(data))validateRows(name,rows);
-  const store=require('./operation-store.cjs'),provided=own(input,'operationState')||own(input,'operationObjects'),seed=provided?store.validateSeed({operationState:input.operationState,operationObjects:input.operationObjects,hotRows:data.auditLog}):store.bootstrap({auditRows:data.auditLog});data.auditLog=seed.hotRows;
+  const store=require('./operation-store.cjs'),streaming=own(input,'operationProvider'),provided=own(input,'operationState')||own(input,'operationObjects');let readProvider;
+  if(streaming){
+    const provider=input.operationProvider,method=provider&&Object.getOwnPropertyDescriptor(provider,'readObject');
+    if(!own(input,'operationState')||own(input,'operationObjects')||!provider||![Object.prototype,null].includes(Object.getPrototypeOf(provider))||Reflect.ownKeys(provider).length!==1||!method?.enumerable||!Object.hasOwn(method,'value')||typeof method.value!=='function')fail('OPERATION_SEED_INCOMPLETE','Не подтверждён потоковый источник истории');
+    readProvider=method.value.bind(provider);
+  }
+  const seed=streaming?store.verifyProvider({operationState:input.operationState,readObject:readProvider,hotRows:data.auditLog}):provided?store.validateSeed({operationState:input.operationState,operationObjects:input.operationObjects,hotRows:data.auditLog}):store.bootstrap({auditRows:data.auditLog});data.auditLog=seed.hotRows;
   const revisions=revisionsOf(input.revisions===undefined?{}:input.revisions),target=location(dataDir);let madeDirectory=false,claimed=false,db=null,began=false;
   if(fs.existsSync(target.directory)){if(!fs.statSync(target.directory).isDirectory()||fs.readdirSync(target.directory).length)fail('SQLITE_TARGET_NOT_EMPTY','SQLite можно создать только в новом или пустом отдельном каталоге');}
   else{fs.mkdirSync(target.directory);madeDirectory=true;}
@@ -345,7 +351,17 @@ function create(dataDir,input,options={}){
     assertDatabaseFile(target);
     db=new DatabaseSync(target.file,{enableForeignKeyConstraints:true,allowExtension:false,enableDoubleQuotedStringLiterals:false,timeout:5000,defensive:true});configure(db,false);db.exec('BEGIN IMMEDIATE;');began=true;db.exec(ddl);db.exec(operationDDL);
     const meta=db.prepare('INSERT INTO metadata VALUES(?,?)');for(const [name,value]of Object.entries({format:FORMAT,format_version:String(VERSION),schema_version:String(SCHEMA_VERSION),compatibility:JSON.stringify(descriptor),database_uuid:identity.uuid,generation:String(identity.generation),created_at:new Date().toISOString(),operation_state:JSON.stringify(seed.operationState)}))meta.run(name,value);
-    const insertObject=db.prepare('INSERT INTO operation_ledger_objects VALUES(?,?)');for(const object of seed.objects)insertObject.run(object.id,object.json);indexOperationObjects(db,seed.objects);
+    if(streaming){
+      const insertObject=db.prepare('INSERT OR IGNORE INTO operation_ledger_objects VALUES(?,?)'),readStaged=db.prepare('SELECT json FROM operation_ledger_objects WHERE hash=?');
+      store.verifyProvider({operationState:seed.operationState,readObject:readProvider,hotRows:data.auditLog},object=>{const inserted=insertObject.run(object.id,object.json);if(!inserted.changes&&readStaged.get(object.id)?.json!==object.json)fail('OPERATION_OBJECT_HASH','Объект истории изменился во время восстановления');});
+      // Cold proofs remain on disk. Index only small radix leaves after all
+      // their referenced receipts exist, in bounded batches within this same
+      // transaction; traversal visits shared immutable objects more than once.
+      let batch=[];
+      for(const row of db.prepare("SELECT hash AS id,json FROM operation_ledger_objects WHERE json_extract(json,'$.kind') IN('leaf','reserved-unknown')").iterate()){batch.push(row);if(batch.length===64){indexOperationObjects(db,batch);batch=[];}}
+      if(batch.length)indexOperationObjects(db,batch);
+      store.verifyProvider({operationState:seed.operationState,readObject:id=>readStaged.get(id)?.json??null,hotRows:data.auditLog});
+    }else{const insertObject=db.prepare('INSERT INTO operation_ledger_objects VALUES(?,?)');for(const object of seed.objects)insertObject.run(object.id,object.json);indexOperationObjects(db,seed.objects);}
     const section=db.prepare('INSERT INTO sections(name,revision) VALUES(?,?)');for(const name of schema.sections)section.run(name,revisions[name]);
     build(db,data,revisions,schema.sections);if(options.beforeCommit)resultSync(()=>options.beforeCommit());db.exec('COMMIT;');began=false;
     db.exec('PRAGMA wal_checkpoint(TRUNCATE);');db.close();db=null;writeGuard(target.directory);

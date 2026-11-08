@@ -104,7 +104,7 @@ function execute(parentDir,payload,value,options={}){
  const user=checkedUser(value);row(payload);if(payload.command?.type!=='AssetInventoryAction')fail('INVENTORY_COMMAND','Эта база принимает только операции инвентаризации');
  const command=commands.parseCommand(payload.command);if(commands.dependencies(command).some(name=>!READ_SECTIONS.includes(name))||commands.footprint(command).some(name=>!SECTIONS.includes(name))||Object.keys(row(payload.base)).some(name=>!READ_SECTIONS.includes(name)))fail('INVENTORY_COMMAND','Команда затрагивает посторонние разделы');
  const dir=ensure(parentDir);fence(dir,payload);if(!['admin','accountant'].includes(user.role)||commands.footprint(command).some(name=>!writable(user,name)))fail('ACCESS_DENIED','Нет права изменения инвентаризации',403);
- storage.makeDailyBackup(dir,path.join(dir,'backups'),30);return ownResult(storage.executeCommand(dir,payload,writeOptions(dir,user,options)));
+ storage.scheduleDailyBackup(dir,path.join(dir,'backups'),30);return ownResult(storage.executeCommand(dir,payload,writeOptions(dir,user,options)));
 }
 async function importSource(parentDir,payload,value,options={}){
  const user=checkedUser(value);row(payload);if(payload.profile!=='asset-inventory'||!['stage','preview','read'].includes(payload.action))fail('INVENTORY_IMPORT','Выберите источник инвентаризации');

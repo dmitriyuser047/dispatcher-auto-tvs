@@ -45,7 +45,7 @@ export function createAssetInventoryExcel(contracts:Contracts,decimal:DecimalCor
      input=raw.replace(/[ \u00a0\u202f]/g,'').replace(',','.').replace(/^\+/,'');
     }
     return decimal.toNumberExact(decimal.parse(input,{scale,nonNegative:!signed,max:scale===2?'1000000000000000':'1000000000000'}));
-   }catch{issue('EXCEL_NUMBER','Нужно неотрицательное число без лишних символов и без потери точности',sheet,row,column);return null;}
+   }catch{const negative=!signed&&(typeof value==='number'?value<0:typeof value==='string'&&value.trim().startsWith('-'));issue('EXCEL_NUMBER',negative?'В источнике отрицательный учётный остаток. Проверьте эту строку в оборотке; значение не исправлено автоматически':signed?'Нужно число без лишних символов и без потери точности':'Нужно неотрицательное число без лишних символов и без потери точности',sheet,row,column);return null;}
   }
   function metadata(sheet:InventoryExcelSheet,index:number,row:number):JsonRow{return {format:options.format!,book:source.name!,sheet:sheet.name,path:'sheets['+index+'].rows['+row+']',original:sheet.rows[row] as JsonValue};}
   // Excel's numeric .v loses a code's display zeros. Only identifier-like
@@ -64,7 +64,14 @@ export function createAssetInventoryExcel(contracts:Contracts,decimal:DecimalCor
   function explicitDate(sheet:InventoryExcelSheet):string {const raw=headerValue(sheet,'date');let value=raw;const match=/^(\d{2})\.(\d{2})\.(\d{4})$/.exec(raw);if(match)value=match[3]+'-'+match[2]+'-'+match[1];if(raw&&!day(value)){issue('EXCEL_DATE','В заголовке недействительная дата',sheet.name);return '';}return value||text(options.date);}
   function orgName(sheet:InventoryExcelSheet):string {const explicit=headerValue(sheet,'org');if(explicit)return explicit;const legal=sheet.rows.slice(0,12).map(row=>label(row[0])).filter(value=>/^(?:ООО|АО|ПАО|ЗАО|ОАО|ИП)\s/i.test(value));const unique=[...new Set(legal)];if(unique.length>1){issue('EXCEL_ORG_AMBIGUOUS','Заголовок содержит несколько организаций',sheet.name);return '';}return unique[0]||label(options.defaultOrgName);}
   function debitColumns(sheet:InventoryExcelSheet,fallback:number):{closing:number;opening:number} {
-   const search=(term:string):number[]=>{const found=new Set<number>();for(let r=0;r<Math.min(sheet.rows.length,35);r++)for(let c=0;c<sheet.rows[r]!.length;c++)if(normal(sheet.rows[r]![c]).includes(term))for(let h=r;h<Math.min(sheet.rows.length,r+4);h++)for(let d=c;d<Math.min(sheet.rows[h]!.length,c+4);d++)if(normal(sheet.rows[h]![d])==='дебет')found.add(d);return [...found];};
+   // A merged balance header only owns its columns up to the next section.
+   // Searching four columns unconditionally also picked up the neighbouring
+   // turnover debit in ordinary 1C exports and blocked otherwise valid OSV.
+   const groupHeading=(value:unknown):boolean=>/сальдо на (?:начало|конец)(?: периода)?|обороты за период/.test(normal(value));
+   const search=(term:string):number[]=>{const found=new Set<number>();for(let r=0;r<Math.min(sheet.rows.length,35);r++)for(let c=0;c<sheet.rows[r]!.length;c++)if(normal(sheet.rows[r]![c]).includes(term)){
+    const next=sheet.rows[r]!.findIndex((value,index)=>index>c&&groupHeading(value)),through=next<0?c+4:Math.min(c+4,next);
+    for(let h=r;h<Math.min(sheet.rows.length,r+4);h++)for(let d=c;d<Math.min(sheet.rows[h]!.length,through);d++)if(normal(sheet.rows[h]![d])==='дебет')found.add(d);
+   }return [...found];};
    const ends=search('сальдо на конец периода'),starts=search('сальдо на начало периода');if(ends.length>1||starts.length>1)issue('EXCEL_BALANCE_HEADER','Неоднозначные колонки дебетового сальдо',sheet.name);const closing=ends[0]??fallback;return {closing,opening:starts[0]??Math.max(0,closing-4)};
   }
   function osv(sheet:InventoryExcelSheet,index:number):void {
@@ -72,14 +79,19 @@ export function createAssetInventoryExcel(contracts:Contracts,decimal:DecimalCor
    if(start<0){issue('EXCEL_OSV_HEADER','Не найдена строка счёта поддерживаемой ОСВ',sheet.name);return;}
    const modes=[2,1,4].filter(column=>rows.slice(start).some(row=>label(row[column])==='БУ')),mode=modes[0]??-1;if(modes.length>1){issue('EXCEL_OSV_AMBIGUOUS','На одном листе смешаны разные структуры ОСВ',sheet.name);return;}
    const columns=debitColumns(sheet,mode===2?7:mode===4?9:6);let accountCode=identifierText(sheet,start,0).trim(),currentMol='',group='s'+index+':group:0',groupIndex=0,pending:JsonRow|null=null;
-   const unitHeaders=new Set<number>();for(const row of rows.slice(0,start+1))row.forEach((value,c)=>{if(c!==mode&&/^(?:ед\.?|единиц[аы])(?:\s|\.|$)/i.test(label(value)))unitHeaders.add(c);});const unitColumn=unitHeaders.size===1?[...unitHeaders][0]!:null;
+   const unitHeaders=new Set<number>(),unitSymbols=new Set<number>();for(const row of rows.slice(0,start+1))row.forEach((value,c)=>{if(c===mode)return;if(/^(?:ед\.?|единиц[аы])(?:\s|\.|$)/i.test(label(value)))unitHeaders.add(c);if(normal(value)==='условное обозначение')unitSymbols.add(c);});
+   // 1C may export the numeric OKEI code beside its literal unit symbol.
+   // The symbol column, not the code or the surrounding merged header, is
+   // the explicit measurement unit retained by the quantity workspace.
+   const units=unitSymbols.size?unitSymbols:unitHeaders,unitColumn=units.size===1?[...units][0]!:null;
    const balance=(row:number,scale:number):number|null=>{const values=rows[row]!,closing=values[columns.closing];if(blank(closing)&&options.useOpeningIfNoClosing===true&&!blank(values[columns.opening])){issue('EXCEL_OPENING_USED','Пустое конечное сальдо заменено начальным по явному выбору',sheet.name,row,columns.closing,true);return numeric(values[columns.opening],scale,sheet.name,row,columns.opening);}return numeric(closing,scale,sheet.name,row,columns.closing);};
    for(let r=start+1;r<rows.length;r++){
-    const row=rows[r]!,name=label(row[0]),nameAsId=identifierText(sheet,r,0).trim(),code=mode===1?'':identifierText(sheet,r,1),indicator=mode<0?'':label(row[mode]);if(row.every(blank)||/^итого|^всего|^счет\s*\d/i.test(name))continue;
-    if(account(nameAsId)&&blank(row[1])){accountCode=nameAsId;currentMol='';pending=null;continue;}
+    const row=rows[r]!,name=label(row[0]),nameAsId=identifierText(sheet,r,0).trim(),code=mode===1?'':identifierText(sheet,r,1),indicator=mode<0?'':label(row[mode]);if(row.every(blank))continue;
+    if(/^итого|^всего|^сч[её]т\s*\d/i.test(name)){pending=null;continue;}
+    if(account(nameAsId)&&(blank(row[1])||mode===1&&indicator==='БУ')){accountCode=nameAsId;currentMol='';pending=null;continue;}
     if(mode>=0&&indicator==='Кол.') {if(pending){pending.qty=balance(r,3);pending=null;}continue;}
-    if(mode>=0&&indicator!=='БУ')continue;
-    const isGroup=mode===1?/^(?:склад|МОЛ\b)/i.test(name):!!name&&!label(code);
+    if(mode>=0&&indicator!=='БУ'){pending=null;continue;}
+    const isGroup=mode===1?/^(?:склад|МОЛ)(?:\s|:|$)/i.test(name):!!name&&!label(code);
     if(isGroup){currentMol=nameAsId.replace(/^МОЛ\s*:?\s*/i,'').trim();group='s'+index+':group:'+ ++groupIndex;pending=null;continue;}
     if(!name&&!label(code))continue;
     if(mode===4&&/^\d{8}$/.test(label(code))){issue('EXCEL_OSV_GROUP_AMBIGUOUS','Восеммизначный код может обозначать группу ОСВ; требуется явное уточнение источника',sheet.name,r,1);continue;}

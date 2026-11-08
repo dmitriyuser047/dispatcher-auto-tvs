@@ -1,0 +1,40 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto');
+const storage=require('../electron/storage.js'),backup=require('../electron/backup-service.cjs'),identities=require('../electron/database-identity.cjs'),metadata=require('../electron/database-lifecycle.cjs'),format=require('../electron/storage-format.cjs'),lifecycle=require('../assets/core/database-lifecycle.js'),journals=require('../electron/migration-journal.cjs');
+const actor={id:'multipart-lifecycle',name:'Synthetic administrator',role:'admin'},hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
+function tree(directory){const result={};function visit(folder){for(const entry of fs.readdirSync(folder,{withFileTypes:true})){assert.equal(entry.isSymbolicLink(),false);const p=path.join(folder,entry.name);if(entry.isDirectory())visit(p);else result[path.relative(directory,p)]=hash(fs.readFileSync(p));}}visit(directory);return result;}
+function fixture(t){
+ const parent=fs.realpathSync.native(os.tmpdir()),root=fs.mkdtempSync(path.join(parent,'tvs-multipart-lifecycle-')),pin=fs.lstatSync(root),sourceDir=path.join(root,'source'),archivePath=path.join(root,'backup.zip');
+ t.after(()=>{assert.equal(path.dirname(root),parent);assert.match(path.basename(root),/^tvs-multipart-lifecycle-/);const current=fs.lstatSync(root);assert.equal(current.isSymbolicLink(),false);assert.equal(current.dev,pin.dev);assert.equal(current.ino,pin.ino);fs.rmSync(root,{recursive:true,force:true});});
+ storage.createJson(sourceDir,{data:{vehicles:[{id:0,plate:'NUMERIC',org:'Synthetic A',fuelBalance:923.537},{id:'0',plate:'TEXT',org:'Synthetic B',fuelBalance:0}],records:[{id:'r',vehicleId:0,date:'2026-09-10',km:1.001,fuelActual:0.001}]}});
+ const initial=storage.readSnapshot(sourceDir);storage.writeSections(sourceDir,{databaseToken:initial.databaseToken,base:initial.revisions,sections:{vehicles:initial.data.vehicles.map(row=>({...row,note:'Literal captured note'}))},operation:{id:'captured-operation'}},{principal:actor});
+ const snapshot=storage.readSnapshot(sourceDir);fs.mkdirSync(path.join(sourceDir,'migration-history'));fs.writeFileSync(path.join(sourceDir,'migration-history','prior.json'),'{"version":1,"literal":"prior immutable report"}');
+ const checked=backup.createMultipartPackage({sourceDir,archivePath,partBytes:8*1024*1024});return{root,sourceDir,archivePath,snapshot,checked};
+}
+function reviewed(f,action,targetFormat,targetDir=path.join(f.root,'restored')){
+ const knownHeads=[];let head;
+ if(action==='restoreContinuation'){const currentDir=path.join(f.root,'current-head');storage.createJson(currentDir,{data:{vehicles:[],records:[]}});fs.writeFileSync(path.join(currentDir,identities.FILE),JSON.stringify({...f.checked.sourceIdentity,generation:5}));const inspected=metadata.inspectMetadata(currentDir);head={identity:inspected.identity,physicalKey:inspected.physicalKey,metadataStamp:inspected.metadataStamp};knownHeads.push(head);}
+ const input={action,source:{format:'backup',identity:f.checked.sourceIdentity,descriptor:f.checked.sourceDescriptor,fingerprint:'sha256:'+f.checked.archiveSha256,physicalKey:f.archivePath},target:{format:targetFormat,descriptor:format.describe(format.SCHEMA_VERSION),physicalKey:targetDir},reason:'Synthetic explicitly reviewed multipart restore',knownHeads,...(head?{continuationOf:head}:{})},context={operationId:'multipart-'+action,at:'2026-11-08T09:00:00.000Z',actor,newUuid:crypto.randomUUID()},preview=lifecycle.preview(input,context);
+ assert.equal(preview.canApply,true,JSON.stringify(preview.issues));const plan=lifecycle.plan({...input,reviewFingerprint:preview.reviewFingerprint},context);
+ return{targetDir,head,plan,options:{lifecyclePlan:plan,assertLifecycleCurrent(candidate){assert.deepEqual(candidate,plan);if(head&&metadata.inspectMetadata(head.physicalKey).metadataStamp!==head.metadataStamp)throw Object.assign(Error('Current head changed'),{code:'SYNTHETIC_HEAD_CHANGED'});}}};
+}
+for(const chosen of ['json','sqlite'])for(const action of ['clone','restoreContinuation'])test('multipart reviewed '+action+' preserves exact data and pins '+chosen+' identity generation',t=>{
+ const f=fixture(t),r=reviewed(f,action,chosen),before=tree(f.sourceDir),result=backup.restorePackage({archivePath:f.archivePath,targetDir:r.targetDir,...(chosen==='sqlite'?{format:chosen}:{}),protectedDir:f.sourceDir},r.options),actual=storage.readSnapshot(r.targetDir);
+ assert.deepEqual(actual.data,f.snapshot.data);assert.deepEqual(actual.revisions,f.snapshot.revisions);assert.deepEqual(metadata.inspectMetadata(r.targetDir).identity,r.plan.target.identity);assert.equal(result.targetIdentity.generation,action==='clone'?1:6);assert.equal(result.targetIdentity.uuid,action==='clone'?r.plan.target.identity.uuid:f.checked.sourceIdentity.uuid);assert.deepEqual(result.lifecycleDecision.plan,r.plan);assert.deepEqual(tree(f.sourceDir),before);
+ const old=fs.readFileSync(path.join(r.targetDir,'migration-history','prior.json'),'utf8');assert.equal(old,'{"version":1,"literal":"prior immutable report"}');const report=fs.readFileSync(path.join(r.targetDir,'backup-restore-report.json'));assert.deepEqual(report,fs.readFileSync(path.join(r.targetDir,'migration-history',result.migrationId+'.json')));
+});
+for(const mutation of ['index-deleted','part-deleted','part-tampered'])test('published multipart restore replays its frozen report after '+mutation+' without checking a new head',t=>{
+ const f=fixture(t),r=reviewed(f,'restoreContinuation','json'),request={archivePath:f.archivePath,targetDir:r.targetDir,format:'json'},first=backup.restorePackage(request,r.options),before=tree(r.targetDir);
+ if(mutation==='index-deleted')fs.unlinkSync(f.archivePath);else{const parts=f.archivePath+'.parts',part=fs.readdirSync(parts).find(n=>/^part-/.test(n));assert.ok(part);if(mutation==='part-deleted')fs.unlinkSync(path.join(parts,part));else fs.writeFileSync(path.join(parts,part),'deliberately damaged synthetic part');}
+ fs.writeFileSync(path.join(r.head.physicalKey,identities.FILE),JSON.stringify({...r.head.identity,generation:9}));
+ const repeated=backup.restorePackage(request,{lifecyclePlan:r.plan,assertLifecycleCurrent(){assert.fail('Published replay must not re-evaluate a new current head');}});assert.deepEqual(repeated,first);assert.deepEqual(tree(r.targetDir),before);
+});
+for(const checkpoint of ['report-written','renamed'])test('multipart reviewed restore resumes '+checkpoint+' with the same pinned generation and immutable report',t=>{
+ const f=fixture(t),r=reviewed(f,'restoreContinuation','sqlite'),request={archivePath:f.archivePath,targetDir:r.targetDir,format:'sqlite'};let interrupted=false;
+ const service=backup.createBackupService({journal:journals.createMigrationJournal({checkpoint(label){if(label===checkpoint&&!interrupted){interrupted=true;throw Object.assign(Error('Synthetic interruption'),{code:'SYNTHETIC_INTERRUPTION'});}}})});
+ assert.throws(()=>service.restorePackage(request,r.options),{code:'SYNTHETIC_INTERRUPTION'});assert.equal(interrupted,true);const result=backup.restorePackage(request,r.options);assert.deepEqual(metadata.inspectMetadata(r.targetDir).identity,r.plan.target.identity);assert.deepEqual(result.targetIdentity,r.plan.target.identity);assert.deepEqual(storage.readAll(r.targetDir),f.snapshot.data);
+});
+for(const reviewedRestore of [false,true])test('multipart '+(reviewedRestore?'reviewed':'ordinary')+' restore cannot create a target within its source parts',t=>{
+ const f=fixture(t),parts=f.archivePath+'.parts',target=path.join(parts,'restored'),before=tree(parts),r=reviewedRestore?reviewed(f,'clone','sqlite',target):null;
+ assert.throws(()=>backup.restorePackage({archivePath:f.archivePath,targetDir:target,format:'sqlite'},r?.options),{code:'BACKUP_PATH'});assert.deepEqual(tree(parts),before);assert.equal(fs.existsSync(target),false);assert.equal(backup.verifyPackage({archivePath:f.archivePath}).ok,true);
+});

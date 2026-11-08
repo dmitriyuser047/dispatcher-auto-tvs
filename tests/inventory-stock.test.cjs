@@ -18,3 +18,28 @@ test('same-day stock has no invented time order; the end-of-day result controls 
 test('invalid stock boundaries never execute accessors or toJSON and missing dependencies fail closed',()=>{
  let executions=0;const source={partId:0,date:'2026-09-01',kind:'receipt',qty:1};Object.defineProperty(source,'id',{get(){executions++;return 'bad';},enumerable:true});assert.throws(()=>inventory.project(db({partMovements:[source]})));assert.equal(executions,0);assert.throws(()=>inventory.project(db(),{},{readable:['parts']}),{code:'ACCESS_DENIED'});
 });
+
+test('duplicate movement identities never become two authorized receipts, including across selected parts',()=>{
+ const base=db({partMovements:[{id:0,partId:0,date:'2026-09-01',kind:'receipt',qty:3},{id:'0',partId:'0',date:'2026-09-01',kind:'receipt',qty:7}]}),next={...base,partMovements:[...base.partMovements,{id:0,partId:'0',date:'2026-09-02',kind:'receipt',qty:3}]};
+ assert.equal(at(base,0).balance,3);assert.equal(at(base,'0').balance,7);
+ for(const partId of [0,'0']){const result=at(next,partId);assert.equal(result.status,'invalid');assert.equal(result.balance,null);assert.ok(result.diagnostics.some(problem=>problem.code==='PART_MOVEMENT_AMBIGUOUS'));}
+ assert.throws(()=>inventory.validateChanges(base,next),error=>error.issues?.some(problem=>problem.code==='PART_MOVEMENT_AMBIGUOUS'));
+ const outbound={...next,partMovements:[...next.partMovements,{id:'spend',partId:0,date:'2026-09-03',kind:'issue',qty:1}]};assert.throws(()=>inventory.validateChanges(next,outbound),{code:'PART_STOCK_UNKNOWN'});
+ assert.equal(inventory.validateChanges(next,base),true);
+});
+
+test('a projection bounded to one date cannot authorize a later balance from missing future events',()=>{
+ const data=db({partMovements:[{id:'in',partId:0,date:'2026-09-01',kind:'receipt',qty:10},{id:'out',partId:0,date:'2026-10-01',kind:'issue',qty:8}]}),bounded=inventory.project(data,{to:'2026-09-30'});
+ assert.equal(inventory.at(bounded,{section:'parts',id:0},'2026-09-30').balance,10);
+ assert.throws(()=>inventory.at(bounded,{section:'parts',id:0},'2026-10-01'),{code:'INVENTORY_SNAPSHOT_RANGE'});
+ assert.equal(at(data,0,'2026-10-01').balance,2);
+});
+
+test('out-of-range intermediate balances fail closed on that date without poisoning earlier known days',()=>{
+ const data=db({partMovements:[{id:'in',partId:0,date:'2026-09-01',kind:'receipt',qty:9007199254740991},{id:'fraction',partId:0,date:'2026-09-02',kind:'receipt',qty:0.1}]}),projected=inventory.project(data);
+ assert.equal(inventory.at(projected,{section:'parts',id:0},'2026-09-01').balance,9007199254740991);
+ const invalid=inventory.at(projected,{section:'parts',id:0},'2026-09-02');assert.equal(invalid.status,'invalid');assert.equal(invalid.balance,null);assert.ok(invalid.diagnostics.some(problem=>problem.code==='PART_RANGE'));
+ const recovered=inventory.project({...data,partMovements:[...data.partMovements,{id:'out',partId:0,date:'2026-09-03',kind:'issue',qty:0.1}]});
+ const intermediate=inventory.at(recovered,{section:'parts',id:0},'2026-09-02');assert.equal(intermediate.status,'invalid');assert.equal(intermediate.balance,null);assert.ok(intermediate.diagnostics.some(problem=>problem.code==='PART_RANGE'));
+ assert.equal(inventory.at(recovered,{section:'parts',id:0},'2026-09-03').balance,9007199254740991);
+});

@@ -1,5 +1,5 @@
 /* Generated from src/ui/asset-inventory.ts, src/ui/asset-inventory-host.ts, src/ui/asset-inventory-files.ts, src/ui/inventory-documents.ts, src/ui/inventory-photos.ts by scripts/build-inventory-ui.cjs.
- * TypeScript 5.9.3; source/config sha256:58f7ec054df5bc27bf77d55c00d056a9a322a99d98b5f9b36364f7e48ac5b0ef. Do not edit directly. */
+ * TypeScript 5.9.3; source/config sha256:8d49e948f4ed9b20a8bb155a5071833f616f19fe8c6b2618699762680dcb0ebd. Do not edit directly. */
 "use strict";
 /** Standalone property inventory UI. This adapter never accesses application globals,
  * paths, localStorage or fleet/stock data. All writes require a canonical host ACK. */
@@ -1027,7 +1027,7 @@ var AssetInventoryFiles;
             reader.readAsDataURL(file);
         });
     }
-    function messages(value, kind) { return items(value).map(issue => '<p class="' + kind + '">' + esc(issue.message || issue.code || 'Проверьте источник') + '</p>').join(''); }
+    function messages(value, kind) { return items(value).map(issue => { const location = [string(issue.sheet), typeof issue.row === 'number' ? 'строка ' + issue.row : '', typeof issue.column === 'number' ? 'столбец ' + issue.column : ''].filter(Boolean).join(', '); return '<p class="' + kind + '">' + esc((location ? location + ': ' : '') + string(issue.message || issue.code || 'Проверьте источник')) + '</p>'; }).join(''); }
     function warnings(s, ...values) { const seen = new Set(), all = [...s.warnings, ...values.flatMap(items)]; return messages(all.filter(value => { const key = JSON.stringify([value.code, value.message]); if (seen.has(key))
         return false; seen.add(key); return true; }), 'ai-muted'); }
     function sourceHtml(sourceValue) {

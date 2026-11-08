@@ -43,6 +43,24 @@ function bootstrap({auditRows=[],receipts=[],reservations=[],archiveLegacy=false
 }
 function validateSeed({operationState,operationObjects,hotRows}){if(operationState===undefined||operationObjects===undefined)fail('OPERATION_SEED_INCOMPLETE');const seed=fromClosure({version:1,kind:'operation-ledger-closure',head:state(operationState).head,objects:normalizeObjects(operationObjects)},{operationState});if(!same(seed.hotRows,hotRows))fail('OPERATION_HOT_VIEW');return seed;}
 function exportClosure(directory){return engine(directory).exportClosure(readState(directory).head);}
+// Backups may deliberately walk an earlier immutable head captured before a
+// later save. The caller pins the database identity/snapshot; every referenced
+// object is still read and hash-verified from the selected physical provider.
+function walkClosure(directory,visitObject,options={}){
+ if(!plain(options))fail('OPERATION_STREAM_OPTIONS');
+ const {operationState,...limits}=options,root=database(directory),captured=operationState===undefined?readState(root.path):state(operationState);
+ const summary=engine(root.path).walkClosure(captured.head,visitObject,limits);safeFile.assertDirectory(root);
+ return frozen({...summary,operationState:captured});
+}
+// Trusted restore boundary over a staged, immutable disk/chunk provider. It
+// returns no whole-history array; backend builders can stage each emitted
+// object in their private target and publish only after this call succeeds.
+function verifyProvider(input,visitObject=()=>{},limits={}){
+ if(!plain(input)||Object.keys(input).some(key=>!['operationState','readObject','hotRows'].includes(key))||typeof input.readObject!=='function'||input.readObject.constructor?.name==='AsyncFunction')fail('OPERATION_SEED_INCOMPLETE');
+ const operationState=state(input.operationState),api=ledger.createOperationLedger({readObject:input.readObject,cursorKey:Buffer.alloc(32)}),summary=api.walkClosure(operationState.head,visitObject,limits);
+ const hotRows=api.planArchive({head:operationState.head,throughSeq:0,hotRows:input.hotRows}).hotRows;
+ return frozen({operationState,hotRows,summary});
+}
 // Private rare-maintenance input, never a renderer snapshot or an ACL bypass.
 // Verify the complete portable graph before returning any historical event.
 function readLogicalHistory(directory){const closure=exportClosure(directory),objects=new Map(closure.objects.map(object=>[object.id,object.json])),segments=[];let current=closure.head.auditHead;while(current!==null){const segment=JSON.parse(objects.get(current));segments.push(segment.entries);current=segment.previous;}const rows=segments.reverse().flatMap(entries=>entries.map(entry=>entry.event));if(rows.length!==closure.head.lastSeq)fail('OPERATION_HISTORY_INCOMPLETE');return frozen(rows);}
@@ -60,4 +78,4 @@ function verifyCommitWitness(directory,validated,{expectedOperationState,nextOpe
  let folder;for(const [id,expected]of witness.reads){const actual=readObjectAt(witness.root,id,{text:true,directory:()=>folder??=safeFile.verifiedDirectory(path.join(witness.root.path,'operation-ledger/objects'))});if(typeof actual==='string'&&typeof expected==='string'?actual!==expected:actual==null||!Buffer.from(actual).equals(Buffer.from(expected)))fail('OPERATION_OBJECT_HASH');}
  safeFile.assertDirectory(witness.root);return true;
 }
-module.exports=Object.freeze({HOT_LIMIT,readState,engine,readObject,putObjects,validateHot,bootstrap,fromClosure,validateSeed,exportClosure,readLogicalHistory,prepareCommit,validateCommit,verifyCommitWitness,withFileReadScope,managedFiles:ledger.createManagedFiles});
+module.exports=Object.freeze({HOT_LIMIT,readState,engine,readObject,putObjects,validateHot,bootstrap,fromClosure,validateSeed,exportClosure,walkClosure,verifyProvider,readLogicalHistory,prepareCommit,validateCommit,verifyCommitWitness,withFileReadScope,managedFiles:ledger.createManagedFiles});

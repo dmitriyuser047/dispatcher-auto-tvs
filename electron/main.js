@@ -198,7 +198,7 @@ function localStorageExecutor(){
 function localStorageWrite(kind,context,input,options={}){
   return localStorageExecutor().run(kind,context.directory,input,{...options,principal:context.principal},{
     assertCurrent:()=>assertOperationContext(context),
-    backup:{directory:path.join(context.directory,'backups'),keep:30,optional:true}
+    backup:{directory:path.join(context.directory,'backups'),keep:30,optional:true,background:true}
   });
 }
 let writeSessions=null;
@@ -401,7 +401,7 @@ function ensureDirs() {
 // Копия собирается из разделов обратно в один файл — так её удобно
 // открыть, переслать и при необходимости загрузить обратно целиком.
 function createDailyBackup() {
-  try { storage.makeDailyBackup(getDataDir(), getBackupDir(), 30); }
+  try { storage.scheduleDailyBackup(getDataDir(), getBackupDir(), 30); }
   catch (e) { console.error('[backup] ' + e.message); }
 }
 
@@ -951,6 +951,7 @@ app.whenReady().then(() => {
         mode, available: hasSqlite || hasSplit || hasLegacy,
         storage: hasSqlite ? 'SQLite (транзакционная база)' : hasSplit ? 'Разделённая база' : hasLegacy ? 'Файл базы' : 'База не найдена',
         backupCount: backups.length,
+        backupJob:fs.existsSync(getBackupDir())?require('./daily-backup.cjs').status(fs.realpathSync.native(getBackupDir())):null,
         lastBackupAt: backups.length ? new Date(backups[0].time).toISOString() : null,
         checkedAt: new Date().toISOString(),
       };
@@ -998,7 +999,7 @@ app.whenReady().then(() => {
     return await server.start({
       port,
       dataDir: startupDir,
-      backup: {directory:path.join(startupDir,'backups'),keep:30},
+      backup: {directory:path.join(startupDir,'backups'),keep:30,background:true},
       serverName: user.name || os.hostname(),
       renderPdf:renderArchivedDocumentPdf,
       key: settings.networkKey,
@@ -1500,7 +1501,7 @@ app.whenReady().then(() => {
         checkSnapshot(snapshot);
         const sections = { reestrRows:rows }, base = { reestrRows:context.revision };
         return storage.writeSections(dir, { databaseToken:context.databaseToken, base, sections }, {
-          principal:operation.principal,...mainWriteSessions().localOptions(operation),beforeCommit:()=>storage.makeDailyBackup(dir,path.join(dir,'backups'),30) });
+          principal:operation.principal,...mainWriteSessions().localOptions(operation),beforeCommit:()=>storage.scheduleDailyBackup(dir,path.join(dir,'backups'),30) });
       });
       await assertFileContext(file);
       if (!result?.ok) throw new Error(result?.error || 'Реестр изменён другим пользователем. Откройте его заново.');

@@ -92,6 +92,71 @@ function createOperationLedger({readObject,cursorKey}={}){
  function exportClosure(input,options){const head=headOf(input),limits=closureLimits(options),objects=new Map(),parsed=new Map(),receipts=new Map(),reservations=new Set(),visited=new Set();let bytes=0,eventCount=0;function capture(id){if(parsed.has(id))return parsed.get(id);const raw=bytesOf(id);bytes+=raw.length;if(objects.size>=limits.maxObjects||bytes>limits.maxBytes)fail('LEDGER_LIMIT');const value=parse(raw);objects.set(id,raw.toString('utf8'));parsed.set(id,value);return value;}const stack=head.receiptRoot?[{id:head.receiptRoot,prefix:''}]:[];while(stack.length){const {id,prefix}=stack.pop();if(visited.has(id))fail('LEDGER_INDEX');visited.add(id);const node=capture(id);if(['leaf','reserved-unknown'].includes(node.kind)){keys(node,node.kind==='leaf'?['version','kind','key','operationId','receiptHash']:['version','kind','key','operationId']);text(node.operationId,200);if(node.version!==1||!HASH.test(node.key)||hash(node.operationId)!==node.key||!node.key.startsWith(prefix)||receipts.has(node.operationId)||reservations.has(node.operationId))fail('LEDGER_INDEX');if(receipts.size+reservations.size>=limits.maxReceipts)fail('LEDGER_LIMIT');if(node.kind==='reserved-unknown')reservations.add(node.operationId);else{if(!HASH.test(node.receiptHash))fail('LEDGER_INDEX');const stored=receiptObject(capture(node.receiptHash));if(stored.receipt.operation.id!==node.operationId||stored.eventRange&&stored.eventRange.through>head.lastSeq)fail('LEDGER_RECEIPT');const proof=proofOf(capture(stored.proofHash));if(own(proof.request,'operation')&&!same(operationOf(proof.request.operation),stored.receipt.operation))fail('LEDGER_PROOF');if(stored.kind==='legacy-receipt'&&proof.status!=='legacy-unverified')fail('LEDGER_PROOF');receipts.set(node.operationId,stored);}continue;}keys(node,['version','kind','prefix','children']);if(node.version!==1||node.kind!=='branch'||typeof node.prefix!=='string'||!/^[a-f0-9]{0,63}$/.test(node.prefix)||!node.prefix.startsWith(prefix)||!plain(node.children)||Object.keys(node.children).length<2||Object.keys(node.children).some(char=>!/^[a-f0-9]$/.test(char)||!HASH.test(node.children[char])))fail('LEDGER_INDEX');for(const [char,child]of Object.entries(node.children))stack.push({id:child,prefix:node.prefix+char});}
   let current=head.auditHead,through=head.lastSeq;const seenSegments=new Set(),ranged=new Set(),hot=new Map(head.hot.map(entry=>[entry.seq,entry.eventHash]));while(current!==null){if(seenSegments.has(current))fail('LEDGER_SEGMENT');seenSegments.add(current);const segment=segmentOf(current,through,capture);eventCount+=segment.entries.length;if(eventCount>limits.maxEvents)fail('LEDGER_LIMIT');if(segment.kind==='audit-segment'){const stored=receipts.get(segment.operationId);if(!stored||stored.kind!=='operation-receipt'||!same(stored.eventRange,{from:segment.fromSeq,through:segment.throughSeq})||stored.proofHash!==segment.proofHash||ranged.has(segment.operationId))fail('LEDGER_RECEIPT');ranged.add(segment.operationId);}for(const entry of segment.entries)if(hot.has(entry.seq)){if(hot.get(entry.seq)!==entry.eventHash)fail('LEDGER_HOT_VIEW');hot.delete(entry.seq);}through=segment.fromSeq-1;current=segment.previous;}if(through!==0||hot.size||[...receipts].some(([id,stored])=>stored.eventRange!==null&&!ranged.has(id)))fail('LEDGER_SEGMENT');return freeze({version:1,kind:'operation-ledger-closure',head,objects:[...objects].sort(([a],[b])=>a.localeCompare(b)).map(([id,json])=>({id,json}))});
  }
+ // Private streaming portable graph. Aggregate history bytes never become a
+ // save-time ceiling. Each individual object still has the ordinary byte,
+ // JSON-node/depth and hash checks. The visitor must stage its output until
+ // this call succeeds; an interrupted or invalid graph is not a valid backup.
+ // Shared proof objects may be visited repeatedly. The host deduplicates them
+ // in its on-disk index rather than retaining the complete graph in memory.
+ function walkClosure(input,visitObject,options){
+  const head=headOf(input),limits=safe(options??{});
+  keys(limits,['maxObjects','maxBytes','maxEvents','maxReceipts'],[]);
+  for(const value of Object.values(limits))if(!Number.isSafeInteger(value)||value<0)fail('LEDGER_LIMIT');
+  if(typeof visitObject!=='function'||visitObject.constructor?.name==='AsyncFunction')fail('LEDGER_PROVIDER');
+  const counts={objectVisits:0,bytesVisited:0,receipts:0,reservations:0,segments:0,events:0};
+  function increment(name,amount=1,limit){if(!Number.isSafeInteger(amount)||amount<0||counts[name]>Number.MAX_SAFE_INTEGER-amount)fail('LEDGER_LIMIT');counts[name]+=amount;if(limit!==undefined&&counts[name]>limit)fail('LEDGER_LIMIT');}
+  function get(id,emit=true){
+   const raw=bytesOf(id),value=parse(raw);
+   if(emit){
+    increment('objectVisits',1,limits.maxObjects);increment('bytesVisited',raw.length,limits.maxBytes);
+    const result=visitObject(Object.freeze({id,json:raw.toString('utf8')}));
+    if(result&&typeof result.then==='function'){if(typeof result.catch==='function')result.catch(()=>{});fail('LEDGER_PROVIDER');}
+   }
+   return value;
+  }
+  // Every descent extends a hexadecimal prefix. The radix walk is at most64
+  // levels deep, which also rules out cycles and reuse on disjoint paths.
+  const stack=head.receiptRoot?[{id:head.receiptRoot,prefix:''}]:[];let rangedReceipts=0;
+  while(stack.length){
+   const {id,prefix}=stack.pop(),node=get(id);
+   if(['leaf','reserved-unknown'].includes(node.kind)){
+    keys(node,node.kind==='leaf'?['version','kind','key','operationId','receiptHash']:['version','kind','key','operationId']);text(node.operationId,200);
+    if(node.version!==1||!HASH.test(node.key)||hash(node.operationId)!==node.key||!node.key.startsWith(prefix))fail('LEDGER_INDEX');
+    if(node.kind==='reserved-unknown')increment('reservations');
+    else{
+     if(!HASH.test(node.receiptHash))fail('LEDGER_INDEX');const stored=receiptObject(get(node.receiptHash));
+     if(stored.receipt.operation.id!==node.operationId||stored.eventRange&&stored.eventRange.through>head.lastSeq)fail('LEDGER_RECEIPT');
+     const proof=proofOf(get(stored.proofHash));
+     if(own(proof.request,'operation')&&!same(operationOf(proof.request.operation),stored.receipt.operation))fail('LEDGER_PROOF');
+     if(stored.kind==='legacy-receipt'&&proof.status!=='legacy-unverified')fail('LEDGER_PROOF');
+     increment('receipts');if(stored.eventRange!==null)rangedReceipts++;
+    }
+    if(limits.maxReceipts!==undefined&&counts.receipts+counts.reservations>limits.maxReceipts)fail('LEDGER_LIMIT');
+    continue;
+   }
+   keys(node,['version','kind','prefix','children']);
+   if(node.version!==1||node.kind!=='branch'||typeof node.prefix!=='string'||!/^[a-f0-9]{0,63}$/.test(node.prefix)||!node.prefix.startsWith(prefix)||!plain(node.children)||Object.keys(node.children).length<2||Object.keys(node.children).some(char=>!/^[a-f0-9]$/.test(char)||!HASH.test(node.children[char])))fail('LEDGER_INDEX');
+   for(const [char,child]of Object.entries(node.children))stack.push({id:child,prefix:node.prefix+char});
+  }
+  // Strictly decreasing sequence ranges rule out audit cycles and duplicate
+  // ranges. Looking up each modern segment's exact receipt proves its binding
+  // without retaining all receipts/proofs; equal counts then prove coverage.
+  let current=head.auditHead,through=head.lastSeq,rangedSegments=0;
+  const hot=new Map(head.hot.map(entry=>[entry.seq,entry.eventHash]));
+  while(current!==null){
+   const segment=segmentOf(current,through,get);increment('segments');increment('events',segment.entries.length,limits.maxEvents);
+   if(segment.kind==='audit-segment'){
+    const leaf=find(head.receiptRoot,segment.operationId,id=>get(id,false));
+    if(!leaf||leaf.kind!=='leaf')fail('LEDGER_RECEIPT');const stored=receiptObject(get(leaf.receiptHash,false));
+    if(stored.kind!=='operation-receipt'||stored.receipt.operation.id!==segment.operationId||!same(stored.eventRange,{from:segment.fromSeq,through:segment.throughSeq})||stored.proofHash!==segment.proofHash)fail('LEDGER_RECEIPT');
+    rangedSegments++;
+   }
+   for(const entry of segment.entries)if(hot.has(entry.seq)){if(hot.get(entry.seq)!==entry.eventHash)fail('LEDGER_HOT_VIEW');hot.delete(entry.seq);}
+   through=segment.fromSeq-1;current=segment.previous;
+  }
+  if(through!==0||hot.size||rangedSegments!==rangedReceipts)fail('LEDGER_SEGMENT');
+  return freeze({version:1,kind:'operation-ledger-walk',head,...counts});
+ }
  function verifyClosure(input,options){const value=safe(input),limits=closureLimits(options);keys(value,['version','kind','head','objects']);if(value.version!==1||value.kind!=='operation-ledger-closure'||!Array.isArray(value.objects)||value.objects.length>limits.maxObjects)fail('LEDGER_CLOSURE');const objects=new Map();let bytes=0;for(const object of value.objects){keys(object,['id','json']);if(!HASH.test(object.id)||typeof object.json!=='string'||objects.has(object.id)||Buffer.byteLength(object.json)>MAX_OBJECT||hash(object.json)!==object.id)fail('LEDGER_HASH');bytes+=Buffer.byteLength(object.json);if(bytes>limits.maxBytes)fail('LEDGER_LIMIT');objects.set(object.id,object.json);}const verifier=createOperationLedger({readObject:id=>objects.get(id),cursorKey:secret}),verified=verifier.exportClosure(value.head,limits);if(verified.objects.length!==objects.size||verified.objects.some(object=>objects.get(object.id)!==object.json))fail('LEDGER_CLOSURE');return verified;}
  function putClosure(input,putObject,options){const closure=verifyClosure(input,options);if(typeof putObject!=='function'||putObject.constructor?.name==='AsyncFunction')fail('LEDGER_PROVIDER');for(const object of closure.objects){if(readObject(object.id)==null){const result=putObject(object.id,Buffer.from(object.json));if(result&&typeof result.then==='function'){if(typeof result.catch==='function')result.catch(()=>{});fail('LEDGER_PROVIDER');}}if(!bytesOf(object.id).equals(Buffer.from(object.json)))fail('LEDGER_HASH');}return freeze({version:1,kind:'operation-ledger-reference',head:closure.head,objects:closure.objects.map(object=>object.id)});}
  function queryOf(value){const query=safe(value??{});keys(query,['section','subject','search'],[]);if(query.section!==undefined)section(query.section);if(query.search!==undefined)text(query.search,200);if(query.subject!==undefined){keys(query.subject,['section','id']);section(query.subject.section);if(!typedId(query.subject.id))fail('LEDGER_QUERY');}return query;}
@@ -100,7 +165,7 @@ function createOperationLedger({readObject,cursorKey}={}){
  function page(input,options,projectVisible){const head=headOf(input),value=safe(options),query=queryOf(value.query),queryHash=hash(JSON.stringify(query));keys(value,['databaseToken','principalStamp','query','limit','cursor'],['databaseToken','principalStamp','limit']);text(value.databaseToken);text(value.principalStamp);if(!Number.isInteger(value.limit)||value.limit<1||value.limit>200||typeof projectVisible!=='function')fail('LEDGER_QUERY');let view={version:2,databaseToken:value.databaseToken,principalStamp:value.principalStamp,queryHash,limit:value.limit,highWater:head.lastSeq,auditHead:head.auditHead,seek:{segmentHash:head.auditHead,through:head.lastSeq,index:null}};if(value.cursor!==undefined){view=decodeCursor(value.cursor);keys(view,['version','databaseToken','principalStamp','queryHash','limit','highWater','auditHead','seek']);keys(view.seek,['segmentHash','through','index']);if(view.version!==2||view.databaseToken!==value.databaseToken||view.principalStamp!==value.principalStamp||view.queryHash!==queryHash||view.limit!==value.limit||!Number.isSafeInteger(view.highWater)||view.highWater<1||view.highWater>head.lastSeq||!HASH.test(view.auditHead)||!HASH.test(view.seek.segmentHash)||!Number.isSafeInteger(view.seek.through)||view.seek.through<1||view.seek.through>view.highWater||!Number.isSafeInteger(view.seek.index)||view.seek.index<0)fail('LEDGER_CURSOR_STALE');}
   const rows=[];for(const entry of eventsFrom(view.seek)){if(entry.seq>view.highWater)fail('LEDGER_CURSOR_STALE');const projected=projectVisible(freeze(safe(entry.event)),freeze({proof:entry.proof,subjects:entry.subjects}));if(projected&&typeof projected.then==='function')fail('LEDGER_AUTHORIZATION');if(projected===null||projected===undefined)continue;const row=safe(projected);if(!plain(row))fail('LEDGER_AUTHORIZATION');if(query.section!==undefined&&row.section!==query.section||query.subject&&!subjects(row).some(subject=>same(subject,query.subject))||query.search!==undefined&&!JSON.stringify(row).toLowerCase().includes(query.search.toLowerCase()))continue;if(rows.length===value.limit)return freeze({rows,nextCursor:encodeCursor({...view,seek:entry.seek})});rows.push(row);}return freeze({rows,nextCursor:null});
  }
- return Object.freeze({genesis:()=>freeze(genesis()),prepareAppend,prepareLegacy,inspectReceipt,lookup,planArchive,page,validatePlan,referencePlan,resolvePlan,putObjects,exportClosure,verifyClosure,putClosure});
+ return Object.freeze({genesis:()=>freeze(genesis()),prepareAppend,prepareLegacy,inspectReceipt,lookup,planArchive,page,validatePlan,referencePlan,resolvePlan,putObjects,exportClosure,walkClosure,verifyClosure,putClosure});
 }
 
 const samePath=(a,b)=>process.platform==='win32'?path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase():path.resolve(a)===path.resolve(b);

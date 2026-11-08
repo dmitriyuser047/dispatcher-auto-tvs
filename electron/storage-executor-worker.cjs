@@ -16,6 +16,7 @@ function rpc(action,context){
  return reply.value;
 }
 function errorValue(error){const value={name:error?.name||'Error',message:String(error?.message||'Запись не подтверждена.')};for(const key of ['code','status','definitive','unknown','issues','details','causeCode','databaseChanged','databaseToken'])if(error?.[key]!==undefined)value[key]=error[key];return value;}
+require('./daily-backup.cjs').configureLauncher((jobDir,source)=>rpc('backupQueued',{jobDir,source}));
 boundary.configure(event=>port.postMessage({type:'diagnostic',event}));
 try{
  if(!['writeSections','executeCommand','writeAll','readSnapshot'].includes(kind))throw Object.assign(Error('Неизвестная операция хранилища.'),{code:'STORAGE_EXECUTOR_INPUT',definitive:true});
@@ -24,7 +25,7 @@ try{
   if(kind==='readSnapshot')return storage.readSnapshot(physical,{principal:options.principal});
   const trusted={...options,...(hasCompatibility?{assertWriteCompatibility:context=>rpc('compatibility',context)}:{}),beforeCommit:()=>{
    rpc('beforeCommit');
-   if(backup)try{storage.makeDailyBackup(dataDir,backup.directory,backup.keep);}catch(error){if(!backup.optional)throw error;boundary.record({phase:'backup-failed',code:'BACKUP_FAILED',backend:'local'});}
+   if(backup)try{storage[backup.background?'scheduleDailyBackup':'makeDailyBackup'](dataDir,backup.directory,backup.keep);}catch(error){if(!backup.optional)throw error;boundary.record({phase:'backup-failed',code:'BACKUP_FAILED',backend:'local'});}
    rpc('afterBackup');
    // Storage has finished validation and is about to enter its durable write.
    // A later failure can occur after the revision/SQLite commit point.
@@ -34,7 +35,7 @@ try{
  }));
  port.postMessage({type:'result',ok:true,value});
 }catch(error){port.postMessage({type:'result',ok:false,error:{...errorValue(error),...(commitMayHaveStarted?{unknown:true,definitive:false}:['BACKUP_PATH','LEDGER_LIMIT'].includes(error.code)?{unknown:false,definitive:true}:{})}});}
-finally{boundary.configure(null);port.close();parentPort.postMessage({type:'ready',sequence:job.sequence});}
+finally{require('./daily-backup.cjs').configureLauncher(null);boundary.configure(null);port.close();parentPort.postMessage({type:'ready',sequence:job.sequence});}
 }
 parentPort.on('message',perform);
 perform(workerData);

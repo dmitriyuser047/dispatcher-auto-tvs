@@ -110,7 +110,7 @@ namespace AssetInventoryFiles {
    reader.onerror=()=>{s.reader=null;reject(Error('Не удалось прочитать выбранный файл'));};reader.onabort=()=>{s.reader=null;reject(Error('Чтение файла прекращено после закрытия окна'));};reader.readAsDataURL(file);
   });
  }
- function messages(value:unknown,kind:string):string {return items(value).map(issue=>'<p class="'+kind+'">'+esc(issue.message||issue.code||'Проверьте источник')+'</p>').join('');}
+ function messages(value:unknown,kind:string):string {return items(value).map(issue=>{const location=[string(issue.sheet),typeof issue.row==='number'?'строка '+issue.row:'',typeof issue.column==='number'?'столбец '+issue.column:''].filter(Boolean).join(', ');return '<p class="'+kind+'">'+esc((location?location+': ':'')+string(issue.message||issue.code||'Проверьте источник'))+'</p>';}).join('');}
  function warnings(s:State,...values:unknown[]):string {const seen=new Set<string>(),all=[...s.warnings,...values.flatMap(items)];return messages(all.filter(value=>{const key=JSON.stringify([value.code,value.message]);if(seen.has(key))return false;seen.add(key);return true;}),'ai-muted');}
  function sourceHtml(sourceValue:Row):string {
   const data=record(sourceValue.data);if(ownSections.some(section=>!Array.isArray(data[section])))throw Error('Сервер не подтвердил полный состав собственных разделов источника');

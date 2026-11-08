@@ -338,7 +338,7 @@ test('Electron archive IPC stays a thin compatible wrapper around the tested ser
     const filename = path.join(__dirname, '../electron/artifacts.js'), requireHere = createRequire(filename), exported = { exports: {} }, handlers = {};
     let selection = 0;
     const electron = { dialog: { showSaveDialog: async () => ({ canceled: false, filePath: paths.archivePath }), showOpenDialog: async () => ({ canceled: false, filePaths: [selection++ === 0 ? paths.archivePath : paths.parent] }) }, shell: {}, BrowserWindow: { fromWebContents: () => null } };
-    vm.runInNewContext(fs.readFileSync(filename, 'utf8'), { module: exported, exports: exported.exports, Buffer, Date, require(name) { return name === 'electron' ? electron : requireHere(name); } }, { filename });
+    vm.runInNewContext(fs.readFileSync(filename, 'utf8'), { module: exported, exports: exported.exports, Buffer, Date, __dirname:path.dirname(filename), __filename:filename, require(name) { return name === 'electron' ? electron : requireHere(name); } }, { filename });
     exported.exports.register({ ipcMain: { handle(name, handler) { handlers[name] = handler; } }, getDataDir: () => paths.sourceDir, isClientMode: () => false, getSettings: () => ({ networkKey: 'PRIVATE-KEY' }), knowledgeDir: () => path.join(paths.sourceDir, 'reestr-knowledge') });
     const event={sender:{id:1,getURL:()=> 'http://127.0.0.1/synthetic',isDestroyed:()=>false,mainFrame:{}}};
     const created = await handlers['create-backup-package'](event);

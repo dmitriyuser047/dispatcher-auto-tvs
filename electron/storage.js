@@ -327,9 +327,20 @@ function createJson(dataDir,input){
   const data=require('../assets/core/platform-contracts.js').validateSections(Object.fromEntries(SECTIONS.map(name=>[name,Object.hasOwn(input.data,name)?input.data[name]:[]])),SECTIONS),raw=input.revisions??{};
   storageFormat.assertInventoryBackend(data,'json');
   if(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.keys(raw).some(name=>!SECTIONS.includes(name))||Object.values(raw).some(value=>!Number.isSafeInteger(value)||value<0))throw Object.assign(Error('Некорректные исходные версии разделов'),{code:'JSON_CREATE'});
-  const revisions=Object.fromEntries(SECTIONS.map(name=>[name,raw[name]??0])),provided=Object.hasOwn(input,'operationState')||Object.hasOwn(input,'operationObjects'),seed=provided?store.validateSeed({operationState:input.operationState,operationObjects:input.operationObjects,hotRows:data.auditLog}):store.bootstrap({auditRows:data.auditLog});data.auditLog=seed.hotRows;
+  const revisions=Object.fromEntries(SECTIONS.map(name=>[name,raw[name]??0])),streaming=Object.hasOwn(input,'operationProvider'),provided=Object.hasOwn(input,'operationState')||Object.hasOwn(input,'operationObjects');let readProvider;
+  if(streaming){
+    const provider=input.operationProvider,method=provider&&Object.getOwnPropertyDescriptor(provider,'readObject');
+    if(!Object.hasOwn(input,'operationState')||Object.hasOwn(input,'operationObjects')||!provider||![Object.prototype,null].includes(Object.getPrototypeOf(provider))||Reflect.ownKeys(provider).length!==1||!method?.enumerable||!Object.hasOwn(method,'value')||typeof method.value!=='function')throw Object.assign(Error('Не подтверждён потоковый источник истории'),{code:'OPERATION_SEED_INCOMPLETE'});
+    readProvider=method.value.bind(provider);
+  }
+  const seed=streaming?store.verifyProvider({operationState:input.operationState,readObject:readProvider,hotRows:data.auditLog}):provided?store.validateSeed({operationState:input.operationState,operationObjects:input.operationObjects,hotRows:data.auditLog}):store.bootstrap({auditRows:data.auditLog});data.auditLog=seed.hotRows;
   safe.assertDirectory(parent);if(fs.existsSync(location)){safe.verifiedDirectory(location);if(fs.readdirSync(location).length)throw Object.assign(Error('База создаётся только в новом или пустом отдельном каталоге'),{code:'JSON_TARGET_NOT_EMPTY'});}else fs.mkdirSync(location,{mode:0o700});
-  const files=store.managedFiles(location);store.putObjects(location,seed.objects);files.atomic(path.join(location,'database-identity.json'),Buffer.from(JSON.stringify(identity)),null,4096);files.verifyDirectory(path.join(location,'sections'),true);
+  const files=store.managedFiles(location);
+  if(streaming){
+    store.verifyProvider({operationState:seed.operationState,readObject:readProvider,hotRows:data.auditLog},object=>store.putObjects(location,[object]));
+    store.verifyProvider({operationState:seed.operationState,readObject:id=>store.readObject(location,id),hotRows:data.auditLog});
+  }else store.putObjects(location,seed.objects);
+  files.atomic(path.join(location,'database-identity.json'),Buffer.from(JSON.stringify(identity)),null,4096);files.verifyDirectory(path.join(location,'sections'),true);
   for(const name of SECTIONS)files.atomic(sectionFile(location,name),Buffer.from(JSON.stringify(data[name])),null,64*1024*1024);
   files.atomic(revisionsFile(location),Buffer.from(JSON.stringify(storageFormat.encodeRevisions(revisions,descriptor,seed.operationState))),null);return {ok:true,path:location,schemaVersion:storageFormat.SCHEMA_VERSION,descriptor,identity};
 }
@@ -593,6 +604,8 @@ function commitPrintArtifact(dataDir,input,options={}){
   });
 }
 
+function scheduleDailyBackup(dataDir,backupDir,keepDays){if(schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION)return null;return require('./daily-backup.cjs').schedule(dataDir,backupDir,keepDays||30);}
+
 /** Ежедневная резервная копия: складываем разделы обратно в один файл */
 function makeDailyBackup(dataDir, backupDir, keepDays) {
   if(schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION)return null;
@@ -622,15 +635,15 @@ module.exports = {
   executeCommand:(dataDir,envelope,options)=>require('./diagnostic-boundary.cjs').withCommit(envelope,envelope?.databaseToken,sqliteBackend(dataDir)?'sqlite':'json',()=>require('./command-service.cjs').execute(dataDir,envelope,options)),
   commitPrintArtifact,
   isDatabaseLockHeld:dataDir=>heldLocks.has(canonicalDirectory(dataDir)),
-  ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot,readOperation,archiveHistory }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, physical => {
+  ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot,readOperation,archiveHistory,scheduleDailyBackup }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, physical => {
     // The selected profile may be reached through a Windows folder junction.
     // Rebase only its own default backup folder; links inside it still fail
     // the backup service's ordinary directory checks.
-    if(name==='makeDailyBackup'&&typeof args[0]==='string'&&path.relative(path.resolve(dataDir,'backups'),path.resolve(args[0]))==='')args[0]=path.join(physical,'backups');
+    if(['makeDailyBackup','scheduleDailyBackup'].includes(name)&&typeof args[0]==='string'&&path.relative(path.resolve(dataDir,'backups'),path.resolve(args[0]))==='')args[0]=path.join(physical,'backups');
     dataDir=physical;
     const sqlite = sqliteBackend(dataDir), action = () => {try{return operation(dataDir,...args);}catch(error){const principal=name==='readSnapshot'?args[0]?.principal:name==='readOperation'?args[1]:args[1]?.principal;throw require('./access-control').publicError(error,principal);}};
     const writing=['writeAll','writeSections','archiveHistory'].includes(name),nested=sqlite?.inTransaction(dataDir),readOnly=!writing||schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||args[1]?.requireWriterSchema===true&&args[1]?.writerSchemaVersion!==storageFormat.SCHEMA_VERSION||writing&&!hasWriteCompatibility(dataDir,args[1]);
-    const commit=()=>!sqlite||['isSplit','migrate'].includes(name)?action():sqlite.transaction(dataDir,action,{readOnly});
+    const commit=()=>!sqlite||['isSplit','migrate','scheduleDailyBackup'].includes(name)?action():sqlite.transaction(dataDir,action,{readOnly});
     const payload=name==='writeAll'?{operation:args[1]?.operation}:args[0];
     const result=writing&&!nested&&name!=='archiveHistory'?require('./diagnostic-boundary.cjs').withCommit(payload,payload?.databaseToken||args[1]?.databaseToken,sqlite?'sqlite':'json',commit):commit();
     if(writing&&!nested&&!readOnly&&!result?.replayed)require('./document-archive.cjs').recover(dataDir,undefined,args[1]);

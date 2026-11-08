@@ -225,7 +225,9 @@ function opsRenderHealth() {
       return;
     }
     setStatus(host, status.available ? status.storage : 'Рабочая база не найдена', status.available ? 'good' : 'bad');
-    if (status.lastBackupAt) {
+    if(status.backupJob?.state==='failed')setStatus(backup,'Резервирование не завершено: '+(status.backupJob.error||'проверьте папку копий'),'bad');
+    else if(['queued','running'].includes(status.backupJob?.state))setStatus(backup,'Резервная копия собирается в фоне; сохранение доступно','warn');
+    else if (status.lastBackupAt) {
       const date = new Date(status.lastBackupAt);
       const age = Math.floor((Date.now() - date.getTime()) / 86400000);
       const label = date.toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });

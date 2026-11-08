@@ -4,6 +4,13 @@ const backup = require('./backup-service.cjs');
 const safeFile=require('./safe-file.cjs');
 const SAFE_EXT = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.txt', '.csv', '.xlsx', '.xls', '.docx', '.odt', '.ods']);
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
+function createManualBackup(input){
+    return new Promise((resolve,reject)=>{
+        const {Worker}=require('node:worker_threads'),worker=new Worker(path.join(__dirname,'manual-backup-worker.cjs'),{workerData:input});let response;
+        worker.on('message',value=>{response=value;});worker.once('error',reject);
+        worker.once('exit',code=>{if(code!==0||!response)reject(Error('Создание резервной копии прервано. Повторите сохранение в новый файл.'));else if(response.ok!==true)reject(Object.assign(Error(response.error||'Резервная копия не создана'),{code:response.code}));else resolve(response.result);});
+    });
+}
 function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir, getPrincipal, getContext, assertContext, getWriteOptions, archiveRemoteSource }) {
     const capture=event=>({sender:event.sender,url:event.sender.getURL(),frame:event.sender.mainFrame,context:getContext?.(event),directory:path.resolve(getDataDir())});
     const current=job=>{if(job.sender.isDestroyed()||job.sender.getURL()!==job.url||job.sender.mainFrame!==job.frame)throw Error('Окно закрыто или изменилось');local();if(job.context)assertContext(job.context);if(path.resolve(getDataDir())!==job.directory)throw Error('Профиль базы изменился');};
@@ -75,6 +82,7 @@ function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir
             local();
             const job=capture(event);
             const originalDir = path.resolve(getDataDir());
+            const sourcePin=safeFile.verifiedDirectory(fs.realpathSync.native(originalDir));
             const pick = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), { title: 'Резервный пакет базы и документов', defaultPath: 'TVS-backup-' + new Date().toISOString().slice(0, 10) + '.zip', filters: [{ name: 'ZIP', extensions: ['zip'] }] });
             current(job);
             if (pick.canceled)
@@ -82,7 +90,12 @@ function register({ ipcMain, getDataDir, isClientMode, getSettings, knowledgeDir
             local();
             if (path.resolve(getDataDir()) !== originalDir)
                 throw Error('Профиль базы изменился. Повторите операцию.');
-            const result=await backup.createPackage({ sourceDir: originalDir, archivePath: pick.filePath, settings: getSettings(), knowledgeDir: knowledgeDir() });current(job);return result;
+            safeFile.assertDirectory(sourcePin);
+            if(fs.realpathSync.native(originalDir)!==sourcePin.path)throw Error('Папка выбранной базы изменилась. Повторите резервирование.');
+            const selected=path.resolve(pick.filePath),parent=safeFile.verifiedDirectory(fs.realpathSync.native(path.dirname(selected))),archivePath=path.join(parent.path,path.basename(selected)),requestedKnowledge=knowledgeDir?.(),ownedKnowledge=requestedKnowledge&&path.relative(originalDir,path.resolve(requestedKnowledge))==='reestr-knowledge'?path.join(sourcePin.path,'reestr-knowledge'):requestedKnowledge;
+            const result=await createManualBackup({sourceDir:sourcePin.path,archivePath,settings:getSettings(),knowledgeDir:ownedKnowledge,sourcePin,parentPin:parent});
+            current(job);
+            return result.version===4?{...result,transferHint:'Переносите вместе файл «'+path.basename(result.path)+'» и папку «'+path.basename(result.partsDirectory)+'». Для восстановления они должны находиться рядом.'}:result;
         }
         catch (e) {
             return { ok: false, error: e.message };
