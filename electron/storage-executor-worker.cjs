@@ -24,7 +24,7 @@ try{
   if(kind==='readSnapshot')return storage.readSnapshot(physical,{principal:options.principal});
   const trusted={...options,...(hasCompatibility?{assertWriteCompatibility:context=>rpc('compatibility',context)}:{}),beforeCommit:()=>{
    rpc('beforeCommit');
-   if(backup)try{storage.makeDailyBackup(physical,backup.directory,backup.keep);}catch(error){if(!backup.optional)throw error;boundary.record({phase:'backup-failed',code:'BACKUP_FAILED',backend:'local'});}
+   if(backup)try{storage.makeDailyBackup(dataDir,backup.directory,backup.keep);}catch(error){if(!backup.optional)throw error;boundary.record({phase:'backup-failed',code:'BACKUP_FAILED',backend:'local'});}
    rpc('afterBackup');
    // Storage has finished validation and is about to enter its durable write.
    // A later failure can occur after the revision/SQLite commit point.
@@ -33,7 +33,7 @@ try{
   return storage[kind](physical,input,trusted);
  }));
  port.postMessage({type:'result',ok:true,value});
-}catch(error){port.postMessage({type:'result',ok:false,error:{...errorValue(error),...(commitMayHaveStarted?{unknown:true,definitive:false}:{})}});}
+}catch(error){port.postMessage({type:'result',ok:false,error:{...errorValue(error),...(commitMayHaveStarted?{unknown:true,definitive:false}:['BACKUP_PATH','LEDGER_LIMIT'].includes(error.code)?{unknown:false,definitive:true}:{})}});}
 finally{boundary.configure(null);port.close();parentPort.postMessage({type:'ready',sequence:job.sequence});}
 }
 parentPort.on('message',perform);

@@ -623,6 +623,10 @@ module.exports = {
   commitPrintArtifact,
   isDatabaseLockHeld:dataDir=>heldLocks.has(canonicalDirectory(dataDir)),
   ...Object.fromEntries(Object.entries({ isSplit, migrate, readAll, writeAll, readRevisions, makeDailyBackup, readSection, writeSections, readSnapshot,readOperation,archiveHistory }).map(([name, operation]) => [name, (dataDir, ...args) => withDatabaseLock(dataDir, physical => {
+    // The selected profile may be reached through a Windows folder junction.
+    // Rebase only its own default backup folder; links inside it still fail
+    // the backup service's ordinary directory checks.
+    if(name==='makeDailyBackup'&&typeof args[0]==='string'&&path.relative(path.resolve(dataDir,'backups'),path.resolve(args[0]))==='')args[0]=path.join(physical,'backups');
     dataDir=physical;
     const sqlite = sqliteBackend(dataDir), action = () => {try{return operation(dataDir,...args);}catch(error){const principal=name==='readSnapshot'?args[0]?.principal:name==='readOperation'?args[1]:args[1]?.principal;throw require('./access-control').publicError(error,principal);}};
     const writing=['writeAll','writeSections','archiveHistory'].includes(name),nested=sqlite?.inTransaction(dataDir),readOnly=!writing||schemaVersion(dataDir)<storageFormat.SCHEMA_VERSION||args[1]?.requireWriterSchema===true&&args[1]?.writerSchemaVersion!==storageFormat.SCHEMA_VERSION||writing&&!hasWriteCompatibility(dataDir,args[1]);

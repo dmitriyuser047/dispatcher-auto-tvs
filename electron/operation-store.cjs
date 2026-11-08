@@ -1,7 +1,7 @@
 'use strict';
 // Physical service bridge. It never owns a second business commit or an IPC DTO.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),safeFile=require('./safe-file.cjs'),ledger=require('./operation-ledger.cjs'),format=require('./storage-format.cjs');
-const HASH=/^[a-f0-9]{64}$/,MAX_OBJECT=8*1024*1024,MAX_TOTAL=256*1024*1024,HOT_LIMIT=5000,master=crypto.randomBytes(32);
+const HASH=/^[a-f0-9]{64}$/,MAX_OBJECT=8*1024*1024,MAX_TOTAL=512*1024*1024,HOT_LIMIT=5000,master=crypto.randomBytes(32);
 const commitWitnesses=new WeakMap();
 let fileReadScope=null;
 function withFileReadScope(action){if(fileReadScope)return action();const session=safeFile.createReadSession();fileReadScope=session;try{return action();}finally{fileReadScope=null;session.close();}}
