@@ -168,7 +168,7 @@ async function freshDataCacheContext(event){
   // IPC and contextBridge retain plain values, but discard Error.code/status.
   // These fixed results carry no identity, grant, token or underlying exception.
   if(!(settings.networkMode==='client'&&settings.remoteHost)){
-    try{const token=storage.databaseToken(getDataDir()),access=product.kind==='des-object'?server.publicAccess(localPrincipal()):null;return {version:1,mode:'local',identity:identity+':'+token,databaseToken:token,access,policyStamp:access?.policyStamp||null,...(access?{readOnly:!access.writable.length}:{})};}
+    try{const token=storage.databaseToken(getDataDir()),access=server.publicAccess(localPrincipal());return {version:1,mode:'local',identity:identity+':'+token,databaseToken:token,access,policyStamp:access?.policyStamp||null,...(access?{readOnly:!access.writable.length}:{})};}
     catch(error){if(error?.code!=='DB_BUSY')throw error;assertCache();return {version:1,unavailable:'DB_BUSY'};}
   }
   try{
@@ -586,7 +586,7 @@ app.whenReady().then(() => {
     try {
       const snapshot = storage.readSnapshot(getDataDir(),product.kind==='des-object'?{principal:localPrincipal()}:{});
       assertObjectSnapshot(snapshot);
-      if(product.kind==='des-object')snapshot.access=server.publicAccess(localPrincipal());
+      snapshot.access=server.publicAccess(localPrincipal());
       bindSnapshotCompatibility(event,snapshot,null);
       return JSON.stringify(snapshot.data);
     } catch (e) {
@@ -653,7 +653,7 @@ app.whenReady().then(() => {
       const generation=beginDataRead(event),assertCurrent=()=>assertDataRead(event,generation,identity);
       const snapshot = await localStorageExecutor().run('readSnapshot',dir,{},product.kind==='des-object'?{principal:localPrincipal()}:{},{assertCurrent});
       assertObjectSnapshot(snapshot);
-      if(product.kind==='des-object')snapshot.access=server.publicAccess(localPrincipal());
+      snapshot.access=server.publicAccess(localPrincipal());
       assertCurrent();
       bindSnapshotCompatibility(event,snapshot,hello);
       return JSON.stringify(snapshot);
