@@ -210,7 +210,7 @@ function mainWriteSessions(){
 function bindSnapshotCompatibility(event,snapshot,hello,negotiation=null){
   const profile=negotiation||{platform:{descriptor:snapshot.platform.descriptor,compatibility:require('../assets/core/platform-compatibility.js').describe().serverProfile}};
   const readable=require('../assets/core/platform-compatibility.js').negotiate(hello,profile.platform.compatibility,profile.platform.descriptor);
-  if(!readable.readCompatible){invalidateDataBinding(event);throw Object.assign(Error('Клиент не подтвердил совместимость чтения этой базы. Откройте совместимую версию программы.'),{code:'READ_COMPATIBILITY_REQUIRED'});}
+  if(!readable.readCompatible){invalidateDataBinding(event);throw Object.assign(Error('Версии программы не подтвердили совместимость чтения базы. Обновите программу на сервере и клиентских компьютерах.'),{code:'READ_COMPATIBILITY_REQUIRED'});}
   bindData(event,snapshot.databaseToken,snapshot.access||null,snapshot.revisions,snapshot.platform);
   const chosen=mainWriteSessions().bind(capturedOperationContext(event),hello,profile);
   snapshot.platform={...snapshot.platform,compatibility:profile.platform.compatibility,negotiation:chosen};

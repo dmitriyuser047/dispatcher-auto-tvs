@@ -1,6 +1,8 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),crypto=require('node:crypto');
-const fuel=require('../assets/core/fuel-engine.js'),writeoff=require('../assets/core/writeoff-engine.js');
+const fuelRoot=require('../assets/core/fuel-engine.js'),writeoffRoot=require('../assets/core/writeoff-engine.js');
+// This historical release suite intentionally keeps its v6 readers.
+const fuel={...fuelRoot.forVersion(6),recordBalanceAt:fuelRoot.recordBalanceAt,forVersion:fuelRoot.forVersion},writeoff={...writeoffRoot.forVersion(6),forVersion:writeoffRoot.forVersion};
 const range={from:'2026-09-01',to:'2026-09-30'},request={month:'2026-09',date:'2026-09-30'};
 const metadata={id:'release-golden',number:'SYNTHETIC-1',postedAt:'2026-10-24T00:00:00Z',postedBy:{id:'release-synthetic',name:'Synthetic calculation audit'}};
 const hash=value=>crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -95,7 +97,7 @@ test('v6 canonical validation preserves existing v5 snapshots but new legacy act
   const db=fixtures().normal,preview=writeoff.prepare(db,request),document=writeoff.post(db,request,{...metadata,expectedFingerprint:preview.sourceFingerprint});
   assert.equal(writeoff.validateDocuments(db,{...db,fuelWriteoffs:[document]}),true);
   assert.throws(()=>writeoff.forVersion(5).validateDocuments({...db,fuelWriteoffs:[document]},{...db,fuelWriteoffs:[document]}),{code:'CALCULATION_VERSION'});
-  for(const api of [fuel,writeoff])assert.throws(()=>api.forVersion(7),{code:'CALCULATION_VERSION'});
+  for(const api of [fuel,writeoff])assert.throws(()=>api.forVersion(8),{code:'CALCULATION_VERSION'});
   assert.throws(()=>writeoff.validateDocuments(db,{...db,fuelWriteoffs:[{...document,calculationVersion:7}]}),{code:'CALCULATION_VERSION'});
 });
 

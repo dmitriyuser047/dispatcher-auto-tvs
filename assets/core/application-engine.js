@@ -16,7 +16,7 @@
   const sections = Object.freeze({
     fuel: fuelSections,
     fuelAudit: fuelSections,
-    fuelRecords: Object.freeze(['vehicles', 'records']),
+    fuelRecords: Object.freeze(['vehicles', 'records', 'fuelPurchases']),
     writeoff: writeoffSections,
     writeoffPost: writeoffSections,
     costs: Object.freeze(['vehicles', 'generators', 'records', 'genRecords', 'repairs', 'vehicleTo',
@@ -37,19 +37,21 @@
       maxCacheCharacters: options.maxCacheCharacters,
       fingerprint:writeoff.sha256,
       modules: {
-        fuel: { version:'6', sections:sections.fuel,
+        fuel: { version:'7', sections:sections.fuel,
           calculate:(db, query) => fuel.buildLedger(db, query) },
-        fuelRecords: { version:'6', sections:sections.fuelRecords,
-          calculate:(db, query) => fuel.recordBalances(db, query.vehicleId, { from:query.from, to:query.to }) },
-        fuelAudit: { version:'6', sections:sections.fuelAudit,
+        fuelRecords: { version:'7', sections:sections.fuelRecords,
+          calculate:(db, query) => Array.isArray(query.readable)&&sections.fuelRecords.some(name=>!query.readable.includes(name))
+            ? fuel.recordBalanceMap((db.records||[]).filter(row=>row&&row.vehicleId===query.vehicleId).map(row=>[row.id,null]))
+            : fuel.recordBalances(db, query.vehicleId, { from:query.from, to:query.to }) },
+        fuelAudit: { version:'7', sections:sections.fuelAudit,
           calculate:(db, query) => audit.buildModel(db, query) },
-        writeoff: { version:'6', sections:sections.writeoff,
+        writeoff: { version:'7', sections:sections.writeoff,
           calculate:(db, query) => writeoff.prepare(db, query) },
-        writeoffPost: { version:'6', sections:sections.writeoffPost,
+        writeoffPost: { version:'7', sections:sections.writeoffPost,
           calculate:(db, query) => writeoff.post(db, query.request, query.metadata) },
-        costs: { version:'5', sections:sections.costs,
+        costs: { version:'6', sections:sections.costs,
           calculate:(db, query) => costs.buildReport(db, query) },
-        costValuation: { version:'3', sections:sections.costValuation,
+        costValuation: { version:'4', sections:sections.costValuation,
           calculate:(db,query) => {
             if(typeof costs.buildFullReport!=='function')throw Object.assign(Error('Не загружен расчёт полной себестоимости'),{code:'MODULE_UNAVAILABLE'});
             return costs.buildFullReport(db,query);
@@ -76,7 +78,8 @@
           ? rows.filter(row => row == null || row[field] === parameters.vehicleId) : rows;
         database = {
           vehicles:forVehicle(database.vehicles, 'id'),
-          records:forVehicle(database.records, 'vehicleId')
+          records:forVehicle(database.records, 'vehicleId'),
+          fuelPurchases:forVehicle(database.fuelPurchases, 'vehicleId')
         };
       }
       return runtime.query(name, database, options, context);

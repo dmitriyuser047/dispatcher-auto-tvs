@@ -30,12 +30,17 @@ function fuelAccountingOpening(section,asset,date){
 }
 function fuelAccountingCurrentBalance(section,asset,records,balances,to=''){
   const boundary=fuelAccountingFor(section,asset);
+  const readable=typeof platformSessionContext==='function'?platformSessionContext().readable:null;
+  if(section==='vehicles'&&Array.isArray(readable)&&!readable.includes('*')&&['vehicles','records','fuelPurchases'].some(name=>!readable.includes(name)))return null;
   const until=to||(boundary.mode==='explicit'?dispatcherLocalDate():'');
   if(boundary.mode==='explicit'&&until&&until<boundary.from)return null;
   const eligible=records.filter(row=>(!until||row.date<=until)&&fuelAccountingIncludes(section,asset,row.date)).slice().sort((a,b)=>cmpDateAsc(a.date,b.date));
   const last=eligible.at(-1);
   const value=last?TvsFuelEngine.recordBalanceAt(balances,last.id):undefined;
-  return value!==undefined?value:fuelAccountingOpening(section,asset,until);
+  const opening=value!==undefined?value:fuelAccountingOpening(section,asset,until);
+  if(section!=='vehicles'||opening===null)return opening;
+  const laterReturns=(data.fuelPurchases||[]).filter(purchase=>!purchase.deleted&&!purchase.cancelled&&purchase.status!=='cancelled'&&purchase.operationKind==='return'&&purchase.vehicleId===asset.id&&fqValue(purchase.qty)<0&&TvsFuelEngine.gsmValidDate(purchase.date)&&(!last||purchase.date>last.date)&&(!until||purchase.date<=until)&&fuelAccountingIncludes(section,asset,purchase.date));
+  return laterReturns.length?DecimalCore.toNumberExact(DecimalCore.add(opening,DecimalCore.sum(laterReturns.map(purchase=>purchase.qty)))):opening;
 }
 function fuelAccountingStatusHtml(section,asset){
   const boundary=fuelAccountingFor(section,asset);

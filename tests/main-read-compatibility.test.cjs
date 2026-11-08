@@ -11,7 +11,7 @@ function fixture({client=true,bind=true}={}){
  const sender={id:7,mainFrame:{synthetic:true},getURL:()=>state.url,isDestroyed:()=>state.destroyed},event={sender},bindings=new Map();
  const visible={id:0,note:'SYNTHETIC-VISIBLE-ROW'},publicAccess=access('a'),description=compatibility.describe();
  const platform={apiVersion:1,operations:1,commands:1,outbox:1,descriptor:format.describe(format.SCHEMA_VERSION),compatibility:description.serverProfile};
- const context={settings:{networkMode:client?'client':'local',remoteHost:'synthetic.invalid',remotePort:8123,activeUser:0},networkConfigError:'',dataBindings:bindings,dataReadGenerations:new Map(),notificationService:{invalidate(){}},writeSessions:null,settingsIdentity:()=>state.identity,getDataDir:()=>path.join(ROOT,'tests','synthetic-no-io'),getActiveUser:()=>({name:'Synthetic'}),isClientMode:()=>client,
+ const context={settings:{networkMode:client?'client':'local',remoteHost:'synthetic.invalid',remotePort:8123,activeUser:0},product:{kind:'dispatcher'},localPrincipal:()=>({id:'local-profile',name:'Synthetic',role:'admin'}),networkConfigError:'',dataBindings:bindings,dataReadGenerations:new Map(),notificationService:{invalidate(){}},writeSessions:null,settingsIdentity:()=>state.identity,getDataDir:()=>path.join(ROOT,'tests','synthetic-no-io'),getActiveUser:()=>({name:'Synthetic'}),isClientMode:()=>client,
   storage:{SECTIONS:['vehicles','records'],databaseToken:()=>state.token,readSection(_directory,name){state.reads.push(name);return [visible];},readRevisions(){state.reads.push('revisions');return {vehicles:1,records:0};}},
   server:{async getJson(_host,_port,url){state.reads.push(url);await state.hook?.(url);if(url==='/api/ping')return state.ping||{ok:true,databaseToken:state.token,access:publicAccess};if(url==='/api/revisions')return {vehicles:1,records:0,databaseToken:state.token};if(url.startsWith('/api/query'))return {ok:true,rows:[visible],databaseToken:state.token};return [visible];},negotiate(){state.writeProofs++;throw Error('A data read must not renew a write proof');},localWriteOptions(){state.writeProofs++;throw Error('A data read must not request a local write proof');}},
   require(name){if(name==='node:crypto')return require(name);if(name==='./write-session.cjs')return require('../electron/write-session.cjs');if(name==='../assets/core/platform-compatibility.js')return compatibility;if(name==='./storage-format.cjs')return format;if(name==='./data-query.cjs')return {queryRows(){state.reads.push('query');return {ok:true,rows:[visible],databaseToken:state.token};}};throw Error('Unexpected main read dependency '+name);}};
@@ -22,6 +22,12 @@ function fixture({client=true,bind=true}={}){
 }
 const args=channel=>channel==='read-section'?'vehicles':channel==='query-rows'?{section:'vehicles',limit:10}:undefined;
 const mutations=[f=>{f.sender.mainFrame={synthetic:true,replaced:true};},f=>{f.state.url='file:///synthetic/replaced.html';},f=>{f.state.destroyed=true;}];
+
+test('an older fuel-calculation reader cannot bind rows and receives an explicit update instruction',()=>{
+ const f=fixture({bind:false}),hello=owned(compatibility.describe().hello);hello.capabilities=hello.capabilities.filter(item=>item.name!=='fuelCalculationsV7');
+ assert.throws(()=>f.context.bindSnapshotCompatibility(f.event,f.snapshot,hello),error=>error.code==='READ_COMPATIBILITY_REQUIRED'&&/Обновите программу на сервере и клиентских компьютерах/.test(error.message));
+ assert.equal(f.bindings.has(7),false);assert.deepEqual(f.state.reads,[]);assert.equal(f.state.writeProofs,0);assert.throws(()=>f.context.readableOperationContext(f.event),{code:'SESSION_CHANGED'});
+});
 
 test('section, revision and query IPCs require an explicitly confirmed readable binding before any data access',async()=>{
  for(const client of [false,true])for(const grant of ['unbound',undefined,null,false,0,'true'])for(const channel of channels){

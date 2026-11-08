@@ -73,7 +73,7 @@
       if (negotiated?.compatibility && !snapshot.platform?.negotiation)
         snapshot.platform = { ...snapshot.platform, compatibility: negotiated.platform?.compatibility, negotiation: negotiated.compatibility };
       if (snapshot.platform?.negotiation?.readCompatible === false)
-        throw Error('Версия клиента несовместима с форматом общей базы.');
+        throw Error('Версии программы не подтвердили совместимость чтения базы. Обновите программу на сервере и клиентских компьютерах.');
       snapshotToken = snapshot.databaseToken;
       latestSnapshot = snapshot;
       return JSON.stringify(snapshot);

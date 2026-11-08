@@ -56,6 +56,7 @@ function renderSidebarSummary() {
         const quality=fqRecord(r,v);if(v.fuelNorms!=null&&(quality.total==null||quality.partial))missingUsed[ft]++;else used[ft] += quality.total||0;
       }
     });
+    for(const purchase of data.fuelPurchases||[])if(!purchase.deleted&&!purchase.cancelled&&purchase.status!=='cancelled'&&purchase.operationKind==='return'&&purchase.vehicleId===v.id&&fqValue(purchase.qty)<0&&TvsFuelEngine.gsmValidDate(purchase.date)&&fuelAccountingCurrentIncludes('vehicles',v,purchase.date))issued[ft]+=fqValue(purchase.qty);
     // end balance for this vehicle
     const bMap = computeFuelBalances(v.id);
     const physical=fuelAccountingCurrentBalance('vehicles',v,vRecs,bMap);

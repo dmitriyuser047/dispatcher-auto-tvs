@@ -85,7 +85,7 @@
   function readable(value) {
     if (value == null) return null;
     if (!Array.isArray(value) || value.some(section => typeof section !== 'string')) fail('INVALID_ACCESS', 'Проверьте список доступных разделов');
-    return [...new Set(value)].sort();
+    return value.includes('*') ? null : [...new Set(value)].sort();
   }
   function createEngine(configuration) {
     configuration = configuration == null ? {} : configuration; object(configuration, 'Настройки ядра');

@@ -93,7 +93,7 @@ function gsmReceiptSummary(ledger, org) {
 function gsmReceiptSummaryHtml(ledger) {
   const summary = gsmReceiptSummary(ledger, gsmOrg);
   const amount = (qty, org, grade) => '<td class="gsm-number"' + (grade ? ' data-grade="' + fpEsc(grade) + '"' : '') + '>' +
-    (qty > 0 ? '<button type="button" class="gsm-receipt-amount" title="' + fpEsc([org || 'Все организации', grade || 'Все марки топлива', 'Поступления'].join(' · ')) +
+    (qty !== 0 ? '<button type="button" class="gsm-receipt-amount" title="' + fpEsc([org || 'Все организации', grade || 'Все марки топлива', 'Поступления'].join(' · ')) +
       '" onclick="gsmShowReceipts(' + gsmArg(org) + ',' + gsmArg(grade) + ')">' + fpNum(qty, 3) + '</button>' : '<span class="gsm-zero">' + fpNum(qty, 3) + '</span>') + '</td>';
   const rows = summary.rows.map(row => '<tr data-org="' + fpEsc(row.org) + '"><th scope="row"' + (row.org === GSM_UNKNOWN_ORG ? ' class="gsm-error"' : '') + '>' + fpEsc(row.org) + '</th>' +
     row.quantities.map((qty, index) => amount(qty, row.org, summary.grades[index])).join('') + amount(row.total, row.org, '') + '</tr>');
@@ -151,12 +151,12 @@ function gsmBarrelMovements(ledger) {
 }
 function gsmMovementListHtml(ledger) {
   const movements = gsmBarrelMovements(ledger), shown = movements.slice(0, gsmMovementLimit);
-  const labels = { receipt: 'Приход', consumption: 'Расход', 'grade-reconciliation': 'Сверка марок', 'measurement-correction': 'Корректировка по замеру' };
+  const labels = { receipt: 'Приход', return: 'Возврат заправки', consumption: 'Расход', 'grade-reconciliation': 'Сверка марок', 'measurement-correction': 'Корректировка по замеру' };
   const rows = shown.map(row => {
     const qty = row.kind === 'grade-reconciliation' || row.kind === 'measurement-correction' ? row.delta : row.kind === 'consumption' ? -row.qty : row.qty;
     return '<tr data-movement-kind="' + fpEsc(row.kind) + '"><td class="gsm-date">' + fpEsc(fmtDate(row.date)) + (row.time ? '<small>' + fpEsc(row.time) + '</small>' : '') + '</td>' +
       '<td><span class="gsm-movement-kind gsm-movement-' + fpEsc(row.kind) + '">' + fpEsc(labels[row.kind] || row.kind) + '</span></td><td>' + fpEsc(fpVehicleTitle(gsmVehicle(row.vehicleId))) + '<small>' + fpEsc(row.org) + '</small></td>' +
-      gsmCell(row.grade) + '<td class="gsm-number' + (qty < 0 && row.kind !== 'consumption' ? ' gsm-error' : '') + '">' + (qty > 0 ? '+' : qty < 0 ? '−' : '') + fpNum(Math.abs(qty), 3) + '</td>' +
+      gsmCell(row.grade) + '<td class="gsm-number' + (qty < 0 && !['consumption','return'].includes(row.kind) ? ' gsm-error' : '') + '">' + (qty > 0 ? '+' : qty < 0 ? '−' : '') + fpNum(Math.abs(qty), 3) + '</td>' +
       '<td>' + fpEsc(gsmMovementSource(row)) + '</td><td class="gsm-movement-links">' + gsmMovementLinks(row) + '</td></tr>';
   });
   return '<p class="gsm-movement-count" role="status">Показано ' + shown.length + ' из ' + movements.length + ' операций · сначала последние</p>' +
@@ -169,7 +169,7 @@ function gsmRefreshMovements() {
   if (target) target.innerHTML = gsmMovementListHtml(gsmMovementLedger || gsmBuildLedger(data, gsmMonthRange(fpMonth)));
 }
 function gsmSetMovementSearch(value) { gsmMovementSearch = String(value || ''); gsmMovementLimit = 30; gsmRefreshMovements(); }
-function gsmSetMovementType(value) { gsmMovementType = ['receipt', 'consumption', 'grade-reconciliation', 'measurement-correction'].includes(value) ? value : ''; gsmMovementLimit = 30; gsmRefreshMovements(); }
+function gsmSetMovementType(value) { gsmMovementType = ['receipt', 'return', 'consumption', 'grade-reconciliation', 'measurement-correction'].includes(value) ? value : ''; gsmMovementLimit = 30; gsmRefreshMovements(); }
 function gsmShowMoreMovements() { gsmMovementLimit += 30; gsmRefreshMovements(); }
 function gsmUnassignedReceiptsHtml(ledger) {
   const rows = ledger.receipts.filter(row => !gsmVehicle(row.vehicleId) && gsmVisible(row));
@@ -200,7 +200,7 @@ function gsmBarrelOverviewHtml(ledger) {
     (unassigned.length ? '<div class="gsm-unassigned-notice"><span>Поступления без машины: ' + unassigned.length + ' · ' + fpNum(unassigned.reduce((sum, row) => sum + row.qty, 0), 3) + ' л. Не включены в остатки в машинах.</span><button type="button" class="btn btn-ghost btn-sm" onclick="gsmScrollTo(\'gsmUnassignedReceipts\')">Разобрать поступления</button></div>' : '') + gsmIssuesHtml(ledger) +
     '<section class="gsm-band gsm-barrel-movements" id="gsmBarrelMovements" aria-label="Операции с топливом"><div class="gsm-section-title"><h3>Операции с топливом <span>' + fpEsc([gsmOrg || 'Все организации', gsmFuel || 'Все марки', fpMonthLabel(fpMonth)].join(' · ')) + '</span></h3><div class="gsm-actions"><button type="button" class="btn btn-ghost btn-sm" onclick="gsmResetBarrels()">Все сводные остатки ↑</button><button type="button" class="btn btn-ghost btn-sm" onclick="gsmScrollTo(\'gsmBarrelVehicles\')">Остатки по машинам ↓</button></div></div><div class="gsm-movement-filters">' +
     '<label class="gsm-movement-search"><span>Найти операцию</span><input type="search" aria-label="Поиск операций" placeholder="Машина, карта, организация, топливо, АЗС…" value="' + fpEsc(gsmMovementSearch) + '" oninput="gsmSetMovementSearch(this.value)"></label>' +
-    '<label><span>Вид операции</span><select class="fsel" aria-label="Вид операции" onchange="gsmSetMovementType(this.value)">' + [['', 'Все операции'], ['receipt', 'Приход'], ['consumption', 'К списанию'], ['grade-reconciliation', 'Сверка марок'], ['measurement-correction', 'Корректировка по замеру']].map(([value, label]) => '<option value="' + value + '"' + (gsmMovementType === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select></label></div>' +
+    '<label><span>Вид операции</span><select class="fsel" aria-label="Вид операции" onchange="gsmSetMovementType(this.value)">' + [['', 'Все операции'], ['receipt', 'Приход'], ['return', 'Возврат заправки'], ['consumption', 'К списанию'], ['grade-reconciliation', 'Сверка марок'], ['measurement-correction', 'Корректировка по замеру']].map(([value, label]) => '<option value="' + value + '"' + (gsmMovementType === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select></label></div>' +
     '<p class="gsm-overview-note">Сверка марок перераспределяет остаток между марками. Корректировка по замеру требует проверки источника топлива. Эти операции не являются приходом или расходом. Расход включает х/х; основание указано в строке.</p>' +
     '<div id="gsmBarrelMovementResults">' + gsmMovementListHtml(ledger) + '</div></section>' +
     '<section class="gsm-band gsm-barrel-vehicles" id="gsmBarrelVehicles" aria-label="Остатки по машинам"><div class="gsm-section-title"><h3>В каких машинах топливо <span>' + fpEsc(dateLabel) + '</span></h3><button type="button" class="btn btn-ghost btn-sm" onclick="gsmOpeningDialog()">Начальные остатки</button></div>' +

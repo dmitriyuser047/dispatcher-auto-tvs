@@ -6,7 +6,7 @@
 })(typeof globalThis === 'object' ? globalThis : this, function (fuelRoot,getAccounting,getDecimal,getPeriods,getTemporal) {
   'use strict';
   function makeEngine(calculationVersion){
-  const fuel=fuelRoot.forVersion(calculationVersion),modern=calculationVersion>=2,temporal=calculationVersion>=3,corrected=calculationVersion>=4,verified=calculationVersion>=6;
+  const fuel=fuelRoot.forVersion(calculationVersion),modern=calculationVersion>=2,temporal=calculationVersion>=3,corrected=calculationVersion>=4,verified=calculationVersion>=6,returns=calculationVersion>=7;
   if (!fuel || fuel.apiVersion !== 1) throw Error('Не загружено ядро расчёта ГСМ');
   const sumValues=values=>modern?getDecimal().toNumberExact(getDecimal().sum(values)):values.reduce((sum,value)=>sum+value,0);
   const sourceSections = Object.freeze(['vehicles', 'records', 'fuelPurchases', 'fuelCards', 'monthlyFuel']);
@@ -17,6 +17,7 @@
   const present = value => value != null && !(typeof value === 'string' && !value.trim());
   const idOr=(value,fallback='')=>corrected?(value??fallback):(value||fallback);
   const live=value=>!value.deleted&&!value.cancelled&&value.status!=='cancelled';
+  const returnPurchase=value=>returns&&value.operationKind==='return'&&fuel.fqValue(value.qty)!==null&&fuel.fqValue(value.qty)<0;
   const plain = value => value != null && tag(value) === '[object Object]';
   const rounded = fuel.gsmRound;
   const orgKey = fuel.gsmOrgKey;
@@ -284,7 +285,8 @@
       for (const field of fields) {
         const value = row[field];
         if (!present(value)) continue;
-        if (!['number','string'].includes(typeof value) || (verified?fuel.fqValue(value)===null||fuel.fqValue(value)<0:!Number.isFinite(Number(value))||Number(value)<0)) {
+        const signedReturn=section==='fuelPurchases'&&returnPurchase(row)&&['qty','sum'].includes(field),signedMonthly=returns&&section==='monthlyFuel'&&['liters','sum'].includes(field);
+        if (!['number','string'].includes(typeof value) || (verified?fuel.fqValue(value)===null||fuel.fqValue(value)<0&&!signedReturn&&!signedMonthly:!Number.isFinite(Number(value))||Number(value)<0)) {
           add({ code:'invalid-number', severity:historical?'warning':'error', field, message:(historical?'Исторический источник переноса: ':'')+'Укажите корректное неотрицательное число — ' + (fieldLabels[field] || field),
             vehicleId:idOr(row.vehicleId,(section === 'vehicles' ? row.id : '')), recordId:section === 'records' ? row.id : '', purchaseId:section === 'fuelPurchases' ? row.id : '', date:row.date || '', section, sourceId:idOr(row.id) });
           if (section === 'records' && ['km','fuelIssued','fuelActual','fuelUsed','fuelIdle','tankMeasured'].includes(field) || section === 'fuelPurchases' && field === 'qty') historicalOpeningUncertain(row,section,field,fieldLabels[field] || field);
@@ -325,7 +327,7 @@
         add({...details,code:'source-grade-invalid',grade,message:'Марка топлива не подходит для акта дизельного топлива или бензина'});
         historicalOpeningUncertain(row,section,'grade','не распознана марка топлива');
       }
-      if (purchase && (!present(row.qty) || Number(row.qty) <= 0)) {
+      if (purchase && !returnPurchase(row) && (!present(row.qty) || Number(row.qty) <= 0)) {
         add({...details,code:'purchase-quantity-missing',message:'В покупке должны быть указаны положительные литры'});
         historicalOpeningUncertain(row,section,'qty','не указаны положительные литры покупки');
       }
@@ -356,10 +358,10 @@
     for (const row of projection.monthlyFuel) {
       if (typeof row.month === 'string' && row.month < scope.month) continue;
       if (typeof row.month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(row.month)) add({code:'monthly-period-invalid',vehicleId:row.vehicleId,message:'Некорректный месяц контрольного значения'});
-      checkNumeric(row,'monthlyFuel',['liters']);
+      checkNumeric(row,'monthlyFuel',returns?['liters','sum']:['liters']);
     }
     const duplicatePurchases = new Map();
-    for (const row of projection.fuelPurchases.filter(row => !row.deleted && Number(row.qty) > 0 && fuel.gsmInPeriod(row.date,scope.from,scope.to))) {
+    for (const row of projection.fuelPurchases.filter(row => !row.deleted && (Number(row.qty) > 0||returnPurchase(row)) && fuel.gsmInPeriod(row.date,scope.from,scope.to))) {
       const key = stableSerialize([row.date,fuel.gsmCardKey(row.cardNo),rounded(row.qty),fuel.gsmGrade(row.grade || row.product),row.vehicleId,row.time || '']);
       if (!duplicatePurchases.has(key)) duplicatePurchases.set(key,[]);
       duplicatePurchases.get(key).push(row);
@@ -501,8 +503,8 @@
   return Object.freeze({apiVersion:1,schemaVersion:1,calculationVersion,sourceSections,requiredSections,prepare,preview:prepare,fingerprint,post,voidDocument,
     validateWriteoffChanges,validateDocuments:validateWriteoffChanges,stableSerialize,sha256});
   }
-  function documentVersion(document,maxVersion=6){const version=Object.prototype.hasOwnProperty.call(document,'calculationVersion')?document.calculationVersion:Object.prototype.hasOwnProperty.call(document,'algorithmVersion')?document.algorithmVersion:1;if(version!==1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6||version>maxVersion)throw Object.assign(Error('Неизвестная версия расчёта проведённого акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version;}
-  const legacy=makeEngine(1),decimalVersion=makeEngine(2),temporalVersion=makeEngine(3),correctedVersion=makeEngine(4),allocatedVersion=makeEngine(5),current=makeEngine(6);
-  function forVersion(version){if(version!==1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6)throw Object.assign(Error('Неизвестная версия расчёта акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version===1?legacy:version===2?decimalVersion:version===3?temporalVersion:version===4?correctedVersion:version===5?allocatedVersion:current;}
+  function documentVersion(document,maxVersion=7){const version=Object.prototype.hasOwnProperty.call(document,'calculationVersion')?document.calculationVersion:Object.prototype.hasOwnProperty.call(document,'algorithmVersion')?document.algorithmVersion:1;if(version!==1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6&&version!==7||version>maxVersion)throw Object.assign(Error('Неизвестная версия расчёта проведённого акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version;}
+  const legacy=makeEngine(1),decimalVersion=makeEngine(2),temporalVersion=makeEngine(3),correctedVersion=makeEngine(4),allocatedVersion=makeEngine(5),verifiedVersion=makeEngine(6),current=makeEngine(7);
+  function forVersion(version){if(version!==1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6&&version!==7)throw Object.assign(Error('Неизвестная версия расчёта акта'),{name:'FuelWriteoffError',code:'CALCULATION_VERSION'});return version===1?legacy:version===2?decimalVersion:version===3?temporalVersion:version===4?correctedVersion:version===5?allocatedVersion:version===6?verifiedVersion:current;}
   return Object.freeze({...current,forVersion});
 });

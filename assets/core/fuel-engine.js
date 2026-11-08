@@ -37,7 +37,7 @@
     return Object.prototype.hasOwnProperty.call(balances,id)?balances[id]:undefined;
   }
   function makeEngine(calculationVersion,liveJournal=false,legacyReadProjection=false){
-  const modern=calculationVersion>=2,temporal=calculationVersion>=3,corrected=calculationVersion>=4,allocated=calculationVersion>=5,verified=calculationVersion>=6;
+  const modern=calculationVersion>=2,temporal=calculationVersion>=3,corrected=calculationVersion>=4,allocated=calculationVersion>=5,verified=calculationVersion>=6,returns=calculationVersion>=7;
   const has=(row,key)=>row&&Object.prototype.hasOwnProperty.call(row,key);
   const live=row=>!row.deleted&&!row.cancelled&&row.status!=='cancelled';
   const idOr=(id,fallback='')=>corrected?(id??fallback):(id||fallback);
@@ -226,6 +226,7 @@ function sourceNumber(value) {
   try{return decimal().toNumberExact(decimal().parse(value));}catch{return null;}
 }
 function sourceQuantity(value) { const number=sourceNumber(value);return number!==null&&number>=0?number:null; }
+function returnPurchase(row) { return returns&&row.operationKind==='return'&&sourceNumber(row.qty)!==null&&sourceNumber(row.qty)<0; }
 function openingEvidence(db,vehicleId,options={}) {
   const vehicle=(db.vehicles||[]).find(row=>row.id===vehicleId),family=options.family||fqRecordFuelFamily({},vehicle),before=options.before||'';
   if(!vehicle)return {status:'missing',family,reason:'vehicle-missing'};
@@ -264,7 +265,8 @@ function gsmBuildLedger(db, options) {
   if(modern){
     const inspectPrecision=(section,list,fields)=>list.forEach(row=>Object.entries(fields).forEach(([field,places])=>{
       const raw=row[field],value=fqValue(raw);
-      if(verified&&raw!=null&&!(typeof raw==='string'&&!raw.trim())&&(value===null||value<0)){
+      const signedReturn=section==='fuelPurchases'&&returnPurchase(row)&&['qty','sum'].includes(field);
+      if(verified&&raw!=null&&!(typeof raw==='string'&&!raw.trim())&&(value===null||value<0&&!signedReturn)){
         issue('source-number','error',{section,sourceId:row.id,vehicleId:section==='vehicles'?row.id:row.vehicleId,date:row.date||'',field,
           ...(section==='records'?{recordId:row.id}:section==='fuelPurchases'?{purchaseId:row.id}:{}),...(row.org?{org:row.org}:{}),...(row.grade?{grade:row.grade}:{}),
           message:'Некорректное числовое значение '+field+'. Укажите полное неотрицательное десятичное число по первоисточнику; исходное значение сохранено'});
@@ -304,7 +306,7 @@ function gsmBuildLedger(db, options) {
       message: 'Топливо ' + receipt.grade + ' отличается от топлива машины ' + gsmVehicleGrade(v) });
   };
   const duplicateGroups = new Map();
-  purchases.filter(p => !p.deleted && gsmNumber(p.qty) > 0).forEach(p => {
+  purchases.filter(p => !p.deleted && (gsmNumber(p.qty) > 0||returnPurchase(p))).forEach(p => {
     const key = [p.date, gsmCardKey(p.cardNo), gsmRound(p.qty), gsmGrade(p.grade || p.product)].join('|');
     if (!duplicateGroups.has(key)) duplicateGroups.set(key, []);
     duplicateGroups.get(key).push(p);
@@ -316,7 +318,8 @@ function gsmBuildLedger(db, options) {
       message: 'Возможный повтор восстановления: ' + list.length + ' операций по ' + p.qty + ' л. Сверьте с исходной выпиской' }));
   });
 
-  purchases.filter(p => !p.deleted && gsmNumber(p.qty) > 0).forEach(p => {
+  if(returns)for(const p of purchases)if(!p.deleted&&p.operationKind==='return'&&!returnPurchase(p))issue('return-quantity','error',{purchaseId:p.id,vehicleId:p.vehicleId,date:p.date,message:'У возврата должны быть указаны отрицательные литры исходной выписки'});
+  purchases.filter(p => !p.deleted && (gsmNumber(p.qty) > 0||returnPurchase(p))).forEach(p => {
     if (!gsmValidDate(p.date)) {
       issue('date', 'error', { purchaseId: p.id, vehicleId: p.vehicleId, message: 'Некорректная дата покупки' });
       return;
@@ -327,8 +330,9 @@ function gsmBuildLedger(db, options) {
     const grade = gsmGrade(rawGrade, rawGrade ? 'Не указано' : v ? gsmVehicleGrade(v) : 'Не указано');
     if (grade === 'Не указано' || !rawGrade) issue('unknown-grade', 'error', { purchaseId: p.id, vehicleId: p.vehicleId, date: p.date, org: p.sourceOrg || owner.org,
       message: 'Проверьте марку топлива покупки: ' + (rawGrade || 'не указана') });
-    let linked = records.find(r => r.id === p.recordId && r.vehicleId === p.vehicleId && r.date === p.date);
-    if (!linked && v) {
+    const returning=returnPurchase(p);
+    let linked = returning?null:records.find(r => r.id === p.recordId && r.vehicleId === p.vehicleId && r.date === p.date);
+    if (!returning&&!linked && v) {
       const candidates = records.filter(r => r.vehicleId === p.vehicleId && r.date === p.date && gsmGrade(r.fuelGrade, gsmVehicleGrade(v)) === grade);
       if (candidates.length === 1) linked = candidates[0];
       else candidates.forEach(r => ambiguous.add(r.id));
@@ -336,10 +340,12 @@ function gsmBuildLedger(db, options) {
     const receipt = { id: p.id, purchaseId: p.id, vehicleId: idOr(p.vehicleId), date: p.date || '', time: p.time || '',
       qty: gsmNumber(p.qty), sum: fqValue(p.sum), grade, cardNo: p.cardNo || '', org: p.sourceOrg || owner.org || (p.manual && v ? gsmVehicleOrgAt(v, p.date) : ''),
       provider: p.sourceProvider || owner.provider || '', cardVehicleId: idOr(p.cardVehicleId,owner.vehicleId),
-      recordId: corrected?(linked?linked.id:''):linked && linked.id || '', manual: !!p.manual, product: p.product || grade };
+      recordId: corrected?(linked?linked.id:''):linked && linked.id || '', manual: !!p.manual, product: p.product || grade,...(returning?{operationKind:'return'}:{}) };
+    if(returning&&p.recordId!==null&&p.recordId!==undefined&&p.recordId!=='')issue('return-journal-link','error',{purchaseId:p.id,vehicleId:p.vehicleId,date:p.date,message:'Возврат выписки учитывается отдельно от выдачи в журнале; проверьте старую связь'});
+    if(returning&&fqValue(p.sum)>0)issue('return-positive-sum','warning',{purchaseId:p.id,vehicleId:p.vehicleId,date:p.date,message:'У возврата указана положительная сумма. Знак исходника сохранён; проверьте денежную сверку'});
     addReceipt(receipt);
     if (linked) byRecord.get(linked.id).push(receipt);
-    else if (v) issue('journal-missing', 'error', { vehicleId: v.id, purchaseId: p.id, date: p.date, org: receipt.org, grade,
+    else if (v&&!returning) issue('journal-missing', 'error', { vehicleId: v.id, purchaseId: p.id, date: p.date, org: receipt.org, grade,
       qty: receipt.qty, message: 'Покупка не связана со строкой журнала пробега' });
   });
 
@@ -452,6 +458,21 @@ function gsmBuildLedger(db, options) {
     vr.forEach(r => events.push({ date: r.date, order: 1, time: '', record: r }));
     events.sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.order - b.order || a.time.localeCompare(b.time));
 
+    const withdrawReturn = source => {
+      // A supplier return is an outgoing receipt, not engine consumption. Fuel
+      // may be mixed, but another organization's or grade's stock is never used.
+      // Prefer the named provider; opening stock has no proved provider at all.
+      let left=minus(0,source.qty);
+      changeStock(source.grade,source.qty);
+      const candidates=lots.filter(lot=>lot.qty>0&&gsmOrgKey(lot.org)===gsmOrgKey(source.org)&&lot.grade===source.grade);
+      if(source.provider)candidates.sort((a,b)=>Number(gsmOrgKey(b.provider)===gsmOrgKey(source.provider))-Number(gsmOrgKey(a.provider)===gsmOrgKey(source.provider)));
+      for(const lot of candidates){if(left<=LOT_EPS)break;const qty=Math.min(lot.qty,left);lot.qty=minus(lot.qty,qty);left=minus(left,qty);}
+      if(left>LOT_EPS){
+        lots.push({org:source.org,grade:source.grade,qty:minus(0,left),provider:source.provider||'',origin:'return-shortage',purchaseId:source.purchaseId,date:source.date});
+        issue('return-source-shortage','error',{vehicleId:v.id,date:source.date,purchaseId:source.purchaseId,org:source.org,grade:source.grade,qty:left,message:'Для возврата не хватает '+decimal().parse(left)+' л '+source.grade+' в запасе этой организации. Проверьте исходную заправку и входящий остаток'});
+      }
+    };
+
     const consume = (qty, grade, date, recordId) => {
       let left = qty;
       const used = [];
@@ -475,12 +496,12 @@ function gsmBuildLedger(db, options) {
       if (!started && event.date >= from) { snapshot('start'); started = true; }
       const included = gsmInPeriod(event.date, from, to);
       if (event.receipt) {
-        const p = event.receipt; supply(p, p.qty, p);
+        const p = event.receipt,returning=returns&&p.operationKind==='return';if(returning)withdrawReturn(p);else supply(p, p.qty, p);
         if (included) {
           const row = rowFor(v.id, p.org, p.grade); row.issued=plus(row.issued,p.qty); row.active = true;
           row.providers[p.provider || 'Поставщик не указан'] = plus((row.providers[p.provider || 'Поставщик не указан'] || 0),p.qty);
           if (p.cardNo) row.cards.add(p.cardNo);
-          movements.push(Object.assign({ kind: 'receipt' }, p));
+          movements.push(Object.assign({ kind: returning?'return':'receipt' }, p));
         }
         continue;
       }
@@ -626,6 +647,11 @@ function recordBalances(db, vehicleId, options) {
       return true;
     })
     .sort((a, b) => cmpDateAsc(a.date, b.date));
+  // Journal receipts remain the actual entered facts. Separately dated returns
+  // reduce the balance once, without creating a negative journal issue or
+  // changing any historical row's kilometres, fuel issued or consumption.
+  const returnRows=returns?(db.fuelPurchases||[]).filter(row=>row.vehicleId===vehicleId&&live(row)&&returnPurchase(row)&&gsmValidDate(row.date)&&
+    (boundary.mode!=='explicit'||row.date>=boundary.from)&&(!dateTo||row.date<=dateTo)).sort((a,b)=>cmpDateAsc(a.date,b.date)):[];
   const opening = boundary.mode==='explicit'?boundary.opening:fqValue(vehicle && vehicle.fuelBalance) || 0;
   const defaultFamily = fqFuelFamily(vehicleFuelGrade(vehicle));
   const sources = boundary.mode==='explicit'?boundary.sources:vehicle && vehicle.fuelBalanceSources;
@@ -652,8 +678,9 @@ function recordBalances(db, vehicleId, options) {
   }
   const { keyFor, lastOnDate, measurements } = fqMeasurementPlan(recs, vehicle);
   const initialKnown=!verified||openingEvidence(db,vehicleId,{family:defaultFamily}).status==='known',confirmedFamilies=new Set();
-  const balMap = {},balanceEntries=[],unknownFamilies=new Set(verified&&!initialKnown?[defaultFamily]:[]);
+  const balMap = {},balanceEntries=[],unknownFamilies=new Set(verified&&!initialKnown?[defaultFamily]:[]);let returnIndex=0;
   recs.forEach(r => {
+    while(returnIndex<returnRows.length&&returnRows[returnIndex].date<=r.date){const returned=returnRows[returnIndex++],family=fqRecordFuelFamily({fuelGrade:returned.grade||returned.product},vehicle);familyBalances.set(family,journalAdd(familyBalances.get(family)||0,sourceNumber(returned.qty)));}
     // Остаток считается по фактическому расходу; если не введён — по норме
     const fuel = legacyRead?fuelRecord(r,vehicle,journalAdd):fqRecord(r, vehicle);
     const family = fqRecordFuelFamily(r, vehicle);
@@ -708,7 +735,7 @@ function recordBalances(db, vehicleId, options) {
   }
   // Posted acts keep all historical algorithms. Journal presentation evolves
   // separately, without rewriting an act's source contract or version.
-  const legacy=makeEngine(1),decimalVersion=makeEngine(2),temporalVersion=makeEngine(3),correctedVersion=makeEngine(4),allocatedVersion=makeEngine(5),current=makeEngine(6,true),live=makeEngine(6,true,true);
-  function forVersion(version){if(version!==1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6)throw Object.assign(Error('Неизвестная версия расчёта ГСМ'),{code:'CALCULATION_VERSION'});return version===1?legacy:version===2?decimalVersion:version===3?temporalVersion:version===4?correctedVersion:version===5?allocatedVersion:current;}
+  const legacy=makeEngine(1),decimalVersion=makeEngine(2),temporalVersion=makeEngine(3),correctedVersion=makeEngine(4),allocatedVersion=makeEngine(5),verifiedVersion=makeEngine(6,true),current=makeEngine(7,true),live=makeEngine(7,true,true);
+  function forVersion(version){if(version!==1&&version!==2&&version!==3&&version!==4&&version!==5&&version!==6&&version!==7)throw Object.assign(Error('Неизвестная версия расчёта ГСМ'),{code:'CALCULATION_VERSION'});return version===1?legacy:version===2?decimalVersion:version===3?temporalVersion:version===4?correctedVersion:version===5?allocatedVersion:version===6?verifiedVersion:current;}
   return Object.freeze({...current,recordBalances:live.recordBalances,recordBalanceMap,recordBalanceAt,forVersion});
 });

@@ -1,0 +1,163 @@
+{
+  "capturedFrom": "f4c180424361437344a1a7c207b2ae2bd0b5fae5",
+  "samples": [
+    {
+      "label": "positive unchanged",
+      "database": {
+        "vehicles": [
+          {
+            "id": 0,
+            "plate": "Synthetic",
+            "org": "A",
+            "fuel": "gasoline",
+            "fuelGrade": "АИ-95",
+            "fuelBalance": 0,
+            "norm": 10
+          }
+        ],
+        "records": [
+          {
+            "id": "r",
+            "vehicleId": 0,
+            "date": "2026-09-10",
+            "fuelGrade": "АИ-95",
+            "fuelIssued": 50,
+            "fuelActual": 10,
+            "km": 100
+          }
+        ],
+        "fuelPurchases": [
+          {
+            "id": "purchase",
+            "vehicleId": 0,
+            "recordId": "r",
+            "date": "2026-09-10",
+            "time": "12:00",
+            "grade": "АИ-95",
+            "product": "АИ-95",
+            "qty": 50,
+            "sum": 3500,
+            "price": 70,
+            "sourceOrg": "A",
+            "sourceProvider": "Synthetic provider"
+          }
+        ],
+        "fuelCards": [],
+        "monthlyFuel": [],
+        "fuelWriteoffs": []
+      },
+      "versions": [
+        {
+          "version": 1,
+          "sha256": "329ccceed0c82089341f2d9cf314350eecabdcdbc51e33145b02763d36082743"
+        },
+        {
+          "version": 2,
+          "sha256": "343f6dc04634e9cc5a6c2791565e9737f1fa0d7b516488a98c8590572bbf408f"
+        },
+        {
+          "version": 3,
+          "sha256": "a0400a7c0008edeba8291001bf2ff0424c84af701b93fe154376aee4ba65f0e6"
+        },
+        {
+          "version": 4,
+          "sha256": "2f0e15c94aebb5ab7928cf38530f63ae63eb31c8e8e836a3035a6d112ae66ee2"
+        },
+        {
+          "version": 5,
+          "sha256": "d33a87133186be21d6099a9a92364afe7df53912065747bef080b0d304a5b4fb"
+        },
+        {
+          "version": 6,
+          "sha256": "ba90bb514552ebbaaae130b751f1e0b3b94476edf68568db859aca40b40dbf9a"
+        }
+      ]
+    },
+    {
+      "label": "formerly rejected signed return",
+      "database": {
+        "vehicles": [
+          {
+            "id": 0,
+            "plate": "Synthetic",
+            "org": "A",
+            "fuel": "gasoline",
+            "fuelGrade": "АИ-95",
+            "fuelBalance": 0,
+            "norm": 10
+          }
+        ],
+        "records": [
+          {
+            "id": "r",
+            "vehicleId": 0,
+            "date": "2026-09-10",
+            "fuelGrade": "АИ-95",
+            "fuelIssued": 50,
+            "fuelActual": 10,
+            "km": 100
+          }
+        ],
+        "fuelPurchases": [
+          {
+            "id": "purchase",
+            "vehicleId": 0,
+            "recordId": "r",
+            "date": "2026-09-10",
+            "time": "12:00",
+            "grade": "АИ-95",
+            "product": "АИ-95",
+            "qty": 50,
+            "sum": 3500,
+            "price": 70,
+            "sourceOrg": "A",
+            "sourceProvider": "Synthetic provider"
+          },
+          {
+            "id": "return",
+            "vehicleId": 0,
+            "date": "2026-09-11",
+            "time": "12:00",
+            "grade": "АИ-95",
+            "product": "АИ-95",
+            "qty": -10,
+            "sum": -700,
+            "price": 70,
+            "operationKind": "return",
+            "sourceOrg": "A",
+            "sourceProvider": "Synthetic provider"
+          }
+        ],
+        "fuelCards": [],
+        "monthlyFuel": [],
+        "fuelWriteoffs": []
+      },
+      "versions": [
+        {
+          "version": 1,
+          "sha256": "9815d36f2a1ad90b0f6707ba99f33d9c3ca13741611697c0a790b51c6caa99d1"
+        },
+        {
+          "version": 2,
+          "sha256": "7db75398fdc5d1312dddfa891e751c0211f9a1c886e64c9cacee1ff0a53900a3"
+        },
+        {
+          "version": 3,
+          "sha256": "31228d6d9c6f68ac0c6ebad7ac2939404513985fcdf50e3727c9553bfa90fd47"
+        },
+        {
+          "version": 4,
+          "sha256": "79c94cd1894ec3b79c799d132c393c9bb1e6d6f23e4901c7798fdbc2bfa8a40f"
+        },
+        {
+          "version": 5,
+          "sha256": "7b90721e147b1f7e020599f615fbdbe9b65b632be85eeea1b5ce39e2805086ac"
+        },
+        {
+          "version": 6,
+          "sha256": "0fc380a507acd5b7eca34818c75143ebbc50802f4f25699aa5a5b9951d5735bd"
+        }
+      ]
+    }
+  ]
+}

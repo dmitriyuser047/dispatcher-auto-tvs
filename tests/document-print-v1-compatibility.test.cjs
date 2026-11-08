@@ -32,9 +32,9 @@ test('normalization permits only the known calculation admission extension; othe
  const forged=structuredClone(snapshot);forged.template.digest='sha256:'+'a'.repeat(64);delete forged.snapshotFingerprint;forged.snapshotFingerprint='sha256:'+writeoff.sha256(kernel.stableSerialize(forged));assert.throws(()=>print.verify(forged),{code:'PRINT_TEMPLATE_VERSION'});
 });
 
-for(const version of [5,6])test('v'+version+' act metadata remains explicit under the unchanged rendering contract and unknown calculation seven still rejects',()=>{
+for(const version of [5,6])test('v'+version+' act metadata remains explicit under the unchanged rendering contract and unknown calculation eight still rejects',()=>{
  const api=writeoff.forVersion(version),db=database(),scope={month:'2026-09',date:'2026-09-30'},prepared=api.prepare(db,scope),document=api.post(db,scope,{id:'act-v'+version,number:'Synthetic-'+version,postedAt:ctx.now,postedBy:actor,expectedFingerprint:prepared.sourceFingerprint});db.fuelWriteoffs=[document];const request={mode:'document',source:{section:'fuelWriteoffs',id:document.id},revision:'exact',templateId:'fuelWriteoff',templateVersion:1},snapshot=print.capture(db,request,ctx);assert.equal(snapshot.calculationVersions.calculationVersion,version);assert.equal(snapshot.sourceRecord.calculationVersion,version);assert.equal(snapshot.template.digest,'sha256:'+templates.fuelWriteoff);assert.equal(JSON.stringify(print.render(snapshot)),JSON.stringify(old.render(snapshot)));
- db.fuelWriteoffs=[{...document,calculationVersion:7}];const unsupported=print.prepare(db,request,ctx);assert.equal(unsupported.canCapture,false);assert.ok(unsupported.blockers.some(issue=>issue.code==='PRINT_CALCULATION_VERSION'));
+ db.fuelWriteoffs=[{...document,calculationVersion:8}];const unsupported=print.prepare(db,request,ctx);assert.equal(unsupported.canCapture,false);assert.ok(unsupported.blockers.some(issue=>issue.code==='PRINT_CALCULATION_VERSION'));
 });
 
 for(const format of ['json','sqlite'])test(format+' existing archive capsules with old v1 seals open unchanged through production storage and archive readers',async t=>{

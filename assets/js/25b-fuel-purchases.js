@@ -33,7 +33,7 @@ function fpNum(v, dec) {
   return precisionFormat(v,{...(dec==null?{}:{scale:dec,minimumScale:dec})});
 }
 function fpList() { return data.fuelPurchases || (data.fuelPurchases = []); }
-function fpLive() { return fpList().filter(p => !p.deleted); }
+function fpLive() { return fpList().filter(p => !p.deleted&&!p.cancelled&&p.status!=='cancelled'); }
 function fpById(id) { return fpList().find(p => p.id === id); }
 function fpByKey(key) { return key ? fpList().find(p => p.importKey === key) : null; }
 // АЗС и комментарий без повторов: в офисной выписке номер АЗС уже вписан
@@ -73,6 +73,7 @@ function fpRecordIsEmpty(rec) {
 
 // sign = +1 — добавить покупку в журнал, −1 — снять
 function fpLinkedRecord(p) {
+  if(p?.operationKind==='return'&&fqValue(p.qty)<0)return null;
   const records = data.records || [];
   const direct = records.find(r => r.id === p.recordId && r.vehicleId === p.vehicleId && r.date === p.date);
   if (direct) return direct;
@@ -81,6 +82,7 @@ function fpLinkedRecord(p) {
   return candidates.length === 1 ? candidates[0] : null;
 }
 function fpApply(p, sign) {
+  if(p?.operationKind==='return'&&fqValue(p.qty)<0){p.recordId=null;return null;}
   if (!p || p.vehicleId==null || p.vehicleId==='' || p.deleted) { if (sign < 0 && p) p.recordId = null; return null; }
   if (sign > 0) {
     let rec = p.recordId!=null&&p.recordId!=='' ? (data.records || []).find(r => r.id === p.recordId) : null;
@@ -445,7 +447,7 @@ function fpRenderVehicle() {
       <td>${fpEsc(p.time || '')}</td>
       <td><span class="fuel-tag ${fuelTypeFromGrade(p.grade)}" style="font-size:10px;padding:1px 6px">${fpEsc(p.grade || '—')}</span></td>
       <td style="max-width:150px;white-space:normal">${fpEsc(p.product || '—')}</td>
-      <td style="text-align:right;font-weight:700">${fpNum(p.qty)}</td>
+      <td style="text-align:right;font-weight:700">${fpNum(p.qty)}${p.operationKind==='return'&&fqValue(p.qty)<0?' <small>Возврат</small>':''}</td>
       <td style="text-align:right">${p.price != null ? fpNum(p.price) : '—'}</td>
       <td style="text-align:right">${p.sum != null ? fpNum(p.sum) : '—'}${p.restored ? '<div style="font-size:10px;color:var(--text3)" title="Восстановлено из журнала, точная сумма подтянется при повторной загрузке выписки">≈ по журналу</div>' : ''}</td>
       <td>${fpEsc(p.cardNo || '—')}</td>
@@ -526,7 +528,7 @@ function fpUnmatchedHtml(list) {
       <tbody>${list.map(p => `<tr>
         <td>${fmtDate(p.date)} ${fpEsc(p.time || '')}</td>
         <td>${fpEsc(p.product || p.grade || '—')}</td>
-        <td style="text-align:right;font-weight:700">${fpNum(p.qty)}</td>
+        <td style="text-align:right;font-weight:700">${fpNum(p.qty)}${p.operationKind==='return'&&fqValue(p.qty)<0?' <small>Возврат</small>':''}</td>
         <td style="text-align:right">${p.sum != null ? fpNum(p.sum) : '—'}</td>
         <td>${fpEsc(p.cardNo || '—')}</td>
         <td>${fpEsc(p.vehicleText || '—')}</td>
@@ -600,6 +602,10 @@ async function fpSaveAndRender() {
 function fpEdit(id) {
   const p = fpById(id);
   if (!p || !fuelEditAllowed(p.date)) return;
+  if(p.operationKind==='return'&&fqValue(p.qty)<0){
+    const source=typeof reviewedImportPurchaseSource==='function'?reviewedImportPurchaseSource(p):null;
+    openGenericModal('Возврат заправки · '+fmtDate(p.date),'<p><strong>'+fpNum(p.qty,3)+' л</strong> · '+fpEsc(p.grade||p.product||'')+'</p><p>'+fpEsc(fpVehicleTitle((data.vehicles||[]).find(vehicle=>vehicle.id===p.vehicleId)))+'</p><p>Возврат уменьшает полученное топливо и остаток. Пробег, расход и журнал не изменяются.</p><p>Сумма исходника: '+(p.sum==null?'Не указана':fpNum(p.sum)+' ₽')+'</p>'+(source?'<button type="button" class="btn btn-primary" onclick="closeModal(\'genericModal\');reviewedImportOpenSource('+fpJs(source.sourceId)+')">Открыть исходную выписку</button>':'<p>Чтобы проверить получателя или исходные значения, загрузите оригинал выписки.</p>'),620);return;
+  }
   fpEditContext = { id, fingerprint: fpFuelFormFingerprint() };
   const grades = FP_GRADES.includes(p.grade) ? FP_GRADES : FP_GRADES.concat([p.grade]);
   openGenericModal('Заправка ' + fmtDate(p.date), `
@@ -1241,9 +1247,9 @@ function fpMonthlyHtml() {
     const cardRows = mfRecs.length ? mfRecs : [null];
     const totalMfL = mfRecs.reduce((s, m) => s + (m.liters || 0), 0);
     const totalMfS = mfRecs.reduce((s, m) => s + (m.sum || 0), 0);
-    const received = totalMfL > 0 ? totalMfL : stmtLitersTotal || issFromRecs;
+    const received = mfRecs.some(item=>fqValue(item.liters)!==null) ? totalMfL : (vPurchases.length?stmtLitersTotal:issFromRecs);
     const eco = normL==null?null:datedNorm?DecimalCore.toNumberExact(DecimalCore.sub(received,normL)):received - normL;
-    tKm += km; if(normL!=null)tNorm += normL; tIss += stmtLitersTotal || issFromRecs;
+    tKm += km; if(normL!=null)tNorm += normL; tIss += (vPurchases.length?stmtLitersTotal:issFromRecs);
     tMf += totalMfL; tMfSum += totalMfS;
 
     const bg = i % 2 === 0 ? '' : 'background:var(--bg2)';
