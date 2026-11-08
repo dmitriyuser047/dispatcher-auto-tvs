@@ -73,14 +73,14 @@ function renderDocument({url='/objects', csrf='', user=null, principal=user, dem
   const template = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   let sectionAssets='';
   const registryAssets='<link rel="stylesheet" href="/web/public/registries.css"><script src="/assets/core/registry-import.js"></script><script src="/assets/core/registry-counterparties.js"></script><script src="/web/public/registries.js"></script>';
-  if(['registries','finances'].includes(route.section)){
+  if(['registries','finances','logistics'].includes(route.section)){
     const articles=JSON.parse(fs.readFileSync(path.join(ROOT,'ReestrBuilder/statyi.json'),'utf8')).map(({code,name,label,vid})=>({code,name,label,vid}));
     const json=JSON.stringify(articles).replace(/[<>&]/g,char=>({'<':'\\u003c','>':'\\u003e','&':'\\u0026'}[char]));
     sectionAssets='<script type="application/json" id="tvs-bdds-articles">'+json+'</script><script src="/web/public/bdds.js"></script>';
   }
   if(route.section==='registries')sectionAssets+=registryAssets;
   else if(route.section==='finances')sectionAssets+='<link rel="stylesheet" href="/web/public/finance-registry.css"><script src="/assets/core/registry-import.js"></script><script src="/assets/core/registry-statistics.js"></script><script src="/web/public/finance-registry.js"></script>';
-  else if(route.section==='logistics')sectionAssets='<script src="/web/public/logistics.js"></script>';
+  else if(route.section==='logistics')sectionAssets+=registryAssets+'<script src="/web/public/logistics.js"></script>';
   else if(route.section==='contragents')sectionAssets='<script src="/assets/core/registry-import.js"></script><script src="/assets/core/registry-counterparties.js"></script><script src="/web/public/registry-counterparties.js"></script>';
   else if(route.section==='drivers')sectionAssets='<script src="/assets/core/registry-import.js"></script><script src="/web/public/driver-invoices.js"></script>';
   else if(['vehicles','repairs','toSchedule'].includes(route.section)||route.view==='generator')sectionAssets='<link rel="stylesheet" href="/web/public/vehicle-invoices.css"><script src="/assets/core/registry-import.js"></script><script src="/web/public/vehicle-invoices.js"></script>';

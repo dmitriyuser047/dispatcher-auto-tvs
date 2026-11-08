@@ -20,7 +20,7 @@
  const legacyFinance=renderFinancesSection;
  async function render(section){const database=data,identity=syncSessionStamp(),host=main();if(!host)return;host.innerHTML='<div class="welcome"><p role="status">Открываем раздел…</p></div>';
   try{await ensure();if(activeSection!==section||database!==data||identity!==syncSessionStamp())return;
-   if(section==='registries'){if(!readable('savedReestrs'))throw Error('Нет доступа к реестрам.');web.registries.render();}
+   if(section==='registries'){if(!readable('savedReestrs'))throw Error('Нет доступа к реестрам.');web.registries.render('registries');}
    else if(section==='logistics')web.logistics.render();
    else if(web.params().get('view')==='ledger'){legacyFinance();web.financeRegistry.mountLegacyTabs();}
    else web.financeRegistry.render();
@@ -28,10 +28,10 @@
  }
  renderFinancesSection=function(){return render('finances');};
  const originalSwitch=switchSection;
- switchSection=function(section,...args){if(!routing&&activeSection==='registries'&&section!=='registries'&&!canLeave())return;if(!routing)routeSearch='';return originalSwitch.call(this,section,...args);};
+ switchSection=function(section,...args){if(!routing&&['registries','logistics'].includes(activeSection)&&section!==activeSection&&!canLeave())return;if(!routing)routeSearch='';return originalSwitch.call(this,section,...args);};
  async function navigate(input){const url=new URL(input,'https://dispatcher.invalid'),section=routes[url.pathname];if(!section)return false;
   if(document.querySelector('.modal-overlay.open')){showToast('Завершите или закройте открытую форму.');return true;}if(!canLeave())return true;
-  await ensure();routeSearch=url.search;if(section==='registries')web.registries.resetNavigation?.();routing=true;try{originalSwitch(section);}finally{routing=false;}
+  await ensure();routeSearch=url.search;if(['registries','logistics'].includes(section))web.registries.resetNavigation?.();routing=true;try{originalSwitch(section);}finally{routing=false;}
   if(section==='vehicles'&&url.pathname==='/transport/vehicle'){let id;try{id=JSON.parse(url.searchParams.get('asset'));}catch{return true;}selectVehicle(id);const view=url.searchParams.get('view');if(['journal','repairs','to'].includes(view))openVehicleJournal(view);}
   else if(section==='generators'){try{selectGenerator(JSON.parse(url.searchParams.get('asset')));}catch{}}
   else if(section==='drivers'&&url.searchParams.has('person')){try{personnelOpenPerson(JSON.parse(url.searchParams.get('person')));}catch{}}
@@ -39,7 +39,7 @@
   return true;
  }
  document.addEventListener('click',event=>{const link=event.target.closest?.('a[href]'),href=link?.getAttribute('href');if(event.defaultPrevented||!href?.startsWith('/')||href.startsWith('//')||!routes[new URL(href,'https://dispatcher.invalid').pathname]||link.hasAttribute('download'))return;event.preventDefault();event.stopImmediatePropagation();void navigate(href).catch(error=>showToast(error.message));},true);
- document.addEventListener('submit',event=>{const action=event.target.getAttribute?.('action');if(!['/registries','/finance'].includes(action))return;event.preventDefault();void navigate(action+'?'+new URLSearchParams(new FormData(event.target))).catch(error=>showToast(error.message));},true);
+ document.addEventListener('submit',event=>{const action=event.target.getAttribute?.('action');if(!['/registries','/logistics','/finance'].includes(action))return;event.preventDefault();void navigate(action+'?'+new URLSearchParams(new FormData(event.target))).catch(error=>showToast(error.message));},true);
  const vehicleRender=renderDetail;renderDetail=function(vehicle,...args){const result=vehicleRender.call(this,vehicle,...args);void ensure().then(()=>{if(activeSection==='vehicles'&&selectedVehicleId===vehicle.id)web.vehicleInvoices.mount(vehicle.id);}).catch(()=>{});return result;};
  const generatorRender=renderGenDetail;renderGenDetail=function(generator,...args){const result=generatorRender.call(this,generator,...args);void ensure().then(()=>{if(activeSection==='generators'&&selectedGeneratorId===generator.id)web.vehicleInvoices.mountGenerator(generator.id);}).catch(()=>{});return result;};
  const personRender=personnelRenderDetail;personnelRenderDetail=function(person,...args){const result=personRender.call(this,person,...args);void ensure().then(()=>{if(activeSection==='drivers'&&personnelView('driver').selected===person.id)web.driverInvoices.mount(person.id);}).catch(()=>{});return result;};

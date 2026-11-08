@@ -63,8 +63,8 @@ test('local Electron exposes its real admin grants, imports a registry through n
   const sheet = workbook.addWorksheet('Реестр');
   sheet.addRows([
     ['Реестр 88 от 01.11.2026'],
-    ['№', 'Сумма, руб.', 'Контрагент', 'Назначение платежа', 'ОСНОВАНИЕ'],
-    [1, 100.1, 'Synthetic registry supplier', 'Synthetic service for SYNTHETIC-LOCAL-0', 'Счёт №LOCAL-001 от 01.11.2026'],
+    ['№', 'Сумма, руб.', 'Контрагент', 'Назначение платежа', 'ОСНОВАНИЕ', 'Финконтроль'],
+    [1, 100.1, 'Synthetic registry supplier', 'Synthetic service for SYNTHETIC-LOCAL-0', 'Счёт №LOCAL-001 от 01.11.2026', 'СТАТЬЯ 21.04.16, ТО и ремонт ТС'],
     ['', 100.1, 'ВСЕГО по организации'],
   ]);
   await workbook.xlsx.writeFile(filename);
@@ -133,6 +133,10 @@ test('local Electron exposes its real admin grants, imports a registry through n
   await editor.locator('[name=number]').fill('SYNTHETIC-LOCAL-88');
   await editor.locator('[name=date]').fill('2026-11-01');
   await editor.locator('[name=reason]').fill('Synthetic reviewed local registry import');
+  await editor.locator('[name=workspace]').selectOption('logistics');
+  await editor.locator('[data-allocation-expense]').selectOption('fine');
+  assert.equal(await editor.locator('[data-allocation-service]').count(), 0);
+  if(process.env.TVS_REGISTRY_QA_DIR){fs.mkdirSync(process.env.TVS_REGISTRY_QA_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.TVS_REGISTRY_QA_DIR,'expense-workspace-preview.png'),fullPage:true});}
   await editor.locator('[name=confirmed]').check();
   assert.equal(await editor.locator('button[type=submit]').isEnabled(), true);
   await editor.locator('button[type=submit]').click();
@@ -145,6 +149,17 @@ test('local Electron exposes its real admin grants, imports a registry through n
   assert.equal(entry.source.sha256, sourceHash);
   assert.equal(entry.totalSum, 100.1);
   assert.equal(entry.rows[0].vehicleId, 0);
+  assert.equal(entry.workspace, 'logistics');
+  assert.equal(entry.rows[0].registryExpenseType, 'fine');
+  assert.match(entry.rows[0].category, /^21\.04\.16/);
+  assert.equal(entry.rows[0].financeControl, 'СТАТЬЯ 21.04.16, ТО и ремонт ТС');
+  assert.equal(Object.hasOwn(entry.rows[0], 'serviceRef'), false);
+  assert.deepEqual(saved.data.repairs, before.data.repairs);
+  assert.doesNotMatch(await page.locator('.registry-page').innerText(), /SYNTHETIC-LOCAL-88/);
+  await page.evaluate(() => switchSection('logistics'));
+  await page.locator('[data-registry-pick]').waitFor();
+  assert.match(await page.locator('.registry-page').innerText(), /SYNTHETIC-LOCAL-88/);
+  assert.match(await page.locator('.registry-page a[href*=register]').first().getAttribute('href'), /^\/logistics\?/);
   assert.equal(entry.rows[0].invoiceNo, 'LOCAL-001');
   assert.equal(saved.data.contragents.length, 1);
   assert.equal(saved.data.contragents[0].name, 'Synthetic registry supplier');
@@ -157,6 +172,9 @@ test('local Electron exposes its real admin grants, imports a registry through n
   await page.evaluate(() => switchSection('registries'));
   await page.locator('[data-registry-pick]').waitFor();
   assert.equal(await page.locator('[data-registry-pick]').isEnabled(), true);
+  assert.doesNotMatch(await page.locator('.registry-page').innerText(), /SYNTHETIC-LOCAL-88/);
+  await page.evaluate(() => switchSection('logistics'));
+  await page.locator('[data-registry-pick]').waitFor();
   assert.match(await page.locator('.registry-page').innerText(), /SYNTHETIC-LOCAL-88/);
   assert.equal(await page.evaluate(() => data.savedReestrs[0].rows[0].vehicleId), 0);
   assert.deepEqual((await observeDatabase(() => storage.readSnapshot(dataDir))).data.savedReestrs, saved.data.savedReestrs);

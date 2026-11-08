@@ -289,7 +289,7 @@
     const readable=platformSessionContext().readable;
     if(readable&&!readable.includes('*')&&!readable.includes(section)){showToast('Раздел недоступен для вашей роли.');return;}
     const row=(data[section]||[]).find(row=>(row.id??row.month??'')===id);
-    if(section==='savedReestrs'&&row?.kind==='payment-registry'&&row.registryVersion===1){navigate('/registries?register='+typed(id));return;}
+    if(section==='savedReestrs'&&row?.kind==='payment-registry'&&row.registryVersion===1){navigate((row.workspace==='logistics'?'/logistics':'/registries')+'?register='+typed(id));return;}
     if(section==='vehicles'||section==='records'){const asset=section==='records'?row?.vehicleId:row?.id;navigate(asset!=null?vehicleUrl(asset,section==='records'?'journal':''):'/transport');return;}
     if(section==='generators'||section==='genRecords'){const asset=section==='genRecords'?row?.generatorId:row?.id;navigate(asset!=null?generatorUrl(asset):'/objects');return;}
     if(section==='tanks'||section==='tankIncomes'){const asset=section==='tankIncomes'?row?.tankId:row?.id;navigate('/fuel/tanks'+(asset!=null?'?asset='+typed(asset):''));return;}

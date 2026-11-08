@@ -51,8 +51,8 @@ test('all vehicle invoices appear inside Repairs and TO with no card-side bindin
   const db=fixture();db.repairs=[];db.vehicleTo=[];
   const context=vm.createContext({window:{tvsWeb:{}},RegistryImport:core,htmlEsc:escape,data:db,_loadWriteBlocked:false,_sync:{access:{readable:['savedReestrs'],writable:['savedReestrs']},platform:{negotiation:{writeCompatible:true}}},document:{addEventListener(){}}});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/public/vehicle-invoices.js'),'utf8'),context);const view=context.window.tvsWeb.vehicleInvoices;
-  const html=view.vehicleHtml(0);assert.match(html,/Ремонты и ТО/);assert.doesNotMatch(html,/Привязать счёт|К ремонту|data-service-invoice/);assert.match(html,/50,00/);assert.match(html,/invoice=synthetic-register/);assert.doesNotMatch(html,/Ремонт \/ ТО не выбран/);assert.doesNotMatch(html,/<img/);
-  db.savedReestrs=[];assert.match(view.vehicleHtml(0),/Ремонты и ТО/);assert.match(view.vehicleHtml(0),/после распределения/);
+  const html=view.vehicleHtml(0);assert.match(html,/Счета и расходы по автомобилю/);assert.doesNotMatch(html,/Привязать счёт|К ремонту|data-service-invoice/);assert.match(html,/50,00/);assert.match(html,/invoice=synthetic-register/);assert.doesNotMatch(html,/Ремонт \/ ТО не выбран/);assert.doesNotMatch(html,/<img/);
+  db.savedReestrs=[];assert.match(view.vehicleHtml(0),/Счета и расходы по автомобилю/);assert.match(view.vehicleHtml(0),/после распределения/);
   context._sync.access.writable=[];assert.doesNotMatch(view.vehicleHtml(0),/Привязать счёт/);context._sync.access.readable=[];assert.doesNotMatch(view.vehicleHtml(0),/Счета ·|<table/);
 });
 test('the shared maintenance schedule includes invoice actions on vehicle rows and keeps generator columns aligned',()=>{
@@ -72,5 +72,5 @@ test('distributed DES invoices display without creating or linking a maintenance
 });
 test('the car card mounts all invoices inside the Repairs and TO block and replaces separate service tiles',()=>{
   let panel=null,removed=0,updates=0;const grid={append:node=>panel=node,classList:{add(){}},querySelector:()=>({remove:()=>removed++})},main={querySelector:selector=>selector==='[data-vehicle-invoices]'?panel:selector==='.vd-journals-grid'?grid:null},context=vm.createContext({window:{tvsWeb:{}},RegistryImport:core,htmlEsc:escape,data:fixture(),_sync:{access:{readable:['savedReestrs']}},document:{getElementById:()=>main,createElement:()=>({setAttribute(){},set innerHTML(value){this.html=value;updates++;},get innerHTML(){return this.html;}})}});
-  vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/public/vehicle-invoices.js'),'utf8'),context);context.window.tvsWeb.vehicleInvoices.mount(0);assert.match(panel.innerHTML,/Ремонты и ТО/);assert.match(panel.innerHTML,/50,00/);assert.equal(removed,2);context.window.tvsWeb.vehicleInvoices.mount(0);assert.equal(updates,1);
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/public/vehicle-invoices.js'),'utf8'),context);context.window.tvsWeb.vehicleInvoices.mount(0);assert.match(panel.innerHTML,/Счета и расходы по автомобилю/);assert.match(panel.innerHTML,/50,00/);assert.equal(removed,2);context.window.tvsWeb.vehicleInvoices.mount(0);assert.equal(updates,1);
 });

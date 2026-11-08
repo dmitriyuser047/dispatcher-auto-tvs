@@ -57,10 +57,10 @@ test('imported registers stay out of the invoice list and financial row indexes 
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../assets/js/20-to-schedule.js'),'utf8'),context);context.reestrRenderSavedList();
   assert.doesNotMatch(nodes.reestrSavedList.innerHTML,/LOG-PRIVATE/);assert.match(nodes.reestrSavedList.innerHTML,/FIN-001/);assert.match(nodes.reestrSavedList.innerHTML,/reestrOpenSaved\(1\)/);assert.match(nodes.reestrSavedList.innerHTML,/reestrDeleteSaved\(1\)/);assert.equal(nodes.reestrSavedCount.textContent,'1 шт.');
 });
-test('logistics is an independent page with no registry upload workflow',()=>{
-  const main={innerHTML:''},context=vm.createContext({window:{tvsWeb:{}},document:{getElementById:()=>main}});
+test('logistics delegates to the same registry editor with an isolated logistics workspace',()=>{
+  const calls=[],context=vm.createContext({window:{tvsWeb:{registries:{render:workspace=>calls.push(workspace)}}}});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/public/logistics.js'),'utf8'),context);context.window.tvsWeb.logistics.render();
-  assert.match(main.innerHTML,/<h1>Логистика<\/h1>/);assert.doesNotMatch(main.innerHTML,/data-registry|Загрузить реестр|type="file"/);
+  assert.deepEqual(calls,['logistics']);
 });
 test('registry driver filters preserve typed identity, expense categories and a separate financial list',()=>{
   const request=input(),database={...db,drivers:[{id:0,name:'Driver number'},{id:'0',name:'Driver text'}]};

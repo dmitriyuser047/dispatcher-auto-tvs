@@ -2,7 +2,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 for(const [file,workspace,exposed]of [['registry.js','registry','web.registry={render,addLink};'],['registries.js','registries','web.registries={render};']]){
   test(file+': confirmation survives its own input/change events and resets after an actual edit',()=>{
-    const listeners={},elements=Object.fromEntries(['number','date','title','reason','duplicateReason','confirmed'].map(name=>[name,{name,value:'',checked:false}]));
+    const listeners={},elements=Object.fromEntries(['number','date','title','workspace','reason','duplicateReason','confirmed'].map(name=>[name,{name,value:'',checked:false}]));
     const close={},exportButton={},form={elements,querySelector:selector=>selector==='[data-registry-close]'?close:selector==='[data-registry-export-draft]'?exportButton:null,querySelectorAll:()=>[],addEventListener:(name,fn)=>listeners[name]=fn};
     const context=vm.createContext({window:{tvsWeb:{},addEventListener(){}},document:{querySelector:selector=>selector==='[data-registry-editor]'?form:null,querySelectorAll:()=>[],addEventListener(){}},RegistryImport:require('../assets/core/registry-import.js'),htmlEsc:String,data:{savedReestrs:[]},URLSearchParams,location:{search:''}});
     const source=fs.readFileSync(path.join(__dirname,'../web/public',file),'utf8');assert.ok(source.includes(exposed));
