@@ -1,4 +1,4 @@
-(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(require('./registry-import.js'));else root.RegistryCounterparties=factory(root.RegistryImport);})(typeof globalThis==='object'?globalThis:this,function(core){
+(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(require('./registry-import.js'),require('./registry-accounting.js'));else root.RegistryCounterparties=factory(root.RegistryImport,root.RegistryAccounting);})(typeof globalThis==='object'?globalThis:this,function(core,accounting){
   'use strict';
   const clone=value=>JSON.parse(JSON.stringify(value));
   const nameKey=value=>String(value??'').normalize('NFKC').trim().toLocaleLowerCase('ru').replace(/ё/g,'е').replace(/[«»„“”"']/g,'').replace(/\s+/g,' ');
@@ -11,8 +11,9 @@
     return {entries:result,contragents:list,added,ambiguous:[...ambiguous]};
   }
   function statistics(database){
+    const projection=accounting.project(database);
     const byId=new Map(),byName=new Map();for(const party of database.contragents||[]){const id=core.typed(party.id);if(!byId.has(id))byId.set(id,[]);byId.get(id).push(party);const name=nameKey(party.name);if(!byName.has(name))byName.set(name,[]);byName.get(name).push(party);}
-    const groups=new Map();for(const entry of database.savedReestrs||[]){if(!core.isImportedRegister(entry))continue;for(const invoice of core.invoices(entry)){const candidates=invoice.contragentId!==undefined&&invoice.contragentId!==null?byId.get(core.typed(invoice.contragentId)):byName.get(nameKey(invoice.supplier));if(candidates?.length!==1)continue;const id=candidates[0].id;if(!groups.has(id))groups.set(id,[]);groups.get(id).push(invoice.sum);}}
+    const groups=new Map();for(const entry of database.savedReestrs||[]){if(!core.isImportedRegister(entry))continue;for(const invoice of core.invoices(entry)){if(!accounting.included(database,entry,invoice,projection))continue;const candidates=invoice.contragentId!==undefined&&invoice.contragentId!==null?byId.get(core.typed(invoice.contragentId)):byName.get(nameKey(invoice.supplier));if(candidates?.length!==1)continue;const id=candidates[0].id;if(!groups.has(id))groups.set(id,[]);groups.get(id).push(invoice.sum);}}
     return new Map([...groups].map(([id,amounts])=>[id,{count:amounts.length,sum:core.total(amounts)}]));
   }
   return Object.freeze({nameKey,prepare,statistics});

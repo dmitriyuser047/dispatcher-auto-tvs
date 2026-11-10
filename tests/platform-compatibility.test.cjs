@@ -34,6 +34,20 @@ test('all current descriptor features and scoped reads are explicit mandatory re
  const initial=fixture();for(const capability of ['scopedAccess',...initial.descriptor.features]){const {module,hello,server,descriptor}=fixture();remove(hello,capability);const result=module.negotiate(hello,server,descriptor);assert.equal(result.mode,'unsupported',capability);assert.equal(result.selectedProfile,null);assert.ok(result.reasons.some(item=>item.code==='REQUIRED_READ_CAPABILITY_UNAVAILABLE'&&item.capability===capability));}
 });
 
+test('registry accounting requires matching readers and writers on both peers before financial data is exposed',()=>{
+ const capability='registryAccountingV1';
+ for(const older of ['client','server']){
+  const {module,hello,server,descriptor}=fixture();remove(older==='client'?hello:server,capability);
+  if(older==='server')for(const field of ['requiredReadCapabilities','requiredWriteCapabilities'])server[field]=server[field].filter(item=>item.name!==capability);
+  const result=module.negotiate(hello,server,descriptor);
+  assert.equal(result.mode,'unsupported',older);assert.equal(result.readCompatible,false);assert.equal(result.writeCompatible,false);assert.equal(result.selectedProfile,null);
+  assert.ok(result.reasons.some(item=>item.code==='REQUIRED_READ_CAPABILITY_UNAVAILABLE'&&item.capability===capability));
+ }
+ const {module,hello,server,descriptor}=fixture(),result=module.negotiate(hello,server,descriptor);
+ assert.equal(result.mode,'read-write');assert.ok(result.selectedProfile.capabilities.some(item=>item.name===capability&&item.version===1));
+ for(const field of ['requiredReadCapabilities','requiredWriteCapabilities'])assert.ok(server[field].some(item=>item.name===capability&&item.version===1));
+});
+
 for(const calculationVersion of [5,6])test('fuel calculation v'+calculationVersion+' requires both peers before writes while older peers retain proven reads',()=>{
  const capability='fuelCalculationsV'+calculationVersion;
  for(const older of ['client','server']){

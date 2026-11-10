@@ -1,4 +1,4 @@
-(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(()=>require('./document-state.js'),()=>require('./entity-identity.js'));else root.RegistryImport=factory(()=>root.DocumentState,()=>root.EntityIdentity);})(typeof globalThis==='object'?globalThis:this,function(getDocuments,getIdentity){
+(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(()=>require('./document-state.js'),()=>require('./entity-identity.js'),()=>require('./registry-accounting.js'));else root.RegistryImport=factory(()=>root.DocumentState,()=>root.EntityIdentity,()=>root.RegistryAccounting);})(typeof globalThis==='object'?globalThis:this,function(getDocuments,getIdentity,getAccounting){
   'use strict';
   const MAX_ROWS=10000;
   const expenseLabels=Object.freeze({maintenance:'ТО и ремонт',fine:'Штрафы',toll:'Платные дороги',vehiclePurchase:'Покупка авто',equipmentPurchase:'Покупка допоборудования',transport:'Перевозки',rental:'Аренда',fuel:'Топливо',insurance:'Страхование',perDiem:'Суточные',training:'Обучение',clothing:'Одежда',other:'Прочее'});
@@ -17,6 +17,8 @@
   const clone=value=>JSON.parse(JSON.stringify(value));
   const typed=id=>JSON.stringify([typeof id,id]);
   const isImportedRegister=entry=>entry?.kind==='payment-registry'&&entry.registryVersion===1;
+  function accountingProjection(database){const engine=getAccounting();if(!engine)fail('REGISTRY_ACCOUNTING','Не загружена защита от повторного учёта. Обновите программу.');return engine.project(database);}
+  function accounted(entry,invoice,projection){return getAccounting().included(null,entry,invoice,projection);}
   function cents(value){
     if(value===null||value===undefined||text(value)==='')return null;
     if(typeof value!=='string'&&typeof value!=='number')fail('REGISTRY_AMOUNT','Укажите сумму числом.');
@@ -63,7 +65,7 @@
   function linkDriver(invoice,id){const result=clone(invoice);result.driverId=id??null;const parts=result.allocations?.length?result.allocations:[{sum:result.sum,kind:'unassigned',assetId:null}];result.allocations=parts.map(part=>{const next=id===null||id===undefined?part.kind==='driver'?{...part,kind:'unassigned',assetId:null,label:''}:part:{...part,kind:'driver',assetId:id,label:'',expenseType:Object.hasOwn(expenseLabels,part.expenseType)?part.expenseType:'other'};if(next.kind!=='vehicle')delete next.serviceRef;return next;});return result;}
   function driverInvoices(database,driverId){
     if(driverId===null||driverId===undefined)return [];
-    const result=[];for(const entry of database.savedReestrs||[]){if(!isImportedRegister(entry))continue;for(const [index,invoice]of invoices(entry).entries()){const parts=invoice.allocations.filter(part=>part.kind==='driver'&&part.assetId===driverId);if(!parts.length)continue;result.push({registerId:entry.id,workspace:workspaceOf(entry),registerNumber:entry.number,invoiceId:invoice.registryInvoiceId,invoiceIndex:index,invoiceNo:invoice.invoiceNo||invoice.osn||'',date:invoice.date||'',supplier:invoice.supplier||'',description:invoice.description||'',sum:total(parts.map(part=>part.sum)),invoiceSum:invoice.sum,types:[...new Set(parts.map(part=>part.expenseType||'other'))]});}}return result;
+    const projection=accountingProjection(database),result=[];for(const entry of database.savedReestrs||[]){if(!isImportedRegister(entry))continue;for(const [index,invoice]of invoices(entry).entries()){if(!accounted(entry,invoice,projection))continue;const parts=invoice.allocations.filter(part=>part.kind==='driver'&&part.assetId===driverId);if(!parts.length)continue;result.push({registerId:entry.id,workspace:workspaceOf(entry),registerNumber:entry.number,invoiceId:invoice.registryInvoiceId,invoiceIndex:index,invoiceNo:invoice.invoiceNo||invoice.osn||'',date:invoice.date||'',supplier:invoice.supplier||'',description:invoice.description||'',sum:total(parts.map(part=>part.sum)),invoiceSum:invoice.sum,types:[...new Set(parts.map(part=>part.expenseType||'other'))]});}}return result;
   }
   // Invoice links live on registry allocations. Posting a repair, its cost and
   // payments remain independent facts; matching invoice numbers is never a FK.
@@ -83,8 +85,8 @@
     return result;
   }
   function serviceInvoices(database,ref){
-    const target=serviceTarget(database,ref),result=[];
-    for(const entry of database.savedReestrs||[]){if(!isImportedRegister(entry))continue;const groups=new Map();for(const row of entry.rows||[]){if(row.registryAllocationKind!=='vehicle'||row.vehicleId!==target.row.vehicleId||row.serviceRef?.section!==target.ref.section||row.serviceRef?.id!==target.ref.id)continue;const id=row.registryInvoiceId;if(!groups.has(id))groups.set(id,[]);groups.get(id).push(row);}for(const [invoiceId,rows]of groups){const first=rows[0];result.push({registerId:entry.id,workspace:workspaceOf(entry),registerNumber:entry.number,invoiceId,invoiceNo:first.invoiceNo||first.osn||'',date:first.date||'',supplier:first.supplier||'',description:first.description||'',sum:total(rows.map(row=>row.sum)),invoiceSum:first.registryInvoiceSum});}}
+    const target=serviceTarget(database,ref),projection=accountingProjection(database),result=[];
+    for(const entry of database.savedReestrs||[]){if(!isImportedRegister(entry))continue;const groups=new Map();for(const row of entry.rows||[]){if(!accounted(entry,row,projection)||row.registryAllocationKind!=='vehicle'||row.vehicleId!==target.row.vehicleId||row.serviceRef?.section!==target.ref.section||row.serviceRef?.id!==target.ref.id)continue;const id=row.registryInvoiceId;if(!groups.has(id))groups.set(id,[]);groups.get(id).push(row);}for(const [invoiceId,rows]of groups){const first=rows[0];result.push({registerId:entry.id,workspace:workspaceOf(entry),registerNumber:entry.number,invoiceId,invoiceNo:first.invoiceNo||first.osn||'',date:first.date||'',supplier:first.supplier||'',description:first.description||'',sum:total(rows.map(row=>row.sum)),invoiceSum:first.registryInvoiceSum});}}
     return result;
   }
   function setServiceLinks(database,ref,selection){
@@ -103,6 +105,8 @@
       for(const [part,allocation]of allocations.entries()){
         if(!['vehicle','generator','driver','other','unassigned'].includes(allocation.kind))fail('REGISTRY_ALLOCATION','Выберите вид распределения.');
         const row={id:input.id+':'+index+':'+part,registryInvoiceId:invoiceId,registryInvoiceSum:invoiceSum,registryAllocationKind:allocation.kind,sum:amount(allocation.sum),registryExpenseType:expenseType(allocation.expenseType),supplier:text(invoice.supplier),description:text(invoice.description),obj:text(invoice.obj),invoiceNo:text(invoice.invoiceNo),date:isoDate(invoice.date),osn:text(invoice.osn),dog:text(invoice.dog),incomeContract:text(invoice.incomeContract),initiator:text(invoice.initiator),financeControl:text(invoice.financeControl),category:articleCategory(invoice),'statья':articleCategory(invoice),sourceRow:invoice.sourceRow||index+1,sourcePage:invoice.sourcePage||null};
+        if(Object.hasOwn(invoice,'uin'))row.uin=text(invoice.uin);
+        if(Object.hasOwn(invoice,'buyerOrganization'))row.buyerOrganization=text(invoice.buyerOrganization);
         if(allocation.serviceRef)row.serviceRef=clone(allocation.serviceRef);
         if(invoice.contragentId!==null&&invoice.contragentId!==undefined)row.contragentId=invoice.contragentId;
         if(['vehicle','generator'].includes(allocation.kind)){const section=allocation.kind==='vehicle'?'vehicles':'generators',matches=(database[section]||[]).filter(asset=>asset.id===allocation.assetId);if(matches.length!==1)fail('REGISTRY_ASSET','Выберите одну доступную карточку техники.');const asset=matches[0];row[allocation.kind==='vehicle'?'vehicleId':'generatorId']=asset.id;row.allocationLabel=allocation.kind==='vehicle'?[asset.plate,asset.make].filter(Boolean).join(' · '):[asset.name,asset.serial].filter(Boolean).join(' · ');if(allocation.kind==='vehicle')row.vehiclePlate=asset.plate||'';row.org=text(asset.org);row.site=text(asset.site||asset.object||asset.location);}
@@ -112,9 +116,13 @@
       }
     }
     const entry={id:input.id,kind:'payment-registry',registryVersion:1,workspace:input.workspace===undefined?'registries':input.workspace,number:text(input.number),date:isoDate(input.date),title:text(input.title),source:clone(input.source),rowCount:input.invoices.length,totalSum:total(rows.map(row=>row.sum)),declaredTotal:input.declaredTotal===null||input.declaredTotal===undefined?null:amount(input.declaredTotal),reason:text(input.reason),duplicateReason:text(input.duplicateReason),rows};
+    const existing=(database.savedReestrs||[]).find(previous=>typed(previous.id)===typed(input.id));
+    if(existing?.registryAccounting)entry.registryAccounting=clone(existing.registryAccounting);
+    if(input.buyerOrganization!==undefined||existing?.buyerOrganization!==undefined)entry.buyerOrganization=text(input.buyerOrganization??existing?.buyerOrganization);
     validateRegister(entry,database);return entry;
   }
   function validateRegister(entry,database){
+    if(Object.hasOwn(entry,'buyerOrganization')&&(typeof entry.buyerOrganization!=='string'||!text(entry.buyerOrganization)))fail('REGISTRY_DETAILS','Не подтверждена организация-покупатель реестра.');
     if(entry.workspace!==undefined&&!['registries','logistics'].includes(entry.workspace))fail('REGISTRY_WORKSPACE','Загруженный реестр принадлежит разделу «Реестры».');
     if(typeof entry.id!=='string'||!/^[a-zA-Z0-9._:-]{1,160}$/.test(entry.id)||entry.registryVersion!==1||!Array.isArray(entry.rows)||!entry.rows.length||entry.rows.length>MAX_ROWS)fail('REGISTRY_STRUCTURE','Неверная структура реестра.');
     if(!entry.source||!/^[a-f0-9]{64}$/.test(entry.source.sha256)||entry.source.id!==entry.source.sha256+(/\.[a-z0-9]{1,6}$/i.exec(entry.source.name||'')?.[0]?.toLowerCase()||'.bin')||typeof entry.source.name!=='string'||!Number.isSafeInteger(entry.source.size)||entry.source.size<1||entry.source.size>25*1024*1024)fail('REGISTRY_SOURCE','Не подтверждён оригинал реестра.');
@@ -122,8 +130,8 @@
     const groups=new Map(),ids=new Set();for(const row of entry.rows){if(!row||typeof row.id!=='string'||ids.has(row.id)||typeof row.registryInvoiceId!=='string'||!['vehicle','generator','driver','other','unassigned'].includes(row.registryAllocationKind))fail('REGISTRY_STRUCTURE','Неверная строка распределения.');ids.add(row.id);if(cents(row.sum)===null||cents(row.registryInvoiceSum)===null)fail('REGISTRY_AMOUNT','Не указана сумма строки.');const key=row.registryInvoiceId;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row);
       const kind=row.registryAllocationKind;if(Object.hasOwn(row,'registryExpenseType'))expenseType(row.registryExpenseType);if(['vehicle','generator'].includes(kind)){const section=kind==='vehicle'?'vehicles':'generators',field=kind==='vehicle'?'vehicleId':'generatorId',opposite=kind==='vehicle'?'generatorId':'vehicleId';if(Object.hasOwn(row,'driverId')||Object.hasOwn(row,opposite)||(database[section]||[]).filter(asset=>asset.id===row[field]).length!==1)fail('REGISTRY_ASSET','Карточка техники не подтверждена.');}else if(kind==='driver'){if(Object.hasOwn(row,'vehicleId')||Object.hasOwn(row,'generatorId')||(database.drivers||[]).filter(person=>person.id===row.driverId).length!==1)fail('REGISTRY_DRIVER','Водитель не подтверждён.');}else if(Object.hasOwn(row,'vehicleId')||Object.hasOwn(row,'generatorId')||Object.hasOwn(row,'driverId'))fail('REGISTRY_ALLOCATION','Прочий или неразнесённый платёж не должен ссылаться на технику или водителя.');
     }
-    for(const row of entry.rows){validateService(row,database);validateCounterparty(row,database);}
-    for(const rows of groups.values()){const first=rows[0];for(const row of rows)for(const field of ['registryInvoiceSum','supplier','contragentId','invoiceNo','date','description','osn','sourceRow','sourcePage'])if(row[field]!==first[field])fail('REGISTRY_STRUCTURE','Части одного счёта содержат разные исходные реквизиты.');if(cents(total(rows.map(row=>row.sum)))!==cents(first.registryInvoiceSum))fail('REGISTRY_BALANCE','Сумма распределения отличается от суммы счёта.');}
+    for(const row of entry.rows){if(Object.hasOwn(row,'uin')&&!/^\d{20}(?:\d{5})?$/.test(row.uin))fail('REGISTRY_DETAILS','Проверьте УИН счёта: требуется 20 или 25 цифр.');if(Object.hasOwn(row,'buyerOrganization')&&(typeof row.buyerOrganization!=='string'||!text(row.buyerOrganization)))fail('REGISTRY_DETAILS','Не подтверждена организация-покупатель счёта.');validateService(row,database);validateCounterparty(row,database);}
+    for(const rows of groups.values()){const first=rows[0];for(const row of rows)for(const field of ['registryInvoiceSum','supplier','contragentId','invoiceNo','date','description','osn','sourceRow','sourcePage','uin','buyerOrganization'])if(row[field]!==first[field])fail('REGISTRY_STRUCTURE','Части одного счёта содержат разные исходные реквизиты.');if(cents(total(rows.map(row=>row.sum)))!==cents(first.registryInvoiceSum))fail('REGISTRY_BALANCE','Сумма распределения отличается от суммы счёта.');}
     if(entry.rowCount!==groups.size||cents(entry.totalSum)!==cents(total(entry.rows.map(row=>row.sum)))||entry.declaredTotal!==null&&cents(entry.declaredTotal)!==cents(entry.totalSum))fail('REGISTRY_TOTAL','Общий итог реестра не сходится с суммой счетов.');
     return entry;
   }
@@ -134,6 +142,7 @@
   }
   function validateCounterparty(row,database){if(row.contragentId!==null&&row.contragentId!==undefined&&(database.contragents||[]).filter(party=>party.id===row.contragentId).length!==1)fail('REGISTRY_COUNTERPARTY','Контрагент счёта не найден однозначно. Связанную карточку можно переместить в архив.');}
   function validateChanges(previous,next){
+    getAccounting().validateChanges(previous,next);
     // Also enforce links when a primary record is corrected, moved or removed.
     for(const entry of next.savedReestrs||[])if(isImportedRegister(entry))for(const row of entry.rows||[]){validateService(row,next);validateCounterparty(row,next);}
     const before=new Map((previous.savedReestrs||[]).map(entry=>[typed(entry.id),entry]));

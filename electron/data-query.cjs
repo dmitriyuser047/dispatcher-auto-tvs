@@ -81,6 +81,9 @@ function queryRows(dataDir,input,principal){
       if(sql){revisions=sqlite.readRevisions(dataDir);revision=revisions[query.section];databaseToken=storage.databaseToken(dataDir);}
       else{const section=storage.readSection(dataDir,query.section);revision=section.rev;databaseToken=section.databaseToken;jsonRows=section.rows;}
       if(scoped){database=storage.readAll(dataDir);jsonRows=database[query.section]||[];}
+      // Accounting status is global to the complete registry section. A page
+      // without the competing version must not turn a review into inclusion.
+      else if(query.section==='savedReestrs')database={savedReestrs:sql?storage.readSection(dataDir,'savedReestrs').rows:jsonRows};
       const scopedContext=scoped?require('./access-context.cjs').create(database,database,principal):null;
       const binding={databaseToken,section:query.section,revision,filter:filterHash(query),scope,sources:null};
       let afterPosition=scoped?null:cursorPosition(query.cursor,binding);

@@ -27,9 +27,16 @@ function boundReceipt(binding,id){
 }
 function projectHistoryEvent(event,principal,binding,projector){
   const evidence=projector||require('./operation-evidence.cjs'),stored=typeof event?.operationId==='string'?boundReceipt(binding,event.operationId):null;
-  return publicAuditRow(stored?.kind==='receipt'&&!stored.legacy?evidence.projectEvent(event,stored.proof,principal):evidence.projectLegacyEvent(event,principal));
+  return publicAuditRow(stored?.kind==='receipt'&&!stored.legacy?evidence.projectEvent(event,stored.proof,principal):evidence.projectLegacyEvent(event,principal),principal);
 }
-function publicAuditRow(row){if(!row)return null;const {archiveScope,...publicRow}=row;return publicRow;}
+function publicAuditRow(row,principal){
+  if(!row)return null;const {archiveScope,...publicRow}=row;
+  if(row.section!=='savedReestrs'||!accessContext().hasNarrowing(principal))return publicRow;
+  // Historical decisions also carry peer IDs. Per-row history permission does
+  // not prove that this reader can see every participant of an old group.
+  const result={...publicRow};for(const field of ['before','after'])if(result[field]){const copy={...result[field]};delete copy.registryAccounting;delete copy.registryAccountingView;result[field]=copy;}
+  if(Array.isArray(result.fields))result.fields=result.fields.filter(field=>!['registryAccounting','registryAccountingView'].includes(field));return result;
+}
 function literalReceipt(stored){
   const value=stored.receipt,result=value.result||{};
   return {...result,id:result.id??'operation:'+value.operation.id,type:'transaction',source:'platform',section:'auditLog',operationId:value.operation.id,requestDigest:value.operation.digest,databaseToken:value.operation.databaseToken,actorId:value.operation.actorId,actorRole:value.operation.actorRole,at:value.at,changedSections:value.changedSections,revisions:value.revisions};
@@ -83,7 +90,66 @@ function visibleRows(name,rows,principal,database,preparedContext){
   const db=database||{[name]:rows||[]};
   if(name==='auditLog')return visibleAudit(rows,principal,db);
   const legacy=name==='fuelPeriods'?require('./period-access.cjs').visibleRows(rows,principal):require('./document-access.cjs').visibleRows(name,rows,principal);
-  return (preparedContext||accessContext().create(db,db,{...principal,id:principal?.id||'legacy-role-check'})).projectRows(name,legacy);
+  const context=preparedContext||accessContext().create(db,db,{...principal,id:principal?.id||'legacy-role-check'}),projected=context.projectRows(name,legacy);
+  if(name!=='savedReestrs')return projected;
+  const core=require('../assets/core/registry-import.js'),accounting=require('../assets/core/registry-accounting.js');
+  const source=stripRegistryAccountingViews({savedReestrs:db.savedReestrs||[]}).savedReestrs;
+  // Resolve against the complete locked section, before ownership and field
+  // projection. An invisible competing invoice must never become a singleton.
+  const report=accounting.project({...db,savedReestrs:source},{ignoreView:true});
+  const restricted=registryAccountingRestricted({...db,savedReestrs:source},context);
+  const byRegister=new Map();for(const invoice of report.invoices){const id=core.typed(invoice.registerId);if(!byRegister.has(id))byRegister.set(id,[]);byRegister.get(id).push(invoice);}
+  return projected.map(entry=>{
+    if(!core.isImportedRegister(entry))return entry;
+    const visibleIds=new Set((entry.rows||[]).map(row=>core.typed(row.registryInvoiceId)));
+    const invoices=(byRegister.get(core.typed(entry.id))||[]).filter(invoice=>visibleIds.has(core.typed(invoice.invoiceId))).map(invoice=>({invoiceId:invoice.invoiceId,state:invoice.state,reason:invoice.state==='review'?'Требуется сверка повторов или версий реестра.':invoice.state==='excluded'?'Исключён из финансовых итогов по подтверждённому решению.':'Учтён в финансовых итогах.'}));
+    // Decisions contain cross-document evidence and peer IDs. A narrower
+    // principal receives the authoritative result, never those private facts.
+    const publicEntry={...entry};if(restricted)delete publicEntry.registryAccounting;
+    return {...publicEntry,registryAccountingView:{version:1,restricted,invoices}};
+  });
+}
+function stripRegistryAccountingViews(sections){
+  if(!Array.isArray(sections.savedReestrs))return sections;
+  return {...sections,savedReestrs:sections.savedReestrs.map(entry=>{
+    if(!Object.hasOwn(entry,'registryAccountingView'))return entry;
+    const {registryAccountingView,...stored}=entry;return stored;
+  })};
+}
+function registryAccountingRestricted(database,context,phase='before'){
+  const core=require('../assets/core/registry-import.js'),stable=kernel().stableSerialize;
+  return (database.savedReestrs||[]).filter(core.isImportedRegister).some(entry=>!context.canRead('savedReestrs',entry,phase)||stable(context.projectRows('savedReestrs',[entry],phase)[0])!==stable(entry));
+}
+function restoreRestrictedRegistryAccounting(previous,sections,principal){
+  if(!Array.isArray(sections.savedReestrs))return sections;
+  const context=accessContext().create(previous,previous,principal);
+  if(!registryAccountingRestricted(previous,context))return sections;
+  const core=require('../assets/core/registry-import.js'),stable=kernel().stableSerialize,before=new Map((previous.savedReestrs||[]).map(entry=>[core.typed(entry.id),entry]));
+  return {...sections,savedReestrs:sections.savedReestrs.map(entry=>{
+    const old=before.get(core.typed(entry.id));
+    if(entry.registryAccounting!==undefined&&stable(entry.registryAccounting)!==stable(old?.registryAccounting))fail('REGISTRY_ACCOUNTING_ACCESS','Для сверки повторов нужен доступ ко всем реквизитам реестров.',403);
+    return old?.registryAccounting!==undefined?{...entry,registryAccounting:old.registryAccounting}:entry;
+  })};
+}
+function assertRegistryAccountingAccess(previous,sections,principal){
+  if(!Array.isArray(sections.savedReestrs))return;
+  const core=require('../assets/core/registry-import.js'),stable=kernel().stableSerialize;
+  const before=new Map((previous.savedReestrs||[]).map(entry=>[core.typed(entry.id),entry]));
+  const changed=sections.savedReestrs.filter(entry=>stable(before.get(core.typed(entry.id))?.registryAccounting??null)!==stable(entry.registryAccounting??null));
+  const afterIds=new Set(sections.savedReestrs.map(entry=>core.typed(entry.id)));
+  for(const entry of previous.savedReestrs||[])if(entry.registryAccounting&&!afterIds.has(core.typed(entry.id)))changed.push(entry);
+  if(!changed.length)return;
+  const next={...previous,...sections},context=accessContext().create(previous,next,principal);
+  for(const [phase,database]of [['before',previous],['after',next]])for(const entry of database.savedReestrs||[]){
+    if(!core.isImportedRegister(entry))continue;
+    // A partial registry view cannot authorize a global reconciliation. It may
+    // still edit ordinary allocations without changing accounting decisions.
+    if(!context.canRead('savedReestrs',entry,phase)||stable(context.projectRows('savedReestrs',[entry],phase)[0])!==stable(entry))fail('REGISTRY_ACCOUNTING_ACCESS','Для сверки повторов нужен доступ ко всем реквизитам реестров.',403);
+  }
+  const groupIds=new Set(changed.flatMap(entry=>[...(entry.registryAccounting?.decisions||[]),...(before.get(core.typed(entry.id))?.registryAccounting?.decisions||[])].map(decision=>decision.groupId)));
+  const accounting=require('../assets/core/registry-accounting.js'),required=new Set(changed.map(entry=>core.typed(entry.id)));
+  for(const database of [previous,next])for(const group of accounting.project(database,{ignoreView:true}).groups)if(groupIds.has(group.id))for(const member of group.members)required.add(core.typed(member.registerId));
+  for(const [phase,database]of [['before',previous],['after',next]])for(const entry of database.savedReestrs||[])if(required.has(core.typed(entry.id))&&!context.permits('savedReestrs','update',entry,phase))fail('REGISTRY_ACCOUNTING_ACCESS','Нет права подтвердить все реестры сверяемой группы.',403);
 }
 function scopeViews(database,revisions,principal,names=Object.keys(database)) {
   if(!accessContext().hasNarrowing(principal))return {};
@@ -111,7 +177,7 @@ function filteredResult(result,principal,database,options={}){
       if(pending?.retainsPrefix&&pending.revision===revision){
         const projector=require('./operation-evidence.cjs').createEventProjector(current);
         delete delta.invalidated;delta.baseRevision=pending.baseRevision;
-        delta.appended=pending.events.map(event=>publicAuditRow(projector.projectEvent(event,pending.proof))).filter(Boolean);
+        delta.appended=pending.events.map(event=>publicAuditRow(projector.projectEvent(event,pending.proof),current)).filter(Boolean);
       }
       result.auditDelta=delta;
     }
@@ -238,6 +304,9 @@ function prepareTransaction(previous, supplied, options = {}) {
   contracts().validateSections(supplied,registry);
   const info = operationInfo(previous, supplied, { ...options, principal:options.principal||actor });
   if (info?.receipt) return { replayed:true, operation:info };
+  // Read-only derived status is never a caller-authored accounting fact. Keep
+  // the original request digest above for exact, durable idempotent retries.
+  supplied=restoreRestrictedRegistryAccounting(previous,stripRegistryAccountingViews(supplied),principal);
   assertScopeViews(previous,supplied,options);
   require('./document-archive.cjs').assertHead(previous,{...previous,...supplied});
   assertAuditPrefix(previous, supplied, options.principal||actor);
@@ -245,6 +314,7 @@ function prepareTransaction(previous, supplied, options = {}) {
   const scoped=accessContext().create(previous,previous,principal);
   const merged=Object.fromEntries(Object.entries(supplied).map(([name,rows])=>[name,name==='auditLog'||options.commandIntent||!accessContext().hasNarrowing(principal)?rows:scoped.mergeVisibleChanges(name,rows)]));
   let sections = require('./period-access.cjs').mergePeriods(previous,require('./document-access.cjs').mergeDrafts(previous,Object.fromEntries(Object.entries(merged).filter(([name]) => name !== 'auditLog')),options.principal||actor),options.principal||actor);
+  assertRegistryAccountingAccess(previous,sections,principal);
   const periodCommand=options.commandIntent?.command?.type==='PeriodAction'&&require('./period-access.cjs').canManage(options.principal||actor,options.commandIntent.command.input?.scope);
   const costCommand=options.commandIntent?.command?.type==='CostAction'&&options.commandIntent.command.input?.action==='savePolicy'&&access.costActions(options.principal||actor).includes('savePolicy');
   const costTarget=costCommand?options.commandIntent.command.input.target?.section:null;
@@ -358,9 +428,9 @@ function queryHistoryInternal(dataDir,input,principal){
   // separately for every event and no caller-supplied proof enters this map.
   const checkedProofs=new WeakMap(),projector=evidence.createProjector(normalized);
   return {ok:true,databaseToken:token,...store.engine(dataDir).page(state.head,{databaseToken:token,principalStamp,query:value.query||{},limit:value.limit??25,...(value.cursor===undefined?{}:{cursor:value.cursor})},(event,context)=>{
-    const source=context.proof;if(source.status==='legacy-unverified'&&source.request?.status==='unknown')return publicAuditRow(projector.projectLegacyEvent(event));
+    const source=context.proof;if(source.status==='legacy-unverified'&&source.request?.status==='unknown')return publicAuditRow(projector.projectLegacyEvent(event),normalized);
     if(!checkedProofs.has(source))checkedProofs.set(source,evidence.validateProof(source));
-    return publicAuditRow(projector.projectEvent(event,checkedProofs.get(source)));
+    return publicAuditRow(projector.projectEvent(event,checkedProofs.get(source)),normalized);
   })};
 }
 function queryHistory(dataDir,input,principal){return require('./storage').withDatabaseLock(dataDir,()=>{const sqlite=require('./sqlite-storage.cjs'),action=()=>queryHistoryInternal(dataDir,input,principal);return sqlite.exists(dataDir)?sqlite.transaction(dataDir,action,{readOnly:true}):action();});}

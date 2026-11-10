@@ -65,7 +65,9 @@ test('web pages retain domain editors and load the browser bridge before applica
   assert.doesNotMatch(registry,/href="\/documents\/invoices" aria-current="page"/);
   assert.match(renderDocument({url:'/documents/invoices/import',user}),/href="\/registries" aria-current="page">Реестры/);
   assert.match(registry,/src="\/web\/public\/logistics\.js"/);
-  assert.doesNotMatch(registry,/src="\/assets\/core\/registry-import\.js"|src="\/web\/public\/registries\.js"/);
+  assert.match(registry,/src="\/assets\/core\/registry-import\.js"/);
+  assert.match(registry,/src="\/assets\/core\/registry-accounting\.js"/);
+  assert.match(registry,/src="\/web\/public\/registries\.js"/);
   const registryList=renderDocument({url:'/registries',user});
   assert.match(registryList,/data-web-section="registries"/);
   assert.match(registryList,/data-web-view="registries"/);

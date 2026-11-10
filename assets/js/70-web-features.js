@@ -3,7 +3,7 @@
  if(window.tvsWeb?.active)return;
  const web=window.tvsWeb ||= {},loaded=new Set();let loading=null,routing=false,routeSearch='';
  web.params=()=>new URLSearchParams(routeSearch);
- const scripts=['assets/core/registry-import.js','assets/core/registry-counterparties.js','assets/core/registry-statistics.js','web/public/bdds.js','web/public/registries.js','web/public/finance-registry.js','web/public/registry-counterparties.js','web/public/driver-invoices.js','web/public/vehicle-invoices.js','web/public/logistics.js'];
+ const scripts=['assets/core/registry-import.js','assets/core/registry-accounting.js','assets/core/registry-counterparties.js','assets/core/registry-statistics.js','web/public/bdds.js','web/public/registries.js','web/public/finance-registry.js','web/public/registry-counterparties.js','web/public/driver-invoices.js','web/public/vehicle-invoices.js','web/public/logistics.js'];
  const styles=['web/public/registries.css','web/public/finance-registry.css','web/public/vehicle-invoices.css','assets/css/shared-web-features.css'];
  const routes={'/registries':'registries','/finance':'finances','/finance/counterparties':'contragents','/transport':'vehicles','/transport/journal':'vehicles','/transport/vehicle':'vehicles','/generators/card':'generators','/people/drivers':'drivers','/maintenance':'toSchedule','/repairs':'repairs','/documents/invoices':'reestr','/logistics':'logistics'};
  const readable=name=>{const values=typeof _sync==='undefined'?null:_sync.access?.readable;return !values||values.includes('*')||values.includes(name);};
