@@ -1,5 +1,5 @@
 /* Generated from src/server by scripts/build-inventory-server.cjs.
- * TypeScript 5.9.3; Node types 24.19.2; source/config sha256:09b8a05e40a0eda724e6721d75cb97bb8b75bf4afd537dc8cdfd6a9477d0f584. Do not edit directly. */
+ * TypeScript 5.9.3; Node types 24.19.2; source/config sha256:c6083f87cc264d31f32a2cbe31a8dc5e5023b9ff0ce501711fe8d3e7524d7dce. Do not edit directly. */
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.decode = decode;
@@ -28,7 +28,7 @@ async function workbook(file, tempDirectory) {
     const xlsx = context.XLSX;
     if (!xlsx)
         fail('IMPORT_XLSX', 'Не загружен встроенный декодер Excel');
-    const parsed = xlsx.read(new Uint8Array(file.bytes.buffer, file.bytes.byteOffset, file.bytes.byteLength), { type: 'array', cellDates: false, cellFormula: false, cellText: true, sheetRows: ROWS + 1, bookVBA: false, bookFiles: false });
+    const parsed = xlsx.read(new Uint8Array(file.bytes.buffer, file.bytes.byteOffset, file.bytes.byteLength), { type: 'array', cellStyles: true, cellDates: false, cellFormula: false, cellText: true, sheetRows: ROWS + 1, bookVBA: false, bookFiles: false });
     if (!Array.isArray(parsed.SheetNames) || !parsed.SheetNames.length || parsed.SheetNames.length > SHEETS || new Set(parsed.SheetNames).size !== parsed.SheetNames.length)
         fail('IMPORT_LIMIT', 'В книге допускается от 1 до 100 разных листов');
     const result = [];
@@ -71,7 +71,8 @@ async function workbook(file, tempDirectory) {
             rows.push(raw);
             formattedRows.push(formatted);
         }
-        result.push({ name, rows, formattedRows });
+        const levels = sheet['!rows'];
+        result.push({ name, rows, formattedRows, rowLevels: rows.map((_, r) => levels?.[r]?.level ?? 0) });
     }
     return { name: file.name, sheets: result };
 }
@@ -108,7 +109,7 @@ async function decode(request) {
     else {
         if (!['.xls', '.xlsx'].includes(ext))
             fail('IMPORT_FORMAT', 'Для табличного импорта нужен исходный XLS или XLSX');
-        const book = await workbook({ name: request.file.name, bytes }, request.tempDirectory), decoder = require('../assets/core/asset-inventory-excel.js'), options = { format: request.mapping.format };
+        const book = await workbook({ name: request.file.name, bytes }, request.tempDirectory), decoder = require('../assets/core/asset-inventory-excel.js'), options = { format: request.mapping.format, endingOnly: true };
         for (const key of ['defaultOrgName', 'defaultObjectName', 'date', 'title', 'useOpeningIfNoClosing'])
             if (request.mapping[key] !== undefined)
                 options[key] = request.mapping[key];

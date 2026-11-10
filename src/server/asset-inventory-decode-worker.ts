@@ -20,16 +20,16 @@ const LIMIT=25*1024*1024,ROWS=20000,COLUMNS=128,SHEETS=100,MAX_RESULT=24*1024*10
 function fail(code:string,message:string):never {throw Object.assign(Error(message),{code,status:400});}
 function rawString(bytes:Buffer):string {try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes).replace(/^\uFEFF/,'');}catch{return fail('IMPORT_JSON','Исходный JSON должен быть сохранён в UTF-8');}}
 
-async function workbook(file:{name:string;bytes:Buffer},tempDirectory:string):Promise<{name:string;sheets:{name:string;rows:Json[][];formattedRows:(string|null)[][]}[]}> {
+async function workbook(file:{name:string;bytes:Buffer},tempDirectory:string):Promise<{name:string;sheets:{name:string;rows:Json[][];formattedRows:(string|null)[][];rowLevels?:number[]}[]}> {
  const zipped=file.bytes.length>=4&&file.bytes.readUInt16LE(0)===0x4b50;
  if(zipped){
   const tools=await import(pathToFileURL(path.join(__dirname,'../ReestrBuilder/archive-budget.mjs')).href) as ArchiveTools,budget=tools.createArchiveBudget({inputBytes:LIMIT,entries:1000,entryBytes:LIMIT,extractedBytes:100*1024*1024,depth:1});budget.input(file.bytes.length);tools.extractZipBounded(file.bytes,tempDirectory,budget);
  }
  const context=vm.createContext({}, {codeGeneration:{strings:false,wasm:false}});vm.runInContext(fs.readFileSync(path.join(__dirname,'../vendor/xlsx.bundle.js'),'utf8'),context,{timeout:10000});
  const xlsx=(context as {XLSX?:Xlsx}).XLSX;if(!xlsx)fail('IMPORT_XLSX','Не загружен встроенный декодер Excel');
- const parsed=xlsx.read(new Uint8Array(file.bytes.buffer,file.bytes.byteOffset,file.bytes.byteLength),{type:'array',cellDates:false,cellFormula:false,cellText:true,sheetRows:ROWS+1,bookVBA:false,bookFiles:false});
+ const parsed=xlsx.read(new Uint8Array(file.bytes.buffer,file.bytes.byteOffset,file.bytes.byteLength),{type:'array',cellStyles:true,cellDates:false,cellFormula:false,cellText:true,sheetRows:ROWS+1,bookVBA:false,bookFiles:false});
  if(!Array.isArray(parsed.SheetNames)||!parsed.SheetNames.length||parsed.SheetNames.length>SHEETS||new Set(parsed.SheetNames).size!==parsed.SheetNames.length)fail('IMPORT_LIMIT','В книге допускается от 1 до 100 разных листов');
- const result:{name:string;rows:Json[][];formattedRows:(string|null)[][]}[]=[];let cells=0;
+ const result:{name:string;rows:Json[][];formattedRows:(string|null)[][];rowLevels?:number[]}[]=[];let cells=0;
  for(const name of parsed.SheetNames){
   const sheet=parsed.Sheets[name];if(typeof name!=='string'||!sheet||typeof sheet!=='object')fail('IMPORT_XLSX','Повреждён лист книги');
   const literal=sheet['!fullref']??sheet['!ref'];if(literal===undefined){result.push({name,rows:[],formattedRows:[]});continue;}if(typeof literal!=='string')fail('IMPORT_XLSX','Повреждён диапазон листа');
@@ -41,7 +41,7 @@ async function workbook(file:{name:string;bytes:Buffer},tempDirectory:string):Pr
    if(cell!==undefined&&cell!==null&&typeof cell!=='string'&&typeof cell!=='number')fail('IMPORT_XLSX_CELL','В исходной таблице есть неподдерживаемое значение ячейки');
    if(typeof cell==='number'&&!Number.isFinite(cell)||typeof cell==='string'&&cell.length>20000||typeof value?.w==='string'&&value.w.length>20000)fail('IMPORT_LIMIT','Недопустимое значение или размер ячейки');
    raw.push(cell===undefined?null:cell);formatted.push(typeof value?.w==='string'?value.w:null);
-  }rows.push(raw);formattedRows.push(formatted);}result.push({name,rows,formattedRows});
+  }rows.push(raw);formattedRows.push(formatted);}const levels=sheet['!rows'] as ({level?:number}|undefined)[]|undefined;result.push({name,rows,formattedRows,rowLevels:rows.map((_,r)=>levels?.[r]?.level??0)});
  }
  return {name:file.name,sheets:result};
 }
@@ -54,9 +54,10 @@ export async function decode(request:DecodeRequest):Promise<DecodeResult> {
   if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['orgs','objects','mols','inventories','locGroupNames'].includes(key))||!['objects','mols','inventories'].some(key=>Object.hasOwn(value as object,key)))fail('IMPORT_JSON','Это не поддерживаемый исходный файл прежней инвентаризации');
   const decoder=require('../assets/core/asset-inventory-import.js') as {legacy(value:unknown,options:Record<string,string>):DecodeResult},options:Record<string,string>={};for(const key of ['defaultOrgName','defaultObjectName'] as const)if(request.mapping[key]!==undefined)options[key]=request.mapping[key]!;result=decoder.legacy(value,options);if(request.mapping.format==='auto')result={...result,detectedFormat:'legacy'};
  }else{
-  if(!['.xls','.xlsx'].includes(ext))fail('IMPORT_FORMAT','Для табличного импорта нужен исходный XLS или XLSX');const book=await workbook({name:request.file.name,bytes},request.tempDirectory),decoder=require('../assets/core/asset-inventory-excel.js') as {decode(book:unknown,options:Record<string,unknown>):DecodeResult},options:Record<string,unknown>={format:request.mapping.format};for(const key of ['defaultOrgName','defaultObjectName','date','title','useOpeningIfNoClosing'] as const)if(request.mapping[key]!==undefined)options[key]=request.mapping[key];result=decoder.decode(book,options);
+  if(!['.xls','.xlsx'].includes(ext))fail('IMPORT_FORMAT','Для табличного импорта нужен исходный XLS или XLSX');const book=await workbook({name:request.file.name,bytes},request.tempDirectory),decoder=require('../assets/core/asset-inventory-excel.js') as {decode(book:unknown,options:Record<string,unknown>):DecodeResult},options:Record<string,unknown>={format:request.mapping.format,endingOnly:true};for(const key of ['defaultOrgName','defaultObjectName','date','title','useOpeningIfNoClosing'] as const)if(request.mapping[key]!==undefined)options[key]=request.mapping[key];result=decoder.decode(book,options);
  }
  if(Object.values(result.data).reduce((sum,rows)=>sum+rows.length,0)>20000||result.data.inventorySessions?.some(session=>Array.isArray(session.rows)&&session.rows.length>20000))fail('IMPORT_LIMIT','Источник превышает 20000 записей');
  if(Buffer.byteLength(JSON.stringify(result))>MAX_RESULT)fail('IMPORT_LIMIT','Расшифровка превышает 24 МБ');return result;
 }
 if(parentPort){const port=parentPort;void decode(workerData as DecodeRequest).then(value=>port.postMessage({ok:true,value})).catch((error:unknown)=>{const e=error as DecodeError;port.postMessage({ok:false,code:e.code||'IMPORT_DECODE',error:e.message||'Источник не прочитан'});});}
+

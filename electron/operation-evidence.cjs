@@ -23,7 +23,7 @@ const fail=()=>{throw Object.assign(Error('Invalid frozen operation evidence'),{
 function safe(value){
  const seen=new Set(),memo=new WeakMap();let count=0;
  function copy(item,depth){
-  if(++count>1000000||depth>80)fail();
+  if(++count>8000000||depth>80)fail();
   if(item===null||typeof item==='string'||typeof item==='boolean'||typeof item==='number'&&Number.isFinite(item))return item;
   if(!item||typeof item!=='object'||seen.has(item))fail();
   const array=Array.isArray(item),proto=Object.getPrototypeOf(item);if(!array&&proto!==Object.prototype&&proto!==null)fail();

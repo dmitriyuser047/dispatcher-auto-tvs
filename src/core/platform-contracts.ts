@@ -286,6 +286,7 @@ export function createPlatformContracts() {
       // parser checks catalog fields and all counting/approval invariants before
       // dependencies, planning, review or persistence can use this command.
       const fields:Record<string,readonly string[]>={
+        reconcileCatalogs:['action','entries','reason','reviewFingerprint'],
         saveCatalog:['action','section','id','payload','reason','reviewFingerprint'],
         archiveCatalog:['action','section','id','reason','reviewFingerprint'],
         createSession:['action','objectId','orgId','date','title','reason','reviewFingerprint'],
@@ -560,3 +561,4 @@ export function createPlatformContracts() {
   }
   return Object.freeze({ apiVersion: 1 as const, identifier, validateOperation, validateSections, validateRevisions, parseSectionWrite, validateCommand, parseCommandEnvelope,validatePrintRequest });
 }
+

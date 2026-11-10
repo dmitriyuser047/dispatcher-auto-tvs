@@ -12,6 +12,7 @@ export interface AssetInventoryFact {rowId:Identifier;qtyFact:number|null;costFa
 export interface AssetInventoryDraftPayload {date:string;title:string;note:string;commission:AssetInventoryCommission;facts:AssetInventoryFact[]}
 export interface AssetInventoryCorrection {rowId:Identifier;unit:string;qtyAcct:number|null;costAcct:number|null}
 export type AssetInventoryActionInput=
+ |{action:'reconcileCatalogs';entries:JsonRow[];reason:string;reviewFingerprint:string}
  |{action:'saveCatalog';section:AssetInventoryCatalogSection;id?:Identifier;payload:AssetInventoryCatalogPayload;reason:string;reviewFingerprint:string}
  |{action:'archiveCatalog';section:AssetInventoryCatalogSection;id:Identifier;reason:string;reviewFingerprint:string}
  |{action:'createSession';objectId:Identifier;orgId?:Identifier;date:string;title:string;reason:string;reviewFingerprint:string}
@@ -92,8 +93,9 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
  }
  function catalogSection(value:unknown):AssetInventoryCatalogSection {if(typeof value!=='string'||!(CATALOGS as readonly string[]).includes(value))fail('INVENTORY_SECTION','Выберите собственный справочник инвентаризации');return value as AssetInventoryCatalogSection;}
  function catalogPayload(section:AssetInventoryCatalogSection,value:unknown):JsonRow {
-  const source=row(value),allowed=section==='inventoryMols'?['name','note','orgId','objectId','accountCode']:section==='inventoryItems'?['name','note','molId','code','unit','qty','cost']:['name','note'];fields(source,allowed);
+  const source=row(value),allowed=section==='inventoryMols'?['name','note','orgId','objectId','accountCode']:section==='inventoryItems'?['name','note','molId','code','unit','qty','cost']:section==='inventoryObjects'?['name','note','group']:['name','note'];fields(source,allowed);
   const name=text(source.name,'Наименование',2000);if(!name.trim())fail('INVENTORY_REQUIRED','Укажите наименование');const result:JsonRow={name,note:text(source.note,'Примечание',20000)};
+  if(section==='inventoryObjects'&&own(source,'group'))result.group=text(source.group,'Группа объектов',100);
   if(section==='inventoryMols')Object.assign(result,{orgId:id(source.orgId),objectId:id(source.objectId),accountCode:text(source.accountCode,'Счёт',100)});
   if(section==='inventoryItems')Object.assign(result,{molId:id(source.molId),code:text(source.code,'Код',1000),unit:text(source.unit,'Единица измерения',100),qty:numeric(source.qty,'Учётное количество',3),cost:numeric(source.cost,'Учётная стоимость',2)});
   return result;
@@ -104,10 +106,12 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
  function draftPayload(value:unknown):AssetInventoryDraftPayload {const source=row(value);fields(source,['date','title','note','commission','facts']);if(!Array.isArray(source.facts)||source.facts.length>100000)fail('INVENTORY_FACTS','Нужны фактические данные всех строк описи');const facts=source.facts.map(fact),seen=new Set<Identifier>();for(const item of facts){if(seen.has(item.rowId))fail('INVENTORY_ROW_ID','Фактические данные строки повторяются');seen.add(item.rowId);}return {date:date(source.date,'Дата описи'),title:text(source.title,'Название',2000),note:text(source.note,'Примечание',20000),commission:commission(source.commission),facts};}
  function parse(value:unknown,preview=false):AssetInventoryActionInput {
   const source=row(value),action=source.action;
-  const allowed=action==='saveCatalog'?['action','section','id','payload','reason','reviewFingerprint']:action==='archiveCatalog'?['action','section','id','reason','reviewFingerprint']:action==='createSession'?['action','objectId','orgId','date','title','reason','reviewFingerprint']:action==='saveDraft'?['action','sessionId','payload','reason','reviewFingerprint']:action==='approve'?['action','sessionId','date','document','reason','reviewFingerprint']:action==='amendDraft'?['action','sessionId','corrections','reason','reviewFingerprint']:action==='importLegacy'||action==='importRows'?['action','sourceId','sessionIds','reason','reviewFingerprint']:['action','sessionId','reason','reviewFingerprint'];fields(source,allowed);
+  const allowed=action==='reconcileCatalogs'?['action','entries','reason','reviewFingerprint']:action==='saveCatalog'?['action','section','id','payload','reason','reviewFingerprint']:action==='archiveCatalog'?['action','section','id','reason','reviewFingerprint']:action==='createSession'?['action','objectId','orgId','date','title','reason','reviewFingerprint']:action==='saveDraft'?['action','sessionId','payload','reason','reviewFingerprint']:action==='approve'?['action','sessionId','date','document','reason','reviewFingerprint']:action==='amendDraft'?['action','sessionId','corrections','reason','reviewFingerprint']:action==='importLegacy'||action==='importRows'?['action','sourceId','sessionIds','reason','reviewFingerprint']:['action','sessionId','reason','reviewFingerprint'];fields(source,allowed);
   const reason=text(source.reason,'Основание',20000);if(reason.trim().length<3)fail('INVENTORY_REASON','Укажите основание действия не короче трёх символов');
   const review=source.reviewFingerprint;if(!(preview&&review===undefined)&&(typeof review!=='string'||!/^sha256:[a-f0-9]{64}$/.test(review)))fail('INVENTORY_REVIEW','Сначала проверьте действие инвентаризации');const common={reason,reviewFingerprint:typeof review==='string'?review:'sha256:'+'0'.repeat(64)};
-  if(action==='saveCatalog'){const section=catalogSection(source.section);return {action,section,...(own(source,'id')?{id:id(source.id)}:{}),payload:catalogPayload(section,source.payload) as unknown as AssetInventoryCatalogPayload,...common};}
+  if(action==='reconcileCatalogs'){if(!Array.isArray(source.entries)||!source.entries.length||source.entries.length>1000)fail('INVENTORY_CATALOG_BATCH','Нужен пакет до 1000 изменений справочников');const entries=source.entries.map(raw=>{const e=row(raw);fields(e,['section','id','createId','payload','archive','archiveAfter']);const section=catalogSection(e.section);if(own(e,'id')===own(e,'createId'))fail('INVENTORY_CATALOG_BATCH','Нужен ID существующей либо новой записи');if(own(e,'createId')&&(typeof e.createId!=='string'||!e.createId))fail('INVENTORY_CATALOG_BATCH','Нужен технический ID новой записи');if(e.archive===true){if(!own(e,'id')||own(e,'payload'))fail('INVENTORY_CATALOG_BATCH','Архивировать можно существующую запись');return {section,id:id(e.id),archive:true};}if(own(e,'archive'))fail('INVENTORY_CATALOG_BATCH','Некорректный архивный признак');if(own(e,'archiveAfter')&&(e.archiveAfter!==true||section!=='inventoryItems'||!own(e,'id')))fail('INVENTORY_CATALOG_BATCH','Архивировать после исправления можно только существующее имущество');return {section,...(own(e,'id')?{id:id(e.id)}:{createId:e.createId!}),payload:catalogPayload(section,e.payload),...(e.archiveAfter===true?{archiveAfter:true}:{})};});return {action,entries,...common};}
+  if(action==='saveCatalog'){
+const section=catalogSection(source.section);return {action,section,...(own(source,'id')?{id:id(source.id)}:{}),payload:catalogPayload(section,source.payload) as unknown as AssetInventoryCatalogPayload,...common};}
   if(action==='archiveCatalog')return {action,section:catalogSection(source.section),id:id(source.id),...common};
   if(action==='createSession')return {action,objectId:id(source.objectId),...(own(source,'orgId')?{orgId:id(source.orgId)}:{}),date:date(source.date,'Дата описи'),title:text(source.title,'Название',2000),...common};
   if(action==='saveDraft')return {action,sessionId:id(source.sessionId),payload:draftPayload(source.payload),...common};
@@ -147,7 +151,7 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
  function snapshotDigest(value:unknown):string {return 'sha256:'+fingerprint.sha256(stable(row(value)));}
  function sourceLocator(value:unknown):JsonRow {
   const source=object(value)?value:{},result:JsonRow={};
-  for(const key of ['path','sheet','cell','decoderId','option','legacyStatus'])if(typeof source[key]==='string'&&(source[key] as string).length<=4000)result[key]=source[key]!;
+  for(const key of ['path','sheet','cell','decoderId','option','legacyStatus','reportTitle'])if(typeof source[key]==='string'&&(source[key] as string).length<=4000)result[key]=source[key]!;
   for(const key of ['row','column','decoderVersion','parserVersion'])if(typeof source[key]==='number'&&Number.isSafeInteger(source[key])&&(source[key] as number)>=0)result[key]=source[key]!;
   for(const key of ['sourceRecord','explicitDefault'])if(typeof source[key]==='boolean')result[key]=source[key]!;
   for(const key of ['legacyMolId','externalId'])if(contracts.identifier(source[key]))result[key]=source[key]!;
@@ -200,7 +204,7 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
   const result:AssetInventoryContext={id:contracts.validateOperation({id:source.id}).id,now:source.now,today:date(source.today,'Рабочая дата'),actor:{id:actor.id as string,name:actor.name as string,role:actor.role as string}};for(const key of ['readable','writable'] as const)if(own(source,key))result[key]=(source[key] as string[]).slice();if(own(source,'importSource'))result.importSource=row(source.importSource);return result;
  }
  function dependencies(value?:unknown):string[] {if(value!==undefined)parse(value,true);return [...SECTIONS];}
- function footprint(value:unknown):string[] {const input=parse(value,true);return input.action==='importLegacy'||input.action==='importRows'?[...SECTIONS]:[input.action==='saveCatalog'||input.action==='archiveCatalog'?input.section:SESSION];}
+ function footprint(value:unknown):string[] {const input=parse(value,true);return input.action==='reconcileCatalogs'?['inventoryOrgs','inventoryObjects','inventoryMols','inventoryItems']:input.action==='importLegacy'||input.action==='importRows'?[...SECTIONS]:[input.action==='saveCatalog'||input.action==='archiveCatalog'?input.section:SESSION];}
  function importBuild(db:SectionRows,input:Extract<AssetInventoryActionInput,{sourceId:string}>,ctx:AssetInventoryContext):BuiltInventory {
   const source=row(ctx.importSource),digest=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
   if(source.version!==1||source.parserVersion!==1||source.sourceId!==input.sourceId||source.id!==input.sourceId||!digest(source.sha256)||typeof source.name!=='string'||!['inventory-legacy-json','inventory-osv','inventory-comparison'].includes(source.format as string))fail('INVENTORY_IMPORT_SOURCE','Источник не подтверждён сервером или имеет другой формат');
@@ -216,7 +220,7 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
    const mol=targets.get('inventoryMols');if(mol){for(const[field,section]of [['orgId','inventoryOrgs'],['objectId','inventoryObjects']] as const){const owner=available(db,section,id(mol[field])),given=targets.get(section);if(given&&given.id!==owner.id)fail('INVENTORY_IMPORT_TARGET','Выбранный МОЛ относится к другой организации или объекту');targets.set(section,owner);}const sourceMol=incoming.inventoryMols?.[0];if(sourceMol&&typeof sourceMol.accountCode==='string'&&sourceMol.accountCode.trim()&&typeof mol.accountCode==='string'&&mol.accountCode.trim()&&sourceMol.accountCode!==mol.accountCode)fail('INVENTORY_IMPORT_TARGET','Счёт выбранного МОЛ отличается от счёта источника');}
    for(const[section]of targets)if((incoming[section]||[]).length>1)fail('INVENTORY_IMPORT_TARGET','Нельзя неявно объединять несколько организаций, объектов или МОЛ в одну запись');
   }
-  for(const section of SECTIONS){unique(incoming[section]||[],section);const map=new Map<Identifier,Identifier>(),target=targets.get(section);for(const value of incoming[section]||[]){const external=id(value.id),mapped=target?id(target.id):namespace(section,external);if(!batching&&!target&&(db[section]||[]).some(value=>value.id===mapped))fail('INVENTORY_IMPORT_COLLISION','Идентификатор импорта уже занят');map.set(external,mapped);}maps.set(section,map);}
+  for(const section of SECTIONS){unique(incoming[section]||[],section);const map=new Map<Identifier,Identifier>(),target=targets.get(section);for(const value of incoming[section]||[]){const external=id(value.id),namedSection=section==='inventoryOrgs'||section==='inventoryObjects',nameKey=(v:unknown)=>String(v??'').normalize('NFKC').replace(/[\"«»]/g,'').replace(/\s+/g,' ').trim().toLowerCase(),matches=!target&&namedSection?(db[section]||[]).filter(r=>!r.archived&&nameKey(r.name)===nameKey(value.name)):[];if(matches.length>1)fail('INVENTORY_IMPORT_TARGET','Повторяющиеся справочники нужно объединить перед импортом');const mapped=target?id(target.id):matches.length?id(matches[0]!.id):namespace(section,external);if(!batching&&!target&&!matches.length&&(db[section]||[]).some(value=>value.id===mapped))fail('INVENTORY_IMPORT_COLLISION','Идентификатор импорта уже занят');map.set(external,mapped);}maps.set(section,map);}
   function linked(section:string,external:unknown):Identifier {const selected=id(external),mapped=maps.get(section)?.get(selected);if(mapped===undefined)fail('INVENTORY_IMPORT_REFERENCE','Источник ссылается на отсутствующую запись: '+section);return mapped;}
   function meta(value:JsonRow):JsonRow {return {...sourceLocator(value.sourceMeta),importSourceId:input.sourceId,originalSha256:source.sha256!,format:source.format!,name:source.name!,externalId:copy(value.id!),sourceArchive:fileReference(source.sourceArchive),sourceManifest:fileReference(source.sourceManifest)};}
   const provenance:JsonRow={version:1,sourceId:input.sourceId,sourceManifest:fileReference(source.sourceManifest),sourceArchive:fileReference(source.sourceArchive)};
@@ -232,7 +236,7 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
    for(const mol of incoming.inventoryMols||[])if(selected.get('inventoryMols')!.has(id(mol.id))){selected.get('inventoryOrgs')!.add(id(mol.orgId));selected.get('inventoryObjects')!.add(id(mol.objectId));}
   }
   const full:SectionRows={};
-  for(const section of SECTIONS){const values:JsonRow[]=[];for(const original of targets.has(section)?[]:incoming[section]||[]){const value=copy(original);value.id=linked(section,original.id);value.sourceMeta=meta(original);value.importProvenance=copy(provenance);value.createdAt=ctx.now;value.updatedAt=ctx.now;
+  for(const section of SECTIONS){const values:JsonRow[]=[];for(const original of targets.has(section)?[]:incoming[section]||[]){const value=copy(original);value.id=linked(section,original.id);if((section==='inventoryOrgs'||section==='inventoryObjects')&&(db[section]||[]).some(r=>r.id===value.id))continue;value.sourceMeta=meta(original);value.importProvenance=copy(provenance);value.createdAt=ctx.now;value.updatedAt=ctx.now;
     if(section==='inventoryMols'){value.orgId=linked('inventoryOrgs',value.orgId);value.objectId=linked('inventoryObjects',value.objectId);}
     if(section==='inventoryItems')value.molId=linked('inventoryMols',value.molId);
     if(section===SESSION){
@@ -258,11 +262,18 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
   for(const value of appended[SESSION]||[])if(object(value.sourceMeta)&&value.sourceMeta.importSourceId===input.sourceId)warnings.push(...draftWarnings(value));
   return {sections:appended,changed,session:null,entityIds:{},issues:[],warnings};
  }
- function build(db:SectionRows,input:AssetInventoryActionInput,ctx:AssetInventoryContext):BuiltInventory {
+ function build(db:SectionRows,input:AssetInventoryActionInput,ctx:AssetInventoryContext,deferCatalogValidation=false):BuiltInventory {
   if(input.action==='importLegacy'||input.action==='importRows')return importBuild(db,input,ctx);
+  if(input.action==='reconcileCatalogs'){
+   let next:SectionRows={...db};const changes:AssetInventoryResult['changed']=[],seen=new Set<string>();
+   for(const e of input.entries){const section=e.section as AssetInventoryCatalogSection,target=(own(e,'id')?e.id:e.createId) as Identifier,key=section+':'+typed(target);if(seen.has(key))fail('INVENTORY_CATALOG_BATCH','Запись повторяется в пакете');seen.add(key);if(own(e,'createId')&&(next[section]||[]).some(r=>r.id===target))fail('INVENTORY_CATALOG_BATCH','ID новой записи занят');const sub:AssetInventoryActionInput=e.archive===true?{action:'archiveCatalog',section,id:target,reason:input.reason,reviewFingerprint:input.reviewFingerprint}:{action:'saveCatalog',section,...(own(e,'id')?{id:target}:{}),payload:e.payload as unknown as AssetInventoryCatalogPayload,reason:input.reason,reviewFingerprint:input.reviewFingerprint};const result=build(next,sub,{...ctx,id:String(target)},true);next={...next,...result.sections};if(e.archiveAfter===true){const item=find(next,'inventoryItems',target);if((item.qty!==null&&item.qty!==0)||(item.cost!==null&&item.cost!==0)||(item.qty===null&&item.cost===null))fail('INVENTORY_CATALOG_BATCH','В архив нулевых остатков можно перенести только подтверждённый нулевой остаток');next.inventoryItems=(next.inventoryItems||[]).map(r=>r.id===target?{...r,archived:true}:r);}changes.push(...result.changed);}
+   for(const item of next.inventoryItems||[]){if(item.archived)continue;const m=find(next,'inventoryMols',item.molId as Identifier);if(m.archived||find(next,'inventoryOrgs',m.orgId as Identifier).archived||find(next,'inventoryObjects',m.objectId as Identifier).archived)fail('INVENTORY_CATALOG_BATCH','После объединения имущество должно остаться в действующих справочниках');}
+   validateDatabase(next);return {sections:{inventoryOrgs:next.inventoryOrgs||[],inventoryObjects:next.inventoryObjects||[],inventoryMols:next.inventoryMols||[],inventoryItems:next.inventoryItems||[]},changed:changes,session:null,entityIds:{},issues:[],warnings:[]};
+  }
+
   const section=input.action==='saveCatalog'||input.action==='archiveCatalog'?input.section:SESSION,list=db[section]||[];let changed:JsonRow,prior:JsonRow|undefined;
   if(input.action==='saveCatalog'){
-   prior=own(input,'id')?find(db,section,input.id!):undefined;if(prior?.archived)fail('INVENTORY_ARCHIVED','Архивную запись нельзя редактировать');const body=catalogPayload(input.section,input.payload);
+   prior=own(input,'id')?find(db,section,input.id!):undefined;if(prior?.archived)fail('INVENTORY_ARCHIVED','Архивную запись нельзя редактировать');const body=catalogPayload(input.section,input.payload);if(section==='inventoryObjects'&&prior&&own(prior,'group')&&!own(body,'group'))body.group=prior.group!;
    if(section==='inventoryMols'){available(db,'inventoryOrgs',body.orgId as Identifier);available(db,'inventoryObjects',body.objectId as Identifier);}if(section==='inventoryItems'){const mol=available(db,'inventoryMols',body.molId as Identifier);available(db,'inventoryOrgs',mol.orgId as Identifier);available(db,'inventoryObjects',mol.objectId as Identifier);}
    changed={...body,id:prior?prior.id!:ctx.id,createdAt:prior?.createdAt??ctx.now,updatedAt:ctx.now,...(prior&&own(prior,'sourceMeta')?{sourceMeta:copy(prior.sourceMeta!)}:{}),...(prior&&own(prior,'importProvenance')?{importProvenance:copy(prior.importProvenance!)}:{})};
   }else if(input.action==='archiveCatalog'){prior=find(db,section,input.id);changed={...copy(prior),archived:true,updatedAt:ctx.now};}
@@ -293,7 +304,7 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
    }
   }
   if(!prior&&list.some(value=>value.id===changed.id))fail('INVENTORY_ID_CONFLICT','Новый идентификатор уже занят');
-  const sections:SectionRows={[section]:prior?list.map(value=>value===prior?changed:value):[...list,changed]};validateDatabase({...db,...sections});
+  const sections:SectionRows={[section]:prior?list.map(value=>value===prior?changed:value):[...list,changed]};if(!deferCatalogValidation)validateDatabase({...db,...sections});
   const session=section===SESSION?changed:null,warnings=session?draftWarnings(session):[];if(session)for(const value of session.rows as JsonRow[])if(value.costAcct===null||value.costFact===null)warnings.push(issue('INVENTORY_COST_UNKNOWN','Стоимость неизвестна; полный денежный итог не рассчитывается','cost',value.id as Identifier,'warning'));
   return {sections,changed:[{section,id:id(changed.id),type:prior?'update':'create'}],session,entityIds:section===SESSION?{sessionId:id(changed.id)}:{id:id(changed.id)},issues:[],warnings};
  }
@@ -366,3 +377,4 @@ export function createAssetInventory(contracts:Contracts,decimal:DecimalCoreAPI,
  return Object.freeze({apiVersion:1 as const,parse,dependencies,footprint,preview,plan,apply:plan,protectChanges,validateChanges:protectChanges,validate,snapshotDigest,exportModel,quantityModel,countValue});
 }
 export type AssetInventoryAPI=ReturnType<typeof createAssetInventory>;
+

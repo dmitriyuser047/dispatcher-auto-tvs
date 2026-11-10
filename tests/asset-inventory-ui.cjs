@@ -135,3 +135,5 @@ test('native quantity and inventory import buttons prepare a compatible copy or 
  assert.equal(await page.evaluate(()=>JSON.stringify(data)),initial);
  assert.equal(await page.evaluate(()=>__fileRequests.length+__fileCommands.length+__upgradeWrites+__writes),0);
 });
+
+test('office objects form a separate visible group and preserve typed object selection',async()=>{await page.evaluate(()=>{__aiDB.inventoryObjects[0].name='Офис 1010';__aiDB.inventoryObjects[0].group='Офис';__aiDB.inventoryObjects[1].name='КП 18G';__aiDB.inventoryObjects[1].group='Площадки';__aiStamp++;__ai.render(document.getElementById('mainContent'));});const option=page.locator('[name=filterObject] optgroup[label="Офис"] option');assert.equal(await option.count(),1);assert.equal(await option.innerText(),'Офис 1010');await page.locator('[name=filterObject]').selectOption(await option.getAttribute('value'));assert.equal(await page.locator('[data-ai-item]').count(),1);assert.equal(await page.evaluate(()=>__aiCommands.length),0);});
