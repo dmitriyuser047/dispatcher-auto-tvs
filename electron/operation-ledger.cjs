@@ -32,7 +32,27 @@ function withReadScope(action){if(typeof action!=='function')fail('LEDGER_PROVID
 function createReadSession(){const cache={objects:new Map(),bytes:0};let running=false,closed=false;return Object.freeze({run(action){if(closed||running||readSession||readScope||typeof action!=='function')fail('LEDGER_PROVIDER');running=true;readSession=cache;try{const value=action();if(value&&typeof value.then==='function')fail('LEDGER_ASYNC_SCOPE');return value;}finally{readSession=null;running=false;}},close(){if(running)fail('LEDGER_PROVIDER');closed=true;cache.objects.clear();cache.bytes=0;}});}
 function fail(code){throw Object.assign(Error(code),{code});}
 function freeze(value){if(value&&typeof value==='object'&&!Object.isFrozen(value)){Object.values(value).forEach(freeze);Object.freeze(value);}return value;}
-function safe(value){let count=0;const parents=new Set();function copy(item,depth){if(++count>MAX_JSON_NODES||depth>80)fail('LEDGER_LIMIT');if(item===null||typeof item==='string'||typeof item==='boolean'||typeof item==='number'&&Number.isFinite(item))return item;if(!item||typeof item!=='object'||parents.has(item))fail('LEDGER_JSON');const array=Array.isArray(item),proto=Object.getPrototypeOf(item);if(!array&&proto!==Object.prototype&&proto!==null)fail('LEDGER_JSON');parents.add(item);const result=array?[]:{};for(const key of Reflect.ownKeys(item)){if(array&&key==='length')continue;const descriptor=Object.getOwnPropertyDescriptor(item,key);if(typeof key!=='string'||['__proto__','prototype','constructor'].includes(key)||!descriptor?.enumerable||descriptor.get||descriptor.set||array&&!/^(0|[1-9][0-9]*)$/.test(key))fail('LEDGER_JSON');result[key]=copy(descriptor.value,depth+1);}if(array&&(result.length!==item.length||Object.keys(result).length!==item.length))fail('LEDGER_JSON');parents.delete(item);return result;}return copy(value,0);}
+function safe(value){
+ let count=0;const parents=new Set(),memo=new WeakMap();
+ function copy(item,depth){
+  if(++count>MAX_JSON_NODES||depth>80)fail('LEDGER_LIMIT');
+  if(item===null||typeof item==='string'||typeof item==='boolean'||typeof item==='number'&&Number.isFinite(item))return item;
+  if(!item||typeof item!=='object'||parents.has(item))fail('LEDGER_JSON');
+  const array=Array.isArray(item),proto=Object.getPrototypeOf(item);if(!array&&proto!==Object.prototype&&proto!==null)fail('LEDGER_JSON');
+  // Own shared subtrees once in this invocation. Account for their full expanded
+  // size and depth on every occurrence, retaining the exact input limits.
+  const cached=memo.get(item);if(cached){if(depth+cached.height>80||count+cached.nodes-1>MAX_JSON_NODES)fail('LEDGER_LIMIT');count+=cached.nodes-1;return cached.value;}
+  const first=count;parents.add(item);const result=array?[]:{};let height=0;
+  for(const key of Reflect.ownKeys(item)){
+   if(array&&key==='length')continue;const descriptor=Object.getOwnPropertyDescriptor(item,key);
+   if(typeof key!=='string'||['__proto__','prototype','constructor'].includes(key)||!descriptor?.enumerable||descriptor.get||descriptor.set||array&&!/^(0|[1-9][0-9]*)$/.test(key))fail('LEDGER_JSON');
+   const child=descriptor.value;result[key]=copy(child,depth+1);height=Math.max(height,1+(child&&typeof child==='object'?memo.get(child).height:0));
+  }
+  if(array&&(result.length!==item.length||Object.keys(result).length!==item.length))fail('LEDGER_JSON');
+  parents.delete(item);memo.set(item,{value:result,height,nodes:count-first+1});return result;
+ }
+ return copy(value,0);
+}
 function plain(value){return value!==null&&typeof value==='object'&&!Array.isArray(value);}
 function keys(value,allowed,required=allowed){if(!plain(value)||Object.keys(value).some(key=>!allowed.includes(key))||required.some(key=>!own(value,key)))fail('LEDGER_SHAPE');}
 function text(value,max=500){if(typeof value!=='string'||!value||value.length>max)fail('LEDGER_SHAPE');return value;}
@@ -228,9 +248,23 @@ function managedFiles(directory){if(typeof directory!=='string'||!path.isAbsolut
  // Expand a Windows short name only after every lexical ancestor has passed
  // the no-link check. Keep checking those original names as well as the long
  // names so an alias or ancestor cannot be replaced after the first access.
- if(!inspectAncestors(requestedRoot))fail('LEDGER_PATH');const root=fs.realpathSync.native(requestedRoot);if(!inspectAncestors(root,false,true))fail('LEDGER_PATH');
+ if(!inspectAncestors(requestedRoot))fail('LEDGER_PATH');
+ // The completed walk already resolved and rechecked this exact root. Its
+ // verified canonical name avoids opening another resolution/check gap here.
+ const root=pins.get(requestedRoot).canonical,equivalentRoot=samePath(requestedRoot,root);
+ // A short/case alias has separate lexical pin keys: retain both walks there.
+ if(requestedRoot!==root&&!inspectAncestors(root,false,true))fail('LEDGER_PATH');
  function canonicalPath(value){const resolved=path.resolve(value);for(const base of [root,requestedRoot]){const relative=path.relative(base,resolved);if(!relative.startsWith('..')&&!path.isAbsolute(relative))return path.join(root,relative);}fail('LEDGER_PATH');}
- function verifyDirectory(value,create=false){const resolved=canonicalPath(value);if(!inspectAncestors(requestedRoot))fail('LEDGER_PATH');return inspectAncestors(resolved,create,true);}
+ function verifyDirectory(value,create=false){const resolved=canonicalPath(value);
+  if(equivalentRoot){
+   // The resolved walk below includes every pinned root/ancestor again. Keep
+   // a fresh root existence/type preflight so a missing managed root is never
+   // treated as an absent child or recreated by a create=true operation.
+   let state;try{state=fs.lstatSync(requestedRoot);}catch(error){if(error.code==='ENOENT')fail('LEDGER_PATH');throw error;}
+   if(!state.isDirectory()||state.isSymbolicLink())fail('LEDGER_PATH');
+  }else if(!inspectAncestors(requestedRoot))fail('LEDGER_PATH');
+  return inspectAncestors(resolved,create,true);
+ }
  function filePath(file){const resolved=canonicalPath(file);if(!path.relative(root,resolved))fail('LEDGER_PATH');return resolved;}
  function read(file,max=MAX_OBJECT){file=filePath(file);if(!verifyDirectory(path.dirname(file)))return null;let before;try{before=fs.lstatSync(file);}catch(error){if(error.code==='ENOENT')return null;throw error;}const regular=state=>{if(!state.isFile()||state.isSymbolicLink()||state.nlink!==1||!Number.isSafeInteger(state.size)||state.size<0||state.size>max)fail('LEDGER_FILE');};regular(before);let fd;try{fd=fs.openSync(file,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));const opened=fs.fstatSync(fd);regular(opened);if(!sameFile(before,opened))fail('LEDGER_FILE_CHANGED');const chunks=[];let count=0;while(true){const chunk=Buffer.allocUnsafe(Math.min(65536,max-count+1)),size=fs.readSync(fd,chunk,0,chunk.length,null);if(!size)break;count+=size;if(count>max)fail('LEDGER_LIMIT');chunks.push(chunk.subarray(0,size));}const after=fs.fstatSync(fd);regular(after);if(!sameFile(before,after)||count!==before.size)fail('LEDGER_FILE_CHANGED');verifyDirectory(path.dirname(file));const current=fs.lstatSync(file);regular(current);if(!sameFile(before,current)||!samePath(fs.realpathSync.native(file),file))fail('LEDGER_FILE_CHANGED');return {bytes:Buffer.concat(chunks,count),state:current};}finally{if(fd!==undefined)fs.closeSync(fd);}}
  function assertFile(file,expected,max=MAX_OBJECT){const current=read(file,max);if(!sameFile(current?.state,expected?.state)||current&&!current.bytes.equals(expected.bytes))fail('LEDGER_JOURNAL_CHANGED');return current;}

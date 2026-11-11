@@ -16,7 +16,7 @@ test('the differential reference is the immutable module from published v3.5.8',
   const manifest=JSON.parse(fs.readFileSync(path.join(FIXTURE,'source-sha256.json'),'utf8'));
   assert.deepEqual(manifest,{tag:'v3.5.8',commit:'f0d12c07223ce713b93dcf6c09ff76a9ca72cb00',path:'assets/core/request-fingerprint.js',sha256:'553c1d80f8e2948893294fbb2404d0f2a169d96167f73cf1e22efac7463a39bd'});
   assert.equal(crypto.createHash('sha256').update(fs.readFileSync(path.join(FIXTURE,'request-fingerprint.js'))).digest('hex'),manifest.sha256);
-  for(const api of apis){assert.equal(Object.isFrozen(api),true);assert.equal(api.apiVersion,1);assert.deepEqual(Object.keys(api),['apiVersion','stableSerialize','sha256','requestDigest']);}
+  for(const api of apis){assert.equal(Object.isFrozen(api),true);assert.equal(api.apiVersion,1);assert.deepEqual(Object.keys(api),['apiVersion','stableSerialize','sha256','requestDigest',...(typeof api.canonicalClone==='function'?['canonicalClone']:[])]);}
 });
 
 test('canonical bytes retain undefined, sparse arrays, finite zero, property order and shared references',()=>{

@@ -1,0 +1,39 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
+const {DatabaseSync}=require('node:sqlite');
+const sqlite=require('../electron/sqlite-storage.cjs'),storage=require('../electron/storage.js'),schema=require('../assets/core/platform-schema.js');
+function temp(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'tvs-sqlite-incremental-')),pin=fs.lstatSync(root);t.after(()=>{const resolved=path.resolve(root),current=fs.lstatSync(root);assert.equal(path.dirname(resolved),path.resolve(os.tmpdir()));assert.ok(path.basename(resolved).startsWith('tvs-sqlite-incremental-'));assert.equal(current.isSymbolicLink(),false);assert.equal(current.dev,pin.dev);assert.equal(current.ino,pin.ino);fs.rmSync(resolved,{recursive:true,force:true});});return root;}
+function raw(directory,action){const db=new DatabaseSync(sqlite.filename(directory),{enableForeignKeyConstraints:true});try{return action(db);}finally{db.close();}}
+function monitor(directory){raw(directory,db=>db.exec(`CREATE TABLE test_row_writes(action TEXT,section TEXT,row_key TEXT);CREATE TRIGGER test_insert AFTER INSERT ON section_rows BEGIN INSERT INTO test_row_writes VALUES('insert',NEW.section,NEW.row_key);END;CREATE TRIGGER test_update AFTER UPDATE ON section_rows BEGIN INSERT INTO test_row_writes VALUES('update',NEW.section,NEW.row_key);END;CREATE TRIGGER test_delete AFTER DELETE ON section_rows BEGIN INSERT INTO test_row_writes VALUES('delete',OLD.section,OLD.row_key);END;`));}
+function writes(directory,section){return raw(directory,db=>db.prepare('SELECT action,count(*) AS count FROM test_row_writes WHERE section=? GROUP BY action ORDER BY action').all(section).map(row=>({...row})));}
+function projection(directory){return raw(directory,db=>({rows:db.prepare('SELECT * FROM section_rows ORDER BY section,position').all().map(row=>({...row})),links:db.prepare('SELECT * FROM row_links ORDER BY source_section,source_key,relation_id,field_path,target_section,target_key').all().map(row=>({...row})),issues:db.prepare('SELECT section,row_key,issue_json FROM reference_issues ORDER BY section,row_key,issue_json').all().map(row=>({...row}))}));}
+
+test('one canonical mileage edit writes one record and only the new audit suffix, with durable receipt and exact replay',t=>{
+ const root=temp(t),directory=path.join(root,'db'),data=Object.fromEntries(schema.sections.map(name=>[name,[]]));data.vehicles=[{id:0,plate:'SYNTHETIC',org:'A'}];data.records=Array.from({length:2200},(_,id)=>({date:'2026-09-'+String(id%28+1).padStart(2,'0'),id:'synthetic-record-'+id,km:10,note:'Synthetic original mileage',vehicleId:0}));data.auditLog=Array.from({length:100},(_,id)=>({id:'legacy-'+id,section:'records',after:{id:'historical-'+id,note:'Synthetic retained history'}}));sqlite.create(directory,{data});monitor(directory);
+ const before=storage.readSnapshot(directory),records=structuredClone(before.data.records);records[123].note='Synthetic reviewed correction';const payload={databaseToken:before.databaseToken,base:{records:before.revisions.records},sections:{records},operation:{id:'synthetic-one-row-edit'}},options={principal:{id:'synthetic-admin',name:'Synthetic admin',role:'admin'},compactAck:true};
+ const result=storage.writeSections(directory,payload,options);assert.equal(result.ok,true,JSON.stringify(result));assert.equal(result.operationReceipt.status,'committed');assert.deepEqual(writes(directory,'records'),[{action:'update',count:1}]);assert.deepEqual(writes(directory,'auditLog'),[{action:'insert',count:2}]);
+ const after=storage.readSnapshot(directory);assert.deepEqual(after.data.records,records);assert.deepEqual(after.data.vehicles,before.data.vehicles);assert.equal(after.revisions.records,before.revisions.records+1);assert.equal(after.data.auditLog.length,before.data.auditLog.length+2);assert.deepEqual(after.data.auditLog.slice(0,before.data.auditLog.length),before.data.auditLog);
+ const replay=storage.writeSections(directory,payload,options);assert.equal(replay.ok,true,JSON.stringify(replay));assert.deepEqual(storage.readSnapshot(directory).data,after.data);assert.deepEqual(writes(directory,'records'),[{action:'update',count:1}]);assert.deepEqual(writes(directory,'auditLog'),[{action:'insert',count:2}]);assert.deepEqual(sqlite.inspect(directory).foreignKeyErrors,[]);
+});
+
+test('reorders, removals and legacy duplicate/idless rows retain the exact full-build projection and reference diagnostics',t=>{
+ const root=temp(t),directory=path.join(root,'db'),data={vehicles:[{id:7,plate:'Numeric'},{id:'7',plate:'Text'},{id:'duplicate',plate:'A'},{id:'duplicate',plate:'B'},{plate:'Missing ID'}],records:[{id:'number-record',vehicleId:7,date:'2026-09-01',km:1},{id:'text-record',vehicleId:'7',date:'2026-09-02',km:2},{id:'ambiguous',vehicleId:'duplicate',date:'2026-09-03'},{id:'orphan',vehicleId:'missing',date:'2026-09-04'},{vehicleId:7,date:'2026-09-05',note:'Legacy ID absent'},{id:'number-record',vehicleId:'7',date:'2026-09-06',note:'Legacy duplicate ID'}]};sqlite.create(directory,{data});
+ const cases=[
+  current=>({vehicles:[current.vehicles[3],current.vehicles[1],current.vehicles[0],current.vehicles[2],current.vehicles[4]],records:[current.records[5],current.records[4],current.records[2],current.records[1],current.records[0],current.records[3]]}),
+  current=>({vehicles:current.vehicles.filter(row=>row.plate!=='A'),records:current.records.filter((_,index)=>index!==3).concat({id:'fresh',vehicleId:7,date:'2026-09-07',km:3})}),
+  current=>({vehicles:current.vehicles.slice().reverse(),records:current.records.slice().reverse().map((row,index)=>index===0?{...row,vehicleId:'7',date:'2026-10-01'}:row)})
+ ];
+ for(const [index,change]of cases.entries()){
+  const current=sqlite.readAll(directory),sections=change(current),revisions=sqlite.readRevisions(directory);revisions.records++;revisions.vehicles++;sqlite.commitSections(directory,sections,revisions);const expected={...current,...sections},fresh=path.join(root,'full-'+index);sqlite.create(fresh,{data:expected,revisions});assert.deepEqual(projection(directory),projection(fresh));assert.deepEqual(sqlite.readAll(directory),sqlite.readAll(fresh));assert.deepEqual(sqlite.inspect(directory).foreignKeyErrors,[]);
+ }
+});
+
+test('fresh physical comparison repairs stale derived columns even when row JSON and position are unchanged',t=>{
+ const root=temp(t),directory=path.join(root,'db'),data={vehicles:[{id:0,plate:'Synthetic'}],records:[{id:'record',vehicleId:0,date:'2026-09-01',km:1}]};sqlite.create(directory,{data});raw(directory,db=>db.prepare("UPDATE section_rows SET identity_key='forged',id_type='legacy',id_value='forged',date_value='1900-01-01',asset_ref='wrong' WHERE section='records'").run());monitor(directory);
+ const revisions=sqlite.readRevisions(directory);revisions.records++;sqlite.commitSections(directory,{records:data.records},revisions);const fresh=path.join(root,'full');sqlite.create(fresh,{data,revisions});assert.deepEqual(projection(directory),projection(fresh));assert.deepEqual(writes(directory,'records'),[{action:'update',count:1}]);
+});
+
+test('a failing deferred reference commit rolls every incremental row change back',t=>{
+ const root=temp(t),directory=path.join(root,'db'),data={vehicles:[{id:0,plate:'Synthetic'}],records:[{id:'record',vehicleId:0,date:'2026-09-01',km:1}]};sqlite.create(directory,{data});const before=projection(directory),revisions=sqlite.readRevisions(directory);const changed=[{...data.records[0],note:'Synthetic would roll back'}];
+ assert.throws(()=>sqlite.transaction(directory,()=>{sqlite.commitSections(directory,{records:changed},{...revisions,records:revisions.records+1});throw Object.assign(Error('Synthetic trusted failure'),{code:'SYNTHETIC_ABORT'});}),{code:'SYNTHETIC_ABORT'});assert.deepEqual(projection(directory),before);assert.deepEqual(sqlite.readRevisions(directory),revisions);
+});

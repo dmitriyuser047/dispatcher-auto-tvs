@@ -130,8 +130,10 @@ export function createAccessPolicy(contracts:Contracts,schema:Registry,identity:
  function requirement(value:JsonValue|undefined):AccessReadRequirement {
   if(!object(value))fail('ACCESS_CONTEXT_INVALID','Некорректное требование источника');keys(value,['sections','owners','complete'],'ACCESS_CONTEXT_INVALID');if(typeof value.complete!=='boolean')fail('ACCESS_CONTEXT_INVALID','Не подтверждена полнота источников');const required=list(value.sections,'sections','ACCESS_CONTEXT_INVALID');return {sections:required.includes('*')?[...sections].sort():required,owners:owners(value.owners),complete:value.complete};
  }
- function facts(prepared:Prepared,section:string,row:JsonRow,phase:AccessPhase):AccessRowFacts {
-  const input=record(prepared.resolve(section,frozen(record(row,'ACCESS_ROW_INVALID')),phase),'ACCESS_CONTEXT_INVALID');keys(input,['kind','owners','readRequirements','fieldGuards'],'ACCESS_CONTEXT_INVALID');
+ function facts(prepared:Prepared,section:string,row:JsonRow,phase:AccessPhase,ownedReadonly=false):AccessRowFacts {
+  // Projection/permit rows already belong to this call's strict reader. The
+  // resolver receives that private frozen row; merge/edit paths keep a copy.
+  const input=record(prepared.resolve(section,frozen(ownedReadonly?row:record(row,'ACCESS_ROW_INVALID')),phase),'ACCESS_CONTEXT_INVALID');keys(input,['kind','owners','readRequirements','fieldGuards'],'ACCESS_CONTEXT_INVALID');
   if(!['owned','shared','unknown'].includes(input.kind as string))fail('ACCESS_CONTEXT_INVALID','Не определён вид области строки');
   const out:AccessRowFacts={kind:input.kind as AccessRowFacts['kind'],owners:owners(input.owners)};
   if(own(input,'readRequirements'))out.readRequirements=requirement(input.readRequirements);
@@ -169,14 +171,21 @@ export function createAccessPolicy(contracts:Contracts,schema:Registry,identity:
   }
   const last=path[path.length-1]!;if(value.present)current[last]=safe(value.value,'ACCESS_ROW_INVALID');else delete current[last];
  }
+ // Private copies only: callers enter through safe()/rows()/record(). Never
+ // use this copier for raw input or resolver output, which remain validated.
+ function copyOwned(value:JsonValue):JsonValue {
+  if(value===null||typeof value!=='object')return value;
+  if(Array.isArray(value))return value.map(copyOwned);
+  const result:JsonRow={};for(const key of Object.keys(value))result[key]=copyOwned(value[key]!);return result;
+ }
  function projectOne(prepared:Prepared,section:string,row:JsonRow,value:AccessRowFacts):JsonRow {
-  const result:JsonRow={};for(const field of Object.keys(row))if(fieldAllowed(prepared,section,field,'read'))result[field]=safe(row[field],'ACCESS_ROW_INVALID');
+  const result:JsonRow={};for(const field of Object.keys(row))if(fieldAllowed(prepared,section,field,'read'))result[field]=copyOwned(row[field]!);
   for(const guard of [...(value.fieldGuards||[])].sort((left,right)=>right.path.length-left.path.length))if(!reads(prepared,guard.requires)&&at(result,guard.path).present)setPath(result,guard.path,own(guard,'deniedValue')?{present:true,value:guard.deniedValue!}:{present:false});
   return result;
  }
  function rows(value:unknown):JsonRow[] {const result=safe(value,'ACCESS_ROW_INVALID');if(!Array.isArray(result)||result.some(item=>!object(item)))fail('ACCESS_ROW_INVALID','Нужен массив строк');return result as JsonRow[];}
- function permits(value:unknown,section:string,action:string,input:unknown,context:AccessContext,phase:AccessPhase='before'):boolean {if(phase!=='before'&&phase!=='after')fail('ACCESS_CONTEXT_INVALID','Некорректная фаза области');const prepared=prepare(value,context),row=record(input,'ACCESS_ROW_INVALID');return sectionAllowed(prepared,section,action)&&prepared.policy?.grants.length!==0&&rowAllowed(prepared,section,action,facts(prepared,section,row,phase));}
- function projectPrepared(prepared:Prepared,section:string,input:readonly Readonly<JsonRow>[]):JsonRow[] {const source=rows(input);if(!sectionAllowed(prepared,section,'read')||prepared.policy?.grants.length===0)return [];return source.flatMap(row=>{const scope=facts(prepared,section,row,'before');return rowAllowed(prepared,section,'read',scope)?[projectOne(prepared,section,row,scope)]:[];});}
+ function permits(value:unknown,section:string,action:string,input:unknown,context:AccessContext,phase:AccessPhase='before'):boolean {if(phase!=='before'&&phase!=='after')fail('ACCESS_CONTEXT_INVALID','Некорректная фаза области');const prepared=prepare(value,context),row=record(input,'ACCESS_ROW_INVALID');return sectionAllowed(prepared,section,action)&&prepared.policy?.grants.length!==0&&rowAllowed(prepared,section,action,facts(prepared,section,row,phase,true));}
+ function projectPrepared(prepared:Prepared,section:string,input:readonly Readonly<JsonRow>[]):JsonRow[] {const source=rows(input);if(!sectionAllowed(prepared,section,'read')||prepared.policy?.grants.length===0)return [];return source.flatMap(row=>{const scope=facts(prepared,section,row,'before',true);return rowAllowed(prepared,section,'read',scope)?[projectOne(prepared,section,row,scope)]:[];});}
  function projectRows(value:unknown,section:string,input:readonly Readonly<JsonRow>[],context:AccessContext):JsonRow[] {return projectPrepared(prepare(value,context),section,input);}
  // Own the validated policy and role ceiling for one host response. Row facts
  // are still resolved and checked for every projection, including field guards.
@@ -185,7 +194,7 @@ export function createAccessPolicy(contracts:Contracts,schema:Registry,identity:
   const using=(resolve:AccessContext['resolve']|undefined):Prepared=>{if(resolve===undefined)return prepared;if(typeof resolve!=='function')fail('ACCESS_CONTEXT_INVALID','Не подтверждено разрешение областей строк');return {...prepared,resolve};};
   return Object.freeze({
    projectRows:(section:string,input:readonly Readonly<JsonRow>[],resolve?:AccessContext['resolve']):JsonRow[]=>projectPrepared(using(resolve),section,input),
-   permits:(section:string,action:string,input:unknown,resolve?:AccessContext['resolve'],phase:AccessPhase='before'):boolean=>{if(phase!=='before'&&phase!=='after')fail('ACCESS_CONTEXT_INVALID','Некорректная фаза области');const selected=using(resolve),row=record(input,'ACCESS_ROW_INVALID');return sectionAllowed(selected,section,action)&&selected.policy?.grants.length!==0&&rowAllowed(selected,section,action,facts(selected,section,row,phase));}
+   permits:(section:string,action:string,input:unknown,resolve?:AccessContext['resolve'],phase:AccessPhase='before'):boolean=>{if(phase!=='before'&&phase!=='after')fail('ACCESS_CONTEXT_INVALID','Некорректная фаза области');const selected=using(resolve),row=record(input,'ACCESS_ROW_INVALID');return sectionAllowed(selected,section,action)&&selected.policy?.grants.length!==0&&rowAllowed(selected,section,action,facts(selected,section,row,phase,true));}
   });
  }
  // Both hosts share the same owned, response-scoped policy preparation.

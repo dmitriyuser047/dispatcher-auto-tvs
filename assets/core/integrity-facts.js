@@ -44,9 +44,9 @@
   function makeError(code,issues){const error=new Error(issues.map(issue=>issue.message).slice(0,6).join('; ')||'Нарушена целостность базы');error.name='PlatformIntegrityError';error.code=code;error.issues=issues;return error;}
   function rowsOf(db,section){return plain(db)&&Array.isArray(db[section])?db[section]:[];}
   const rowIdentity=recordIdentity.rowIdentity;
-  function indexDatabase(db){
+  function indexDatabase(db,reuse){
     const indexes={};
-    for(const section of schema.sections){const byId=new Map(),byString=new Map();rowsOf(db,section).forEach((row,index)=>{if(!plain(row)||!scalarId(row.id))return;const key=idKey(row.id),text=String(row.id);if(!byId.has(key))byId.set(key,[]);byId.get(key).push({row,index});if(!byString.has(text))byString.set(text,[]);byString.get(text).push({row,index});});indexes[section]={byId,byString};}
+    for(const section of schema.sections){if(reuse&&db[section]===reuse.database[section]){indexes[section]=reuse.indexes[section];continue;}const byId=new Map(),byString=new Map();rowsOf(db,section).forEach((row,index)=>{if(!plain(row)||!scalarId(row.id))return;const key=idKey(row.id),text=String(row.id);if(!byId.has(key))byId.set(key,[]);byId.get(key).push({row,index});if(!byString.has(text))byString.set(text,[]);byString.get(text).push({row,index});});indexes[section]={byId,byString};}
     return indexes;
   }
   function relationTarget(relation,row,value,path){
@@ -65,9 +65,9 @@
     if(target.lookup){const expected=relation.normalize==='card'?card(target.id):target.id;return rowsOf(db,target.section).filter(row=>plain(row)&&(relation.normalize==='card'?card(row[relation.targetField]):row[relation.targetField])===expected).map(row=>({row}));}
     return (target.string?indexes[target.section]?.byString.get(String(target.id)):indexes[target.section]?.byId.get(idKey(target.id)))||[];
   }
-  function analyze(db,options={}){
-    if(!plain(db))return {issues:[{code:'invalid-database',severity:'error',section:'',recordId:'',rowIndex:-1,field:'',message:'База должна быть объектом с разделами'}],relationStates:[]};
-    const readable=allowed(options.readable,'чтения'),indexes=indexDatabase(db),issues=[],seen=new Set(),relationStates=[];
+  function analyzeSnapshot(db,options={},reuse){
+    if(!plain(db))return {report:{issues:[{code:'invalid-database',severity:'error',section:'',recordId:'',rowIndex:-1,field:'',message:'База должна быть объектом с разделами'}],relationStates:[]}};
+    const readable=allowed(options.readable,'чтения'),indexes=indexDatabase(db,reuse),issues=[],seen=new Set(),relationStates=[],relations=new Map();
     const canRead=section=>!readable||readable.has(section);
     const add=(section,row,index,code,field,message,extra={})=>{
       const identity=schema.descriptors[section]?.identity.field||'id',recordId=plain(row)&&scalarId(row[identity])?row[identity]:'';
@@ -89,6 +89,9 @@
     };
     for(const section of schema.sections){
       if(!canRead(section)){issues.push({code:'section-unavailable',severity:'warning',section,recordId:'',rowIndex:-1,field:'',message:'Раздел недоступен для проверки: '+schema.descriptors[section].label});continue;}
+      // This reuse is local to one before/after validation. Calendar-sensitive
+      // ranges still run against each complete snapshot.
+      if(reuse&&db[section]===reuse.database[section]&&!['dispatchJobs','workOrders'].includes(section)){issues.push(...(reuse.structural.get(section)||[]));continue;}
       const descriptor=schema.descriptors[section],raw=plain(db)?db[section]:undefined;
       if(raw!=null&&!Array.isArray(raw)){add(section,{},-1,'invalid-section','','Раздел должен содержать массив записей',{value:raw});continue;}
       const identities=new Map();
@@ -116,8 +119,12 @@
       for(const [key,positions]of identities)if(positions.length>1){const row=raw[positions[0]];add(section,row,positions[0],'duplicate-id',descriptor.identity.field,'Идентификатор записи повторяется',{value:{id:row[descriptor.identity.field],count:positions.length},rowIndexes:positions});}
       for(const unique of descriptor.unique||[]){const groups=new Map();rowsOf(db,section).forEach((row,index)=>{if(!plain(row)||!present(row[unique.field]))return;const key=unique.normalize==='card'?card(row[unique.field]):row[unique.field];if(!groups.has(key))groups.set(key,[]);groups.get(key).push(index);});for(const [key,positions]of groups)if(positions.length>1)add(section,raw[positions[0]],positions[0],'duplicate-business-key',unique.field,'Повторяется уникальный номер или код справочника',{value:{key,count:positions.length},rowIndexes:positions});}
     }
+    const structural=new Map();for(const issue of issues){if(!structural.has(issue.section))structural.set(issue.section,[]);structural.get(issue.section).push(issue);}
     for(const relation of schema.relations){
       if(relation.kind==='historical'||!canRead(relation.from))continue;
+      const dependencies=[relation.from,...(relation.target?[relation.target]:Object.values(relation.targets||{})),...(relation.resolve==='fuel-purchase-journal'?['records']:[])],cached=reuse?.relations.get(relation);
+      if(cached&&dependencies.every(section=>db[section]===reuse.database[section])){issues.push(...cached.issues);relationStates.push(...cached.states);relations.set(relation,cached);continue;}
+      const issueStart=issues.length,stateStart=relationStates.length;
       rowsOf(db,relation.from).forEach((row,index)=>{if(!plain(row)||row.deleted)return;
         for(const entry of values(row,relation.field)){
           if(entry.shape){add(relation.from,row,index,'invalid-reference-container',entry.path,'Повреждена структура связи',{relationId:relation.id,value:entry.value});continue;}
@@ -138,9 +145,11 @@
           relationStates.push({section:relation.from,row,index,path:entry.path,value:entry.value,relation,target,matches,resolvedLegacy});
         }
       });
+      relations.set(relation,{issues:issues.slice(issueStart),states:relationStates.slice(stateStart)});
     }
-    return {issues,relationStates};
+    return {report:{issues,relationStates},database:db,indexes,structural,relations};
   }
+  function analyze(db,options={}){return analyzeSnapshot(db,options).report;}
   function inspect(db,options={}){
     const result=analyze(db,options),readable=allowed(options.readable,'чтения');
     const sections=schema.sections.map(section=>({section,label:schema.descriptors[section].label,module:schema.descriptors[section].module,readable:!readable||readable.has(section),rows:readable&&!readable.has(section)?null:rowsOf(db,section).length}));
@@ -153,10 +162,11 @@
     const add=issue=>errors.push({severity:'error',...issue});
     for(const section of changed)if(writable&&!writable.has(section)||readable&&!readable.has(section))add({code:'section-write-denied',section,recordId:'',field:'',message:'Недостаточно прав на изменение раздела «'+schema.descriptors[section].label+'»'});
     if(errors.length)throw makeError('ACCESS_DENIED',errors);
-    const oldReport=analyze(previous),nextReport=analyze(next),oldIssues=new Set();
+    const priorAnalysis=analyzeSnapshot(previous),oldReport=priorAnalysis.report,nextReport=analyzeSnapshot(next,{},priorAnalysis).report,oldIssues=new Set();
     const oldRows=new Map(),mapping=new Map();
     for(const section of schema.sections){
       const before=rowsOf(previous,section),after=rowsOf(next,section),used=new Set();
+      if(before===after){after.forEach((row,index)=>{mapping.set(section+':'+index,index);oldRows.set(section+':'+index,row);});continue;}
       const identities=new Map();before.forEach((row,index)=>{const key=rowIdentity(section,row,index);if(!identities.has(key))identities.set(key,[]);identities.get(key).push(index);});
       after.forEach((row,index)=>{
         const candidates=identities.get(rowIdentity(section,row,index))||[];let match=candidates.find(position=>!used.has(position)&&(before[position]===row||stable(before[position])===stable(row)));
@@ -175,7 +185,7 @@
       // compare the wrong sibling when a card has several assignments.
       const exactOld=old&&state.path.split('.').reduce((value,key)=>{const match=key.match(/^(.*?)\[(\d+)\]$/);return match?value?.[match[1]]?.[Number(match[2])]:value?.[key];},old);
       if(state.resolvedLegacy){
-        const priorMatches=old?findTarget(indexDatabase(previous),previous,state.relation,{...state.target,id:exactOld}):[];
+        const priorMatches=old?findTarget(priorAnalysis.indexes,previous,state.relation,{...state.target,id:exactOld}):[];
         if(!old||stable(exactOld)!==stable(state.value)||priorMatches.length===1)add({code:'new-stale-reference',section:state.section,recordId:state.row.id??'',rowIndex:state.index,field:state.path,message:'Нельзя создавать или повреждать прямую ссылку на запись журнала',targetSection:state.target.section,targetId:state.value});
       }
       if(!old||stable(exactOld)!==stable(state.value)){

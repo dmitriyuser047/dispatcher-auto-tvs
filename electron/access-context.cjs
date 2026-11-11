@@ -41,10 +41,15 @@ function sectionAllowed(value,action,name){
 function create(previous,next,value,options={}){
  const principal=normalizePrincipal(value),selected=principal.accessPolicy??null,base=ceiling(principal,options),before=scopes().createResolver(previous),after=scopes().createResolver(next||previous),context={...base,resolve:(name,row,phase='before')=>(phase==='after'?after:before).resolve(name,row)};
  const api=policy(),actor=Object.freeze({id:principal.id,name:principal.name,role:principal.role});
+ // One host context owns one policy/role snapshot. Reuse only that prepared
+ // policy: each row and its before/after ownership still pass through the
+ // reader and the trusted resolver on every call. A later request creates a
+ // new context, so neither a principal nor an authorization decision is cached.
+ const reader=api.createReader(selected,context),afterResolve=(section,row)=>after.resolve(section,row);
  return Object.freeze({policy:selected,context,actor,principal,
-  permits:(name,action,row,phase='before')=>api.permits(selected,name,action,row,context,phase),
-  canRead:(name,row,phase='before')=>api.permits(selected,name,'read',row,context,phase),
-  projectRows:(name,rows,phase='before')=>api.projectRows(selected,name,rows,phase==='before'?context:{...context,resolve:(section,row)=>after.resolve(section,row)}),
+  permits:(name,action,row,phase='before')=>reader.permits(name,action,row,undefined,phase),
+  canRead:(name,row,phase='before')=>reader.permits(name,'read',row,undefined,phase),
+  projectRows:(name,rows,phase='before')=>reader.projectRows(name,rows,phase==='before'?undefined:afterResolve),
   mergeVisibleChanges:(name,rows)=>api.mergeVisibleChanges(selected,name,previous[name]||[],rows,context),
   validateChanges:(name,rows)=>api.validateChanges(selected,name,previous[name]||[],rows,context),
   resolveArchive:(snapshot,phase='before')=>(phase==='after'?after:before).resolveArchive(snapshot),

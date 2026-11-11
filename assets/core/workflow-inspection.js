@@ -66,7 +66,7 @@
   function scopePeriods(db,scope){return periodsModule().scopePeriods(db,scope);}
   function periodsModule() {const api=getPeriods();if(!api||api.apiVersion!==1){const error=new Error('Не загружены правила закрытия периодов');error.code='MODULE_UNAVAILABLE';throw error;}return api;}
   function validatePeriodChanges(previous,next,context) {return periodsModule().validateChanges(previous,next,context);}
-  function inspect(db, context) {
+  function inspectSnapshot(db, context, inspectModule) {
     context = context || {};
     const issues = [];
     const add = (section,row,code,field,message,proof,extra) => issues.push({ severity:'error',section,recordId:row.id ?? '',code,field,message,proof,...extra });
@@ -94,14 +94,29 @@
       if (order.status === 'accepted'&&!Object.hasOwn(order,'downtime')&&!Object.hasOwn(order,'repairProcess')) for (const [field,label] of [['acceptedBy','принявший'],['result','результат'],['downtimeTo','конец простоя']])
         if (!present(order[field])) add('workOrders',order,'WORK_ORDER_ACCEPTANCE_REQUIRED',field,'Для приёмки нужен ' + label,[order[field]]);
     }
-    issues.push(...inspectStock(db,context).issues);
+    const stock=inventoryModule();issues.push(...(inspectModule?inspectModule(stock,db,context,stock.readSections):stock.inspect(db,context)).issues);
     const personnel = getPersonnel();
     if (personnel && personnel.apiVersion === 1) issues.push(...personnel.inspect(db,context).issues);
     for (const module of [getFuelMovements(),getDocuments(),getWorkflow(),getTemporal(),periodsModule()]) if (module && module.apiVersion === 1) issues.push(...module.inspect(db,context).issues);
     const catalog=catalogModule(db);if(catalog)issues.push(...catalog.inspect(db,context).issues);
     const calendar=getCalendar?.();if(calendar?.apiVersion===1)issues.push(...calendar.inspect(db,context).issues);let costs;try{costs=getCosts();}catch{}if(costs?.apiVersion===1&&typeof costs.inspect==='function')issues.push(...costs.inspect(db,context).issues);
-    let repairs;try{repairs=getRepairs();}catch{}if(repairs?.apiVersion===1)issues.push(...repairs.inspect(db,context).issues);
+    let repairs;try{repairs=getRepairs();}catch{}if(repairs?.apiVersion===1)issues.push(...(inspectModule?inspectModule(repairs,db,context,(typeof repairs.dependencies==='function'?repairs.dependencies():null)):repairs.inspect(db,context)).issues);
     return { issues,counts:{ error:issues.filter(issue=>issue.severity==='error').length,warning:issues.filter(issue=>issue.severity==='warning').length,total:issues.length } };
   }
-  return Object.freeze({apiVersion:1,inspect,scopePeriods,validatePeriodChanges,validateStockChanges});
+  function inspect(db,context){return inspectSnapshot(db,context);}
+  // Reuse only exact, descriptor-safe source arrays inside one synchronous
+  // before/after call. Public health inspection always evaluates fresh inputs.
+  function inspectPair(previous,next,context){
+    const reports=new Map(),sessions=new Map(),collect=(module,db,current,names)=>{
+      if(typeof module.prepareValidation==='function'){if(!sessions.has(module))sessions.set(module,module.prepareValidation(previous,next,current));const session=sessions.get(module);return db===previous?session.before:session.after;}
+      const old=reports.get(module),same=old&&old.database!==null&&typeof old.database==='object'&&db!==null&&typeof db==='object'&&Array.isArray(names)&&names.every(name=>{
+        const before=Object.getOwnPropertyDescriptor(old.database,name),after=Object.getOwnPropertyDescriptor(db,name);
+        return !!before===!!after&&!before?.get&&!before?.set&&!after?.get&&!after?.set&&before?.value===after?.value;
+      });
+      if(same)return old.report;
+      const report=module.inspect(db,current);reports.set(module,{database:db,report});return report;
+    };
+    return {before:inspectSnapshot(previous,context,collect),after:inspectSnapshot(next,context,collect),validateModule(module){const session=sessions.get(module);return session?session.validate():false;}};
+  }
+  return Object.freeze({apiVersion:1,inspect,inspectPair,scopePeriods,validatePeriodChanges,validateStockChanges});
 });

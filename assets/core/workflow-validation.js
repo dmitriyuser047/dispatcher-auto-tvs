@@ -37,7 +37,8 @@
     const archiveRows=db=>rows(db,'appMeta').filter(row=>row.id==='document-archive-head'||row.kind==='documentArchive').map(row=>Object.keys(row).sort().map(key=>[key,row[key]]));
     if(JSON.stringify(archiveRows(previous))!==JSON.stringify(archiveRows(next))){const error=new Error('Архив печати изменяется только проверенным сохранением снимка');error.code='DOCUMENT_ARCHIVE_IMMUTABLE';error.status=403;throw error;}
     const calendar=getCalendarOperations?.();if(calendar?.apiVersion===1)calendar.validateChanges(previous,next,context);else if(['appMeta'].some(name=>JSON.stringify(rows(previous,name).filter(row=>row.id==='business-calendar'||row.kind==='businessCalendar'))!==JSON.stringify(rows(next,name).filter(row=>row.id==='business-calendar'||row.kind==='businessCalendar')))||['dispatchJobs','workOrders'].some(name=>rows(next,name).some(row=>{const matches=rows(previous,name).filter(old=>old.id===row.id),old=matches.length===1?matches[0]:{};return (name==='dispatchJobs'?['start','end','actualStart','actualEnd','timeContext']:['downtimeFrom','downtimeTo','completedAt','timeContext']).some(field=>JSON.stringify(old[field])!==JSON.stringify(row[field]));})))throw Object.assign(Error('Не загружены правила рабочего календаря'),{code:'MODULE_UNAVAILABLE'});
-    const old = inspect(previous,context).issues, current = inspect(next,context).issues;
+    const reports=typeof inspection.inspectPair==='function'?inspection.inspectPair(previous,next,context):{before:inspect(previous,context),after:inspect(next,context)};
+    const old=reports.before.issues,current=reports.after.issues;
     const key = issue => JSON.stringify([issue.section,issue.recordId,issue.code,issue.field,issue.relatedRecordId || '']);
     const prior = new Map(old.map(issue => [key(issue),issue]));
     const blocking = current.filter(issue => {
@@ -66,7 +67,7 @@
     const assetInventory=getAssetInventory?.();
     if(assetInventory?.apiVersion===1)assetInventory.protectChanges(previous,next,context);
     else if(['inventoryOrgs','inventoryObjects','inventoryMols','inventoryItems','inventorySessions'].some(name=>JSON.stringify(previous?.[name]||[])!==JSON.stringify(next?.[name]||[])))throw Object.assign(Error('Не загружена защита инвентаризации'),{code:'MODULE_UNAVAILABLE'});
-    validateStockChanges(previous,next,context);
+    if(!reports.validateModule||reports.validateModule(inventoryModule())!==true)validateStockChanges(previous,next,context);
     for (const module of [getDocuments(),getFuelMovements(),getWorkflow(),getTemporal(),periodsModule()]) {
       if (!module || module.apiVersion !== 1) {
         const error = new Error('Не загружены правила проведения документов и движения топлива');error.code='MODULE_UNAVAILABLE';throw error;
@@ -79,7 +80,7 @@
     if(costs?.apiVersion===1)costs.validateChanges(previous,next,context);
     else if([previous,next].some(db=>['tanks','parts','vehicles','generators'].some(name=>rows(db,name).some(row=>Object.hasOwn(row,'costValuation')))||rows(db,'costEntries').some(row=>Object.hasOwn(row,'costAllocation')||row.kind==='allocation')))throw Object.assign(Error('Не загружены правила стоимости'),{code:'MODULE_UNAVAILABLE'});
     let repairs,repairOperations;try{repairs=getRepairs();repairOperations=getRepairOperations();}catch{}
-    if(repairs?.apiVersion===1&&repairOperations?.apiVersion===1){repairOperations.validateChanges(previous,next,context);repairs.validateChanges(previous,next,context);}
+    if(repairs?.apiVersion===1&&repairOperations?.apiVersion===1){repairOperations.validateChanges(previous,next,context);if(!reports.validateModule||reports.validateModule(repairs)!==true)repairs.validateChanges(previous,next,context);}
     else if(repairModuleRequired(previous,next))throw Object.assign(Error('Не загружены правила ремонтного процесса'),{code:'MODULE_UNAVAILABLE'});
     let imports;try{imports=getImports();}catch{}
     if(imports?.apiVersion===1&&typeof imports.validateChanges==='function')imports.validateChanges(previous,next,context);

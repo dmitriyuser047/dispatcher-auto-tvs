@@ -1,3 +1,4 @@
+import type {VehicleRecordActionInput} from './vehicle-record';
 import type { AssetTarget, CalendarActionInput, CostActionInput, DocumentActionInput, FuelActionInput, Identifier, ImportActionInput, JsonRow, JsonValue, MergeCatalogInput, PeriodActionInput, PlatformCommand, ProcurementActionInput, RepairActionInput, SectionRows, createPlatformContracts } from './platform-contracts';
 
 export type {CommandActor,CommandContext,CommandPlan} from './command-source';
@@ -20,11 +21,12 @@ interface PersonnelPlanning {apiVersion:number;dependencies():string[];captureSh
 interface DocumentPrint {apiVersion:number;dependencies(request:unknown):string[];prepare(database:unknown,request:unknown,context:unknown):{canCapture:boolean;sourceFingerprint:string;blockers:unknown[]};capture(database:unknown,request:unknown,context:unknown):unknown}
 interface ImportEngine {apiVersion:number;dependencies(input:ImportActionInput):string[];footprint(input:ImportActionInput):string[];plan(database:unknown,input:ImportActionInput,context:CommandContext):CommandPlan}
 interface GeneratorMaintenance {apiVersion:number;dependencies(input?:GeneratorMaintenanceActionInput):string[];footprint(input?:GeneratorMaintenanceActionInput):string[];plan(database:unknown,input:GeneratorMaintenanceActionInput,context:CommandContext):CommandPlan}
+interface VehicleRecord {apiVersion:number;dependencies(input?:VehicleRecordActionInput):string[];footprint(input?:VehicleRecordActionInput):string[];plan(database:SectionRows,input:VehicleRecordActionInput,context:CommandContext):CommandPlan}
 interface AssetInventory {apiVersion:number;dependencies(input?:AssetInventoryActionInput):string[];footprint(input?:AssetInventoryActionInput):string[];plan(database:unknown,input:AssetInventoryActionInput,context:CommandContext):CommandPlan}
 type Contracts = ReturnType<typeof createPlatformContracts>;
 
 /** Pure semantic actions. Storage still owns ACL, CAS, audit and atomic commit. */
-export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, commandSource:CommandSourceAPI, issueFuel:IssueFuelAPI,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions,calendarActions?:CalendarActions,calendar?:BusinessCalendar,planning?:PersonnelPlanning,getPrinting?:()=>DocumentPrint,getImports?:()=>ImportEngine,getGeneratorMaintenance?:()=>GeneratorMaintenance,getAssetInventory?:()=>AssetInventory) {
+export function createPlatformCommands(contracts: Contracts, personnel: PersonnelRules, commandSource:CommandSourceAPI, issueFuel:IssueFuelAPI,catalog?: CatalogMerge,registry?: SectionRegistry,documents?:DocumentActions,periods?:PeriodActions,fuelActions?:FuelActions,procurementActions?:ProcurementActions,costActions?:CostActions,repairActions?:RepairActions,calendarActions?:CalendarActions,calendar?:BusinessCalendar,planning?:PersonnelPlanning,getPrinting?:()=>DocumentPrint,getImports?:()=>ImportEngine,getGeneratorMaintenance?:()=>GeneratorMaintenance,getAssetInventory?:()=>AssetInventory,getVehicleRecord?:()=>VehicleRecord) {
   if (!contracts || contracts.apiVersion !== 1 || !personnel || personnel.apiVersion !== 1 || commandSource?.apiVersion!==1 || issueFuel?.apiVersion!==1)
     throw new Error('Не загружены общие правила команд платформы');
   const fail:(code:string,message:string,field?:string)=>never=commandSource.fail;
@@ -44,9 +46,11 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   function printModule():DocumentPrint {const printing=getPrinting?.();if(!printing||printing.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены печатные модели документов');return printing;}
   function importModule():ImportEngine {const imports=getImports?.();if(!imports||imports.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила подтверждённого импорта');return imports;}
   function maintenanceModule():GeneratorMaintenance {const api=getGeneratorMaintenance?.();if(api?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила графиков ТО ДЭС');return api;}
+  function vehicleRecordModule():VehicleRecord {const api=getVehicleRecord?.();if(api?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружены правила журнала пробега');return api;}
   function inventoryModule():AssetInventory {const api=getAssetInventory?.();if(api?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружено ядро инвентаризации ОС');return api;}
   function footprint(value: unknown): string[] {
     const command=parseCommand(value);
+    if(command.type==='VehicleRecordAction')return vehicleRecordModule().footprint(command.input);
     if(command.type==='GeneratorMaintenanceAction')return maintenanceModule().footprint(command.input);
     if(command.type==='AssetInventoryAction')return inventoryModule().footprint(command.input);
     if(command.type==='ImportAction')return importModule().footprint(command.input);
@@ -68,6 +72,7 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
   }
   function commandDependencies(value: unknown): string[] {
     const command=parseCommand(value);
+    if(command.type==='VehicleRecordAction')return vehicleRecordModule().dependencies(command.input);
     if(command.type==='GeneratorMaintenanceAction')return maintenanceModule().dependencies(command.input);
     if(command.type==='AssetInventoryAction')return inventoryModule().dependencies(command.input);
     if(command.type==='ImportAction')return importModule().dependencies(command.input);
@@ -146,7 +151,8 @@ export function createPlatformCommands(contracts: Contracts, personnel: Personne
     const ctx=context(metadata),db=database(source,dependencies(command));
     calendar?.context(db,ctx);
     let result:CommandPlan;
-    if(command.type==='GeneratorMaintenanceAction')result=maintenanceModule().plan(db,command.input,ctx);
+    if(command.type==='VehicleRecordAction')result=vehicleRecordModule().plan(db,command.input,ctx);
+    else if(command.type==='GeneratorMaintenanceAction')result=maintenanceModule().plan(db,command.input,ctx);
     else if(command.type==='AssetInventoryAction')result=inventoryModule().plan(db,command.input,ctx);
     else if(command.type==='ImportAction')result=importModule().plan(db,command.input,ctx);
     else if(command.type==='PrintAction'){

@@ -173,6 +173,15 @@ function filteredResult(result,principal,database,options={}){
     result={...result,canonicalSections};
     if(Number.isSafeInteger(revision)&&require('./document-access.cjs').permitted(current,'read','auditLog')){
       const pending=committedAuditViews.get(database?.auditLog);
+      // A mileage command can compact an older foreground history on its
+      // first save. Return the small authoritative replacement (also on a
+      // lost-ACK replay), so its next save starts with the current hot view.
+      // The ordinary projection below still applies the current audit ACL.
+      const smallRecordHistory=options.commandIntent?.command?.type==='VehicleRecordAction'&&Array.isArray(database?.auditLog)&&database.auditLog.length<=require('./operation-store.cjs').AUTO_ARCHIVE_THRESHOLD;
+      if(smallRecordHistory&&(result.replayed===true||pending?.revision===revision&&!pending.retainsPrefix)){
+        canonicalSections.auditLog=database.auditLog;
+        delete result.auditDelta;
+      }else{
       const delta={version:1,revision,invalidated:true};
       if(pending?.retainsPrefix&&pending.revision===revision){
         const projector=require('./operation-evidence.cjs').createEventProjector(current);
@@ -180,6 +189,7 @@ function filteredResult(result,principal,database,options={}){
         delta.appended=pending.events.map(event=>publicAuditRow(projector.projectEvent(event,pending.proof),current)).filter(Boolean);
       }
       result.auditDelta=delta;
+      }
     }
   }
   if(!principal)return result;
@@ -311,8 +321,11 @@ function prepareTransaction(previous, supplied, options = {}) {
   require('./document-archive.cjs').assertHead(previous,{...previous,...supplied});
   assertAuditPrefix(previous, supplied, options.principal||actor);
   // Client-generated audit suffixes are hints, never persisted as trusted facts.
-  const scoped=accessContext().create(previous,previous,principal);
-  const merged=Object.fromEntries(Object.entries(supplied).map(([name,rows])=>[name,name==='auditLog'||options.commandIntent||!accessContext().hasNarrowing(principal)?rows:scoped.mergeVisibleChanges(name,rows)]));
+   const narrowed=accessContext().hasNarrowing(principal);
+   // Scoped restoration is used only by narrowed raw writes. Semantic commands
+   // already passed their trusted source scope; do not prepare unused contexts.
+   const scoped=!options.commandIntent&&narrowed?accessContext().create(previous,previous,principal):null;
+   const merged=Object.fromEntries(Object.entries(supplied).map(([name,rows])=>[name,name==='auditLog'||options.commandIntent||!narrowed?rows:scoped.mergeVisibleChanges(name,rows)]));
   let sections = require('./period-access.cjs').mergePeriods(previous,require('./document-access.cjs').mergeDrafts(previous,Object.fromEntries(Object.entries(merged).filter(([name]) => name !== 'auditLog')),options.principal||actor),options.principal||actor);
   assertRegistryAccountingAccess(previous,sections,principal);
   const periodCommand=options.commandIntent?.command?.type==='PeriodAction'&&require('./period-access.cjs').canManage(options.principal||actor,options.commandIntent.command.input?.scope);
@@ -330,7 +343,7 @@ function prepareTransaction(previous, supplied, options = {}) {
   if (!Number.isFinite(Date.parse(at))) fail('INVALID_CLOCK', 'Некорректное время операции');
   const id = info?.id || 'backend:' + crypto.randomUUID();
   const calendar=require('../assets/core/business-calendar.js'),clock=calendar.resolve(previous,at);
-  const commandProof=['MergeCatalog','AcceptShift','DocumentAction','PeriodAction','FuelAction','ProcurementAction','CostAction','RepairAction','CalendarAction','ImportAction','GeneratorMaintenanceAction','AssetInventoryAction'].includes(options.commandIntent?.command?.type)
+  const commandProof=['MergeCatalog','AcceptShift','DocumentAction','PeriodAction','FuelAction','ProcurementAction','CostAction','RepairAction','CalendarAction','ImportAction','GeneratorMaintenanceAction','AssetInventoryAction','VehicleRecordAction'].includes(options.commandIntent?.command?.type)
     ? {commandIntent:contracts().parseCommandEnvelope(options.commandIntent,registry)} : {};
   const importProof=['ImportAction','AssetInventoryAction'].includes(commandProof.commandIntent?.command?.type)&&options.importSource?{importSource:options.importSource}:{};
   const temporalContext={id,now:at,today:clock.today,calendar:clock,actor,...commandProof,...importProof};
@@ -348,11 +361,13 @@ function prepareTransaction(previous, supplied, options = {}) {
     readable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'read', name)),
     writable:registry.filter(name => require('./document-access.cjs').permitted(options.principal||actor, 'write', name)||name==='fuelPeriods'&&periodCommand||name===costTarget&&costCommand) });
   plan=stampPostingScopes(previous,plan,{now:at,actor});
-  const finalAccess=accessContext().create(previous,{...previous,...plan.sections},principal,{writableOverrides:[...(periodCommand?['fuelPeriods']:[]),...(costTarget?[costTarget]:[])],...(costTarget?{writeFields:{[costTarget]:['costProfile']}}:{})});
-  if(accessContext().hasNarrowing(principal))for(const [name,rows] of Object.entries(plan.sections))if(name!=='auditLog'){
+   if(narrowed){
+   const finalAccess=accessContext().create(previous,{...previous,...plan.sections},principal,{writableOverrides:[...(periodCommand?['fuelPeriods']:[]),...(costTarget?[costTarget]:[])],...(costTarget?{writeFields:{[costTarget]:['costProfile']}}:{})});
+   for(const [name,rows] of Object.entries(plan.sections))if(name!=='auditLog'){
     const firstById=new Map();for(const row of previous[name]||[])if(!firstById.has(row.id))firstById.set(row.id,row);
     finalAccess.validateChanges(name,rows.map(row=>{const old=firstById.get(row.id);if(!old?.scopeSnapshot&&row.scopeSnapshot){const {scopeSnapshot,...business}=row;return business;}return row;}));
-  }
+   }
+   }
   require('./attachment-access.cjs').validateChanges(options.dataDir,previous,{...previous,...plan.sections},{principal,databaseToken:options.databaseToken});
   const changes = (plan.rowChanges || []).filter(row => row.section !== 'auditLog');
   const result = { ...plan.sections };

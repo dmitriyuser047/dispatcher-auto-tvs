@@ -48,6 +48,25 @@ test('a 999-row database keeps the compatible save path without starting a trans
  assert.deepEqual(result,{saved:true,count:999,workers:0,writes:1});
 });
 
+test('sequential journal saves reuse pure worker code while each request has its own verified operation and snapshots',async()=>{
+ const result=await page.evaluate(async()=>{
+  data.records[0].note='First confirmed save';const first=await saveData(data,{operation:{id:'worker-reuse-first'}});
+  data.records[1].note='Second confirmed save';const second=await saveData(data,{operation:{id:'worker-reuse-second'}});
+  return {first,second,workers:window.__workers.filter(url=>url.includes('transaction-worker')).length,messages:window.__workerMessages.length,operations:window.__writes.map(request=>request.operation.id),notes:window.__disks[window.__token].records.slice(0,2).map(row=>row.note),status:platformPrepareBackgroundStatus()};
+ });
+ assert.deepEqual(result,{first:true,second:true,workers:1,messages:2,operations:['worker-reuse-first','worker-reuse-second'],notes:['First confirmed save','Second confirmed save'],status:{active:0,queued:0,limit:8}});
+});
+
+test('an idle worker never carries the previous user grant into a later journal save',async()=>{
+ const result=await page.evaluate(async()=>{
+  data.records[0].note='First authorized save';const first=await saveData(data,{operation:{id:'worker-admin-save'}});
+  _sync.access={user:{id:'restricted-user',role:'viewer'},readable:PlatformSchema.sections.slice(),writable:[]};
+  data.records[1].note='Denied second save';const second=await saveData(data,{operation:{id:'worker-viewer-save'}});
+  return {first,second,workers:window.__workers.filter(url=>url.includes('transaction-worker')).length,writes:window.__writes.length,notes:window.__disks[window.__token].records.slice(0,2).map(row=>row.note)};
+ });
+ assert.deepEqual(result,{first:true,second:false,workers:1,writes:1,notes:['First authorized save','Original 1']});
+});
+
 test('exactly 1000 total rows, including metadata and cards, enable background transaction preparation',async()=>{
  const result=await page.evaluate(async()=>{while(Object.values(data).reduce((sum,rows)=>sum+(Array.isArray(rows)?rows.length:0),0)>1000)data.records.pop();window.__disks[window.__token]=structuredClone(data);data=await loadData();rebuildIndex();_platformRuntime=null;_platformRuntimeIdentity=null;const count=Object.values(data).reduce((sum,rows)=>sum+(Array.isArray(rows)?rows.length:0),0);data.records[0].note='Boundary transaction changed';const saved=await saveData(data,{operation:{id:'transaction-boundary'}});return{saved,count,workers:window.__workers.filter(url=>url.includes('transaction-worker')).length,writes:window.__writes.length,status:platformPrepareBackgroundStatus()};});
  assert.equal(result.count,1000);assert.equal(result.saved,true);assert.ok(result.workers>=1);assert.equal(result.writes,1);assert.equal(result.status.active,0);assert.equal(result.status.queued,0);

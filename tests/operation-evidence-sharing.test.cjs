@@ -33,7 +33,7 @@ test('memoized snapshots still reject cycles, accessors and sparse arrays withou
  const sparse=Array(2);sparse[1]='present';assert.throws(()=>evidence.createProof(request(database([row([sparse,sparse])]))),invalid);
 });
 
-test('distinct owned data still cannot cross the one-million-node resource ceiling',()=>{
- const distinct=Array.from({length:1000001},(_,index)=>index);
+test('distinct owned data still cannot cross the released eight-million-node resource ceiling',()=>{
+ const distinct=Array.from({length:8000001},(_,index)=>index);
  assert.throws(()=>evidence.createProof(request(database([row(distinct)]))),invalid);
 });

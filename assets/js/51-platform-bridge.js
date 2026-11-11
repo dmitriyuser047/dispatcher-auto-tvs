@@ -3,6 +3,22 @@
 let _platformRuntime = null, _platformRuntimeIdentity = null, _platformLastError = null;
 let _platformPrepareActive=null,_platformPrepareSequence=0;
 const _platformPrepareQueue=[],PLATFORM_PREPARE_LIMIT=8,PLATFORM_PREPARE_CHARACTERS=1048576;
+// Retain only pure calculation code between saves, never a plan or its sources.
+// The worker endpoint clears each captured request after replying.
+let _platformPrepareIdleWorker=null,_platformPrepareIdleTimer=null;
+function platformTakePrepareWorker(){
+  clearTimeout(_platformPrepareIdleTimer);_platformPrepareIdleTimer=null;
+  const worker=_platformPrepareIdleWorker;_platformPrepareIdleWorker=null;
+  return worker||new Worker('assets/core/transaction-worker.js');
+}
+function platformReleasePrepareWorker(worker,reusable){
+  if(!reusable){try{worker.terminate();}catch{}return;}
+  if(_platformPrepareIdleWorker&&_platformPrepareIdleWorker!==worker)try{_platformPrepareIdleWorker.terminate();}catch{}
+  _platformPrepareIdleWorker=worker;
+  const retire=()=>{if(_platformPrepareIdleWorker!==worker)return;_platformPrepareIdleWorker=null;clearTimeout(_platformPrepareIdleTimer);_platformPrepareIdleTimer=null;try{worker.terminate();}catch{}};
+  worker.onerror=event=>{event.preventDefault?.();retire();};worker.onmessageerror=retire;
+  _platformPrepareIdleTimer=setTimeout(retire,300000);
+}
 
 function platformPrepareBackgroundStatus(){return {active:_platformPrepareActive?1:0,queued:_platformPrepareQueue.length,limit:PLATFORM_PREPARE_LIMIT};}
 function platformPrepareAccessStamp(context){
@@ -22,11 +38,11 @@ function platformDrainPrepareQueue(){
   const job=_platformPrepareQueue.shift();
   try{platformPrepareGuard(job);}catch(error){job.reject(error);platformDrainPrepareQueue();return;}
   if(typeof Worker!=='function'){job.reject(platformPrepareError('WORKER_UNAVAILABLE','Фоновая подготовка недоступна. Откройте программу заново.'));platformDrainPrepareQueue();return;}
-  let worker;try{worker=new Worker('assets/core/transaction-worker.js');}catch{job.reject(platformPrepareError('WORKER_FAILED','Не удалось запустить фоновую подготовку'));platformDrainPrepareQueue();return;}
+  let worker;try{worker=platformTakePrepareWorker();}catch{job.reject(platformPrepareError('WORKER_FAILED','Не удалось запустить фоновую подготовку'));platformDrainPrepareQueue();return;}
   _platformPrepareActive=job;job.worker=worker;
   let finished=false;
-  const finish=(error,plan)=>{
-    if(finished)return;finished=true;clearTimeout(timer);worker.onmessage=null;worker.onerror=null;worker.onmessageerror=null;try{worker.terminate();}catch{}
+  const finish=(error,plan,reusable=false)=>{
+    if(finished)return;finished=true;clearTimeout(timer);worker.onmessage=null;worker.onerror=null;worker.onmessageerror=null;platformReleasePrepareWorker(worker,reusable);
     if(_platformPrepareActive===job)_platformPrepareActive=null;
     if(error)job.reject(error);else job.resolve(plan);platformDrainPrepareQueue();
   };
@@ -40,7 +56,7 @@ function platformDrainPrepareQueue(){
       if(reply.identity!==job.context.identity)throw platformPrepareError('STALE_IDENTITY','Результат подготовки относится к другой базе');
       if(reply.ok!==true){const detail=reply.error||{};throw Object.assign(platformPrepareError(detail.code||'PREPARE_FAILED',detail.message||'Не удалось подготовить сохранение'),detail);}
       if(reply.plan?.id!==job.context.id||reply.plan?.identity!==job.context.identity)throw platformPrepareError('MISMATCHED_PREPARE','План относится к другой операции');
-      finish(null,reply.plan);
+      finish(null,reply.plan,true);
     }catch(error){finish(error);}
   };
   try{worker.postMessage({protocolVersion:1,type:'prepare',requestId:job.requestId,previous:job.previous,next:job.next,context:job.context});}
@@ -179,6 +195,25 @@ function platformCommandNeedsPersonnelPlanning(command,source){
   return !!scope&&(scope.section==='shiftReports'||scope.section==='dispatchJobs'&&scope.candidates.some(row=>row.driverId!==undefined&&row.driverId!==null&&row.driverId!==''||Object.hasOwn(row,'personnelRequirements')));
 }
 function platformExecuteCommand(command,options={}){return platformApplication().commands.semantic(command,options);}
+function platformVehicleRecordCommandAvailable(){
+  return typeof _sync!=='undefined'&&_sync.enabled&&_sync.platform?.vehicleRecordV1===1&&
+    _sync.platform.apiVersion===1&&_sync.platform.commands===1&&_sync.platform.operations===1&&_sync.platform.outbox===1&&
+    _sync.platform.scopedAccess!==1&&
+    _sync.platform.negotiation?.writeCompatible===true&&typeof window.electronAPI?.executeCommand==='function'&&
+    (typeof _loadWriteBlocked==='undefined'||!_loadWriteBlocked);
+}
+// A row command must not silently replace the old whole-snapshot save when
+// another editor has already changed live data. Its unrelated draft stays on
+// the existing save path, including deferred/unknown input validation.
+function platformVehicleRecordCommandSourceClean(source=data,command=null){
+  try{
+    if(source!==data||typeof _sync==='undefined'||!_sync.enabled)return false;
+    if(Object.keys(source).some(name=>!SYNC_SECTIONS.includes(name)))return false;
+    PlatformContracts.validateSections(source,SYNC_SECTIONS);
+    if(command){const dependencies=PlatformCommands.dependencies(command),readable=_sync.access?.readable;if(!Array.isArray(readable)||dependencies.some(name=>!syncSectionLoaded(name)||!readable.includes('*')&&!readable.includes(name)))return false;}
+    return SYNC_SECTIONS.every(name=>syncSectionLoaded(name)?JSON.stringify(source[name]||[])===_sync.synced[name]:JSON.stringify(source[name]||[])==='[]');
+  }catch{return false;}
+}
 function platformExecuteDomainCommand(value,options={}){
   let command,id,stamp,signature,entry;
   try{
@@ -213,6 +248,8 @@ function platformExecuteDomainCommand(value,options={}){
         if(context.blocked||!_sync.enabled||!_sync.databaseToken)throw platformPrepareError('COMMAND_CONNECTION_REQUIRED','Для команды нужно подтверждённое подключение к основной базе.');
         if(_sync.platform?.apiVersion!==1||_sync.platform?.commands!==1||_sync.platform?.operations!==1||_sync.platform?.outbox!==1||!window.electronAPI?.executeCommand)
           throw platformPrepareError('UNSUPPORTED_COMMANDS','Подключение не поддерживает атомарные команды. Загрузите данные из совместимой версии программы.');
+        if(command.type==='VehicleRecordAction'&&_sync.platform?.vehicleRecordV1!==1)
+          throw platformPrepareError('UNSUPPORTED_VEHICLE_RECORD','Подключение не поддерживает быструю запись журнала пробега. Обновите сервер или используйте обычное сохранение.');
         if(command.type==='GeneratorMaintenanceAction'&&!_sync.platform?.negotiation?.selectedProfile?.capabilities?.some(item=>item.name==='generatorMaintenanceV1'&&item.version===1))
           throw platformPrepareError('UNSUPPORTED_GENERATOR_MAINTENANCE','Подключение не поддерживает график ТО ДЭС. Обновите основную программу.');
         if(command.type==='AssetInventoryAction'&&(!_sync.platform?.negotiation?.selectedProfile?.capabilities?.some(item=>item.name==='inventoryV1'&&item.version===1)||_sync.platform?.storageKind!=='sqlite'))

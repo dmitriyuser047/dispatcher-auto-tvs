@@ -14,6 +14,8 @@ export interface Capture{readonly key:symbol}
 export interface RuntimeInput{id?:unknown;previous:Database;next:Database;identity:string;options:Options}
 export interface SavePorts{
  context():Context;accessStamp(context:Context):string;capabilities():Record<string,unknown>;
+ /** Strict portable serialization before a complete snapshot is reduced to its write patch. */
+ serializeSnapshot?(database:Database):string;
  run(input:RuntimeInput,persist:(plan:{id:string})=>Promise<unknown>):Promise<unknown>;
  clearAck():void;ack():Record<string,unknown>|null;
  rollback(database:Database):void;setError(error:{code:string;message:string;at:string}|null):void;

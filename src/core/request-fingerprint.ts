@@ -1,5 +1,6 @@
 export interface RequestFingerprintAPI {
   readonly apiVersion:1;
+  canonicalClone(input:unknown):CanonicalValue|undefined;
   stableSerialize(input:unknown):string|undefined;
   sha256(text:unknown):string;
   requestDigest(payload:unknown):string;
@@ -9,7 +10,7 @@ type CanonicalValue=null|string|boolean|number|CanonicalValue[]|{[key:string]:Ca
 interface FingerprintError extends Error {code:string;details?:unknown}
 
 /** Portable request bytes. The released serialization and digest formats are unchanged. */
-export function createRequestFingerprint():RequestFingerprintAPI {
+export function createRequestFingerprint(nativeSha256?:(text:string)=>string):RequestFingerprintAPI {
   const tag=(value:unknown):string=>Object.prototype.toString.call(value);
   const plain=(value:unknown):value is Row=>value!=null&&tag(value)==='[object Object]';
   const own=(value:object,key:PropertyKey):boolean=>Object.prototype.hasOwnProperty.call(value,key);
@@ -17,7 +18,7 @@ export function createRequestFingerprint():RequestFingerprintAPI {
     const error=new Error(message) as FingerprintError;
     error.name='PlatformKernelError';error.code=code;if(details!==undefined)error.details=details;throw error;
   }
-  function stableSerialize(input:unknown):string|undefined {
+  function canonicalClone(input:unknown):CanonicalValue|undefined {
     const parents=new WeakSet<object>();
     function visit(value:unknown,depth:number,inArray:true):CanonicalValue;
     function visit(value:unknown,depth:number,inArray:false):CanonicalValue|undefined;
@@ -27,7 +28,8 @@ export function createRequestFingerprint():RequestFingerprintAPI {
       if(value===null||typeof value==='string'||typeof value==='boolean')return value;
       if(typeof value==='number'){
         if(!Number.isFinite(value))fail('INVALID_SNAPSHOT','Данные содержат неконечное число');
-        return value;
+        // A JSON round trip historically normalizes negative zero to zero.
+        return Object.is(value,-0)?0:value;
       }
       if(!Array.isArray(value)&&!plain(value))fail('INVALID_SNAPSHOT','Допустимы только данные JSON');
       if(parents.has(value))fail('INVALID_SNAPSHOT','Циклическая структура данных');
@@ -44,12 +46,17 @@ export function createRequestFingerprint():RequestFingerprintAPI {
       }
       parents.delete(value);return out;
     }
-    return JSON.stringify(visit(input,0,false));
+    return visit(input,0,false);
   }
+  function stableSerialize(input:unknown):string|undefined { return JSON.stringify(canonicalClone(input)); }
   // The fixed-width word accesses below are bounded by their SHA-256 block loops.
   function sha256(text:unknown):string {
+    const input=String(text);
+    // The Node wrapper supplies its synchronous UTF-8 SHA-256 implementation.
+    // Browsers use the portable implementation with the same released bytes.
+    if(nativeSha256)return nativeSha256(input);
     const bytes:number[]=[];
-    for(const character of String(text)){
+    for(const character of input){
       let code=character.codePointAt(0)!;
       if(code>=0xd800&&code<=0xdfff)code=0xfffd;
       if(code<0x80)bytes.push(code);
@@ -89,5 +96,5 @@ export function createRequestFingerprint():RequestFingerprintAPI {
     const omitAudit=(object:object):Row=>Object.fromEntries(Object.entries(object).filter(([name])=>name!=='auditLog'));
     return 'sha256:'+sha256(stableSerialize({base:omitAudit(payload.base||{}),sections:omitAudit(payload.sections||{}),...(own(payload,'scopeViews')?{scopeViews:payload.scopeViews}:{})}));
   }
-  return Object.freeze({apiVersion:1 as const,stableSerialize,sha256,requestDigest});
+  return Object.freeze({apiVersion:1 as const,stableSerialize,sha256,requestDigest,canonicalClone});
 }

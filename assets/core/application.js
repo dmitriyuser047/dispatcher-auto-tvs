@@ -1,5 +1,5 @@
 /* Generated from strict TypeScript by scripts/build-application.cjs.
- * Source/config sha256:edd01aa247bf4f454792beccc3d5ba320a1a347224ccbfb8d3121626218944c7. Do not edit directly. */
+ * Source/config sha256:e2ad48acffb43e632f84a8a4e90c7e418cd3521a7269ea6a681c140508212175. Do not edit directly. */
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.DispatcherApplication=factory();})(typeof globalThis==='object'?globalThis:this,function(){
 'use strict';
 const modules=Object.create(null),instances=Object.create(null);function define(name,deps,factory){if(Object.hasOwn(modules,name))throw Error('Duplicate application module '+name);modules[name]={deps,factory};}function resolve(name,owner){if(!name.startsWith('.'))return name;const parts=owner.split('/');parts.pop();for(const part of name.split('/')){if(part==='..')parts.pop();else if(part!=='.')parts.push(part);}return parts.join('/');}function load(name){if(Object.hasOwn(instances,name))return instances[name];const module=modules[name];if(!module)throw Error('Missing application module '+name);const exports={};instances[name]=exports;const result=module.factory(...module.deps.map(dep=>dep==='exports'?exports:dep==='require'?(request=>load(resolve(request,name))):load(resolve(dep,name))));if(result!==undefined)instances[name]=result;return instances[name];}
@@ -79,7 +79,21 @@ define("application/save-service", ["require", "exports", "application/contracts
                 const previous = repository.baseline(), operation = (0, contracts_2.object)(options?.operation) ? options.operation : undefined;
                 if (['dispatchJobs', 'workOrders'].some(name => JSON.stringify(previous[name] || []) !== JSON.stringify(database[name] || [])) && ports.capabilities().calendar !== 1)
                     (0, contracts_2.fail)('UNSUPPORTED_CALENDAR', 'Подключение не поддерживает проверку учётного календаря. Загрузите данные из совместимой версии программы.');
-                const result = await ports.run({ id: operation?.id, previous, next: database, identity: context.identity, options: { allowLegacy: true, ...options, requireOperationReceipt: !!ports.capabilities().operations } }, async (plan) => {
+                // The runtime accepts a patch over the complete previous snapshot. Keep its
+                // entire read context, but do not repeatedly clone unrelated sections as writes.
+                // The host's strict serializer still examines every supplied value, including
+                // unchanged/unknown fields that JSON.stringify alone could silently coerce.
+                let next = database;
+                if (ports.serializeSnapshot) {
+                    const normalized = JSON.parse(ports.serializeSnapshot(database));
+                    if (!(0, contracts_2.object)(normalized))
+                        (0, contracts_2.fail)('INVALID_SNAPSHOT', 'Источник изменений должен быть объектом');
+                    next = {};
+                    for (const [name, rows] of Object.entries(normalized))
+                        if (JSON.stringify(previous[name]) !== JSON.stringify(database[name]))
+                            next[name] = rows;
+                }
+                const result = await ports.run({ id: operation?.id, previous, next, identity: context.identity, options: { allowLegacy: true, ...options, requireOperationReceipt: !!ports.capabilities().operations } }, async (plan) => {
                     if (!sameSession())
                         (0, contracts_2.fail)('SESSION_CHANGED', 'База или пользователь изменились. Откройте форму заново.');
                     if (ports.accessStamp(ports.context()) !== ports.accessStamp(context))

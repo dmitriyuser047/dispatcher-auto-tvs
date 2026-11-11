@@ -23,11 +23,30 @@ function requireAccess(principal,action,names){if(names.some(name=>!permitted(pr
 const stable=value=>require('../assets/core/platform-kernel.js').stableSerialize(value);
 function filteredResult(result,principal,database,options){return platform.filteredResult(result,principal,database,options);}
 function semanticAction(command){
-  const names={DocumentAction:'document',FuelAction:'fuel',ProcurementAction:'procurement',CostAction:'cost',RepairAction:'repair',CalendarAction:'calendar',PeriodAction:'period',GeneratorMaintenanceAction:'maintenance',AssetInventoryAction:'inventory'};
+  const names={VehicleRecordAction:'vehicle-record',DocumentAction:'document',FuelAction:'fuel',ProcurementAction:'procurement',CostAction:'cost',RepairAction:'repair',CalendarAction:'calendar',PeriodAction:'period',GeneratorMaintenanceAction:'maintenance',AssetInventoryAction:'inventory'};
   if(names[command.type])return names[command.type]+':'+command.input.action;
   return command.type==='ImportAction'?'import:'+command.input.profile:command.type==='PrintAction'?'print:capture':command.type==='MergeCatalog'?'catalog:merge':command.type==='IssueFuel'?'fuel:issue':command.type==='AcceptShift'?'shift:accept':'assignment:save';
 }
+function collectVehicleRecordEvidence(database,command,dependencies,{strict=true}={}){
+  const selected=new Map(),rows=[],targets=[];let complete=true;
+  const take=(name,row,index)=>{const key=name+'|'+index;if(selected.has(key))return;selected.set(key,true);rows.push({name,row});targets.push(contracts.identifier(row.id)?{section:name,id:row.id}:{section:name,before:row,after:null,beforeIndex:index});};
+  const byId=(name,id,optional=false)=>{const matches=(database[name]||[]).map((row,index)=>({row,index})).filter(item=>item.row.id===id);if(matches.length!==1){if(optional&&!matches.length)return null;if(strict)fail('ACCESS_DENIED','Не подтверждён источник записи журнала.',403);complete=false;targets.push({section:name,id});return null;}take(name,matches[0].row,matches[0].index);return matches[0].row;};
+  const record=command.input.record,old=byId('records',record.id,true),vehicle=byId('vehicles',record.vehicleId);
+  // This action reads one journal row, not every other row of that vehicle.
+  // Section revisions bind the absence of a new ID and every omitted policy.
+  for(const [index,row]of (database.appMeta||[]).entries())if(row.id==='business-calendar'||row.kind==='businessCalendar')take('appMeta',row,index);
+  const months=[record.date,old?.date].filter(value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)).map(value=>value.slice(0,7)).sort(),from=months[0];
+  for(const [index,row]of (database.fuelPeriods||[]).entries())if(typeof row.month==='string'&&from&&row.month>=from)take('fuelPeriods',row,index);
+  if(!old||old.date!==record.date||Object.hasOwn(record,'fuelCardNum')&&old.fuelCardNum!==record.fuelCardNum){
+    const fuel=require('../assets/core/fuel-engine.js'),number=Object.hasOwn(record,'fuelCardNum')?record.fuelCardNum:old?.fuelCardNum,key=fuel.gsmCardKey(number);
+    if(key){let found=false;for(const [index,card]of (database.fuelCards||[]).entries())if(fuel.gsmCardKey(card.number)===key){found=true;take('fuelCards',card,index);for(const assignment of card.assignments||[])if((!assignment.from||assignment.from<=record.date)&&(!assignment.to||assignment.to>=record.date)&&contracts.identifier(assignment.vehicleId))byId('vehicles',assignment.vehicleId);}
+      if(!found)for(const [index,row]of (database.vehicles||[]).entries())if(fuel.gsmCardKey(row.fuelcard)===key)take('vehicles',row,index);
+    }
+  }
+  return {complete,readSections:dependencies.slice(),selectedTargets:targets,rows};
+}
 function collectCommandEvidence(database,command,dependencies,{strict=true}={}){
+  if(command.type==='VehicleRecordAction')return collectVehicleRecordEvidence(database,command,dependencies,{strict});
   const selected=new Map(),keys=new Map(),assets=new Set(),unresolved=new Map(),idless=new Map(),indexes=new Map();let complete=true;
   // An import selects the complete read closure. Index each locked section once
   // instead of filtering the whole journal again for every selected identity.
@@ -60,6 +79,11 @@ function assertCommandScope(database,command,dependencies,principal){
 }
 function assertSemanticChanges(database,sections,command,principal){
   if(!require('./access-context.cjs').hasNarrowing(principal))return;
+  if(command.type==='VehicleRecordAction'){
+    // Ordinary journal edits use the established create/update/field ACL, not
+    // a new domain permission that existing journal users were never granted.
+    const context=require('./access-context.cjs').create(database,{...database,...sections},principal);for(const [name,rows]of Object.entries(sections))if(name!=='auditLog')context.validateChanges(name,rows);return;
+  }
   const next={...database,...sections},ctx=require('./access-context.cjs').create(database,next,principal),action=semanticAction(command),key=row=>stable([typeof row.id,row.id]);
   for(const [name,rows]of Object.entries(sections)){
     if(name==='auditLog')continue;const before=database[name]||[],old=new Map(before.map(row=>[key(row),row])),after=new Map(rows.map(row=>[key(row),row]));
@@ -86,7 +110,7 @@ function executeInternal(dataDir,input,options={}){
   if(command.type==='AssetInventoryAction'&&!['admin','accountant'].includes(principal.role))fail('ACCESS_DENIED','Изменение инвентаризации доступно администратору и бухгалтеру.',403);
   if(command.type==='RepairAction'&&!access.repairActions(principal).includes(command.input.action))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия с ремонтом.',403);
   if(command.type==='CalendarAction'&&!access.canCalendarAction(principal,command.input))fail('ACCESS_DENIED','Недостаточно прав для выбранного действия рабочего календаря.',403);
-  if(!primary.some(name=>access.actionAvailable(principal,semanticAction(command),name)))fail('ACCESS_DENIED','Нет права на выбранное действие.',403);
+  if(command.type!=='VehicleRecordAction'&&!primary.some(name=>access.actionAvailable(principal,semanticAction(command),name)))fail('ACCESS_DENIED','Нет права на выбранное действие.',403);
   requireAccess(principal,'write',periodAction?footprint.filter(name=>name!=='fuelPeriods'):costPolicy?footprint.filter(name=>name!==command.input.target.section):command.type==='PrintAction'?[]:footprint);
   };
   if(!Array.isArray(dependencies)||!Array.isArray(footprint)||dependencies.some(name=>!schema.sections.includes(name)||name==='auditLog'&&!catalogMerge)||footprint.some(name=>name==='auditLog'||!dependencies.includes(name)))fail('COMMAND_DEFINITION','Некорректно определены зависимости команды',500);
@@ -95,7 +119,7 @@ function executeInternal(dataDir,input,options={}){
     const action=()=>{
       // Receipt lookup precedes source/archive inspection and new planning.
       // Current ACK projection is applied separately after authorization.
-      const snapshot={data:storage.readAll(dataDir),revisions:storage.readRevisions(dataDir),databaseToken:storage.databaseToken(dataDir)},token=snapshot.databaseToken;
+      const snapshot=command.type==='VehicleRecordAction'?storage.readCommandSnapshot(dataDir):{data:storage.readAll(dataDir),revisions:storage.readRevisions(dataDir),databaseToken:storage.databaseToken(dataDir)},token=snapshot.databaseToken;
       if(envelope.databaseToken!==token)return {ok:false,databaseChanged:true,databaseToken:token,code:'DATABASE_CHANGED',error:'База изменилась. Загрузите её заново перед выполнением команды.'};
       // A previously committed intent wins before stale dependency versions,
       // changing source objects and newly generated timestamps are consulted.
@@ -105,7 +129,7 @@ function executeInternal(dataDir,input,options={}){
         const changed=info.receipt.changedSections;
         if(!Array.isArray(changed)||changed.some(name=>!schema.sections.includes(name)))fail('COMMAND_RECEIPT','Повреждена квитанция команды',500);
         requireAccess(principal,'read',changed);
-        return filteredResult(platform.replayResult(snapshot.data,snapshot.revisions,token,info,changed),principal,snapshot.data,options);
+        return filteredResult(platform.replayResult(snapshot.data,snapshot.revisions,token,info,changed),principal,snapshot.data,{...options,commandIntent:envelope});
       }
       authorizeNewIntent();
       storage.assertWriteCompatibility(dataDir,options,command.type==='ImportAction'?'controlledImports':command.type==='PrintAction'?'documentPrint':undefined);
@@ -131,7 +155,7 @@ function executeInternal(dataDir,input,options={}){
       // after receipt lookup and before backup/commit. Do not prevalidate a
       // correction without its independently reproducible document proof.
       const result=storage.writeSections(dataDir,{databaseToken:token,base:envelope.base,sections:planned.sections,operation:envelope.operation},
-        {principal,now,commandIntent:envelope,...(importSource?{importSource}:{}),requireNegotiatedWriter:options.requireNegotiatedWriter,assertWriteCompatibility:options.assertWriteCompatibility,requireWriterSchema:options.requireWriterSchema,writerSchemaVersion:options.writerSchemaVersion,compactAck:options.compactAck,beforeCommit:options.beforeCommit});
+        {principal,now,commandIntent:envelope,...(command.type==='VehicleRecordAction'?{commandSnapshot:snapshot}:{}),...(importSource?{importSource}:{}),requireNegotiatedWriter:options.requireNegotiatedWriter,assertWriteCompatibility:options.assertWriteCompatibility,requireWriterSchema:options.requireWriterSchema,writerSchemaVersion:options.writerSchemaVersion,compactAck:options.compactAck,beforeCommit:options.beforeCommit});
       return {...result,command:true};
     };
     // Do not split snapshot, dependency checks and business/audit writes across

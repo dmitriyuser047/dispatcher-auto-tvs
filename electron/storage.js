@@ -396,6 +396,12 @@ function readAll(dataDir) {
   storageFormat.assertInventoryBackend(out,'json');
   return out;
 }
+// Trusted command source, captured under its existing database lock/transaction.
+// JSON keeps ordinary fresh reads: it has no SQLite snapshot isolation.
+function readCommandSnapshot(dataDir){
+  const sqlite=sqliteBackend(dataDir),data=sqlite?sqlite.captureCommandRows(dataDir):readAll(dataDir);
+  return {data,revisions:readRevisions(dataDir),databaseToken:databaseToken(dataDir)};
+}
 
 /**
  * Записать данные, тронув только изменившиеся разделы.
@@ -503,7 +509,7 @@ function readSnapshot(dataDir,options={}) {
   require('./document-archive.cjs').validateState(dataDir,database);
   const data=options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?platform.visibleRows(name,database[name],options.principal,database):[]])):database;
   const version=schemaVersion(dataDir);
-  return {data,revisions:options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?revisions[name]:0])):revisions,databaseToken:databaseToken(dataDir),...(options.principal?{scopeViews:platform.scopeViews(database,revisions,options.principal)}:{}),platform:{apiVersion:1,storageKind:sqliteBackend(dataDir)?'sqlite':'json',operations:1,outbox:1,compactAck:1,receiptQuery:1,commands:1,...(require('./access-context.cjs').hasNarrowing(options.principal)?{scopedAccess:1}:{}),schemaVersion:version,currentSchemaVersion:storageFormat.SCHEMA_VERSION,descriptor:descriptor(dataDir),readOnly:version<storageFormat.SCHEMA_VERSION,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,calendar:version>=2?1:0,personnelPlanning:version>=2?1:0,documentPrint:version>=2?1:0,controlledImports:version>=2?1:0,needsSchemaUpgrade:version<storageFormat.SCHEMA_VERSION}};
+  return {data,revisions:options.principal?Object.fromEntries(SECTIONS.map(name=>[name,require('./document-access.cjs').permitted(options.principal,'read',name)?revisions[name]:0])):revisions,databaseToken:databaseToken(dataDir),...(options.principal?{scopeViews:platform.scopeViews(database,revisions,options.principal)}:{}),platform:{apiVersion:1,storageKind:sqliteBackend(dataDir)?'sqlite':'json',operations:1,outbox:1,compactAck:1,receiptQuery:1,commands:1,vehicleRecordV1:1,...(require('./access-context.cjs').hasNarrowing(options.principal)?{scopedAccess:1}:{}),schemaVersion:version,currentSchemaVersion:storageFormat.SCHEMA_VERSION,descriptor:descriptor(dataDir),readOnly:version<storageFormat.SCHEMA_VERSION,documentDrafts:version>=2?1:0,periods:version>=2?1:0,fuelOperations:version>=2?1:0,procurement:version>=2?1:0,costAccounting:version>=2?1:0,repairs:version>=2?1:0,calendar:version>=2?1:0,personnelPlanning:version>=2?1:0,documentPrint:version>=2?1:0,controlledImports:version>=2?1:0,needsSchemaUpgrade:version<storageFormat.SCHEMA_VERSION}};
 }
 function readOperation(dataDir,query,principal){
   if(schemaVersion(dataDir)>=4)return require('./platform-service.cjs').readReceipt(dataDir,query,principal);
@@ -522,7 +528,8 @@ function writeSections(dataDir, payload, options = {}) {
   storageFormat.assertInventoryBackend(payload?.sections,sqliteBackend(dataDir)?'sqlite':'json');
   const token = databaseToken(dataDir);
   if (payload && payload.databaseToken != null && payload.databaseToken !== token) return { ok: false, databaseChanged: true, databaseToken: token, error: 'База данных изменилась. Заново откройте её перед сохранением.' };
-  const previous = readAll(dataDir);
+  const commandSql=options.commandIntent?.command?.type==='VehicleRecordAction'?sqliteBackend(dataDir):null;
+  const previous = commandSql?.reuseCommandRows(dataDir,options.commandSnapshot?.data)||readAll(dataDir);
   const base = (payload && payload.base) || {};
   let sections = (payload && payload.sections) || {};
   const names = Object.keys(sections);
@@ -631,7 +638,7 @@ function makeDailyBackup(dataDir, backupDir, keepDays) {
 
 module.exports = {
   SECTIONS, sectionsDir, sectionFile, revisionsFile,schemaVersion,descriptor,assertWritable,assertWriteCompatibility,hasWriteCompatibility,encodeRevisions:storageFormat.encodeRevisions,
-  databaseToken, withDatabaseLock, validateRows, prepareWriteoffSections,createJson,
+  databaseToken, withDatabaseLock, validateRows, prepareWriteoffSections,createJson,readCommandSnapshot,
   executeCommand:(dataDir,envelope,options)=>require('./diagnostic-boundary.cjs').withCommit(envelope,envelope?.databaseToken,sqliteBackend(dataDir)?'sqlite':'json',()=>require('./command-service.cjs').execute(dataDir,envelope,options)),
   commitPrintArtifact,
   isDatabaseLockHeld:dataDir=>heldLocks.has(canonicalDirectory(dataDir)),

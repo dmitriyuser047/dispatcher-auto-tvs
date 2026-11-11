@@ -134,7 +134,52 @@ function vehicleDetailNumber(value, options) {
   return format.format(value);
 }
 
-function renderDetail(v) {
+// Only retain the mounted DOM and its last rendered strings. Calculations are
+// always made from the current canonical data before deciding which rows changed.
+const vehicleJournalMounts = new WeakMap();
+function vehicleJournalRemember(main, parts) {
+  if (main) vehicleJournalMounts.delete(main);
+  if (!main || typeof main.querySelector !== 'function' || !parts.rows.length) return;
+  const wrap=main.querySelector('#historyTableWrap'),body=wrap?.querySelector('tbody');
+  if (!body || body.children.length!==parts.rows.length || new Set(parts.rows.map(row=>row.key)).size!==parts.rows.length) return;
+  vehicleJournalMounts.set(main,{...parts,wrap,body,rows:parts.rows.map((row,index)=>({...row,node:body.children[index]}))});
+}
+function vehicleJournalPatch(main, parts, options) {
+  if (!options?.preserveJournal) return false;
+  const previous=vehicleJournalMounts.get(main);
+  if (!previous || previous.vehicleId!==parts.vehicleId || previous.year!==parts.year || previous.month!==parts.month || previous.session!==parts.session || previous.valuationHtml!==parts.valuationHtml || !parts.rows.length || new Set(parts.rows.map(row=>row.key)).size!==parts.rows.length) return false;
+  const wrap=main.querySelector('#historyTableWrap'),body=wrap?.querySelector('tbody'),scroll=wrap?.querySelector('.table-scroll'),tabs=main.querySelector('#monthTabs'),stats=main.querySelector('.stats-row'),header=main.querySelector('.vehicle-detail-header'),label=wrap?.querySelector('.table-toolbar-left');
+  if (wrap!==previous.wrap || body!==previous.body || !scroll || !tabs || !stats || !header || !label || body.children.length!==previous.rows.length || previous.rows.some((row,index)=>body.children[index]!==row.node)) return false;
+  const top=scroll.scrollTop,left=scroll.scrollLeft,oldRows=new Map(previous.rows.map(row=>[row.key,row]));
+  if (parts.headerHtml!==previous.headerHtml) {
+    const template=document.createElement('template');template.innerHTML=parts.headerHtml;header.replaceWith(template.content.querySelector('.vehicle-detail-header'));
+  }
+  if (parts.statsHtml!==previous.statsHtml) {
+    const template=document.createElement('template');template.innerHTML=parts.statsHtml;stats.replaceWith(template.content.querySelector('.stats-row'));
+  }
+  if (parts.monthTabsHtml!==previous.monthTabsHtml) tabs.innerHTML=parts.monthTabsHtml;
+  if (parts.labelHtml!==previous.labelHtml) label.innerHTML=parts.labelHtml;
+  const next=[];
+  for (const row of parts.rows) {
+    const old=oldRows.get(row.key);let node=old?.node;
+    if (!old || old.html!==row.html) {
+      const table=document.createElement('table');table.innerHTML='<tbody>'+row.html+'</tbody>';node=table.tBodies[0].rows[0];
+      if (old) { const checked=old.node.querySelector('.rec-check')?.checked;const check=node.querySelector('.rec-check');if(check)check.checked=!!checked;old.node.replaceWith(node); }
+    }
+    next.push({...row,node});oldRows.delete(row.key);
+  }
+  for (const old of oldRows.values()) old.node.remove();
+  let cursor=body.firstElementChild;
+  for (const row of next) { if (row.node!==cursor) body.insertBefore(row.node,cursor);cursor=row.node.nextElementSibling; }
+  scroll.scrollTop=top;scroll.scrollLeft=left;
+  const checks=next.map(row=>row.node.querySelector('.rec-check')),selected=checks.filter(check=>check?.checked).length,master=wrap.querySelector('#rec-check-all');
+  if(master){master.checked=selected===checks.length;master.indeterminate=selected>0&&selected<checks.length;}
+  if(typeof recUpdateToolbar==='function')recUpdateToolbar();
+  vehicleJournalMounts.set(main,{...parts,wrap,body,rows:next});return true;
+}
+
+function renderDetail(v, options) {
+  if (vehicleDetailView!=='journal')vehicleJournalMounts.delete(document.getElementById('mainContent'));
   const recs = recsFor(v.id);
   const valuationHtml=typeof costValuationCardHtml==='function'?costValuationCardHtml({section:'vehicles',id:v.id}):'';
   const totalKm = recs.reduce((s, r) => s + (r.km || 0), 0);
@@ -196,6 +241,7 @@ function renderDetail(v) {
 
   // rows
   let tableRows = '';
+  const journalRows = [];
   if (vehicleDetailView === 'journal') {
   if (monthRecs.length === 0) {
     tableRows = `<tr><td colspan="13" class="empty-table">Нет записей за этот месяц. Нажмите «+ Запись» чтобы добавить.</td></tr>`;
@@ -213,7 +259,7 @@ function renderDetail(v) {
         : '';
       const balance = TvsFuelEngine.recordBalanceAt(balMap,r.id);
       const balColor = balance < 0 ? 'var(--red)' : balance === 0 ? 'var(--text3)' : 'var(--green)';
-      tableRows += `<tr>
+      const rowHtml = `<tr>
         <td style="text-align:center;padding:0;width:28px"><input type="checkbox" class="rec-check" data-recid="${htmlEsc(r.id)}" onchange="recUpdateToolbar()"></td>
         <td class="td-day">${fullDate} <span style="color:var(--text3)">${dayName}</span></td>
         <td class="td-num">${r.km ? vehicleDetailNumber(r.km, {maximumFractionDigits:1}) : '—'}</td>
@@ -235,6 +281,8 @@ function renderDetail(v) {
           </button>
         </td>
       </tr>`;
+      tableRows += rowHtml;
+      journalRows.push({key:JSON.stringify([typeof r.id,r.id]),html:rowHtml});
     });
   }
   }
@@ -427,8 +475,11 @@ function renderDetail(v) {
       </div>
     `;
   } else if (vehicleDetailView === 'journal') {
-    // --- Full journal view ---
-    document.getElementById('mainContent').innerHTML = vehicleHeaderHtml + statsHtml + valuationHtml + `
+    const main=document.getElementById('mainContent'),parts={vehicleId:v.id,year:selectedYear,month:selectedMonth,session:typeof syncSessionStamp==='function'?syncSessionStamp():null,headerHtml:vehicleHeaderHtml,statsHtml,valuationHtml,monthTabsHtml,rows:journalRows,labelHtml:MONTHS_RU[selectedMonth-1]+' '+selectedYear+'<span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:10px">'+monthRecs.length+' записей · '+Math.round(monthKm).toLocaleString('ru')+' км · '+monthFuel.toLocaleString('ru',{maximumFractionDigits:1})+' л</span>'};
+    // The entire visible balance sequence was recalculated above. Retain the
+    // mounted journal after ACK and replace only rows whose display changed.
+    if (!vehicleJournalPatch(main,parts,options)) {
+    main.innerHTML = vehicleHeaderHtml + statsHtml + valuationHtml + `
     <div class="vehicle-journal-months">
       <div class="section-header">
         <div class="section-title">История по месяцам</div>
@@ -488,6 +539,8 @@ function renderDetail(v) {
       </div>
     </div>
     `;
+    vehicleJournalRemember(main,parts);
+    }
   } else if (vehicleDetailView === 'to') {
     document.getElementById('mainContent').innerHTML = vehicleHeaderHtml + statsHtml + valuationHtml +
       renderVehicleToSection(v.id, (v.odometer || 0) + totalKm);

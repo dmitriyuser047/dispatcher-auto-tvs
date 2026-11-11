@@ -1,3 +1,4 @@
+import type {VehicleRecordActionInput} from './vehicle-record';
 import type {GeneratorMaintenanceActionInput,GeneratorMaintenancePayload,GeneratorMaintenanceRow} from './generator-maintenance';
 import type {AssetInventoryActionInput} from './asset-inventory';
 export type {AssetInventoryActionInput} from './asset-inventory';
@@ -95,6 +96,7 @@ export type PlatformCommand = { type: 'IssueFuel'; version: 1; input: IssueFuelI
   | { type: 'ProcurementAction'; version: 1; input: ProcurementActionInput }
   | { type: 'CostAction'; version: 1; input: CostActionInput }
   | { type: 'RepairAction'; version: 1; input: RepairActionInput }
+  | { type: 'VehicleRecordAction'; version: 1; input: VehicleRecordActionInput }
   | { type: 'GeneratorMaintenanceAction'; version: 1; input: GeneratorMaintenanceActionInput }
   | { type: 'AssetInventoryAction'; version: 1; input: AssetInventoryActionInput }
   | { type: 'CalendarAction'; version: 1; input: CalendarActionInput }
@@ -281,6 +283,13 @@ export function createPlatformContracts() {
     const row = commandObject(commandJson(value,'command'),'command'); keys(row,['type','version','input'],'command');
     if (row.version !== 1) fail('COMMAND_VERSION', 'command.version', 'Версия команды не поддерживается');
     const input = commandObject(row.input,'command.input'), path = 'command.input.';
+    if(row.type==='VehicleRecordAction'){
+      keys(input,['action','record'],'command.input');if(input.action!=='save')fail('INVALID_COMMAND',path+'action','Неизвестное действие журнала пробега');
+      const record=commandObject(input.record,path+'record');keys(record,['id','vehicleId','date','km','kmGlonass','odoStart','odoEnd','driver','fuelGrade','fuelIssued','fuelSum','fuelUsed','fuelActual','fuelIdle','tankMeasured','fuelCardNum','note','route'],path+'record');
+      commandId(record.id,path+'record.id');commandId(record.vehicleId,path+'record.vehicleId');commandDate(record.date,path+'record.date');
+      if(record.km===undefined)fail('INVALID_COMMAND',path+'record.km','Укажите пробег');
+      return {type:'VehicleRecordAction',version:1,input:{action:'save',record:record as JsonRow}};
+    }
     if(row.type==='AssetInventoryAction'){
       // JSON shape is checked at the transport boundary. The standalone domain
       // parser checks catalog fields and all counting/approval invariants before

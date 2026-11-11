@@ -1,0 +1,187 @@
+{
+  "date": "2026-11-11",
+  "sourceBase": "v3.5.42 / 4254f4269fc777f7e4df26d107a0ad2489e63c24",
+  "status": "implemented, targeted checks passed; 500 ms target not reached",
+  "targetMs": 500,
+  "targetAchieved": false,
+  "syntheticOnly": true,
+  "workingDatabaseOpened": false,
+  "fullSuiteRun": false,
+  "installerBuilt": false,
+  "releasePublished": false,
+  "method": {
+    "native": "Real isolated Electron renderer saveRecord through the actual main IPC, durable outbox and storage worker; timer includes validation, receipt, canonical install and renderDetail. A separate reader verifies physical saved values after each operation. First cold round kept separate from four warm rounds.",
+    "fixture": "100 vehicles, 2500 parts, 1200 initial legacy audit events; only records count changes.",
+    "paint": "Two requestAnimationFrame callbacks in hidden native windows have an artificial ~1 Hz compositor delay; paintMs is retained in raw artifacts and excluded from save latency.",
+    "server": "Authenticated HTTP loopback, current write handshake, real persistent storage worker, production backup descriptor. Timer includes the complete HTTP response and JSON parse; excludes desktop UI and real LAN/WAN latency.",
+    "environment": "Windows x64, Node 24.22.1, pinned source Electron 44.9.0. No cold OS cache eviction."
+  },
+  "native": [
+    {
+      "records": 1000,
+      "mode": "sqlite",
+      "saveMedianMs": 665.2,
+      "saveMinMs": 624.8,
+      "saveMaxMs": 723.2,
+      "coldSaveMs": 1292.4,
+      "warmSamples": 4,
+      "durableVerified": true
+    },
+    {
+      "records": 1000,
+      "mode": "json",
+      "saveMedianMs": 800.85,
+      "saveMinMs": 749.4,
+      "saveMaxMs": 925.2,
+      "coldSaveMs": 1623.9,
+      "warmSamples": 4,
+      "durableVerified": true
+    },
+    {
+      "records": 2200,
+      "mode": "sqlite",
+      "saveMedianMs": 802.05,
+      "saveMinMs": 762.5,
+      "saveMaxMs": 932.8,
+      "coldSaveMs": 1397.9,
+      "warmSamples": 4,
+      "durableVerified": true
+    },
+    {
+      "records": 2200,
+      "mode": "json",
+      "saveMedianMs": 1073.95,
+      "saveMinMs": 966.2,
+      "saveMaxMs": 1138.8,
+      "coldSaveMs": 2068.9,
+      "warmSamples": 4,
+      "durableVerified": true
+    }
+  ],
+  "baseline2200": [
+    {
+      "mode": "sqlite",
+      "saveMedianMs": 3342.35
+    },
+    {
+      "mode": "json",
+      "saveMedianMs": 3322.95
+    }
+  ],
+  "http2200": [
+    {
+      "mode": "sqlite",
+      "medianMs": 825.48,
+      "rounds": [
+        {
+          "round": 0,
+          "cold": true,
+          "elapsedMs": 1846.62,
+          "requestBytes": 596,
+          "responseBytes": 512370,
+          "durableVerified": true
+        },
+        {
+          "round": 1,
+          "cold": false,
+          "elapsedMs": 1026.87,
+          "requestBytes": 600,
+          "responseBytes": 513683,
+          "durableVerified": true
+        },
+        {
+          "round": 2,
+          "cold": false,
+          "elapsedMs": 825.48,
+          "requestBytes": 600,
+          "responseBytes": 514996,
+          "durableVerified": true
+        },
+        {
+          "round": 3,
+          "cold": false,
+          "elapsedMs": 790.54,
+          "requestBytes": 600,
+          "responseBytes": 516309,
+          "durableVerified": true
+        }
+      ]
+    },
+    {
+      "mode": "json",
+      "medianMs": 1045.85,
+      "rounds": [
+        {
+          "round": 0,
+          "cold": true,
+          "elapsedMs": 2535.75,
+          "requestBytes": 594,
+          "responseBytes": 512360,
+          "durableVerified": true
+        },
+        {
+          "round": 1,
+          "cold": false,
+          "elapsedMs": 1065.45,
+          "requestBytes": 598,
+          "responseBytes": 513665,
+          "durableVerified": true
+        },
+        {
+          "round": 2,
+          "cold": false,
+          "elapsedMs": 1008.97,
+          "requestBytes": 598,
+          "responseBytes": 514970,
+          "durableVerified": true
+        },
+        {
+          "round": 3,
+          "cold": false,
+          "elapsedMs": 1045.85,
+          "requestBytes": 598,
+          "responseBytes": 516275,
+          "durableVerified": true
+        }
+      ]
+    }
+  ],
+  "changes": [
+    "VehicleRecordAction sends only editable row facts with all dependency revisions; backend still runs shared guards and writes a durable receipt.",
+    "SQLite changes only differing physical rows; a private frozen snapshot can be reused only inside its unchanged live connection and schema/total_changes boundary. Commit checks still re-read physical rows after hooks.",
+    "Pure background planning worker is reused; generic saves carry only dirty sections after complete input validation.",
+    "Canonical clones avoid a redundant stringify/parse; Node SHA-256 uses native crypto with the exact released UTF-8 hash format.",
+    "Unchanged private canonical rows and per-call structural/domain results are reused; source/context mutation invalidates exported transition sessions.",
+    "Import origin guards compare protected facts directly only after strict portable-JSON validation; legacy inputs retain the earlier path.",
+    "Current ownership/field ACL and proof checks remain; public projected rows remain independent mutable copies.",
+    "Active history keeps a bounded foreground window; every event, proof and receipt remains reachable in the immutable archive and backups. Physical/decode limits were not lowered.",
+    "Canonical file paths avoid duplicate ancestor traversals; fresh inode, route, no-link, object-content and fsync checks remain.",
+    "The journal patches only changed DOM rows and preserves selection/scroll. Confirmed unchanged drafts do not write. Unknown operations preserve their form and operation ID."
+  ],
+  "checks": {
+    "status": "targeted checks passed; no full suite",
+    "groups": [
+      "Exact typed IDs, unknown field preservation, numeric precision, odometer mismatch, negative changed mileage, linked movements, closed periods, posted acts, CAS conflict and replay in SQLite/JSON.",
+      "SQLite diff/derived-field repair, private snapshot stale guards, hook-time physical mutation, root/ancestor inode replacement and symlink guards, immutable history/provider byte authentication.",
+      "History pagination/order, archived receipt lookup/current ACL, retention with batch201, lost-ACK canonical view, actual portable backup and restore.",
+      "Native/browser published v3.5.8 byte/hash fixtures, canonical clone error/order/ownership semantics, native SHA use and portable browser fallback.",
+      "Cost/import/inventory/repair/workflow reference-reuse parity, reverse links, calendar-sensitive ranges, malformed legacy fallback and source/context stale checks.",
+      "Browser command form: pending/unknown/error preservation, durable ACK path, no duplicate writes, fallback for old connections/dirty neighbors and no-op draft. Journal DOM refresh and ownership/field projection regressions.",
+      "Strict TypeScript core and application bundle checks; application architecture check; git diff --check."
+    ]
+  },
+  "limits": [
+    "500 ms was not achieved on either reported volume. These measurements are not an SLA for arbitrary data, hardware or network.",
+    "First save after startup, first history compaction and scheduled backups can be slower; cold results are explicitly included.",
+    "The one-record UI path requires the updated capability, a clean confirmed source and an unrestricted current connection. Old servers, scoped views and unrelated unsaved edits retain the complete guarded save path.",
+    "Full physical graph checks, unchanged-section dependencies and canonical whole-section ACK remain material costs. No early success or skipped guard was introduced to hit a timer."
+  ],
+  "artifacts": [
+    "journal-native-baseline.json",
+    "journal-native-final-1000.json",
+    "journal-native-final-2200.json",
+    "journal-http-final.json",
+    "journal-reviewed.cpuprofile",
+    "journal-reviewed-phases.json"
+  ]
+}

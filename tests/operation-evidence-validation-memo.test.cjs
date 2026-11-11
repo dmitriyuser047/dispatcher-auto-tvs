@@ -83,7 +83,7 @@ test('reconstructed or tampered proofs retain full validation and the existing r
  assert.notEqual(evidence.validateProof(reconstructed),checked);
  reconstructed.request.eventGuards[0].hash='sha256:'+'f'.repeat(64);assert.throws(()=>evidence.validateProof(reconstructed),invalid);
  let calls=0;const accessor=structuredClone(checked);Object.defineProperty(accessor.request,'hidden',{enumerable:true,get(){calls++;return null;}});assert.throws(()=>evidence.validateProof(accessor),invalid);assert.equal(calls,0);
- const oversized=structuredClone(checked);oversized.request.extra=Array(1000001).fill(null);assert.throws(()=>evidence.validateProof(oversized),invalid);
+ const oversized=structuredClone(checked);oversized.request.extra=Array(8000001).fill(null);assert.throws(()=>evidence.validateProof(oversized),invalid);
  const tooDeep=structuredClone(checked);let nested=null;for(let index=0;index<81;index++)nested={child:nested};tooDeep.request.extra=nested;assert.throws(()=>evidence.validateProof(tooDeep),invalid);
 });
 

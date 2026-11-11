@@ -13,6 +13,7 @@ const integrity=require('../assets/core/platform-integrity.js');
 const FORMAT='tvs-platform-sqlite',VERSION=1,FILE='platform.sqlite';
 const storageFormat=require('./storage-format.cjs'),SCHEMA_VERSION=storageFormat.SCHEMA_VERSION;
 const held=new Map();
+const commandRowSnapshots=new WeakMap();
 const operationReads=new WeakMap(),OPERATION_READ_BYTES=64*1024*1024,OPERATION_READ_ENTRIES=256;
 const own=(object,key)=>Object.prototype.hasOwnProperty.call(object,key);
 const plain=value=>value!==null&&Object.prototype.toString.call(value)==='[object Object]';
@@ -27,9 +28,9 @@ function location(dataDir){
   if(network(dataDir))fail('SQLITE_NETWORK_PATH','SQLite должна находиться на локальном диске основного компьютера; UNC-пути не поддерживаются');
   const resolved=path.resolve(dataDir);
   if(network(resolved))fail('SQLITE_NETWORK_PATH','Сетевая папка SQLite не поддерживается');
-  let parent=resolved;
-  while(!fs.existsSync(parent)){const next=path.dirname(parent);if(next===parent)break;parent=next;}
-  const real=fs.existsSync(parent)?fs.realpathSync.native(parent):parent;
+  let parent=resolved,found;
+  while(!(found=fs.existsSync(parent))){const next=path.dirname(parent);if(next===parent)break;parent=next;}
+  const real=found?fs.realpathSync.native(parent):parent;
   if(network(real))fail('SQLITE_NETWORK_PATH','Каталог SQLite указывает на сетевую папку');
   const directory=parent===resolved?real:path.join(real,path.relative(parent,resolved));
   return {directory,key:process.platform==='win32'?directory.toLowerCase():directory,file:path.join(directory,FILE)};
@@ -135,7 +136,7 @@ function transaction(dataDir,action,options={}){
     const result=resultSync(action);if(session.failure)throw session.failure;if(options.beforeCommit)resultSync(()=>options.beforeCommit());
     db.exec('COMMIT;');began=false;return result;
   }catch(error){if(began)try{db.exec('ROLLBACK;');}catch{}throw error;}
-  finally{held.delete(target.key);operationReads.delete(db);db.close();cleanRead();}
+  finally{held.delete(target.key);operationReads.delete(db);for(const rows of session.commandRowSnapshots||[])commandRowSnapshots.delete(rows);db.close();cleanRead();}
 }
 function connection(dataDir){const session=held.get(location(dataDir).key);if(!session)fail('SQLITE_TRANSACTION','Нет активного соединения SQLite');return session.db;}
 function readMetadata(dataDir){const session=held.get(location(dataDir).key);return session?.scopes[0]===true?session.readMetadata:null;}
@@ -205,6 +206,21 @@ function readAll(dataDir){return transaction(dataDir,()=>{
   if(version>=4){require('./operation-store.cjs').validateHot(dataDir,result.auditLog);const platform=require('./platform-service.cjs');if(typeof platform.bindHistory==='function')platform.bindHistory(result,dataDir);}
   return result;
 },{readOnly:true});}
+function commandSourceVersion(db){return {changes:db.prepare('SELECT total_changes() AS n').get().n,schema:db.prepare('PRAGMA schema_version').get().schema_version};}
+function freezeCommandRows(value){if(value&&typeof value==='object'&&!Object.isFrozen(value)){for(const child of Object.values(value))freezeCommandRows(child);Object.freeze(value);}return value;}
+// Only a fresh, fully validated host read can acquire this private witness.
+// It lives inside this connection, never in a transport DTO or between writes.
+function captureCommandRows(dataDir){return transaction(dataDir,()=>{
+  const rows=freezeCommandRows(readAll(dataDir)),session=held.get(location(dataDir).key);
+  commandRowSnapshots.set(rows,{session,...commandSourceVersion(session.db)});
+  (session.commandRowSnapshots??=new Set()).add(rows);return rows;
+},{readOnly:true});}
+function reuseCommandRows(dataDir,rows){
+  const witness=commandRowSnapshots.get(rows);if(!witness)return null;
+  const session=held.get(location(dataDir).key);if(!session||session!==witness.session||session.failure)return null;
+  const current=commandSourceVersion(session.db);
+  return current.changes===witness.changes&&current.schema===witness.schema?rows:null;
+}
 function readRevisions(dataDir){return transaction(dataDir,()=>{
   const captured=readMetadata(dataDir);if(captured)return {...captured.revisions};
   const revisions=Object.fromEntries(connection(dataDir).prepare('SELECT name,revision FROM sections').all().map(row=>[row.name,row.revision]));
@@ -288,12 +304,21 @@ function build(db,data,revisions,names){
   // the compatibility representation; unresolved old links are evidence, not
   // silently rewritten IDs or rows. The kernel prevents new invalid references.
   db.exec('DELETE FROM row_links; DELETE FROM reference_issues;');
-  const remove=db.prepare('DELETE FROM section_rows WHERE section=?'),insert=db.prepare('INSERT INTO section_rows(section,row_key,position,identity_key,id_type,id_value,row_json,date_value,asset_ref) VALUES(?,?,?,?,?,?,?,?,?)');
+  const current=db.prepare('SELECT row_key,position,identity_key,id_type,id_value,row_json,date_value,asset_ref FROM section_rows WHERE section=?'),remove=db.prepare('DELETE FROM section_rows WHERE section=? AND row_key=?'),insert=db.prepare('INSERT INTO section_rows(section,row_key,position,identity_key,id_type,id_value,row_json,date_value,asset_ref) VALUES(?,?,?,?,?,?,?,?,?)'),update=db.prepare('UPDATE section_rows SET identity_key=?,id_type=?,id_value=?,row_json=?,date_value=?,asset_ref=? WHERE section=? AND row_key=?');
   const revision=db.prepare('UPDATE sections SET revision=? WHERE name=?');
-  for(const name of names){remove.run(name);for(const entry of graph.bySection[name]){
+  for(const name of names){
+    // Read the physical rows inside this commit transaction. A snapshot from
+    // the renderer, planner or beforeCommit hook is never a storage witness.
+    const before=new Map(current.all(name).map(row=>[row.row_key,row])),wanted=new Map(graph.bySection[name].map(entry=>[entry.key,entry]));
+    // Remove moved rows before inserting any replacements: position is unique
+    // within a section, including swaps and legacy duplicate/idless records.
+    for(const [key,row]of before){const next=wanted.get(key);if(!next||next.position!==row.position)remove.run(name,key);}
+    for(const entry of graph.bySection[name]){
     const date=typeof entry.row.date==='string'?entry.row.date:typeof entry.row.month==='string'?entry.row.month:null;
     const asset=typeof entry.row.assetRef==='string'?entry.row.assetRef:present(entry.row.vehicleId)?'v:'+entry.row.vehicleId:present(entry.row.generatorId)?'g:'+entry.row.generatorId:null;
-    insert.run(name,entry.key,entry.position,entry.identity,entry.idType,entry.idValue,entry.raw,date,asset);
+    const previous=before.get(entry.key);
+    if(!previous||previous.position!==entry.position)insert.run(name,entry.key,entry.position,entry.identity,entry.idType,entry.idValue,entry.raw,date,asset);
+    else if(previous.identity_key!==entry.identity||previous.id_type!==entry.idType||previous.id_value!==entry.idValue||previous.row_json!==entry.raw||previous.date_value!==date||previous.asset_ref!==asset)update.run(entry.identity,entry.idType,entry.idValue,entry.raw,date,asset,name,entry.key);
   }}
   for(const name of schema.sections)revision.run(revisions[name],name);
   const link=db.prepare('INSERT INTO row_links(source_section,source_key,relation_id,field_path,target_section,target_key) VALUES(?,?,?,?,?,?)');
@@ -386,4 +411,4 @@ function inspect(dataDir){return transaction(dataDir,()=>{
     sections,rowCount:sections.reduce((total,row)=>total+row.count,0),linkCount:db.prepare('SELECT count(*) AS count FROM row_links').get().count,
     legacyIssues:db.prepare('SELECT issue_json FROM reference_issues ORDER BY id').all().map(row=>JSON.parse(row.issue_json)),integrity:integrityCheck,foreignKeyErrors};
 },{readOnly:true});}
-module.exports={inTransaction:dataDir=>held.has(location(dataDir).key),exists,filename,readAll,readRows,readRawSections,queryRows,countLegacyAssetReferences,readRevisions,readIdentity,schemaVersion,readDescriptor,readOperationState,readOperationObject,readOperationText,putOperationObjects,writeOperationState,commitSections,create,inspect,transaction};
+module.exports={inTransaction:dataDir=>held.has(location(dataDir).key),exists,filename,readAll,captureCommandRows,reuseCommandRows,readRows,readRawSections,queryRows,countLegacyAssetReferences,readRevisions,readIdentity,schemaVersion,readDescriptor,readOperationState,readOperationObject,readOperationText,putOperationObjects,writeOperationState,commitSections,create,inspect,transaction};

@@ -122,12 +122,17 @@ export function createImportPlanner(contracts:Contracts,schema:Registry,identity
   const ownInventory=['inventoryOrgs','inventoryObjects','inventoryMols','inventoryItems','inventorySessions'],delegated=command?.type==='AssetInventoryAction';
   if(delegated){const guard=getAssetInventory?.();if(guard?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружена защита происхождения инвентаризации');guard.protectChanges(previous,nextValue,contextValue);}
   let changed=false;
-  for(const name of schema.sections){if(name==='auditLog'||delegated&&ownInventory.includes(name))continue;const a=Array.isArray(before[name])?before[name]:[],b=Array.isArray(next[name])?next[name]:[];if(stable(a)!==stable(b)&&stable(protectedProjection(name,a))!==stable(protectedProjection(name,b)))changed=true;}
+   for(const name of schema.sections){if(name==='auditLog'||delegated&&ownInventory.includes(name))continue;const a=Array.isArray(before[name])?before[name]:[],b=Array.isArray(next[name])?next[name]:[];if(a===b)continue;
+    // For strictly portable inputs equal whole rows necessarily have the same
+    // protected projection. Validate without cloning, then compare just proof.
+    // Legacy executable/nonportable inputs retain the historical stable flow.
+    let portable=false;try{contracts.validateSections({[name]:a},schema.sections);contracts.validateSections({[name]:b},schema.sections);portable=true;}catch{}
+    if((portable||stable(a)!==stable(b))&&stable(protectedProjection(name,a))!==stable(protectedProjection(name,b)))changed=true;}
   if(!changed&&command?.type!=='ImportAction')return true;
   if(command?.type!=='ImportAction'||!ctx.importSource)fail('IMPORT_PROOF','Происхождение импортированных строк изменяется только проверенным импортом');
   const action=input(command.input),source=normalize(action.profile,ctx.importSource),proof=build(load(previous,dependencies(action)),action,source,ctx),errors=proof.rows.flatMap(value=>value.issues).filter(value=>value.severity==='error');
   if(errors.length)fail('IMPORT_BLOCKED',errors[0]!.message,errors);
-  for(const name of schema.sections){if(name==='auditLog')continue;if(stable(next[name]||[])!==stable(proof.sections[name]||before[name]||[]))fail('IMPORT_PROOF','Изменения отличаются от проверенного плана импорта');}return true;
+   for(const name of schema.sections){if(name==='auditLog')continue;const actual=next[name]||[],expected=proof.sections[name]||before[name]||[];if(actual!==expected&&stable(actual)!==stable(expected))fail('IMPORT_PROOF','Изменения отличаются от проверенного плана импорта');}return true;
  }
 
  return Object.freeze({apiVersion:1 as const,describe,dependencies,footprint,normalize,prepare,validateChanges});

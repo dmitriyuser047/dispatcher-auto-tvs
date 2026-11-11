@@ -38,6 +38,28 @@ test('a lexical ancestor swapped while its canonical name is resolved fails befo
  assert.throws(()=>f.api.createManagedFiles(f.short),{code:'LEDGER_PATH'});assert.equal(fired,true);
 });
 
+test('canonical managed paths check every pinned ancestor afresh with one complete prefix walk',()=>{
+ const f=fixture(),counts=new Map(),P=path.win32;f.setStatHook(value=>counts.set(f.fold(value),(counts.get(f.fold(value))||0)+1));
+ const files=f.api.createManagedFiles(f.long);assert.equal(counts.get(f.fold('C:\\')),3,'initial ordinary-root verification does not repeat its identical pinned walk');
+ files.verifyDirectory(P.join(f.long,'sections'));counts.clear();assert.equal(files.verifyDirectory(P.join(f.long,'sections')),true);
+ let current=f.long;while(true){assert.ok(counts.get(f.fold(current))>=1,'every ancestor remains fresh: '+current);const parent=P.dirname(current);if(parent===current)break;current=parent;}
+ assert.equal(counts.get(f.fold('C:\\')),1);assert.equal(counts.get(f.fold(f.long)),2,'the root has its existence preflight and its ordinary ancestor identity check');
+ const alias=fixture(),aliasCounts=new Map();const aliasFiles=alias.api.createManagedFiles(alias.short);aliasFiles.verifyDirectory(P.join(alias.long,'sections'));alias.setStatHook(value=>aliasCounts.set(alias.fold(value),(aliasCounts.get(alias.fold(value))||0)+1));aliasFiles.verifyDirectory(P.join(alias.long,'sections'));assert.equal(aliasCounts.get(alias.fold('C:\\')),2,'a distinct short alias retains both full lexical and canonical walks');
+});
+
+test('a moved canonical managed root fails read and create operations without recreating its old name',()=>{
+ const f=fixture(),files=f.api.createManagedFiles(f.long);f.nodes.delete(f.fold(f.long));
+ for(const operation of [()=>files.read(path.win32.join(f.long,'sections','records.json')),()=>files.verifyDirectory(path.win32.join(f.long,'new-section'),true),()=>files.atomic(path.win32.join(f.long,'sections','records.json'),Buffer.from('[]'),null)])assert.throws(operation,{code:'LEDGER_PATH'});
+ assert.equal(f.nodes.has(f.fold(f.long)),false);
+});
+
+for(const change of ['inode','link'])test('canonical managed reads and atomic writes reject a changed ancestor '+change,()=>{
+ const f=fixture(),files=f.api.createManagedFiles(f.long),target=path.win32.join(f.long,'sections','records.json'),before=Buffer.from(f.nodes.get(f.fold(target)).bytes);
+ if(change==='inode')f.replace('C:\\Users\\runneradmin');else f.link('C:\\Users\\runneradmin');
+ for(const operation of [()=>files.read(target),()=>files.atomic(target,Buffer.from('[]'),null)])assert.throws(operation,error=>['LEDGER_PATH_CHANGED','LEDGER_PATH'].includes(error.code));
+ assert.deepEqual(f.nodes.get(f.fold(target)).bytes,before);
+});
+
 test('real managed atomic files preserve bytes through native Windows short names when available',t=>{
  const os=require('node:os'),{execFileSync}=require('node:child_process'),api=require('../electron/operation-ledger.cjs'),parent=fs.realpathSync.native(os.tmpdir()),directory=fs.mkdtempSync(path.join(parent,'tvs-release-ledger-long-name-')),identity=fs.lstatSync(directory);
  t.after(()=>{const current=fs.lstatSync(directory);assert.equal(path.dirname(directory),parent);assert.match(path.basename(directory),/^tvs-release-ledger-long-name-/);assert.equal(current.isSymbolicLink(),false);assert.equal(current.dev,identity.dev);assert.equal(current.ino,identity.ino);fs.rmSync(directory,{recursive:true,force:true});});

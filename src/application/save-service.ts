@@ -10,7 +10,18 @@ export function createSaveService(repository:Repository,ports:SavePorts){
    if(ports.capabilities().needsSchemaUpgrade)fail('SCHEMA_UPGRADE_REQUIRED','База открыта только для чтения. В разделе «Состояние программы» создайте отдельную обновлённую копию; исходная база останется прежней.');
    submitted=JSON.stringify(database);const previous=repository.baseline(),operation=object(options?.operation)?options.operation:undefined;
    if(['dispatchJobs','workOrders'].some(name=>JSON.stringify(previous[name]||[])!==JSON.stringify(database[name]||[]))&&ports.capabilities().calendar!==1)fail('UNSUPPORTED_CALENDAR','Подключение не поддерживает проверку учётного календаря. Загрузите данные из совместимой версии программы.');
-   const result=await ports.run({id:operation?.id,previous,next:database,identity:context.identity,options:{allowLegacy:true,...options,requireOperationReceipt:!!ports.capabilities().operations}},async plan=>{
+   // The runtime accepts a patch over the complete previous snapshot. Keep its
+   // entire read context, but do not repeatedly clone unrelated sections as writes.
+   // The host's strict serializer still examines every supplied value, including
+   // unchanged/unknown fields that JSON.stringify alone could silently coerce.
+   let next=database;
+   if(ports.serializeSnapshot){
+    const normalized:unknown=JSON.parse(ports.serializeSnapshot(database));
+    if(!object(normalized))fail('INVALID_SNAPSHOT','Источник изменений должен быть объектом');
+    next={};for(const [name,rows]of Object.entries(normalized))
+     if(JSON.stringify(previous[name])!==JSON.stringify(database[name]))next[name]=rows as Database[string];
+   }
+   const result=await ports.run({id:operation?.id,previous,next,identity:context.identity,options:{allowLegacy:true,...options,requireOperationReceipt:!!ports.capabilities().operations}},async plan=>{
     if(!sameSession())fail('SESSION_CHANGED','База или пользователь изменились. Откройте форму заново.');
     if(ports.accessStamp(ports.context())!==ports.accessStamp(context))fail('STALE_ACCESS','Права или учётный календарь изменились. Проверьте форму заново.');
     if(JSON.stringify(database)!==submitted)fail('STALE_DRAFT','Данные изменились в ожидании сохранения. Повторите проверку формы.');

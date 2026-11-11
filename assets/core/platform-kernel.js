@@ -19,7 +19,8 @@
     return Object.assign(new Error(error?.message || 'Сохранение не выполнено'), { name:'PlatformKernelError', code:'PERSIST_FAILED' });
   }
   const {stableSerialize,sha256,requestDigest}=fingerprint;
-  const clone = value => value === undefined ? undefined : JSON.parse(stableSerialize(value));
+  const clone = value => value === undefined ? undefined : typeof fingerprint.canonicalClone==='function'
+    ? fingerprint.canonicalClone(value) : JSON.parse(stableSerialize(value));
   function freeze(value) {
     if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.values(value).forEach(freeze); Object.freeze(value); }
     return value;
@@ -50,7 +51,7 @@
     const old = keyed(before), next = keyed(after), changes = [];
     for (const key of new Set([...old.keys(), ...next.keys()])) {
       const a = old.get(key), b = next.get(key);
-      if (a && b && stableSerialize(a.row) === stableSerialize(b.row)) continue;
+      if (a && b && (a.row === b.row || stableSerialize(a.row) === stableSerialize(b.row))) continue;
       const fields = [...new Set([...Object.keys(a?.row || {}), ...Object.keys(b?.row || {})])]
         .filter(field => stableSerialize(a?.row[field]) !== stableSerialize(b?.row[field])).sort();
       changes.push({ section:name, recordId:(b || a).recordId, key,
@@ -65,13 +66,24 @@
     if(timeRisk){const calendar=getCalendar?.();if(calendar?.apiVersion!==1)fail('MODULE_UNAVAILABLE','Не загружен рабочий календарь для проверки времени');calendar.assertSuppliedMetadata(prior,patch,ctx);const clock=calendar.resolve(prior,ctx.now||new Date().toISOString());const calendarContext={...ctx,today:ctx.today??clock.today,calendar:ctx.calendar??clock};const command=ctx.commandIntent?.command||ctx.commandIntent,options=command?.type==='CalendarAction'&&command.input?.action==='confirmInterval'?{confirm:command.input.target,reason:command.input.reason}:{};patch=calendar.canonicalizeIntervals(prior,patch,calendarContext,options);}
     return patch;
   }
+  function reuseUnchangedRows(prior,patch){
+    // Both trees are private canonical JSON clones. Reuse only positionally
+    // identical rows; no caller-owned or stale cross-operation object is kept.
+    // This leaves the exact request bytes and duplicate/legacy row order intact.
+    const result={...patch};
+    for(const name of Object.keys(patch)){
+      const before=prior[name],after=patch[name];if(!Array.isArray(before)||!Array.isArray(after))continue;
+      result[name]=after.map((row,index)=>plain(row)&&plain(before[index])&&JSON.stringify(before[index])===JSON.stringify(row)?before[index]:row);
+    }
+    return result;
+  }
   function prepare(previous, next, context) {
     if (!schema || schema.apiVersion !== 1 || !integrity || integrity.apiVersion !== 1 || contracts?.apiVersion !== 1) fail('MODULE_UNAVAILABLE', 'Не загружены правила платформы');
     if (!plain(previous) || !plain(next)) fail('INVALID_ARGUMENT', 'Источник и изменения должны быть объектами');
     const ctx = validateContext(context);
     if (typeof ctx.id !== 'string' || !ctx.id || ctx.id.length > 200 || !/^[a-z0-9_.:-]+$/i.test(ctx.id)) fail('INVALID_OPERATION_ID', 'Некорректный ID операции');
     const prior = clone(previous); let patch = clone(next);
-    const rawTarget={...prior,...patch};patch=canonicalPatch(prior,patch,ctx);
+    const rawTarget={...prior,...patch};patch=canonicalPatch(prior,patch,ctx);patch=reuseUnchangedRows(prior,patch);
     const target = { ...prior, ...patch };
     const names = schema.sections;
     for (const name of new Set([...Object.keys(prior), ...Object.keys(patch)])) {
@@ -195,7 +207,9 @@
           fail('INVALID_PREPARED_PLAN','Подготовленный план изменяет неизвестный раздел');
       for (const name of names) {
         const before=previous[name] || [], after=target[name] || [];
-        if (stableSerialize(before)!==stableSerialize(after)) changed.push(name);
+        // target shares unchanged sections with this runtime's immutable private
+        // previous snapshot. A partial intent must not re-encode those sections.
+        if (before!==after && stableSerialize(before)!==stableSerialize(after)) changed.push(name);
       }
       if (JSON.stringify(changed)!==JSON.stringify(result.changed)) fail('INVALID_PREPARED_PLAN','Подготовленный план не соответствует изменениям');
       for (const name of result.changed) {

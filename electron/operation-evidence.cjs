@@ -59,11 +59,14 @@ function makeSubject(sectionName,before,after,beforeFacts,afterFacts,fields=chan
  const id=identifier(after?.id)?after.id:identifier(before?.id)?before.id:undefined;
  return {section:sectionName,...(id===undefined?{}:{id}),before:fragment(before,fields,sectionName),after:fragment(after,fields,sectionName),beforeFacts,afterFacts,beforeHash:before===null?null:digest(before),afterHash:after===null?null:digest(after),changedFields:fields,action:before===null?'create':after===null?'delete':'update'};
 }
-function compactSelectedFacts(facts,row){
+function compactSelectedFacts(facts,row,checkedFacts){
  if(facts===null)return null;
  // Check the complete original facts first: an unused malformed guard must
  // never become acceptable merely because its field is outside the fragment.
- validateFacts(facts);
+ // Own strict JSON before using a content memo: malformed getters, holes or
+ // undefined values must never collide with an already checked valid fact.
+ // The memo belongs to this proof only, never to a principal or later request.
+ facts=safe(facts);validateFacts(facts,checkedFacts);
  if(!Array.isArray(facts.fieldGuards))return facts;
  const guards=facts.fieldGuards.filter(guard=>{
   let value=row;for(const token of guard.path){if(value===null||typeof value!=='object'||!own(value,token))return false;value=value[token];}return true;
@@ -109,7 +112,7 @@ function createProof(input){
  }
  // Explicit selected rows are the collector's actual read closure, including
  // no-op targets. There is no independent command-to-target guess here.
- const selectedTargets=[];
+ const selectedTargets=[],checkedSelectedFacts=new Set();
  for(const selected of requested){if(!object(selected))fail();const name=section(selected.section),kind=selected.kind||'row';let before=null,after=null,beforeFacts=null,afterFacts=null;
   if(kind==='archive'||kind==='source'){if(!object(selected.value))fail();before=selected.value;after=selected.value;const declared=kind==='source'?before.sourceScopes:before.snapshot?.requiredReadSections??before.requiredReadSections;if(!Array.isArray(declared)||declared.some(name=>!names.has(name))){verified=false;issues.push('unclassified-composite-source');}const captured=archives.get(selected);beforeFacts=captured?captured.facts:kind==='archive'?beforeResolver.resolveArchive(before):beforeResolver.resolveSource(before);afterFacts=captured?captured.facts:kind==='archive'?afterResolver.resolveArchive(after):afterResolver.resolveSource(after);if(captured)selectedTargets.push(...captured.sourceRows);}
   else if(kind==='row'){
@@ -126,7 +129,7 @@ function createProof(input){
    delete item.id;
    // These guards are used only to project this exact read fragment. Changed
    // subjects and full archive/source captures keep their complete facts.
-   if(item.fullReadRequired!==true){item.beforeFacts=compactSelectedFacts(item.beforeFacts,item.before);item.afterFacts=compactSelectedFacts(item.afterFacts,item.after);}
+    if(item.fullReadRequired!==true){item.beforeFacts=compactSelectedFacts(item.beforeFacts,item.before,checkedSelectedFacts);item.afterFacts=compactSelectedFacts(item.afterFacts,item.after,checkedSelectedFacts);}
   }else item.kind=kind;
   selectedTargets.push(item);
  }

@@ -16,13 +16,16 @@ test('warm structural summaries cannot accept changed, missing or mutated-buffer
 });
 test('new proof hashes still undergo full JSON, proof-shape and resource checks after a hot cache is primed',()=>{
  let deep=null;for(let index=0;index<81;index++)deep={child:deep};
- const valid={version:1,status:'verified',requiredSections:['vehicles'],subjects:[],request:{selectedTargets:[]}},cases=[
+ const valid={version:1,status:'verified',requiredSections:['vehicles'],subjects:[],request:{selectedTargets:[]}};
+ // The released compressed-proof format permits 8M expanded JSON nodes. Its
+ // small physical wrapper reaches that decoder guard without hitting 8MiB first.
+ const expanded=Buffer.from(JSON.stringify({...valid,request:{metadata:Array(8000001).fill(0)}})),oversized=JSON.stringify({version:1,kind:'compressed-access-proof',codec:'deflate-raw',size:expanded.length,sha256:hash(expanded),data:require('node:zlib').deflateRawSync(expanded).toString('base64')}),cases=[
   ['{}','LEDGER_SHAPE'],
   [JSON.stringify({...valid,request:{selectedTargets:'invalid'}}),'LEDGER_PROOF'],
   ['{"version":1,"status":"verified","requiredSections":["vehicles"],"subjects":[],"request":{"__proto__":{}}}','LEDGER_JSON'],
   ['{"version":1,"status":"verified","requiredSections":["vehicles"],"subjects":[],"request":{"n":1e400}}','LEDGER_JSON'],
   [JSON.stringify({...valid,request:{deep}}),'LEDGER_LIMIT'],
-  [JSON.stringify({...valid,request:{metadata:Array(1000001).fill(null)}}),'LEDGER_LIMIT'],
+  [oversized,'LEDGER_LIMIT'],
   [JSON.stringify({...valid,request:{padding:'x'.repeat(8*1024*1024)}}),'LEDGER_HASH'],
   [Buffer.from([0x7b,0x22,0x78,0x22,0x3a,0x22,0xff,0x22,0x7d]),'LEDGER_JSON']
  ];
